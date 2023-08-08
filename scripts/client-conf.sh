@@ -26,7 +26,7 @@ sudo sed -i \
     -e "s#__SERVER_PUBLIC_KEY#${WG_PUBLIC_KEY}#g" \
     -e "s#__CLIENT_PRIVATE_KEY#${PRIVATE_KEY}#g" \
     -e "s#__IP#${IP}/32#g" \
-    -e "s/__ALLOWED_IPS/${ALLOWED_IPS}/g" \
+    -e "s#__ALLOWED_IPS#${ALLOWED_IPS}#g" \
     /tmp/wg-client.conf
 
 
