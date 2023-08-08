@@ -34,7 +34,7 @@ sudo cp ${TEMPLATE_PATH}/wg0.conf.tmpl /etc/wireguard/wg0.conf
 sudo sed -i \
     -e "s/__IP/${IP}/g" \
     -e "s/__PORT/${PORT}/g" \
-    -e "s/__PRIVATE_KEY/${PRIVATE_KEY}/g" \
+    -e "s#__PRIVATE_KEY#${PRIVATE_KEY}#g" \
     -e "s/__NIC/${NIC}/g" \
     /etc/wireguard/wg0.conf
 
