@@ -68,6 +68,8 @@ sudo chmod 755 /etc/profile.d/wireguard.profile.sh
 sudo systemctl start wg-quick@wg0
 sudo systemctl enable wg-quick@wg0
 
+touch ~/wireguard.authorized-keys
+
 printf $info "\n\nWireguard configured. \n"
 printf $info "Creat clients using the './client-setup.sh' script. \n\n"
 

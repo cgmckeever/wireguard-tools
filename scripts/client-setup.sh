@@ -8,6 +8,9 @@ source ${SCRIPT_PATH}/color.inc.sh
 NIC=$(route | grep default | awk '{print $8}')
 SERVER_IP=$(ip addr show $NIC | grep -m 1 "inet " | awk '{print $2}' | cut -d "/" -f1)
 
+echo; echo
+read -p "Whaat is the client naame/aliasa? " WG_ALIAS
+
 printf $info "\n\nWireguard Network is ${WG_NETWORK} \n"
 read -p "What IP should the client be allocated? " IP
 
@@ -38,3 +41,5 @@ rm /tmp/wg-client.conf
 
 sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${IP}/32
 echo; echo
+
+echo "${WG_ALIAS} : ${PUBLIC_KEY} : ${IP} : ${ALLOWED_IPS}" >> ~/wireguard.authorized-keys
