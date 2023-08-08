@@ -42,4 +42,4 @@ rm /tmp/wg-client.conf
 sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${IP}/32
 echo; echo
 
-echo "${WG_ALIAS} : ${PUBLIC_KEY} : ${IP} : ${ALLOWED_IPS}" >> ~/wireguard.authorized-keys
+echo "${WG_ALIAS} : ${PUBLIC_KEY} : ${IP} : ${ALLOWED_IPS}" >> ~/authorized-keys.wireguard
