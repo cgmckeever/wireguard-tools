@@ -14,7 +14,7 @@ WG_NETWORK=${WG_NETWORK:-"10.10.0.0/24"}
 read -p "What is the Wireguard Network? default [${WG_NETWORK}] " NETWORK
 NETWORK=${NETWORK:-${WG_NETWORK}}
 read A B C D <<<"${NETWORK//./ }"
-IP=${A}.${B}.${C}.1
+IP=${A}.${B}.${C}.1/24
 
 echo; echo
 WG_PORT=${WG_PORT:-51820}
@@ -41,14 +41,14 @@ PUBLIC_KEY=$(cat /etc/wireguard/publickey)
 
 sudo cp ${TEMPLATE_PATH}/wg0.conf.tmpl /etc/wireguard/wg0.conf
 
-sudo cat /etc/wireguard/wg0.conf
-
 sudo sed -i \
     -e "s/__IP/${IP}/g" \
     -e "s/__PORT/${PORT}/g" \
     -e "s#__PRIVATE_KEY#${PRIVATE_KEY}#g" \
     -e "s/__NIC/${NIC}/g" \
     /etc/wireguard/wg0.conf
+
+sudo cat /etc/wireguard/wg0.conf
 
 sudo cp ${TEMPLATE_PATH}/wireguard.profile.sh.tmpl /etc/profile.d/wireguard.profile.sh
 
