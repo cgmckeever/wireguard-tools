@@ -11,7 +11,7 @@ read -p "What is the Wireguard Network? default [10.10.0.0/24]" NETWORK
 read A B C D <<<"${NETWORK//./ }"
 IP=${A}.${B}.${C}.1
 echo; echo
-read -p "What port sshould Wireguard run on? default [51820]" PORT
+read -p "What port should Wireguard run on? default [51820]" PORT
 
 GENKEYS=y
 
@@ -25,12 +25,6 @@ fi
 
 PRIVATE_KEY=$(cat /etc/wireguard/privatekey)
 PUBLIC_KEY=$(cat /etc/wireguard/publickey)
-
-
-echo "Private:"; \
-cat /etc/wireguard/privatekey; \
-echo "Public:"; \
-cat /etc/wireguard/publickey
 
 sudo cp ${TEMPLATE_PATH}/wg0.conf.tmpl /etc/wireguard/wg0.conf
 
