@@ -7,16 +7,19 @@ source ${SCRIPT_PATH}/color.inc.sh
 
 NIC=$(route | grep default | awk '{print $8}')
 
-read -p "What is the Wireguard Network? default [10.10.0.0/24]" NETWORK
+read -p "What is the Wireguard Network? default [10.10.0.0/24] " NETWORK
 read A B C D <<<"${NETWORK//./ }"
 IP=${A}.${B}.${C}.1
 echo; echo
-read -p "What port should Wireguard run on? default [51820]" PORT
+read -p "What port should Wireguard run on? default [51820] " PORT
 
 GENKEYS=y
 
-if [[ "$(cat /etc/wireguard/privatekey)" == "" && "$(cat /etc/wireguard/publickey)" == "" ]]; then
-    read -p "Generate new Wireguard keys [Y/n]?" GENKEYS
+sudo touch /etc/wireguard/privatekey
+sudo touch /etc/wireguard/publickey
+
+if [[ "$(cat /etc/wireguard/privatekey)" != "" && "$(cat /etc/wireguard/publickey)" != "" ]]; then
+    read -p "Generate new Wireguard keys [Y/n]? " GENKEYS
 fi
 
 if [[ "${GENKEYS}" =~ ^[Yy]$ ]];then
