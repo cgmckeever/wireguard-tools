@@ -11,6 +11,10 @@ SERVER_IP=$(ip addr show $NIC | grep -m 1 "inet " | awk '{print $2}' | cut -d "/
 printf $info "\n\nWireguard Network is ${WG_NETWORK} \n"
 read -p "What IP should the client be allocated? " IP
 
+echo; echo
+read -p "What are the allowed IPs? default [${WG_DEFAULT_ALLOWED_IPS}] " ALLOWED_IPS
+ALLOWED_IPS=${ALLOWED_IPS:-${WG_DEFAULT_ALLOWED_IPS}}
+
 PRIVATE_KEY=$(wg genkey)
 PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
 
@@ -29,6 +33,7 @@ sudo sed -i \
 printf $info "\n\nWireguard Client Conf. \n"
 cat /tmp/wg-client.conf
 
+echo; echo
 cat /tmp/wg-client.conf| qrencode -t ansiutf8
 rm /tmp/wg-client.conf
 

@@ -21,6 +21,10 @@ WG_PORT=${WG_PORT:-51820}
 read -p "What port should Wireguard run on? default [${WG_PORT}] " PORT
 PORT=${PORT:-${WG_PORT}}
 
+echol; echo
+read -p "Default client allowed-ips? default [0.0.0.0/0] " ALLOWED_IPS
+ALLOWED_IPS=${ALLOWED_IPS:-0.0.0.0/0}
+
 GENKEYS=y
 
 sudo touch /etc/wireguard/privatekey
@@ -56,6 +60,7 @@ sudo sed -i \
     -e "s#__WG_NETWORK#${NETWORK}#g" \
     -e "s#__WG_PUBLIC_KEY#${PUBLIC_KEY}#g" \
     -e "s#__WG_PORT#${PORT}#g" \
+    -e "s#__DEFAULT_ALLOWED_IPS#${ALLOWED_IPS}#g" \
     /etc/profile.d/wireguard.profile.sh
 
 sudo chmod 755 /etc/profile.d/wireguard.profile.sh
