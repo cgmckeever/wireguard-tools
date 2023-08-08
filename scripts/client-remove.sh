@@ -15,3 +15,4 @@ sudo wg set wg0 peer ${PUBLIC_KEY} remove
 
 echo; echo
 sudo wg
+echo
