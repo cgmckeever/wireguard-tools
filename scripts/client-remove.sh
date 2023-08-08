@@ -12,7 +12,7 @@ echo
 read -p "Which client do you want to remove? " PUBLIC_KEY
 
 sudo wg set wg0 peer ${PUBLIC_KEY} remove
-
+sed -i "#${PUBLIC_KEY}#d" ~/wireguard.authorized-keys
 echo; echo
 sudo wg
 echo
