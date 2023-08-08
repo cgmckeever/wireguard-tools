@@ -14,4 +14,16 @@ wireguard-tools/scripts/prereq.sh
 
 # Configure
 
+## Using an existing Private Key
+
+```
+echo; read -p "Enter private key: " PRIVATE_KEY; echo ${PRIVATE_KEY} | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey
+```
+
+##
+
+```
+wireguard-tools/scripts/setup.sh
+```
+
 # Add Clients

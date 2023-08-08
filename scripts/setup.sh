@@ -5,6 +5,8 @@ source ${SCRIPT_PATH}/color.inc.sh
 
 # ==============================
 
+sudo systemctl stop wg-quick@wg0
+
 NIC=$(route | grep default | awk '{print $8}')
 
 echo; echo
@@ -37,6 +39,8 @@ PUBLIC_KEY=$(cat /etc/wireguard/publickey)
 
 sudo cp ${TEMPLATE_PATH}/wg0.conf.tmpl /etc/wireguard/wg0.conf
 
+sudo cat /etc/wireguard/wg0.conf
+
 sudo sed -i \
     -e "s/__IP/${IP}/g" \
     -e "s/__PORT/${PORT}/g" \
@@ -54,8 +58,11 @@ sudo sed -i \
 
 sudo chmod 755 /etc/profile.d/wireguard.profile.sh
 
-#sudo systemctl start wg-quick@wg0
-#sudo systemctl enable wg-quick@wg0
+sudo systemctl start wg-quick@wg0
+sudo systemctl enable wg-quick@wg0
+
+printf $info "\n\nWireguard configured. \n"
+printf $info "Creat clients using the './client-setup.sh' script. \n\n"
 
 
 
