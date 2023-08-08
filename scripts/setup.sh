@@ -10,14 +10,16 @@ sudo systemctl stop wg-quick@wg0
 NIC=$(route | grep default | awk '{print $8}')
 
 echo; echo
-read -p "What is the Wireguard Network? default [10.10.0.0/24] " NETWORK
-NETWORK=${NETWORK:-"10.10.0.0/24"}
+WG_NETWORK=${WG_NETWORK:-"10.10.0.0/24"}
+read -p "What is the Wireguard Network? default [${WG_NETWORK}] " NETWORK
+NETWORK=${NETWORK:-${WG_NETWORK}}
 read A B C D <<<"${NETWORK//./ }"
 IP=${A}.${B}.${C}.1
 
 echo; echo
-read -p "What port should Wireguard run on? default [51820] " PORT
-PORT=${PORT:-"51820"}
+WG_PORT=${WG_PORT:-51820}
+read -p "What port should Wireguard run on? default [${WG_PORT}] " PORT
+PORT=${PORT:-${WG_PORT}}
 
 GENKEYS=y
 
