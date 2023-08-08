@@ -27,3 +27,13 @@ wireguard-tools/scripts/setup.sh
 ```
 
 # Add Clients
+
+```
+wireguard-tools/scripts/client-setup.sh
+```
+
+# Remove Client
+
+```
+wireguard-tools/scripts/client-remove.sh
+```
