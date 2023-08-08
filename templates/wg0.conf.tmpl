@@ -1,0 +1,7 @@
+[Interface]
+Address = __IP
+SaveConfig = true
+ListenPort = __PORT
+PrivateKey = __PRIVATE_KEY
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o __NIC -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o __NIC -j MASQUERADE
