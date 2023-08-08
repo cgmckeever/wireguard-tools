@@ -48,7 +48,7 @@ sudo cp ${TEMPLATE_PATH}/wireguard.profile.sh.tmpl /etc/profile.d/wireguard.prof
 
 sudo sed -i \
     -e "s/__WG_NETWORK/${NETWORK}/g" \
-    -e "s/__WG_PUBLIC_KEY/${PUBLIC_KEY}/g" \
+    -e "s#__WG_PUBLIC_KEY#${PUBLIC_KEY}#g" \
     -e "s#__WG_PORT#${PORT}#g" \
     /etc/profile.d/wireguard.profile.sh
 
