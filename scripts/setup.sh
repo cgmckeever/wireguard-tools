@@ -8,10 +8,13 @@ source ${SCRIPT_PATH}/color.inc.sh
 NIC=$(route | grep default | awk '{print $8}')
 
 read -p "What is the Wireguard Network? default [10.10.0.0/24] " NETWORK
+NETWORK=${NETWORK:-"10.10.0.0/24"}
 read A B C D <<<"${NETWORK//./ }"
 IP=${A}.${B}.${C}.1
+
 echo; echo
 read -p "What port should Wireguard run on? default [51820] " PORT
+PORT=${PORT:-"51820"}
 
 GENKEYS=y
 
@@ -20,6 +23,7 @@ sudo touch /etc/wireguard/publickey
 
 if [[ "$(cat /etc/wireguard/privatekey)" != "" && "$(cat /etc/wireguard/publickey)" != "" ]]; then
     read -p "Generate new Wireguard keys [Y/n]? " GENKEYS
+    GENKEYS=${GENKEYS:-"y"}
 fi
 
 if [[ "${GENKEYS}" =~ ^[Yy]$ ]];then
