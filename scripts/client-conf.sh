@@ -29,8 +29,7 @@ sudo sed -i \
     -e "s#__ALLOWED_IPS#${ALLOWED_IPS}#g" \
     /tmp/wg-client.conf
 
-
-printf $info "\n\nWireguard Client Conf. \n"
+printf $info "\n\nWireguard Client Conf: \n"
 cat /tmp/wg-client.conf
 
 echo; echo
