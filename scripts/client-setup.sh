@@ -9,7 +9,7 @@ NIC=$(route | grep default | awk '{print $8}')
 SERVER_IP=$(ip addr show $NIC | grep -m 1 "inet " | awk '{print $2}' | cut -d "/" -f1)
 
 echo; echo
-read -p "Whaat is the client name/alias? " WG_ALIAS
+read -p "What is the client name/alias? " WG_ALIAS
 
 printf $info "\n\nWireguard Network is ${WG_NETWORK} \n"
 read -p "What IP should the client be allocated? " IP
@@ -18,7 +18,7 @@ echo; echo
 read -p "What are the allowed IPs? default [${WG_DEFAULT_ALLOWED_IPS}] " ALLOWED_IPS
 ALLOWED_IPS=${ALLOWED_IPS:-${WG_DEFAULT_ALLOWED_IPS}}
 
-
+echo; echo
 read -p "Enter an existing Wireguard Private Key: " PRIVATE_KEY
 PRIVATE_KEY=${PRIVATE_KEY:-$(wg genkey)}
 PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
