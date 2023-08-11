@@ -13,7 +13,7 @@ echo; echo
 WG_NETWORK=${WG_NETWORK:-"10.10.0.0/24"}
 read -p "What is the Wireguard Network? default [${WG_NETWORK}] " NETWORK
 NETWORK=${NETWORK:-${WG_NETWORK}}
-IFS='.' read A B C D <<< "${WG}"
+IFS='.' read A B C D <<< ${NETWORK}
 IP=${A}.${B}.${C}.1/24
 
 echo; echo
