@@ -5,7 +5,6 @@ source ${SCRIPT_PATH}/shared.inc.sh
 
 # ==============================
 
-
 echo
 sudo wg
 echo

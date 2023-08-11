@@ -71,7 +71,7 @@ sudo systemctl enable wg-quick@wg0
 touch ~/authorized-keys.wireguard
 
 printf $info "\n\nWireguard configured. \n"
-printf $info "Creat clients using the './client-setup.sh' script. \n\n"
+printf $info "Create clients using the './client-setup.sh' script. \n\n"
 
 
 

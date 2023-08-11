@@ -19,7 +19,7 @@ read -p "What are the allowed IPs? default [${WG_DEFAULT_ALLOWED_IPS}] " ALLOWED
 ALLOWED_IPS=${ALLOWED_IPS:-${WG_DEFAULT_ALLOWED_IPS}}
 
 echo; echo
-read -p "Enter an existing Wireguard Private Key: " PRIVATE_KEY
+read -p "Enter an existing Wireguard Private Key [enter to create new key-pair]: " PRIVATE_KEY
 PRIVATE_KEY=${PRIVATE_KEY:-$(wg genkey)}
 PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
 
