@@ -18,7 +18,9 @@ echo; echo
 read -p "What are the allowed IPs? default [${WG_DEFAULT_ALLOWED_IPS}] " ALLOWED_IPS
 ALLOWED_IPS=${ALLOWED_IPS:-${WG_DEFAULT_ALLOWED_IPS}}
 
-PRIVATE_KEY=$(wg genkey)
+
+read -p "Enter an existing Wireguard Private Key: " PRIVATE_KEY
+PRIVATE_KEY=${PRIVATE_KEY:-$(wg genkey)}
 PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
 
 cp ${TEMPLATE_PATH}/client.conf.tmpl /tmp/wg-client.conf
