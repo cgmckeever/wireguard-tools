@@ -13,7 +13,7 @@ echo; echo
 WG_NETWORK=${WG_NETWORK:-"10.10.0.0/24"}
 read -p "What is the Wireguard Network? default [${WG_NETWORK}] " NETWORK
 NETWORK=${NETWORK:-${WG_NETWORK}}
-read A B C D <<<"${NETWORK//./}"
+IFS='.'  read A B C D <<< ${WG}
 IP=${A}.${B}.${C}.1/24
 
 echo; echo
@@ -21,7 +21,7 @@ WG_PORT=${WG_PORT:-51820}
 read -p "What port should Wireguard run on? default [${WG_PORT}] " PORT
 PORT=${PORT:-${WG_PORT}}
 
-echol; echo
+echo; echo
 read -p "Default client allowed-ips? default [0.0.0.0/0] " ALLOWED_IPS
 ALLOWED_IPS=${ALLOWED_IPS:-0.0.0.0/0}
 
