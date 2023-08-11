@@ -10,4 +10,4 @@ color success 92m   # green
 color warning 93m   # yellow
 color danger 91m    # red
 
-TEMPLATE_PATH="$(dirname $(dirname $SCRIPT_PATH))/templates"
+TEMPLATE_PATH="$(dirname $SCRIPT_PATH)/templates"
