@@ -13,7 +13,6 @@ sudo sysctl -p
 
 sudo ufw default deny incoming
 sudo ufw default allow outgoing
-sudo ufw allow 51820/udp
 sudo ufw allow OpenSSH
 sudo ufw enable
 sudo ufw status
