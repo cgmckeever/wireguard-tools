@@ -31,7 +31,7 @@ GENKEYS=y
 sudo touch /etc/wireguard/privatekey
 sudo touch /etc/wireguard/publickey
 
-if [[ "$(cat /etc/wireguard/privatekey)" != "" && "$(cat /etc/wireguard/publickey)" != "" ]]; then
+if [[ "$(sudo at /etc/wireguard/privatekey)" != "" && "$(sudo cat /etc/wireguard/publickey)" != "" ]]; then
     printf $info "\n\nFound existing keys \n"
     read -p "Generate new Wireguard keys [Y/n]? " GENKEYS
     GENKEYS=${GENKEYS:-"y"}
