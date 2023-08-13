@@ -41,8 +41,8 @@ if [[ "${GENKEYS}" =~ ^[Yy]$ ]];then
     wg genkey | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey
 fi
 
-PRIVATE_KEY=$(cat /etc/wireguard/privatekey)
-PUBLIC_KEY=$(cat /etc/wireguard/publickey)
+PRIVATE_KEY=$(sudo cat /etc/wireguard/privatekey)
+PUBLIC_KEY=$(sudo cat /etc/wireguard/publickey)
 
 sudo cp ${TEMPLATE_PATH}/wg0.conf.tmpl /etc/wireguard/wg0.conf
 
