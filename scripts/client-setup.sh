@@ -41,6 +41,9 @@ echo; echo
 cat /tmp/wg-client.conf| qrencode -t ansiutf8
 rm /tmp/wg-client.conf
 
+printf $info "\n\nPrivate Key ${PRIVATE_KEY}} \n"
+printf $info "Public Key ${PUBLIC_KEY}} \n"
+
 sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${IP}/32
 echo; echo
 
