@@ -19,7 +19,8 @@ wireguard-tools/scripts/prereq.sh
 ## Using an existing Private Key
 
 ```
-echo; read -p "Enter private key: " PRIVATE_KEY; echo ${PRIVATE_KEY} | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey
+echo; read -p "Enter private key: " PRIVATE_KEY; \
+echo ${PRIVATE_KEY} | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey
 ```
 
 ## Run script
