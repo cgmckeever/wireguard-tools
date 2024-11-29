@@ -7,40 +7,46 @@ Quick setup and configure for Wireguard on Ubuntu
 ```
 sudo apt -y update; \
 sudo apt -y install git; \
-sudo git clone https://github.com/cgmckeever/wireguard-tools.git
-
+sudo git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools; \
+cd /opt/wireguard-tools
 ```
 
 # Prereqs
 
 ```
-wireguard-tools/scripts/prereq.sh
+scripts/prereq.sh
 ```
 
-# Configure
-
-## Using an existing Private Key
+# Setup
 
 ```
-wireguard-tools/scripts/add-key.sh
+scripts/setup.sh
 ```
 
-## Run script
+# Client Configure 
+
+## Add Clients
 
 ```
-wireguard-tools/scripts/setup.sh
+scripts/client-setup.sh
 ```
 
-# Add Clients
+Client confs `clients/`
+
+## Remove Client
 
 ```
-wireguard-tools/scripts/client-setup.sh
+scripts/client-remove.sh
 ```
 
-Client list `~/authorized-keys.wireguard`
-
-# Remove Client
+## Show Client Details 
 
 ```
-wireguard-tools/scripts/client-remove.sh
+scripts/client-conf {CLIENT_ALIAS}
+```
+
+# Backup
+
+```
+scripts/backup.sh
 ```
