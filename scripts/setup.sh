@@ -73,7 +73,7 @@ mkdir -p ${CLIENT_PATH}
 mkdir -p ${BACKUP_PATH}
 
 printf $info "\n\nWireguard configured. \n"
-printf $info "Create clients using the './client-setup.sh' script. \n\n"
+printf $info "Create clients using the 'scripts/client-setup.sh' script. \n\n"
 
 
 

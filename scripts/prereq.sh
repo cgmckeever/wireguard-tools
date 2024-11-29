@@ -18,4 +18,4 @@ sudo ufw enable
 sudo ufw status
 
 printf $info "\n\nWireguard prereqs installed. \n"
-printf $info "Run the './setup.sh' script to configure. \n\n"
+printf $info "Run the 'scripts/setup.sh' script to configure. \n\n"
