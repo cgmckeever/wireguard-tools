@@ -1,50 +1,36 @@
 #!/bin/bash
 
-SCRIPT_PATH=$(dirname "${BASH_SOURCE[0]}")
+SCRIPT_PATH=$(realpath "$(dirname "${BASH_SOURCE[0]}")/")
 source ${SCRIPT_PATH}/shared.inc.sh
+source ${CONFIG_PATH}
 
 # ==============================
 
-NIC=$(route | grep default | awk '{print $8}')
 SERVER_IP=$(ip addr show $NIC | grep -m 1 "inet " | awk '{print $2}' | cut -d "/" -f1)
 
-echo; echo
-read -p "Client name/alias: " WG_ALIAS
+prompt "Client name/alias:" WG_ALIAS
+CLIENT_CONF=${CLIENT_PATH}/${WG_ALIAS}.conf
 
-printf $info "\n\nWireguard Network is ${WG_NETWORK} \n"
-read -p "IP to allocate client: " IP
+if [[ ! -e "${CLIENT_CONF}" ]];then
+    printf $info "\nWireguard Network is ${WG_NETWORK}"
+    IFS='.' read A B C D <<< ${WG_NETWORK}
+    prompt "IP to allocate client: ${A}.${B}.${C}." LAST_OCTET
+    IP=${A}.${B}.${C}.${LAST_OCTET}
 
-echo; echo
-read -p "Allowed IPs: default [${WG_DEFAULT_ALLOWED_IPS}] " ALLOWED_IPS
-ALLOWED_IPS=${ALLOWED_IPS:-${WG_DEFAULT_ALLOWED_IPS}}
+    prompt "Allowed IPs: default [${WG_DEFAULT_ALLOWED_IPS}] " WG_ALLOWED_IPS
+    WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_DEFAULT_ALLOWED_IPS}}
 
-echo; echo
-read -p "Enter an existing Wireguard Private Key [enter to create new key-pair]: " PRIVATE_KEY
-PRIVATE_KEY=${PRIVATE_KEY:-$(wg genkey)}
-PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
+    prompt "Enter an existing Wireguard Private Key [enter to create new key-pair]:" PRIVATE_KEY
+    PRIVATE_KEY=${PRIVATE_KEY:-$(wg genkey)}
+    PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
 
-cp ${TEMPLATE_PATH}/client.conf.tmpl /tmp/wg-client.conf
+    sudo sed -e "s#__WG_SERVER_IP#${SERVER_IP}#g" \
+        -e "s/__WG_PORT/${WG_PORT}/g" \
+        -e "s#__WG_SERVER_PUBLIC_KEY#${WG_SERVER_PUBLIC_KEY}#g" \
+        -e "s#__WG_CLIENT_PRIVATE_KEY#${PRIVATE_KEY}#g" \
+        -e "s#__WG_IP#${IP}/32#g" \
+        -e "s#__WG_ALLOWED_IPS#${WG_ALLOWED_IPS}#g" \
+        ${TEMPLATE_PATH}/client.conf.tmpl > ${CLIENT_CONF}
+fi 
 
-sudo sed -i \
-    -e "s#__SERVER_IP#${SERVER_IP}#g" \
-    -e "s/__PORT/${WG_PORT}/g" \
-    -e "s#__SERVER_PUBLIC_KEY#${WG_PUBLIC_KEY}#g" \
-    -e "s#__CLIENT_PRIVATE_KEY#${PRIVATE_KEY}#g" \
-    -e "s#__IP#${IP}/32#g" \
-    -e "s#__ALLOWED_IPS#${ALLOWED_IPS}#g" \
-    /tmp/wg-client.conf
-
-printf $info "\n\nWireguard Client Conf: \n"
-cat /tmp/wg-client.conf
-
-echo; echo
-cat /tmp/wg-client.conf| qrencode -t ansiutf8
-rm /tmp/wg-client.conf
-
-printf $info "\n\nPrivate Key ${PRIVATE_KEY}} \n"
-printf $info "Public Key ${PUBLIC_KEY}} \n"
-
-sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${IP}/32
-echo; echo
-
-echo "${WG_ALIAS} : ${PUBLIC_KEY} : ${IP} : ${ALLOWED_IPS}" >> ~/authorized-keys.wireguard
+${SCRIPT_PATH}/client-conf.sh ${WG_ALIAS}

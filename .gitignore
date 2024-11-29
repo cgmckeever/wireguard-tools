@@ -1,0 +1,4 @@
+scripts/wireguard-tools.conf.sh
+clients/*
+
+backups/*

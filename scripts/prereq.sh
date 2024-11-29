@@ -1,12 +1,12 @@
 #!/bin/bash
 
-SCRIPT_PATH=$(dirname "${BASH_SOURCE[0]}")
+SCRIPT_PATH=$(realpath "$(dirname "${BASH_SOURCE[0]}")/")
 source ${SCRIPT_PATH}/shared.inc.sh
 
 # ==============================
 
 sudo apt update
-sudo apt -y install net-tools vim ufw wireguard qrencode
+sudo apt -y install net-tools vim ufw wireguard qrencode zip
 
 echo net.ipv4.ip_forward=1 | sudo tee -a /etc/sysctl.conf
 sudo sysctl -p
@@ -18,4 +18,4 @@ sudo ufw enable
 sudo ufw status
 
 printf $info "\n\nWireguard prereqs installed. \n"
-printf $info "Run the './setup.sh' script to configure. \n"
+printf $info "Run the './setup.sh' script to configure. \n\n"
