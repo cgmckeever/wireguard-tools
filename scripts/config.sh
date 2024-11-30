@@ -6,11 +6,11 @@ source ${CONFIG_PATH}
 
 #================================
 
+echo $2
 if [ -z "${2}" ]; then
 	ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g' | tr '\n' '__NEWLINE__')
 fi 
-
-echo $2
+echo "1"
 echo $ESCAPED
 
 sudo sed \
