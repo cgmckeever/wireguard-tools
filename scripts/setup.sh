@@ -49,6 +49,9 @@ else
     if [[ "${GENKEYS}" =~ ^[Yy]$ ]];then
         PRIVATE_KEY=$(wg genkey)
         store_key ${PRIVATE_KEY}
+        printf $info "\n\nServer Keys Generated\n"
+    else
+        printf $info "\n\nExisting Server Keys Used\n"
     fi
 fi
 
