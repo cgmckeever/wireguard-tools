@@ -6,13 +6,17 @@ source ${CONFIG_PATH}
 
 #================================
 
+tempfile=$(mktemp)
+echo "${2}" > "$tempfile"
+
 sudo sed \
 	-e "s#__WG_CIDR#${WG_CIDR}#g" \
     -e "s/__PORT/${WG_PORT}/g" \
     -e "s#__PRIVATE_KEY#${1}#g" \
     -e "s/__NIC/${NIC}/g" \
-    -e "s#__NON_INTERFACE_CONFIG#$(printf "%s" "${2}")#g" \
+    -e "s#__NON_INTERFACE_CONFIG#$(cat "$tempfile")#g" \
     ${TEMPLATE_PATH}/wg0.conf.tmpl > ${WG_CONFIG_PATH}
 
+rm "$tempfile"
 printf $info "\nWireguard config: \n"
 sudo cat ${WG_CONFIG_PATH}
