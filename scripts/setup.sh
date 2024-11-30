@@ -4,6 +4,7 @@ SCRIPT_PATH=$(realpath "$(dirname "${BASH_SOURCE[0]}")/")
 source ${SCRIPT_PATH}/shared.inc.sh
 
 touch ${CONFIG_PATH}
+sudo chmod 755 ${CONFIG_PATH}
 source ${CONFIG_PATH}
 
 # ==============================
@@ -29,23 +30,28 @@ sudo touch /etc/wireguard/publickey
 
 prompt "Import existing Server Key [y/N]?" IMPORT_KEY
 if [[ "${IMPORT_KEY}" =~ ^[Yy]$ ]];then
-    ${SCRIPT_PATH}/add-server-key.sh
+    echo
+    prompt "Enter server private key: " PRIVATE_KEY
+    store_key ${PRIVATE_KEY}
+
+    printf $info "\n\nServer Keys Updated\n"
 else
     echo
     GENKEYS_DEFAULT=y
     if [[ "$(sudo cat /etc/wireguard/privatekey)" != "" && "$(sudo cat /etc/wireguard/publickey)" != "" ]]; then
         GENKEYS_DEFAULT=n
         printf $info "\n\nFound existing Wireguard keys \n"
+        PRIVATE_KEY=$(sudo cat /etc/wireguard/privatekey)
         prompt "Generate new Wireguard keys [y/N]?" GENKEYS
     fi
 
     GENKEYS=${GENKEYS:-${GENKEYS_DEFAULT}}
     if [[ "${GENKEYS}" =~ ^[Yy]$ ]];then
-        PUB_KEY_OUTPUT=$(wg genkey | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey)
+        PRIVATE_KEY=$(wg genkey)
+        store_key ${PRIVATE_KEY}
     fi
 fi
 
-PRIVATE_KEY=$(sudo cat /etc/wireguard/privatekey)
 PUBLIC_KEY=$(sudo cat /etc/wireguard/publickey)
 
 sudo sed -e "s#__IP_RANGE#${WG_IP_RANGE}#g" \
@@ -62,8 +68,6 @@ sudo sed -e "s#__WG_NETWORK#${WG_NETWORK}#g" \
     -e "s#__WG_PORT#${WG_PORT}#g" \
     -e "s#__WG_DEFAULT_ALLOWED_IPS#${WG_ALLOWED_IPS}#g" \
     ${TEMPLATE_PATH}/wireguard-tools.conf.sh.tmpl > ${CONFIG_PATH}
-
-sudo chmod 755 ${CONFIG_PATH}
 
 echo
 sudo systemctl restart wg-quick@wg0

@@ -17,7 +17,7 @@ if [[ ! -e "${CLIENT_CONF}" ]];then
     prompt "IP to allocate client: ${A}.${B}.${C}." LAST_OCTET
     IP=${A}.${B}.${C}.${LAST_OCTET}
 
-    prompt "Allowed IPs: default [${WG_DEFAULT_ALLOWED_IPS}] " WG_ALLOWED_IPS
+    prompt "Allowed IPs - default [${WG_DEFAULT_ALLOWED_IPS}]:" WG_ALLOWED_IPS
     WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_DEFAULT_ALLOWED_IPS}}
 
     prompt "Enter an existing Wireguard Private Key [enter to create new key-pair]:" PRIVATE_KEY

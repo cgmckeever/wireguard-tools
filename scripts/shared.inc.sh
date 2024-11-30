@@ -17,6 +17,10 @@ color success 92m   # green
 color warning 93m   # yellow
 color danger 91m    # red
 
+store_key () {
+    OUTPUT=$(echo ${1} | sudo tee /etc/wireguard/privatekey | wg pubkey | sudo tee /etc/wireguard/publickey)
+}
+
 pause () {
     echo
     if [[ ! -z $1 ]]; then
