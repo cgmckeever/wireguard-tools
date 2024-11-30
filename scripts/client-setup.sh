@@ -8,7 +8,11 @@ source ${CONFIG_PATH}
 
 SERVER_IP=$(ip addr show $NIC | grep -m 1 "inet " | awk '{print $2}' | cut -d "/" -f1)
 
-prompt "Client name/alias:" WG_ALIAS
+WG_ALIAS=${1}
+if [ -z "${WG_ALIAS}" ]; then
+    prompt "Client name/alias:" WG_ALIAS
+fi
+
 CLIENT_CONF=${CLIENT_PATH}/${WG_ALIAS}.conf
 
 if [[ ! -e "${CLIENT_CONF}" ]];then
