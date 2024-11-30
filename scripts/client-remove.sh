@@ -20,9 +20,9 @@ while read -r LINE; do
     fi
 done <<< "${WG}"
 
-printf $info "\nPeer List:"
+printf $info "\nPeer List:\n"
 for i in "${!PEERS[@]}"; do
-    printf $warn "$((i + 1)). ${PEERS[$i]} / ${IPS[$i]}"
+    printf $warn "$((i + 1)). ${PEERS[$i]} / ${IPS[$i]}\n"
 done
 
 prompt "Which client do you want to remove?" PEER
