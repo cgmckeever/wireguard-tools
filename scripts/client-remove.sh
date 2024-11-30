@@ -29,6 +29,7 @@ prompt "Which client do you want to remove?" PEER
 
 if [[ "${PEER}" -gt 0 && "${PEER}" -le "${#PEERS[@]}" ]];then
     sudo wg set wg0 peer "${PEERS[$((PEER - 1))]}" remove
+    printf $success "Peer "${PEERS[$((PEER - 1))]}" removed \n"
 
     echo
 	sudo wg
