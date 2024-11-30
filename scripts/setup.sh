@@ -39,7 +39,6 @@ else
     if [[ "$(sudo cat /etc/wireguard/privatekey)" != "" && "$(sudo cat /etc/wireguard/publickey)" != "" ]]; then
         GENKEYS_DEFAULT=n
         printf $info "\nFound existing Wireguard keys \n"
-        PRIVATE_KEY=$(sudo cat /etc/wireguard/privatekey)
         prompt "Generate new Wireguard keys [y/N]?" GENKEYS
     fi
 
@@ -49,6 +48,7 @@ else
         store_key ${PRIVATE_KEY}
         printf $success "\nServer Keys Generated\n"
     else
+        PRIVATE_KEY=$(sudo cat /etc/wireguard/privatekey)
         printf $success "\nExisting Server Keys Used\n"
     fi
 fi
