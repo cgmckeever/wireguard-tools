@@ -67,7 +67,7 @@ touch ${WG_CONFIG_PATH}
 NON_INTERFACE_CONFIG=$(sed '/\[Interface\]/,/^$/d' "${WG_CONFIG_PATH}")
 echo ${NON_INTERFACE_CONFIG}
 pause
-${SCRIPT_PATH}/config.sh ${PRIVATE_KEY} ${NON_INTERFACE_CONFIG}
+${SCRIPT_PATH}/config.sh ${PRIVATE_KEY} "${NON_INTERFACE_CONFIG}"
 
 ${SCRIPT_PATH}/system.sh restart
 ${SCRIPT_PATH}/system.sh enable
