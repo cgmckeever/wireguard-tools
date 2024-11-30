@@ -65,7 +65,7 @@ sudo sed \
     ${TEMPLATE_PATH}/wireguard-tools.conf.sh.tmpl > ${CONFIG_PATH}
 
 touch ${WG_CONFIG_PATH}
-NON_INTERFACE_CONFIG=$(sed -n '/^\[Interface\]/,/^[^#]*$/ { /^[^#]*$/q; d; }; p' "${WG_CONFIG_PATH}")
+NON_INTERFACE_CONFIG=$(sed -n '/^\[Interface\]/,/^[^#]*$/ { /^[^#]*$/d; p }' "${WG_CONFIG_PATH}")
 echo ${NON_INTERFACE_CONFIG}
 pause
 ${SCRIPT_PATH}/config.sh ${PRIVATE_KEY} ${NON_INTERFACE_CONFIG}
