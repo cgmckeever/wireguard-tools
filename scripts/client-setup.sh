@@ -39,7 +39,7 @@ WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_ALLOWED_IPS_DEFAULT}}
 
 PRIVATE_KEY_PROMPT=${PRIVATE_KEY_DEFAULT:-"enter to create new key-pair"}
 PRIVATE_KEY_DEFAULT=${PRIVATE_KEY_DEFAULT:-$(wg genkey)}
-prompt "Enter an existing Wireguard Private Key [${PRIVATE_KEY_DEFAULT}]:" PRIVATE_KEY
+prompt "Enter an existing Wireguard Private Key [${PRIVATE_KEY_PROMPT}]:" PRIVATE_KEY
 PRIVATE_KEY=${PRIVATE_KEY:-${PRIVATE_KEY_DEFAULT}}
 PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
 
