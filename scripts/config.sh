@@ -9,7 +9,11 @@ source ${CONFIG_PATH}
 echo $2
 if [ -z "${2}" ]; then
 	echo 3
-	ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g' | tr '\n' '__NEWLINE__')
+	ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g')
+	echo $ESCAPED
+	echo 4
+	ESCAPED=$(echo "$ESCAPED" | tr '\n' '__NEWLINE__')
+	echo $ESCAPED
 fi 
 echo "1"
 echo $ESCAPED
