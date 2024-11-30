@@ -8,6 +8,7 @@ source ${CONFIG_PATH}
 
 echo $2
 if [ -z "${2}" ]; then
+	echo 3
 	ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g' | tr '\n' '__NEWLINE__')
 fi 
 echo "1"
