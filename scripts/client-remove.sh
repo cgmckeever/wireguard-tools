@@ -21,7 +21,7 @@ while read -r LINE; do
 done <<< "${WG}"
 
 printf $info "\nPeer List:"
-for i in "${!peers[@]}"; do
+for i in "${!PEERS[@]}"; do
     printf $warn "$((i + 1)). ${PEERS[$i]} / ${IPS[$i]}"
 done
 
