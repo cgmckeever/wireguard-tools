@@ -28,8 +28,8 @@ if [[ ! -e "${CLIENT_CONF}" ]];then
     PRIVATE_KEY=${PRIVATE_KEY:-$(wg genkey)}
     PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
 
-    sudo sed -e \
-        "s#__WG_SERVER_IP#${SERVER_IP}#g" \
+    sudo sed \
+        -e "s#__WG_SERVER_IP#${SERVER_IP}#g" \
         -e "s/__WG_PORT/${WG_PORT}/g" \
         -e "s#__WG_SERVER_PUBLIC_KEY#${WG_SERVER_PUBLIC_KEY}#g" \
         -e "s#__WG_CLIENT_PRIVATE_KEY#${PRIVATE_KEY}#g" \
