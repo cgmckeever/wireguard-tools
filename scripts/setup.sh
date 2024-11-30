@@ -36,11 +36,10 @@ if [[ "${IMPORT_KEY}" =~ ^[Yy]$ ]];then
 
     printf $success "\nServer Keys Updated\n"
 else
-    echo
     GENKEYS_DEFAULT=y
     if [[ "$(sudo cat /etc/wireguard/privatekey)" != "" && "$(sudo cat /etc/wireguard/publickey)" != "" ]]; then
         GENKEYS_DEFAULT=n
-        printf $info "\n\nFound existing Wireguard keys \n"
+        printf $info "\nFound existing Wireguard keys \n"
         PRIVATE_KEY=$(sudo cat /etc/wireguard/privatekey)
         prompt "Generate new Wireguard keys [y/N]?" GENKEYS
     fi
@@ -67,6 +66,8 @@ sudo sed \
 
 touch ${WG_CONFIG_PATH}
 NON_INTERFACE_CONFIG=$(sed -n '/^\[Interface\]/,/^[^#]*$/ { /^[^#]*$/q; d; }; p' "${WG_CONFIG_PATH}")
+echo ${NON_INTERFACE_CONFIG}
+pause
 ${SCRIPT_PATH}/config.sh ${PRIVATE_KEY} ${NON_INTERFACE_CONFIG}
 
 echo

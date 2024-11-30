@@ -13,7 +13,7 @@ IP=$(grep -oP '(?<=^Address = ).*' ${CLIENT_CONF})
 
 sudo wg set wg0 peer ${PUBLIC_KEY} allowed-ips ${IP}
 
-printf $info "\n\nWireguard Client Conf: \n"
+printf $info "\nWireguard Client Conf: \n"
 cat ${CLIENT_CONF}
 
 echo; echo
