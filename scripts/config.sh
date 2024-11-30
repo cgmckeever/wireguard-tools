@@ -6,17 +6,8 @@ source ${CONFIG_PATH}
 
 #================================
 
-echo $2
-if [ -z "${2}" ]; then
-	echo 3
-	ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g')
-	echo $ESCAPED
-	echo 4
-	ESCAPED=$(echo "$ESCAPED" | sed ':a;N;$!ba;s/\n/__NEWLINE__/g')
-	echo $ESCAPED
-fi 
-echo "1"
-echo $ESCAPED
+ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g')
+ESCAPED=$(echo "$ESCAPED" | sed ':a;N;$!ba;s/\n/__NEWLINE__/g')
 
 sudo sed \
 	-e "s#__WG_CIDR#${WG_CIDR}#g" \
