@@ -11,7 +11,7 @@ sudo sed \
     -e "s/__PORT/${WG_PORT}/g" \
     -e "s#__PRIVATE_KEY#${1}#g" \
     -e "s/__NIC/${NIC}/g" \
-    -e "s#__NON_INTERFACE_CONFIG#"${2}"#g" \
+    -e "s#__NON_INTERFACE_CONFIG#"$(echo "${2}" | sed 's/[&/\]/\\&/g')"#g" \
     ${TEMPLATE_PATH}/wg0.conf.tmpl > ${WG_CONFIG_PATH}
 
 printf $info "\nWireguard config: \n"
