@@ -15,17 +15,30 @@ fi
 
 CLIENT_CONF=${CLIENT_PATH}/${WG_ALIAS}.conf
 
-if [[ ! -e "${CLIENT_CONF}" ]];then
+if [[ -e "${CLIENT_CONF}" ]];then
+    PRIVATE_KEY_DEFAULT=$(sed -n 's/PrivateKey = \(.*\)/\1/p' "$file_path")
+    
+    IP=$(sed -n 's/Address = \(.*\)/\1/p' "$file_path")
+    IFS='.' read A B C LAST_OCTET_DEFAULT <<< ${IP}
+    LAST_OCTET_PROMPT="[${LAST_OCTET_DEFAULT}]"
+
+    WG_ALLOWED_IPS_DEFAULT=$(sed -n 's/AllowedIPs = \(.*\)/\1/p' "$file_path")
+fi 
     printf $info "\nWireguard Network is ${WG_NETWORK}"
     IFS='.' read A B C D <<< ${WG_NETWORK}
-    prompt "IP to allocate client: ${A}.${B}.${C}." LAST_OCTET
+
+    prompt "IP to allocate client: ${A}.${B}.${C}.${LAST_OCTET_PROMPT}" LAST_OCTET
+    LAST_OCTET=${LAST_OCTET:-${LAST_OCTET_DEFAULT}}
     IP=${A}.${B}.${C}.${LAST_OCTET}
 
-    prompt "Allowed IPs - default [${WG_DEFAULT_ALLOWED_IPS}]:" WG_ALLOWED_IPS
-    WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_DEFAULT_ALLOWED_IPS}}
+    WG_ALLOWED_IPS_DEFAULT=${WG_ALLOWED_IPS_DEFAULT:-${WG_DEFAULT_ALLOWED_IPS}}
+    prompt "Allowed IPs - default [${WG_ALLOWED_IPS_DEFAULT}]:" WG_ALLOWED_IPS
+    WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_ALLOWED_IPS_DEFAULT}}
 
-    prompt "Enter an existing Wireguard Private Key [enter to create new key-pair]:" PRIVATE_KEY
-    PRIVATE_KEY=${PRIVATE_KEY:-$(wg genkey)}
+    PRIVATE_KEY_PROMPT=${PRIVATE_KEY_DEFAULT:-"enter to create new key-pair"}
+    PRIVATE_KEY_DEFAULT=${PRIVATE_KEY_DEFAULT:-$(wg genkey)}
+    prompt "Enter an existing Wireguard Private Key [${PRIVATE_KEY_DEFAULT}]:" PRIVATE_KEY
+    PRIVATE_KEY=${PRIVATE_KEY:-${PRIVATE_KEY_DEFAULT}}
     PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
 
     sudo sed \
