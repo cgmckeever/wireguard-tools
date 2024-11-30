@@ -16,13 +16,13 @@ fi
 CLIENT_CONF=${CLIENT_PATH}/${WG_ALIAS}.conf
 
 if [[ -e "${CLIENT_CONF}" ]];then
-    PRIVATE_KEY_DEFAULT=$(sed -n 's/PrivateKey = \(.*\)/\1/p' "$file_path")
+    PRIVATE_KEY_DEFAULT=$(sed -n 's/PrivateKey = \(.*\)/\1/p' "${CLIENT_CONF}")
     
-    IP=$(sed -n 's/Address = \(.*\)/\1/p' "$file_path")
+    IP=$(sed -n 's/Address = \(.*\)/\1/p' "${CLIENT_CONF}")
     IFS='.' read A B C LAST_OCTET_DEFAULT <<< ${IP}
     LAST_OCTET_PROMPT="[${LAST_OCTET_DEFAULT}]"
 
-    WG_ALLOWED_IPS_DEFAULT=$(sed -n 's/AllowedIPs = \(.*\)/\1/p' "$file_path")
+    WG_ALLOWED_IPS_DEFAULT=$(sed -n 's/AllowedIPs = \(.*\)/\1/p' "${CLIENT_CONF}")
 fi 
 
 printf $info "\nWireguard Network is ${WG_NETWORK}"
