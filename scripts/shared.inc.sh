@@ -4,6 +4,7 @@ TEMPLATE_PATH="$(realpath ${SCRIPT_PATH}/../templates)"
 CLIENT_PATH="$(realpath ${SCRIPT_PATH}/../clients)"
 BACKUP_PATH="$(realpath ${SCRIPT_PATH}/../backups)"
 CONFIG_PATH=${SCRIPT_PATH}/wireguard-tools.conf.sh
+WG_CONFIG_PATH=/etc/wireguard/wg0.conf
 
 NIC=$(route | grep default | awk '{print $8}')
 

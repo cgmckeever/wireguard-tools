@@ -9,13 +9,13 @@ source ${CONFIG_PATH}
 
 # ==============================
 
-sudo systemctl stop wg-quick@wg0
+${SCRIPT_PATH}/system.sh stop
 
-WG_NETWORK_DEFAULT=${WG_NETWORK:-"10.10.0.0/24"}
+WG_NETWORK_DEFAULT=${WG_NETWORK:-"10.10.0.0"}
 prompt "Wireguard Network - default [${WG_NETWORK_DEFAULT}]:" WG_NETWORK
 WG_NETWORK=${WG_NETWORK:-${WG_NETWORK_DEFAULT}}
 IFS='.' read A B C D <<< ${WG_NETWORK}
-WG_IP_RANGE=${A}.${B}.${C}.0/24
+WG_CIDR=${A}.${B}.${C}.0/24
 
 WG_PORT_DEFAULT=${WG_PORT:-51820}
 prompt "Wireguard Port - default [${WG_PORT_DEFAULT}]:" WG_PORT
@@ -31,10 +31,10 @@ sudo touch /etc/wireguard/publickey
 prompt "Import existing Server Key [y/N]?" IMPORT_KEY
 if [[ "${IMPORT_KEY}" =~ ^[Yy]$ ]];then
     echo
-    prompt "Enter server private key: " PRIVATE_KEY
+    prompt "Enter server private key:" PRIVATE_KEY
     store_key ${PRIVATE_KEY}
 
-    printf $success "\n\nServer Keys Updated\n"
+    printf $success "\nServer Keys Updated\n"
 else
     echo
     GENKEYS_DEFAULT=y
@@ -49,32 +49,29 @@ else
     if [[ "${GENKEYS}" =~ ^[Yy]$ ]];then
         PRIVATE_KEY=$(wg genkey)
         store_key ${PRIVATE_KEY}
-        printf $success "\n\nServer Keys Generated\n"
+        printf $success "\nServer Keys Generated\n"
     else
-        printf $success "\n\nExisting Server Keys Used\n"
+        printf $success "\nExisting Server Keys Used\n"
     fi
 fi
 
 PUBLIC_KEY=$(sudo cat /etc/wireguard/publickey)
 
-sudo sed -e "s#__IP_RANGE#${WG_IP_RANGE}#g" \
-    -e "s/__PORT/${WG_PORT}/g" \
-    -e "s#__PRIVATE_KEY#${PRIVATE_KEY}#g" \
-    -e "s/__NIC/${NIC}/g" \
-    ${TEMPLATE_PATH}/wg0.conf.tmpl > /etc/wireguard/wg0.conf
-
-printf $info "\nWireguard config: \n"
-sudo cat /etc/wireguard/wg0.conf
-
-sudo sed -e "s#__WG_NETWORK#${WG_NETWORK}#g" \
+sudo sed \
+    -e "s/__WG_NETWORK/${WG_NETWORK}/g" \
+    -e "s#__WG_CIDR#${WG_CIDR}#g" \
     -e "s#__WG_SERVER_PUBLIC_KEY#${PUBLIC_KEY}#g" \
-    -e "s#__WG_PORT#${WG_PORT}#g" \
-    -e "s#__WG_DEFAULT_ALLOWED_IPS#${WG_ALLOWED_IPS}#g" \
+    -e "s/__WG_PORT/${WG_PORT}/g" \
+    -e "s/__WG_DEFAULT_ALLOWED_IPS/${WG_ALLOWED_IPS}/g" \
     ${TEMPLATE_PATH}/wireguard-tools.conf.sh.tmpl > ${CONFIG_PATH}
 
+touch ${WG_CONFIG_PATH}
+NON_INTERFACE_CONFIG=$(sed -n '/^\[Interface\]/,/^[^#]*$/ { /^[^#]*$/q; d; }; p' "${WG_CONFIG_PATH}")
+${SCRIPT_PATH}/config.sh ${PRIVATE_KEY} ${NON_INTERFACE_CONFIG}
+
 echo
-sudo systemctl restart wg-quick@wg0
-sudo systemctl enable wg-quick@wg0
+${SCRIPT_PATH}/system.sh restart
+${SCRIPT_PATH}/system.sh enable
 
 mkdir -p ${CLIENT_PATH}
 mkdir -p ${BACKUP_PATH}

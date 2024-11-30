@@ -31,6 +31,8 @@ if [[ ! -e "${CLIENT_CONF}" ]];then
         -e "s#__WG_IP#${IP}/32#g" \
         -e "s#__WG_ALLOWED_IPS#${WG_ALLOWED_IPS}#g" \
         ${TEMPLATE_PATH}/client.conf.tmpl > ${CLIENT_CONF}
+else
+    sed -i "/^\[Peer\]/,/\[/s/^PublicKey = .*/PublicKey = ${WG_SERVER_PUBLIC_KEY}/" "${CLIENT_CONF}"
 fi 
 
 ${SCRIPT_PATH}/client-conf.sh ${WG_ALIAS}
