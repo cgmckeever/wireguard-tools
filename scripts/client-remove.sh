@@ -15,7 +15,7 @@ IPS=()
 while read -r LINE; do
     if [[ "${LINE}" =~ ^peer:\ (.*) ]];then
         PEERS+=("${BASH_REMATCH[1]}")
-    elif [[ "$line" =~ ^[[:space:]]*allowed\ ips:\ (.*) ]];then
+    elif [[ "${LINE}" =~ ^[[:space:]]*allowed\ ips:\ (.*) ]];then
         IPS+=("${BASH_REMATCH[1]}")
     fi
 done <<< "${WG}"
