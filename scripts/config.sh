@@ -6,15 +6,14 @@ source ${CONFIG_PATH}
 
 #================================
 
-TEMP=$(mktemp)
-echo "${2}" > "${TEMP}"
+ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g')
 
 sudo sed \
 	-e "s#__WG_CIDR#${WG_CIDR}#g" \
     -e "s/__PORT/${WG_PORT}/g" \
     -e "s#__PRIVATE_KEY#${1}#g" \
     -e "s/__NIC/${NIC}/g" \
-    -e "s|__NON_INTERFACE_CONFIG|$(<"${TEMP}")|g" \
+    -e "s#__NON_INTERFACE_CONFIG#${ESCAPED}#g" \
     ${TEMPLATE_PATH}/wg0.conf.tmpl > ${WG_CONFIG_PATH}
 
 rm "${TEMP}"

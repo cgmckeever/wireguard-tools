@@ -75,7 +75,7 @@ ${SCRIPT_PATH}/system.sh enable
 mkdir -p ${CLIENT_PATH}
 mkdir -p ${BACKUP_PATH}
 
-printf $success "\n\nWireguard configured. \n"
+printf $success "\nWireguard configured. \n"
 printf $success "Create clients using the 'scripts/client-setup.sh' script. \n\n"
 
 
