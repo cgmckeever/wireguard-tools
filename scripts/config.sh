@@ -6,6 +6,9 @@ source ${CONFIG_PATH}
 
 #================================
 
+ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g')
+ESCAPED=$(echo "$ESCAPED" | sed ':a;N;$!ba;s/\n/__NEWLINE__/g')
+
 sudo sed \
 	-e "s#__WG_CIDR#${WG_CIDR}#g" \
     -e "s/__PORT/${WG_PORT}/g" \
