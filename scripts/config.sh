@@ -6,7 +6,7 @@ source ${CONFIG_PATH}
 
 #================================
 
-ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g')
+ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g' | tr '\n' '__NEWLINE__')
 
 sudo sed \
 	-e "s#__WG_CIDR#${WG_CIDR}#g" \
@@ -14,8 +14,8 @@ sudo sed \
     -e "s#__PRIVATE_KEY#${1}#g" \
     -e "s/__NIC/${NIC}/g" \
     -e "s#__NON_INTERFACE_CONFIG#${ESCAPED}#g" \
+    -e "s#__NEWLINE__#$(echo -e '\n')#g" \
     ${TEMPLATE_PATH}/wg0.conf.tmpl > ${WG_CONFIG_PATH}
 
-rm "${TEMP}"
 printf $info "\nWireguard config: \n"
 sudo cat ${WG_CONFIG_PATH}
