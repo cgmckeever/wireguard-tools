@@ -30,7 +30,6 @@ sudo touch /etc/wireguard/publickey
 
 prompt "Import existing Server Key [y/N]?" IMPORT_KEY
 if [[ "${IMPORT_KEY}" =~ ^[Yy]$ ]];then
-    echo
     prompt "Enter server private key:" PRIVATE_KEY
     store_key ${PRIVATE_KEY}
 
@@ -61,7 +60,7 @@ sudo sed \
     -e "s#__WG_CIDR#${WG_CIDR}#g" \
     -e "s#__WG_SERVER_PUBLIC_KEY#${PUBLIC_KEY}#g" \
     -e "s/__WG_PORT/${WG_PORT}/g" \
-    -e "s/__WG_DEFAULT_ALLOWED_IPS/${WG_ALLOWED_IPS}/g" \
+    -e "s#__WG_DEFAULT_ALLOWED_IPS#${WG_ALLOWED_IPS}#g" \
     ${TEMPLATE_PATH}/wireguard-tools.conf.sh.tmpl > ${CONFIG_PATH}
 
 touch ${WG_CONFIG_PATH}
