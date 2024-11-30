@@ -12,7 +12,7 @@ if [ -z "${2}" ]; then
 	ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g')
 	echo $ESCAPED
 	echo 4
-	ESCAPED=$(echo "$ESCAPED" | tr '\n' '__NEWLINE__')
+	ESCAPED=$(echo "$ESCAPED" | sed ':a;N;$!ba;s/\n/__NEWLINE__/g')
 	echo $ESCAPED
 fi 
 echo "1"
