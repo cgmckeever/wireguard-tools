@@ -34,7 +34,7 @@ if [[ "${IMPORT_KEY}" =~ ^[Yy]$ ]];then
     prompt "Enter server private key: " PRIVATE_KEY
     store_key ${PRIVATE_KEY}
 
-    printf $info "\n\nServer Keys Updated\n"
+    printf $success "\n\nServer Keys Updated\n"
 else
     echo
     GENKEYS_DEFAULT=y
@@ -49,9 +49,9 @@ else
     if [[ "${GENKEYS}" =~ ^[Yy]$ ]];then
         PRIVATE_KEY=$(wg genkey)
         store_key ${PRIVATE_KEY}
-        printf $info "\n\nServer Keys Generated\n"
+        printf $success "\n\nServer Keys Generated\n"
     else
-        printf $info "\n\nExisting Server Keys Used\n"
+        printf $success "\n\nExisting Server Keys Used\n"
     fi
 fi
 
@@ -79,8 +79,8 @@ sudo systemctl enable wg-quick@wg0
 mkdir -p ${CLIENT_PATH}
 mkdir -p ${BACKUP_PATH}
 
-printf $info "\n\nWireguard configured. \n"
-printf $info "Create clients using the 'scripts/client-setup.sh' script. \n\n"
+printf $success "\n\nWireguard configured. \n"
+printf $success "Create clients using the 'scripts/client-setup.sh' script. \n\n"
 
 
 

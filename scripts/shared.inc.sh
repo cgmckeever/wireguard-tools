@@ -14,7 +14,7 @@ color() {
 }
 color info 96m      # cyan
 color success 92m   # green
-color warning 93m   # yellow
+color warn 93m   # yellow
 color danger 91m    # red
 
 store_key () {
