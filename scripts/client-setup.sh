@@ -29,6 +29,7 @@ fi
 printf $info "\nWireguard Network is ${WG_NETWORK}"
 IFS='.' read A B C D <<< ${WG_NETWORK}
 
+LAST_OCTET_PROMPT=${LAST_OCTET_PROMPT:-"__"}
 prompt "IP to allocate client: ${A}.${B}.${C}.${LAST_OCTET_PROMPT}" LAST_OCTET
 LAST_OCTET=${LAST_OCTET:-${LAST_OCTET_DEFAULT}}
 IP=${A}.${B}.${C}.${LAST_OCTET}
