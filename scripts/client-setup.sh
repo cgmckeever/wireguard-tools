@@ -20,6 +20,7 @@ if [[ -e "${CLIENT_CONF}" ]];then
     
     IP=$(sed -n 's/Address = \(.*\)/\1/p' "${CLIENT_CONF}")
     IFS='.' read A B C LAST_OCTET_DEFAULT <<< ${IP}
+    LAST_OCTET_DEFAULT=$(echo "${LAST_OCTET_DEFAULT}" | sed 's/\/.*//')
     LAST_OCTET_PROMPT="[${LAST_OCTET_DEFAULT}]"
 
     WG_ALLOWED_IPS_DEFAULT=$(sed -n 's/AllowedIPs = \(.*\)/\1/p' "${CLIENT_CONF}")
