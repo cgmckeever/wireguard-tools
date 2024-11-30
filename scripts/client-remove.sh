@@ -26,6 +26,7 @@ while read -r LINE; do
 
 		    if [[ "${PUBLIC_KEY}" == "${PEER_KEY}" ]]; then
 		        ALIASES+=(${ALIAS})
+		        break
 		    fi
 		done
 
