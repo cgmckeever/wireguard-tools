@@ -6,7 +6,9 @@ source ${CONFIG_PATH}
 
 #================================
 
-ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g' | tr '\n' '__NEWLINE__')
+if [ -z "${2}" ]; then
+	ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g' | tr '\n' '__NEWLINE__')
+fi 
 
 sudo sed \
 	-e "s#__WG_CIDR#${WG_CIDR}#g" \
