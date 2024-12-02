@@ -49,14 +49,13 @@ PRIVATE_KEY_DEFAULT=${PRIVATE_KEY_DEFAULT:-$(wg genkey)}
 prompt "Enter an existing Wireguard Private Key [${PRIVATE_KEY_PROMPT}]:" PRIVATE_KEY
 PRIVATE_KEY=${PRIVATE_KEY:-${PRIVATE_KEY_DEFAULT}}
 PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
-echo $PUBLIC_KEY
 
 CLIENT_PSK=$(wg genpsk)
 echo ${CLIENT_PSK} > ${CLIENT_PSK_PATH}
 sudo chmod 600 ${CLIENT_PSK_PATH}
 
 sudo wg set wg0 peer ${PUBLIC_KEY} \
-    allowed-ips ${WG_ALLOWED_IPS} \
+    allowed-ips "${ADDRESS},${WG_ALLOWED_IPS}" \
     preshared-key ${CLIENT_PSK_PATH}
 
 sudo sed \
