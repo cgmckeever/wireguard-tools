@@ -36,13 +36,13 @@ if [[ "${TRAFFIC}" =~ ^[Nn]$ ]];then
         prompt "Client rrouting - default [${WG_ALLOWED_IPS_DEFAULT}]:" WG_ALLOWED_IPS
         WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_ALLOWED_IPS_DEFAULT}}
     else
-        WG_ALLOWED_IPS="0.0.0.0/0, ::/0"
+        WG_ALLOWED_IPS="0.0.0.0/0,::/0"
     fi
 else
     WG_ALLOWED_IPS="${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
 fi
 
-printf $success "\nDefault Allowed-IPs ${WG_ALLOWED_IPS} [Can be configured per client]\n"
+printf $success "\nDefault Allowed-IPs [Can be configured per client]: ${WG_ALLOWED_IPS}\n"
 
 sudo touch /etc/wireguard/privatekey
 sudo touch /etc/wireguard/publickey
