@@ -30,7 +30,7 @@ fi
 printf $info "\nWireguard Network is ${WG_IPV4_NETWORK}.0"
 
 LAST_OCTET_PROMPT=${LAST_OCTET_PROMPT:-"__"}
-prompt "IP to allocate client: ${A}.${B}.${C}.${LAST_OCTET_PROMPT}" LAST_OCTET
+prompt "IP to allocate client: ${WG_IPV4_NETWORK}.${LAST_OCTET_PROMPT}" LAST_OCTET
 LAST_OCTET=${LAST_OCTET:-${LAST_OCTET_DEFAULT}}
 IPV4="${WG_IPV4_NETWORK}.${LAST_OCTET}/32"
 IPV6="${WG_IPV6_NETWORK}::${LAST_OCTET}/128"

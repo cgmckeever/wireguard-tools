@@ -42,6 +42,8 @@ else
     WG_ALLOWED_IPS="${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
 fi
 
+printf $success "\nDefault Allowed-IPs ${WG_ALLOWED_IPS} []\n"
+
 sudo touch /etc/wireguard/privatekey
 sudo touch /etc/wireguard/publickey
 
