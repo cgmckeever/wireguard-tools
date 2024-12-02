@@ -36,6 +36,10 @@ IPV4="${WG_IPV4_NETWORK}.${LAST_OCTET}/32"
 IPV6="${WG_IPV6_NETWORK}::${LAST_OCTET}/128"
 ADDRESS="${IPV4},${IPV6}"
 
+printf $info "\nStandard Allowed-IP Routes:"
+printf $warn "\nAll Traffic: 0.0.0.0/0,::/0"
+printf $warn "\nWireguard Network: ${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
+
 WG_ALLOWED_IPS_DEFAULT=${WG_ALLOWED_IPS_DEFAULT:-${WG_DEFAULT_ALLOWED_IPS}}
 prompt "Allowed IPs - default [${WG_ALLOWED_IPS_DEFAULT}]:" WG_ALLOWED_IPS
 WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_ALLOWED_IPS_DEFAULT}}
