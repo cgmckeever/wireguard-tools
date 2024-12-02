@@ -10,6 +10,7 @@ source ${CONFIG_PATH}
 # ==============================
 
 ${SCRIPT_PATH}/system.sh stop
+sudo ip link delete wg0 2>/dev/null
 
 WG_NETWORK_DEFAULT=${WG_NETWORK:-"10.10.0.0"}
 prompt "Wireguard Network - default [${WG_NETWORK_DEFAULT}]:" WG_IPV4_NETWORK
