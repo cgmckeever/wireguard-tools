@@ -27,17 +27,17 @@ WG_PORT=${WG_PORT:-${WG_PORT_DEFAULT}}
 sudo ufw allow ${WG_PORT}/udp
 
 prompt "Do you want to restrict traffic to the Wireguard Network [Y/n]?" TRAFFIC
-if [[ "${TRAFFIC}" =~ ^[Yy]$ ]];then
-    WG_ALLOWED_IPS="${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
-else
+if [[ "${TRAFFIC}" =~ ^[Nn]$ ]];then
     prompt "Do you want to route all traffic [Y/n]?" TRAFFIC
-    if [[ "${TRAFFIC}" =~ ^[Yy]$ ]];then
-        WG_ALLOWED_IPS="0.0.0.0/0, ::/0"
-    else
+    if [[ "${TRAFFIC}" =~ ^[Nn]$ ]];then
         WG_ALLOWED_IPS_DEFAULT="${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
         prompt "Client rrouting - default [${WG_ALLOWED_IPS_DEFAULT}]:" WG_ALLOWED_IPS
         WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_ALLOWED_IPS_DEFAULT}}
+    else
+        WG_ALLOWED_IPS="0.0.0.0/0, ::/0"
     fi
+else
+    WG_ALLOWED_IPS="${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
 fi
 
 sudo touch /etc/wireguard/privatekey
