@@ -63,6 +63,7 @@ sudo sed \
     -e "s/__WG_PORT/${WG_PORT}/g" \
     -e "s#__WG_SERVER_PUBLIC_KEY#${WG_SERVER_PUBLIC_KEY}#g" \
     -e "s#__WG_CLIENT_PRIVATE_KEY#${PRIVATE_KEY}#g" \
+    -e "s#__WG_CLIENT_PUBLIC_KEY#${PUBLIC_KEY}#g" \
     -e "s#__WG_ADDRESS#${ADDRESS}#g" \
     -e "s#__WG_ALLOWED_IPS#${WG_ALLOWED_IPS}#g" \
     -e "s#__WG_PRESHARED_KEY#${CLIENT_PSK}#g" \
