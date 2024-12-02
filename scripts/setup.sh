@@ -15,10 +15,11 @@ WG_NETWORK_DEFAULT=${WG_NETWORK:-"10.10.0.0"}
 prompt "Wireguard Network - default [${WG_NETWORK_DEFAULT}]:" WG_IPV4_NETWORK
 WG_IPV4_NETWORK=${WG_IPV4_NETWORK:-${WG_NETWORK_DEFAULT}}
 IFS='.' read A B C D <<< ${WG_IPV4_NETWORK}
-WG_IPV4_NETWORK=${A}.${B}.${C}
 
+WG_IPV4_NETWORK=${A}.${B}.${C}
 WG_IPV4="${WG_IPV4_NETWORK}.1/24"
-WG_IPV6_NETWORK="fd$(xxd -p -l 5 /dev/urandom | sed 's/.\{4\}/&:/g;s/:$//;s/\(.*\):\(.*\):\(.*\)/\1:\2:\3\2/g')"
+
+WG_IPV6_NETWORK="fd$(printf "%02x" $((RANDOM % 256))):$(printf "%04x" $((RANDOM % 65536))):$(printf "%04x" $((RANDOM % 65536)))"
 WG_IPV6="${WG_IPV6_NETWORK}::1/64"
 
 WG_PORT_DEFAULT=${WG_PORT:-51820}
