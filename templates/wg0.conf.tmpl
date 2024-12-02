@@ -1,5 +1,5 @@
 [Interface]
-Address = __WG_CIDR
+Address = __WG_ADDRESS
 ListenPort = __PORT
 PrivateKey = __PRIVATE_KEY
 PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o __NIC -j MASQUERADE
