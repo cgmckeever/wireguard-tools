@@ -1,9 +1,9 @@
 [Interface]
-Address = __WG_CIDR
+Address = __WG_ADDRESS
 ListenPort = __PORT
 PrivateKey = __PRIVATE_KEY
-PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o __NIC -j MASQUERADE
-PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o __NIC -j MASQUERADE
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o __NIC -j MASQUERADE; ip6tables -A FORWARD -i %i -j ACCEPT; ip6tables -t nat -A POSTROUTING -o __NIC -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o __NIC -j MASQUERADE; ip6tables -D FORWARD -i %i -j ACCEPT; ip6tables -t nat -D POSTROUTING -o __NIC -j MASQUERADE
 SaveConfig = true
 
 __NON_INTERFACE_CONFIG

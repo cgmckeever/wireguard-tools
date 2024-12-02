@@ -10,7 +10,7 @@ ESCAPED=$(echo "${2}" | sed 's/[&/\]/\\&/g')
 ESCAPED=$(echo "$ESCAPED" | sed ':a;N;$!ba;s/\n/__NEWLINE__/g')
 
 sudo sed \
-	-e "s#__WG_CIDR#${WG_CIDR}#g" \
+	-e "s#__WG_ADDRESS#"${WG_IPV4},${WG_IPV6}"#g" \
     -e "s/__PORT/${WG_PORT}/g" \
     -e "s#__PRIVATE_KEY#${1}#g" \
     -e "s/__NIC/${NIC}/g" \

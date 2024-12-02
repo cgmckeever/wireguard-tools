@@ -6,9 +6,7 @@ source ${CONFIG_PATH}
 
 # ==============================
 
-
 WG=$(wg)
-
 ALIASES=()
 PEERS=()
 IPS=()
