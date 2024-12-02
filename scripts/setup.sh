@@ -28,12 +28,14 @@ prompt "Wireguard Port - default [${WG_PORT_DEFAULT}]:" WG_PORT
 WG_PORT=${WG_PORT:-${WG_PORT_DEFAULT}}
 sudo ufw allow ${WG_PORT}/udp
 
+printf $info "\nConfigure Default Routing Rules:\n"
+
 prompt "Do you want to restrict traffic to the Wireguard Network [Y/n]?" TRAFFIC
 if [[ "${TRAFFIC}" =~ ^[Nn]$ ]];then
-    prompt "Do you want to route all traffic [Y/n]?" TRAFFIC
+    prompt "Do you want to route all traffic through Wireguard [Y/n]?" TRAFFIC
     if [[ "${TRAFFIC}" =~ ^[Nn]$ ]];then
         WG_ALLOWED_IPS_DEFAULT="${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
-        prompt "Client rrouting - default [${WG_ALLOWED_IPS_DEFAULT}]:" WG_ALLOWED_IPS
+        prompt "Custom client routing - default [${WG_ALLOWED_IPS_DEFAULT}]:" WG_ALLOWED_IPS
         WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_ALLOWED_IPS_DEFAULT}}
     else
         WG_ALLOWED_IPS="0.0.0.0/0,::/0"
