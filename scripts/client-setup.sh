@@ -38,7 +38,7 @@ ADDRESS="${IPV4},${IPV6}"
 
 printf $info "\nStandard Allowed-IP Routes:"
 printf $warn "\nAll Traffic: 0.0.0.0/0,::/0"
-printf $warn "\nWireguard Network: ${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
+printf $warn "\nWireguard Network: ${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64\n"
 
 WG_ALLOWED_IPS_DEFAULT=${WG_ALLOWED_IPS_DEFAULT:-${WG_DEFAULT_ALLOWED_IPS}}
 prompt "Allowed IPs - default [${WG_ALLOWED_IPS_DEFAULT}]:" WG_ALLOWED_IPS
@@ -49,6 +49,7 @@ PRIVATE_KEY_DEFAULT=${PRIVATE_KEY_DEFAULT:-$(wg genkey)}
 prompt "Enter an existing Wireguard Private Key [${PRIVATE_KEY_PROMPT}]:" PRIVATE_KEY
 PRIVATE_KEY=${PRIVATE_KEY:-${PRIVATE_KEY_DEFAULT}}
 PUBLIC_KEY=$(echo ${PRIVATE_KEY} | wg pubkey)
+echo $PUBLIC_KEY
 
 CLIENT_PSK=$(wg genpsk)
 echo ${CLIENT_PSK} > ${CLIENT_PSK_PATH}
