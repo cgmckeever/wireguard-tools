@@ -55,7 +55,7 @@ echo ${CLIENT_PSK} > ${CLIENT_PSK_PATH}
 sudo chmod 600 ${CLIENT_PSK_PATH}
 
 sudo wg set wg0 peer ${PUBLIC_KEY} \
-    allowed-ips "${ADDRESS},${WG_ALLOWED_IPS}" \
+    allowed-ips "${ADDRESS}" \
     preshared-key ${CLIENT_PSK_PATH}
 
 sudo sed \
