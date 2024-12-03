@@ -93,9 +93,6 @@ ${SCRIPT_PATH}/config.sh ${PRIVATE_KEY} "${NON_INTERFACE_CONFIG}"
 ${SCRIPT_PATH}/system.sh restart
 ${SCRIPT_PATH}/system.sh enable
 
-mkdir -p ${CLIENT_PATH}
-mkdir -p ${BACKUP_PATH}
-
 printf $success "\nWireguard configured. \n"
 printf $success "Create clients using the 'scripts/client-setup.sh' script. \n\n"
 

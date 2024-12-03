@@ -6,6 +6,9 @@ BACKUP_PATH="$(realpath ${SCRIPT_PATH}/../backups)"
 CONFIG_PATH=${SCRIPT_PATH}/wireguard-tools.conf.sh
 WG_CONFIG_PATH=/etc/wireguard/wg0.conf
 
+mkdir -p ${CLIENT_PATH}
+mkdir -p ${BACKUP_PATH}
+
 NIC=$(route | grep default | awk '{print $8}')
 
 color() {
