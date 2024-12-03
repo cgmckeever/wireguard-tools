@@ -89,7 +89,7 @@ sudo sed \
 touch ${WG_CONFIG_PATH}
 NON_INTERFACE_CONFIG=$(sed '/\[Interface\]/,/^$/d' "${WG_CONFIG_PATH}")
 NON_INTERFACE_CONFIG=$(echo "${NON_INTERFACE_CONFIG}" | sed 's/[&/\]/\\&/g')
-NON_INTERFACE_CONFIG=$(echo "$NON_INTERFACE_CONFIG" | sed ':a;N;$!ba;s/\n/__NEWLINE__/g')
+NON_INTERFACE_CONFIG=$(echo "${NON_INTERFACE_CONFIG}" | sed ':a;N;$!ba;s/\n/__NEWLINE__/g')
 
 sudo sed \
     -e "s#__WG_ADDRESS#"${WG_IPV4},${WG_IPV6}"#g" \
