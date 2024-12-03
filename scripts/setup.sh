@@ -95,7 +95,7 @@ ESCAPED=$(echo "$ESCAPED" | sed ':a;N;$!ba;s/\n/__NEWLINE__/g')
 sudo sed \
     -e "s#__WG_ADDRESS#"${WG_IPV4},${WG_IPV6}"#g" \
     -e "s/__PORT/${WG_PORT}/g" \
-    -e "s#__PRIVATE_KEY#${1}#g" \
+    -e "s#__PRIVATE_KEY#${PRIVATE_KEY}#g" \
     -e "s/__NIC/${NIC}/g" \
     -e "s#__NON_INTERFACE_CONFIG#${ESCAPED}#g" \
     -e "s#__NEWLINE__#$(printf '\\n')#g" \
