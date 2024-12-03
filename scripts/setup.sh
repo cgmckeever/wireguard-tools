@@ -10,20 +10,41 @@ source ${CONFIG_PATH}
 # ==============================
 
 ${SCRIPT_PATH}/system.sh stop
+sudo ip link delete wg0 2>/dev/null
 
 WG_NETWORK_DEFAULT=${WG_NETWORK:-"10.10.0.0"}
-prompt "Wireguard Network - default [${WG_NETWORK_DEFAULT}]:" WG_NETWORK
-WG_NETWORK=${WG_NETWORK:-${WG_NETWORK_DEFAULT}}
-IFS='.' read A B C D <<< ${WG_NETWORK}
-WG_CIDR=${A}.${B}.${C}.0/24
+prompt "Wireguard Network - default [${WG_NETWORK_DEFAULT}]:" WG_IPV4_NETWORK
+WG_IPV4_NETWORK=${WG_IPV4_NETWORK:-${WG_NETWORK_DEFAULT}}
+IFS='.' read A B C D <<< ${WG_IPV4_NETWORK}
+
+WG_IPV4_NETWORK=${A}.${B}.${C}
+WG_IPV4="${WG_IPV4_NETWORK}.1/24"
+
+WG_IPV6_NETWORK="fd$(printf "%02x" $((RANDOM % 256))):$(printf "%04x" $((RANDOM % 65536))):$(printf "%04x" $((RANDOM % 65536)))"
+WG_IPV6="${WG_IPV6_NETWORK}::1/64"
 
 WG_PORT_DEFAULT=${WG_PORT:-51820}
 prompt "Wireguard Port - default [${WG_PORT_DEFAULT}]:" WG_PORT
 WG_PORT=${WG_PORT:-${WG_PORT_DEFAULT}}
 sudo ufw allow ${WG_PORT}/udp
 
-prompt "Default client allowed-ip - default [0.0.0.0/0]:" WG_ALLOWED_IPS
-WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-0.0.0.0/0}
+printf $info "\nConfigure Default Routing Rules:\n"
+
+prompt "Do you want to restrict traffic to the Wireguard Network [Y/n]?" TRAFFIC
+if [[ "${TRAFFIC}" =~ ^[Nn]$ ]];then
+    prompt "Do you want to route all traffic through Wireguard [Y/n]?" TRAFFIC
+    if [[ "${TRAFFIC}" =~ ^[Nn]$ ]];then
+        WG_ALLOWED_IPS_DEFAULT="${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
+        prompt "Custom client routing - default [${WG_ALLOWED_IPS_DEFAULT}]:" WG_ALLOWED_IPS
+        WG_ALLOWED_IPS=${WG_ALLOWED_IPS:-${WG_ALLOWED_IPS_DEFAULT}}
+    else
+        WG_ALLOWED_IPS="0.0.0.0/0,::/0"
+    fi
+else
+    WG_ALLOWED_IPS="${WG_IPV4_NETWORK}.0/24,${WG_IPV6_NETWORK}::/64"
+fi
+
+printf $success "\nDefault Allowed-IPs [Can be configured per client]: ${WG_ALLOWED_IPS}\n"
 
 sudo touch /etc/wireguard/privatekey
 sudo touch /etc/wireguard/publickey
@@ -56,8 +77,10 @@ fi
 PUBLIC_KEY=$(sudo cat /etc/wireguard/publickey)
 
 sudo sed \
-    -e "s/__WG_NETWORK/${WG_NETWORK}/g" \
-    -e "s#__WG_CIDR#${WG_CIDR}#g" \
+    -e "s#__WG_IPV4_NETWORK#${WG_IPV4_NETWORK}#g" \
+    -e "s#__WG_IPV6_NETWORK#${WG_IPV6_NETWORK}#g" \
+    -e "s#__WG_IPV4#${WG_IPV4}#g" \
+    -e "s#__WG_IPV6#${WG_IPV6}#g" \
     -e "s#__WG_SERVER_PUBLIC_KEY#${PUBLIC_KEY}#g" \
     -e "s/__WG_PORT/${WG_PORT}/g" \
     -e "s#__WG_DEFAULT_ALLOWED_IPS#${WG_ALLOWED_IPS}#g" \
