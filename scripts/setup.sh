@@ -109,6 +109,3 @@ ${SCRIPT_PATH}/system.sh enable
 printf $success "\nWireguard configured. \n"
 printf $success "Create clients using the 'scripts/client-setup.sh' script. \n\n"
 
-
-
-
