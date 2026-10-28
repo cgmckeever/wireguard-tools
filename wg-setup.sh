@@ -33,6 +33,9 @@ Commands:
   test        All verification checks; exits non-zero on any FAIL
   status      Interfaces, handshakes, routes, rules
   backup [dir]  Archive keys, configs and clients (default dir /root/wg-backups)
+  restore <archive>
+              Set this server up from a backup: same keys, clients, WARP
+              account and settings, then runs direct or warp as before
   rollback    Stop/disable the interfaces, remove all rules, restore original
               files; keeps keys and clients unless --purge
   help        This text
@@ -304,6 +307,22 @@ EOF
     if [ "$WROTE" -eq 1 ]; then run systemctl daemon-reload; fi
 }
 
+# Point every client config at the current endpoint and port. Keys are
+# unchanged, so only the configs need re-sending.
+sync_client_endpoints() {
+    local want="$ENDPOINT:$WG_PORT" conf stale=()
+    for conf in "$CLIENT_DIR"/*.conf; do
+        [ -f "$conf" ] || continue
+        grep -q '^# wireguard-tools client' "$conf" || continue
+        grep -qxF "Endpoint = $want" "$conf" && continue
+        write_file "$conf" 600 < <(sed "s|^Endpoint = .*|Endpoint = $want|" "$conf")
+        stale+=("$(basename "$conf" .conf)")
+    done
+    if [ ${#stale[@]} -gt 0 ]; then
+        warn "server address is now $want; re-send these clients' configs (wg-client.sh share/show --qr): ${stale[*]}"
+    fi
+}
+
 # ufw (if active): allow the WireGuard port and wg0 -> exit forwarding.
 open_firewall() {
     local st out
@@ -341,6 +360,7 @@ setup_server() {
     install_packages
     ensure_server_keys
     resolve_endpoint 1
+    sync_client_endpoints
     write_sysctl
     if [ "$EXIT" = warp ]; then write_dropin; fi
     write_wg_conf
@@ -518,8 +538,55 @@ cmd_backup() {
     run tar -czf "$out" -P "${paths[@]}"
     run chmod 600 "$out"
     warn "the archive contains private keys; keep it somewhere safe"
-    info "restore on a fresh server: tar -xzpf <archive> -P, then '$PROG $EXIT'"
+    info "restore on a fresh server: $PROG restore <archive>"
     info "fetch it with: scp root@$(state_get ENDPOINT | tr -d '[]'):$out ."
+}
+
+# --- restore ---
+
+# Set this server up from a backup archive. Only keys, clients, the WARP
+# account and settings come across; the old server's baseline (default route,
+# interface, ip_forward), firewall record and file-backup records are dropped,
+# and an IP endpoint is re-detected. Then the saved mode's setup runs.
+cmd_restore() {
+    local archive="${1:-}" members mode ep k
+    [ -n "$archive" ] || die "usage: $PROG restore <archive.tar.gz>"
+    [ -f "$archive" ] || die "no such file: $archive"
+    archive=$(readlink -f "$archive")
+    members=$(tar -tzf "$archive" 2>/dev/null) || die "$archive is not a readable .tar.gz"
+    grep -qx "$STATE" <<<"$members" || die "$archive is not a wireguard-tools backup (no $STATE inside)"
+    if [ -n "$SAVED_EXIT" ] && [ "$FORCE" -eq 0 ]; then
+        die "this server is already set up ($SAVED_EXIT); run '$PROG rollback --purge' first, or use --force to overwrite"
+    fi
+    mode=$(tar -xzOf "$archive" -P "$STATE" | sed -n 's/^EXIT=//p' | tail -n 1)
+    case "$mode" in direct|warp) ;; *) die "backup has no usable mode (EXIT=$mode)" ;; esac
+
+    take_lock
+    local what="keys, clients and settings"
+    if [ "$mode" = warp ]; then what="keys, clients, settings and WARP account"; fi
+    step "Restore $what from $archive ($mode mode)" \
+        "$PROG rollback --purge"
+    confirm "Restore from this backup?"
+    local paths=("$WG_DIR")
+    if grep -q "^$CLIENT_DIR/" <<<"$members"; then paths+=("$CLIENT_DIR"); fi
+    run tar -xzpf "$archive" -P "${paths[@]}"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        info "[dry-run] would then run: $PROG $mode"
+        return 0
+    fi
+    for k in DEFAULT_ROUTE PUB_IF ORIG_IP_FORWARD UFW; do state_unset "$k"; done
+    ep=$(state_get ENDPOINT)
+    if [[ $ep =~ ^\[?[0-9a-fA-F:.]+\]?$ ]]; then state_unset ENDPOINT; fi
+    rm -f "$BACKUP_MAP"
+    info "restored; clients: $(db_entries | awk '{ printf "%s ", $1 }')"
+    if [ "$mode" = warp ]; then
+        warn "the WARP account is now on this server too; don't keep running it on the old one"
+    fi
+    flock -u 9
+    local flags=()
+    if [ "$YES" -eq 1 ]; then flags+=(--yes); fi
+    log "Setting up ($mode)"
+    exec "$SELF" "${flags[@]+"${flags[@]}"}" "$mode"
 }
 
 # --- rollback ---
@@ -583,6 +650,10 @@ cmd_rollback() {
             # shellcheck disable=SC2086  # glob on purpose: this file's .bak copies
             run rm -f $f.*.bak
         done
+        # Configs carrying our marker are ours (a restored original never does).
+        for f in "$WG_CONF" "$WARP_CONF"; do
+            if [ -f "$f" ] && grep -qF "$MARKER" "$f"; then run rm -f "$f"; fi
+        done
         run rm -f "$SERVER_KEY" "$SERVER_PUB" "$CLIENT_DB" "$STATE" "$BACKUP_MAP"
         run rm -rf "$WGCF_DIR" "$CLIENT_DIR" "$PSK_DIR"
         info "left installed: packages and $WGCF_BIN"
@@ -616,6 +687,7 @@ main() {
         test)     cmd_test ;;
         status)   cmd_status ;;
         backup)   cmd_backup "$@" ;;
+        restore)  cmd_restore "$@" ;;
         rollback) cmd_rollback ;;
         *) die "unknown command: $cmd (see: $PROG help)" ;;
     esac

@@ -11,7 +11,7 @@ VPN server, and manage its clients. Pick one of two modes:
 Two commands, both run as root on the server:
 
 - **`wg-setup.sh`** sets up the server (`direct` or `warp`), plus `test`,
-  `status`, `backup`, `rollback`.
+  `status`, `backup`, `restore`, `rollback`.
 - **`wg-client.sh`** manages clients: `add`, `rotate`, `remove`, `list`, `show`, `share`.
 
 Both are safe to re-run, support `--dry-run`, back up every file they change,
@@ -108,12 +108,13 @@ the `.conf` into their WireGuard app.
 Both the QR code and the wormhole transfer carry the client's private key:
 send them only to that client's owner.
 
-## Check, back up, undo
+## Check, back up, restore, undo
 
 ```bash
 ./wg-setup.sh test              # PASS/FAIL checks; non-zero exit on any FAIL
 ./wg-setup.sh status            # interfaces, handshakes, routes, rules
 ./wg-setup.sh backup            # /root/wg-backups/wireguard-tools.<host>.<date>.tar.gz
+./wg-setup.sh restore <archive> # set this server up from a backup
 ./wg-setup.sh rollback          # stop everything, remove all rules, restore original files
 ./wg-setup.sh rollback --purge  # ...and delete keys, clients and the WARP account
 ```
@@ -124,9 +125,34 @@ the server's default route never changed, `wg0` is listening, forwarding is
 on, every routing/NAT rule exists exactly once, the services start at boot in
 the right order, and whether any client has connected.
 
-A backup holds private keys (it's created mode 600). To restore on a fresh
-server: `tar -xzpf <archive> -P`, then run `./wg-setup.sh direct` or
-`./wg-setup.sh warp` (whichever it was).
+### Moving to a new server (or rebuilding)
+
+```bash
+# old server
+./wg-setup.sh backup
+scp root@old:/root/wg-backups/wireguard-tools.*.tar.gz .      # or: wormhole send <archive>
+
+# new server (after Install)
+./wg-setup.sh restore wireguard-tools.<host>.<date>.tar.gz
+```
+
+`restore` brings over the server keys, every client (same keys, addresses and
+allowed IPs), the settings and, in WARP mode, the WARP account (so it doesn't
+need to register again). It then runs the same setup the backup came from
+(`direct` or `warp`). It won't overwrite a server that's already set up
+(`rollback --purge` first, or `--force`).
+
+The new server records its own default route and public interface, and an IP
+endpoint is re-detected. If the address changed, every client config's
+`Endpoint` is updated and the clients to re-send are listed (`wg-client.sh
+share` or `show --qr`); their keys don't change. This also happens whenever a
+re-run changes `--endpoint` or `--port`. An endpoint set as a hostname
+(`--endpoint vpn.example.com`) is kept, so pointing that DNS name at the new
+server means clients need nothing.
+
+A backup holds private keys (it's created mode 600); keep it somewhere safe. In
+WARP mode, stop the old server once the new one works: both would be using the
+same WARP device.
 
 ## Options
 
