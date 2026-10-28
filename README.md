@@ -92,7 +92,7 @@ Leave out the name on `rotate`, `remove`, `show` or `share` to pick from a
 numbered list. Changes apply live; other clients stay connected.
 
 Each client gets its own keypair, a preshared key and the next free address.
-Its config is written to `/root/clients/<server>.<name>.conf` (e.g.
+Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 `dengar.laptop.conf`), so configs from different servers don't collide.
 
 ### Getting a config onto a device
@@ -101,7 +101,7 @@ Its config is written to `/root/clients/<server>.<name>.conf` (e.g.
 |-----|---------|----------|
 | Magic Wormhole | `./wg-client.sh share laptop`; recipient runs `wormhole receive <code>` | sending it to someone else, no SSH needed |
 | QR code | printed by `add`/`rotate` in a terminal (`--no-qr` skips it); again any time with `./wg-client.sh show laptop --qr` | phones (WireGuard app → scan) |
-| scp | `scp root@<server>:/root/clients/dengar.laptop.conf .` | your own machines |
+| scp | `scp root@<server>:/etc/wireguard/clients/dengar.laptop.conf .` | your own machines |
 
 `share` prints a one-time code (like `7-guitar-revenge-tidy`) and waits up to 10
 minutes. The file is encrypted end to end; a wrong guess at the code ends the
@@ -232,7 +232,7 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/server.key`, `server.pub` | server keypair |
 | `/etc/wireguard/clients.db` | `name address public-key allowed-ips`, no private keys |
 | `/etc/wireguard/psk/<name>.psk` | per-client preshared keys |
-| `/root/clients/<server>.<name>.conf` | client configs (the only copy of each client's private key) |
+| `/etc/wireguard/clients/<server>.<name>.conf` | client configs (the only copy of each client's private key) |
 | `/etc/wireguard/wg-tools.state` | saved settings, recorded default route |
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1` |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` (warp mode) |
@@ -249,7 +249,7 @@ Two files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
 
 | Template | Becomes |
 |----------|---------|
-| `client.conf.tmpl` | each `/root/clients/<server>.<name>.conf` |
+| `client.conf.tmpl` | each `/etc/wireguard/clients/<server>.<name>.conf` |
 | `wg-quick-after-warp.conf.tmpl` | the systemd drop-in that starts `wg0` after `warp` (warp mode) |
 
 Edit them to change what every new client gets (e.g. `PersistentKeepalive`).

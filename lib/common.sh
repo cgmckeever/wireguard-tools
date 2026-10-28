@@ -54,7 +54,8 @@ STATE="$WG_DIR/wg-tools.state"
 BACKUP_MAP="$WG_DIR/wg-tools.backups"
 CLIENT_DB="$WG_DIR/clients.db"
 PSK_DIR="$WG_DIR/psk"
-CLIENT_DIR=/root/clients
+CLIENT_DIR="$WG_DIR/clients"
+OLD_CLIENT_DIR=/root/clients   # used by older versions; migrate_client_dir moves it
 SERVER_KEY="$WG_DIR/server.key"
 SERVER_PUB="$WG_DIR/server.pub"
 SYSCTL_FILE=/etc/sysctl.d/99-wg.conf
@@ -364,6 +365,44 @@ take_lock() {
 }
 
 # --- State, backups and file writes ---
+
+# Move client configs from OLD_CLIENT_DIR (older versions) into CLIENT_DIR,
+# with their change copies and backup records. Call with the lock held.
+migrate_client_dir() {
+    local f old_copies new_copies tmp
+    [ -d "$OLD_CLIENT_DIR" ] || return 0
+    if [ "$DRY_RUN" -eq 1 ]; then
+        info "[dry-run] would move client configs from $OLD_CLIENT_DIR to $CLIENT_DIR"
+        return 0
+    fi
+    install -d -m 700 "$CLIENT_DIR"
+    for f in "$OLD_CLIENT_DIR"/*.conf "$OLD_CLIENT_DIR"/*.conf.*.bak; do
+        [ -f "$f" ] || continue
+        [ ! -e "$CLIENT_DIR/${f##*/}" ] || die "both $f and $CLIENT_DIR/${f##*/} exist; remove one and re-run"
+        mv "$f" "$CLIENT_DIR/"
+    done
+    old_copies=$(change_dir "$OLD_CLIENT_DIR/x")
+    new_copies=$(change_dir "$CLIENT_DIR/x")
+    if [ -d "$old_copies" ]; then
+        install -d -m 700 "$new_copies"
+        find "$old_copies" -maxdepth 1 -type f -exec mv -t "$new_copies" {} +
+        rmdir "$old_copies" "$(dirname "$old_copies")" 2>/dev/null || true
+    fi
+    if [ -f "$BACKUP_MAP" ]; then
+        tmp=$(mktemp)
+        awk -F'\t' -v OFS='\t' -v o="$OLD_CLIENT_DIR/" -v n="$CLIENT_DIR/" -v oc="$old_copies/" -v nc="$new_copies/" '
+            index($1, o) == 1 { $1 = n substr($1, length(o) + 1) }
+            index($2, oc) == 1 { $2 = nc substr($2, length(oc) + 1) }
+            { print }' "$BACKUP_MAP" >"$tmp"
+        install -m 600 "$tmp" "$BACKUP_MAP"
+        rm -f "$tmp"
+    fi
+    if rmdir "$OLD_CLIENT_DIR" 2>/dev/null; then
+        info "moved client configs from $OLD_CLIENT_DIR to $CLIENT_DIR"
+    else
+        warn "moved client configs to $CLIENT_DIR; left $OLD_CLIENT_DIR (it holds other files)"
+    fi
+}
 
 # Read/write/remove KEY=value pairs in the state file.
 state_get() {

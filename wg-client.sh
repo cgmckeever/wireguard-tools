@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wg-client.sh — Manage WireGuard clients on a server set up by wg-setup.sh.
 # Each client gets a keypair, a preshared key and the next free address; its
-# config is written to /root/clients/<server>.<name>.conf. See README.md.
+# config is written to /etc/wireguard/clients/<server>.<name>.conf. See README.md.
 
 set -Eeuo pipefail
 
@@ -285,6 +285,12 @@ main() {
     set -- "${ARGS[@]}"
     local cmd="$1"
     shift
+    # Configs from older versions live in OLD_CLIENT_DIR; move them first.
+    if [ -d "$OLD_CLIENT_DIR" ] && [ "$cmd" != help ]; then
+        take_lock
+        migrate_client_dir
+        flock -u 9
+    fi
     case "$cmd" in
         add)    cmd_add "$@" ;;
         rotate) cmd_rotate "$@" ;;
