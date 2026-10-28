@@ -153,7 +153,8 @@ register_warp() {
 
 # Render warp.conf from the wgcf profile: Table = off, our MTU, no DNS, no
 # IPv6 entries without IPv6, IPv4 endpoint on IPv4-only hosts, keepalive, and
-# loose rp_filter (strict would drop WARP's replies; not routing/NAT).
+# loose rp_filter (strict would drop WARP's replies), and RT_TABLE's default
+# route (it goes when warp goes down; see lib/common.sh).
 render_warp_conf() {
     local profile="$1" v6=0 ep host port ip4
     if has_ipv6; then v6=1; fi
@@ -166,7 +167,7 @@ render_warp_conf() {
             if [ -n "$ip4" ]; then ep="$ip4:$port"; else warn "could not resolve $host to IPv4; keeping it"; fi
         fi
     fi
-    awk -v v6="$v6" -v mtu="$WARP_MTU" -v ep="$ep" -v marker="$MARKER" '
+    awk -v v6="$v6" -v mtu="$WARP_MTU" -v ep="$ep" -v marker="$MARKER" -v route="$(warp_route)" '
         function addrs(key, val,   n, i, a, out) {
             n = split(val, a, /[[:space:]]*,[[:space:]]*/)
             out = ""
@@ -176,10 +177,11 @@ render_warp_conf() {
             }
             if (out != "") print key " = " out
         }
-        BEGIN { print marker " from wgcf-profile.conf; no routing/NAT here (see wg0.conf)" }
+        BEGIN { print marker " from wgcf-profile.conf; other routing/NAT is in wg0.conf" }
         /^[[:space:]]*\[Interface\]/ {
             print "[Interface]"; print "MTU = " mtu; print "Table = off"
             print "PostUp = sysctl -q -w net.ipv4.conf.%i.rp_filter=2"
+            print "PostUp = " route
             sec = "i"; next
         }
         /^[[:space:]]*\[Peer\]/ { print ""; print "[Peer]"; sec = "p"; next }
@@ -690,7 +692,9 @@ cmd_rollback() {
         # Free the mode (and its MTU default) so the next setup can pick either.
         state_unset EXIT
         state_unset WG_MTU
-        info "kept: keys, clients ($CLIENT_DB, $CLIENT_DIR), $WGCF_DIR (rollback --purge removes them)"
+        local kept="keys, clients ($CLIENT_DB, $CLIENT_DIR)"
+        if [ -d "$WGCF_DIR" ]; then kept="$kept, WARP account ($WGCF_DIR)"; fi
+        info "kept: $kept (rollback --purge removes them)"
     fi
     log "Rollback done; the main routing table was never changed"
 }

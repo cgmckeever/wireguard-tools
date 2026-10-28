@@ -11,7 +11,10 @@
 #   direct  client traffic is NATed out the server's public interface.
 #
 # Every routing/NAT rule lives in wg0.conf PostUp/PostDown, generated from one
-# list (hook_cmds), so PostDown and rollback exactly invert PostUp.
+# list (hook_cmds), so PostDown and rollback exactly invert PostUp. The one
+# exception: warp.conf's PostUp also re-adds RT_TABLE's default route
+# (warp_route), which goes when warp does, so a warp restart that doesn't
+# restart wg0 can't leave clients blackholed.
 
 # --- Config ---
 # Saved in the state file by `wg-setup.sh direct/warp`, so later runs and
@@ -476,6 +479,9 @@ resolve_endpoint() {
 
 rule_spec() { echo "from $WG_SUBNET lookup $RT_TABLE priority $RULE_PRIO"; }
 
+# RT_TABLE's default route out through warp (in wg0's PostUp and warp.conf's).
+warp_route() { echo "ip route replace default dev $WARP_IF table $RT_TABLE"; }
+
 # iptables rules as "table|chain|rule". Inserted (-I) so ufw/Docker DROP
 # policies can't shadow them.
 ipt_rules() {
@@ -497,7 +503,7 @@ hook_cmds() {
         if [ "$EXIT" = warp ]; then
             echo "while ip rule del $(rule_spec) 2>/dev/null; do :; done; ip rule add $(rule_spec)"
             echo "ip route replace $WG_SUBNET dev $WG_IF table $RT_TABLE"
-            echo "ip route replace default dev $WARP_IF table $RT_TABLE"
+            warp_route
             echo "ip route replace blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE"
         fi
         while IFS='|' read -r t c r; do
@@ -571,11 +577,12 @@ write_wg_conf() {
 
 # Enable an interface's wg-quick unit for boot and make it match its config.
 start_unit() {
-    local ifc="$1" changed="$2" unit="wg-quick@$1"
+    local ifc="$1" changed="$2" unit="wg-quick@$1" enabled=0
     if ! if_exists "$ifc"; then
         step "Bring up $ifc ($unit, enabled at boot)" "systemctl disable --now $unit"
         confirm "Bring up $ifc now?"
         run systemctl enable --now "$unit"
+        enabled=1
     elif [ "$changed" -eq 1 ]; then
         step "Restart $unit to apply its new config" "restore the .bak in $WG_DIR, then systemctl restart $unit"
         confirm "Restart $ifc now?"
@@ -584,18 +591,13 @@ start_unit() {
         else
             run wg-quick down "$ifc"
             run systemctl enable --now "$unit"
+            enabled=1
         fi
     else
         info "$ifc is up and unchanged"
         systemctl is-active -q "$unit" || warn "$ifc is up but not via $unit (started by hand?)"
     fi
-    if ! systemctl is-enabled -q "$unit" 2>/dev/null; then run systemctl enable "$unit"; fi
-    # Taking warp down drops table RT_TABLE's default route. systemd restarts wg0
-    # (rerunning its PostUp) only on `systemctl restart` of warp, so if wg0 stayed
-    # up, put the route back (same line as wg0's PostUp; idempotent).
-    if [ "$ifc" = "$WARP_IF" ] && [ "$EXIT" = warp ] && if_exists "$WG_IF"; then
-        run ip route replace default dev "$WARP_IF" table "$RT_TABLE"
-    fi
+    if [ "$enabled" -eq 0 ] && ! systemctl is-enabled -q "$unit" 2>/dev/null; then run systemctl enable "$unit"; fi
 }
 
 # Human-readable age of a handshake timestamp.

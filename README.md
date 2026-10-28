@@ -186,6 +186,8 @@ server's own routing is never touched and SSH stays reachable. Only packets
 *from* the VPN subnet are policy-routed (`ip rule` → table 100) into `warp`
 and NATed there. Table 100 also has a blackhole fallback: if WARP drops,
 clients lose internet instead of leaking out through the VPS's own IP.
+`warp.conf` re-adds table 100's route through `warp` whenever it comes up,
+so restarting WARP on its own doesn't cut clients off.
 `wg-quick@wg0` starts after, and stops with, `wg-quick@warp`.
 
 **Direct mode.** Clients are NATed out the public interface; no extra routing.
