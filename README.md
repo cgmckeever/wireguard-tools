@@ -80,6 +80,7 @@ after a switch.
 ./wg-client.sh add printer --allowed-ips 10.8.0.0/24 # split tunnel: VPN network only
 ./wg-client.sh list                                  # address, last seen, traffic, allowed IPs
 ./wg-client.sh show laptop                           # config with keys redacted
+./wg-client.sh share laptop                          # send the config via magic-wormhole (one-time code)
 ./wg-client.sh rotate laptop                         # new keys, same address; old config stops working
 ./wg-client.sh remove laptop
 ```
