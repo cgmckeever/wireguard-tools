@@ -34,6 +34,7 @@ ENDPOINT="${ENDPOINT:-}"
 WGCF_VERSION="${WGCF_VERSION:-latest}"
 WGCF_SHA256="${WGCF_SHA256:-}"
 RULE_PRIO=10000
+CALLER_TMPDIR="${TMPDIR:-}"   # init points TMPDIR at a private temp dir
 
 # --- Fixed paths and constants ---
 WG_DIR=/etc/wireguard

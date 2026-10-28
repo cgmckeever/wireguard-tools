@@ -604,7 +604,11 @@ cmd_restore() {
     local flags=()
     if [ "$YES" -eq 1 ]; then flags+=(--yes); fi
     log "Setting up ($mode)"
-    rm -rf "$TMPD"   # exec skips the EXIT trap
+    info "if setup stops, fix the cause and run '$PROG $mode' (the restored files stay in place)"
+    # exec skips the EXIT trap: remove our temp dir and hand back the caller's
+    # TMPDIR, or the new process's mktemp would use the deleted dir.
+    rm -rf "$TMPD"
+    if [ -n "$CALLER_TMPDIR" ]; then export TMPDIR="$CALLER_TMPDIR"; else unset TMPDIR; fi
     exec "$SELF" "${flags[@]+"${flags[@]}"}" "$mode"
 }
 
