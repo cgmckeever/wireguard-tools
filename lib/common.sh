@@ -63,6 +63,7 @@ TRACE_URL=https://www.cloudflare.com/cdn-cgi/trace
 BLACKHOLE_METRIC=4096
 MARKER="# Managed by wireguard-tools"
 TEMPLATE_DIR="$(dirname "$SELF")/templates"
+BACKUP_DIR="$(dirname "$SELF")/backup"   # untracked (.gitignore); mode 700
 
 # --- Flags ---
 DRY_RUN=0

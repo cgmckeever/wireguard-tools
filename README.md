@@ -116,7 +116,7 @@ send them only to that client's owner.
 ```bash
 ./wg-setup.sh test              # PASS/FAIL checks; non-zero exit on any FAIL
 ./wg-setup.sh status            # interfaces, handshakes, routes, rules
-./wg-setup.sh backup            # /root/wg-backups/wireguard-tools.<host>.<date>.tar.gz
+./wg-setup.sh backup            # backup/wireguard-tools.<host>.<date>.tar.gz
 ./wg-setup.sh restore <archive> # set this server up from a backup
 ./wg-setup.sh rollback          # stop everything, remove all rules, restore original files
 ./wg-setup.sh rollback --purge  # ...and delete keys, clients and the WARP account
@@ -133,7 +133,7 @@ the right order, and whether any client has connected.
 ```bash
 # old server
 ./wg-setup.sh backup
-scp root@old:/root/wg-backups/wireguard-tools.*.tar.gz .      # or: wormhole send <archive>
+scp root@old:/opt/wireguard-tools/backup/wireguard-tools.*.tar.gz .   # or: wormhole send <archive>
 
 # new server (after Install)
 ./wg-setup.sh restore wireguard-tools.<host>.<date>.tar.gz
@@ -153,7 +153,9 @@ re-run changes `--endpoint` or `--port`. An endpoint set as a hostname
 (`--endpoint vpn.example.com`) is kept, so pointing that DNS name at the new
 server means clients need nothing.
 
-A backup holds private keys (it's created mode 600); keep it somewhere safe. In
+Backups go in `backup/` inside the checkout (mode 700, ignored by git, so
+`git pull` never touches them); `backup <dir>` writes elsewhere. A backup holds
+private keys (it's created mode 600); keep it somewhere safe. In
 WARP mode, stop the old server once the new one works: both would be using the
 same WARP device.
 

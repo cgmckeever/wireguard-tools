@@ -32,7 +32,7 @@ Commands:
               and you confirm, create $WG_IF routed out through $WARP_IF
   test        All verification checks; exits non-zero on any FAIL
   status      Interfaces, handshakes, routes, rules
-  backup [dir]  Archive keys, configs and clients (default dir /root/wg-backups)
+  backup [dir]  Archive keys, configs and clients (default dir $BACKUP_DIR)
   restore <archive>
               Set this server up from a backup: same keys, clients, WARP
               account and settings, then runs direct or warp as before
@@ -622,7 +622,7 @@ cmd_test() {
 
 # Archive keys, configs, clients and state (mode 600; it holds private keys).
 cmd_backup() {
-    local dir="${1:-/root/wg-backups}" out paths=() p
+    local dir="${1:-$BACKUP_DIR}" out paths=() p
     for p in "$WG_DIR" "$CLIENT_DIR" "$SYSCTL_FILE" "$DROPIN_DIR"; do
         if [ -e "$p" ]; then paths+=("$p"); fi
     done
