@@ -694,6 +694,14 @@ cmd_restore() {
     ep=$(state_get ENDPOINT)
     if [[ $ep =~ ^\[?[0-9a-fA-F:.]+\]?$ ]]; then state_unset ENDPOINT; fi
     if [ -n "$keep_map" ]; then install -m 600 "$keep_map" "$BACKUP_MAP"; else rm -f "$BACKUP_MAP"; fi
+    # Everything restored is new to this server: record it so, or the first
+    # change would record the restored copy as the file's "original".
+    local m
+    while IFS= read -r m; do
+        case "$m" in */|*.bak|"$BACKUP_MAP") continue ;; esac
+        if [ -f "$m" ] && [ -z "$(backup_orig "$m")" ]; then printf '%s\tNEW\n' "$m" >>"$BACKUP_MAP"; fi
+    done < <(grep -E "^($WG_DIR|$CLIENT_DIR)/" <<<"$members")
+    chmod 600 "$BACKUP_MAP" 2>/dev/null || true
     info "restored; clients: $(db_entries | awk '{ printf "%s ", $1 }')"
     if [ "$mode" = warp ]; then
         warn "the WARP account is now on this server too; don't keep running it on the old one"
