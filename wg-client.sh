@@ -35,8 +35,11 @@ Options:
                          Default (set at server setup): $CLIENT_ALLOWED_IPS
                          e.g. "$WG_SUBNET$( [ "$IPV6" -eq 1 ] && echo ", $WG_SUBNET6")" for VPN-network-only (split tunnel)
   --endpoint <host>      With add/rotate: override the server address in the config
-  --qr                   With add/rotate/show: print the config as a QR code
-                         (it contains the client's private key)
+  --qr / --no-qr         With add/rotate: QR code of the new config (default: on
+                         when run in a terminal); with show: add one (to re-send).
+                         It contains the client's private key. In iTerm2/WezTerm
+                         it is drawn as an image QR_WIDTH columns wide (default
+                         32; QR_WIDTH=0 for text)
   --dry-run              Show what would change; change nothing
   --yes, -y              Don't prompt
 
@@ -109,11 +112,26 @@ cmd_share() {
     timeout 600 wormhole send --code-length 3 "$conf" || die "not received (cancelled or timed out); nothing was sent"
 }
 
-# Print a config as a terminal QR code (only on --qr).
+# Print a config as a terminal QR code. Comments, blank lines and padding spaces
+# are left out and the margin is 1 module, to keep the code small. In iTerm2 or
+# WezTerm (inline images) it is drawn as a QR_WIDTH-cell-wide image, streamed so
+# the key never touches disk; QR_WIDTH=0 forces text.
 show_qr() {
+    local width="${QR_WIDTH:-32}"
     command -v qrencode >/dev/null || die "qrencode not installed"
+    [[ $width =~ ^[0-9]+$ ]] || die "QR_WIDTH must be a number of terminal columns: '$width'"
     warn "this QR code contains the client's private key"
-    qrencode -t ansiutf8 <"$1"
+    if [ "$width" -gt 0 ] && [ -t 1 ] && [ -z "${TMUX:-}" ] && [[ "${LC_TERMINAL:-} ${TERM_PROGRAM:-}" =~ iTerm2|iTerm.app|WezTerm ]]; then
+        printf '\033]1337;File=inline=1;width=%s;preserveAspectRatio=1:%s\a\n' "$width" \
+            "$(qr_data "$1" | qrencode -t PNG -s 4 -m 2 -o - | base64 -w0)"
+    else
+        qr_data "$1" | qrencode -t ansiutf8 -m 1
+    fi
+}
+
+# Config lines that matter, without comments or padding, for a smaller QR code.
+qr_data() {
+    grep -v -E '^[[:space:]]*(#|$)' "$1" | sed -E 's/[[:space:]]*=[[:space:]]*/=/; s/,[[:space:]]+/,/g'
 }
 
 # Generate keys for <name> at <ip> with <allowed> (comma list), write its config,
@@ -149,7 +167,12 @@ issue_client() {
     else
         warn "$WG_IF is not up; the peer is in $WG_CONF and loads when it starts"
     fi
-    if [ "$QR" -eq 1 ]; then show_qr "$conf"; fi
+    # QR by default when a person is watching; --qr forces it, --no-qr skips it.
+    if [ "$QR" -eq 1 ]; then
+        show_qr "$conf"
+    elif [ "$QR" -eq 0 ] && [ -t 1 ]; then
+        if command -v qrencode >/dev/null; then show_qr "$conf"; else warn "qrencode not installed; no QR code"; fi
+    fi
     echo ""
     info "client config: $conf"
     info "fetch it with: scp root@$(tr -d '[]' <<<"$ENDPOINT"):$conf ."

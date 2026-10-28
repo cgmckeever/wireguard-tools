@@ -78,10 +78,11 @@ after a switch. Changing `--name` renames the client configs; re-send them.
 ## Manage clients
 
 ```bash
-./wg-client.sh add laptop                            # full tunnel (default)
+./wg-client.sh add laptop                            # full tunnel (default); prints a QR code
 ./wg-client.sh add printer --allowed-ips "10.8.0.0/24, fdXX:XXXX:XXXX::/64" # split tunnel: VPN network only
 ./wg-client.sh list                                  # address, last seen, traffic, allowed IPs
 ./wg-client.sh show laptop                           # config with keys redacted
+./wg-client.sh show laptop --qr                      # QR code again (phones: WireGuard app → scan)
 ./wg-client.sh share laptop                          # send the config via magic-wormhole (one-time code)
 ./wg-client.sh rotate laptop                         # new keys, same address; old config stops working
 ./wg-client.sh remove laptop
@@ -99,7 +100,7 @@ Its config is written to `/root/clients/<server>.<name>.conf` (e.g.
 | How | Command | Best for |
 |-----|---------|----------|
 | Magic Wormhole | `./wg-client.sh share laptop`; recipient runs `wormhole receive <code>` | sending it to someone else, no SSH needed |
-| QR code | `./wg-client.sh show laptop --qr` | phones (WireGuard app → scan) |
+| QR code | printed by `add`/`rotate` in a terminal (`--no-qr` skips it); again any time with `./wg-client.sh show laptop --qr` | phones (WireGuard app → scan) |
 | scp | `scp root@<server>:/root/clients/dengar.laptop.conf .` | your own machines |
 
 `share` prints a one-time code (like `7-guitar-revenge-tidy`) and waits up to 10
@@ -107,6 +108,10 @@ minutes. The file is encrypted end to end; a wrong guess at the code ends the
 transfer. The recipient needs magic-wormhole (`brew install magic-wormhole`,
 `apt install magic-wormhole`, `pipx install magic-wormhole`) and then imports
 the `.conf` into their WireGuard app.
+
+In iTerm2 or WezTerm the QR code is drawn as an inline image 32 columns wide
+(set `QR_WIDTH`, e.g. `QR_WIDTH=24`; `QR_WIDTH=0` for the text version, which
+other terminals and tmux always get). The image is streamed, never written to disk.
 
 Both the QR code and the wormhole transfer carry the client's private key:
 send them only to that client's owner.
@@ -184,7 +189,7 @@ automatically. Precedence: flag > environment variable > saved > default.
 | | `WGCF_SHA256` | | pin the wgcf binary's checksum |
 
 Plus `--dry-run`, `--yes` (no prompts), `--force` (regenerate keys, reinstall
-wgcf, take over configs these tools didn't create), `--purge`, `--qr`.
+wgcf, take over configs these tools didn't create), `--purge`, `--qr` / `--no-qr`.
 `help` on either command lists everything.
 
 ## How it works

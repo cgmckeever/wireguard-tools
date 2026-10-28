@@ -73,7 +73,7 @@ DRY_RUN=0
 YES=0
 FORCE=0
 PURGE=0
-QR=0
+QR=0     # 1 = --qr, -1 = --no-qr, 0 = add/rotate decide (on if a terminal)
 ARGS=()
 
 # --- Runtime ---
@@ -159,6 +159,7 @@ parse_args() {
             --force)   FORCE=1 ;;
             --purge)   PURGE=1 ;;
             --qr)      QR=1 ;;
+            --no-qr)   QR=-1 ;;
             -h|--help) ARGS=(help); return 0 ;;
             --*=*)     set_opt "${1%%=*}" "${1#*=}" ;;
             --name|--subnet|--subnet6|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips)
