@@ -1,0 +1,13 @@
+# wireguard-tools client: {{NAME}}
+[Interface]
+PrivateKey = {{PRIVATE_KEY}}
+Address = {{ADDRESS}}/32
+DNS = {{DNS}}
+MTU = {{MTU}}
+
+[Peer]
+PublicKey = {{SERVER_PUBLIC_KEY}}
+PresharedKey = {{PRESHARED_KEY}}
+Endpoint = {{ENDPOINT}}
+AllowedIPs = {{ALLOWED_IPS}}
+PersistentKeepalive = 25

@@ -215,6 +215,21 @@ IPv4 only, so apps fall back to it).
 Secrets are mode 600 in 700 directories. Every change leaves a timestamped
 `.bak`; `rollback` restores the originals.
 
+### Templates
+
+Two files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
+
+| Template | Becomes |
+|----------|---------|
+| `client.conf.tmpl` | each `/root/clients/<name>.conf` |
+| `wg-quick-after-warp.conf.tmpl` | the systemd drop-in that starts `wg0` after `warp` (warp mode) |
+
+Edit them to change what every new client gets (e.g. `PersistentKeepalive`).
+Changes apply to clients added or rotated afterwards. Every placeholder must
+stay: a missing value stops the script before anything is written.
+`wg0.conf` and `warp.conf` are built in code, since their contents depend on
+the mode, the routing rules and the client list.
+
 ## Troubleshooting
 
 - **Clients can't connect:** the provider firewall usually still blocks UDP 51820.

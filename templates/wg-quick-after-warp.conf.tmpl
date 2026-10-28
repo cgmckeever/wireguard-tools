@@ -1,0 +1,6 @@
+# Managed by wireguard-tools
+# systemd drop-in for wg-quick@{{WG_IF}} (warp mode): start after the WARP
+# tunnel, and stop/restart with it, since wg0's routes go out through it.
+[Unit]
+After=wg-quick@{{WARP_IF}}.service
+Requires=wg-quick@{{WARP_IF}}.service

@@ -49,6 +49,7 @@ LOCK_FILE=/run/wg-tools.lock
 TRACE_URL=https://www.cloudflare.com/cdn-cgi/trace
 BLACKHOLE_METRIC=4096
 MARKER="# Managed by wireguard-tools"
+TEMPLATE_DIR="$(dirname "$SELF")/templates"
 
 # --- Flags ---
 DRY_RUN=0
@@ -366,6 +367,21 @@ write_file() {
     install -m "$mode" "$tmp" "$f.wg-tools.new"
     mv -f "$f.wg-tools.new" "$f"
     info "wrote: $f"
+}
+
+# Print templates/<file> with each {{KEY}} replaced: render_template <file> KEY=value...
+# Pure bash (no sed), so values may contain any character and secrets never
+# reach a command line. An unfilled {{KEY}} is an error.
+render_template() {
+    local name="$1" tmpl="$TEMPLATE_DIR/$1" out kv
+    shift
+    [ -f "$tmpl" ] || die "missing template: $tmpl"
+    out=$(<"$tmpl")
+    for kv in "$@"; do
+        out=${out//"{{${kv%%=*}}}"/"${kv#*=}"}
+    done
+    if [[ $out =~ \{\{[A-Z_]+\}\} ]]; then die "template $name: no value for ${BASH_REMATCH[0]}"; fi
+    printf '%s\n' "$out"
 }
 
 # Refuse to overwrite a config these tools didn't create, unless --force.

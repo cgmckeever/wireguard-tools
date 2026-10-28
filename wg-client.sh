@@ -119,7 +119,7 @@ show_qr() {
 # Generate keys for <name> at <ip> with <allowed> (comma list), write its config,
 # and update clients.db, wg0.conf and the live interface. <old_pub> is replaced.
 issue_client() {
-    local name="$1" ip="$2" allowed="$3" old_pub="${4:-}" conf priv pub psk
+    local name="$1" ip="$2" allowed="$3" old_pub="${4:-}" conf priv pub psk content
     conf="$CLIENT_DIR/$name.conf"
     if [ "$DRY_RUN" -eq 1 ]; then
         info "[dry-run] would generate a keypair + preshared key, write $conf (mode 600),"
@@ -130,22 +130,14 @@ issue_client() {
     priv=$(wg genkey)
     pub=$(wg pubkey <<<"$priv")
     psk=$(wg genpsk)
+    # Render first: a template error must stop us before anything is written.
+    content=$(render_template client.conf.tmpl \
+        NAME="$name" PRIVATE_KEY="$priv" ADDRESS="$ip" DNS="$WG_DNS" MTU="$WG_MTU" \
+        SERVER_PUBLIC_KEY="$(cat "$SERVER_PUB")" PRESHARED_KEY="$psk" \
+        ENDPOINT="$ENDPOINT:$WG_PORT" ALLOWED_IPS="${allowed//,/, }")
     write_file "$PSK_DIR/$name.psk" 600 <<<"$psk"
-    write_file "$conf" 600 <<EOF
-# wireguard-tools client: $name
-[Interface]
-PrivateKey = $priv
-Address = $ip/32
-DNS = $WG_DNS
-MTU = $WG_MTU
-
-[Peer]
-PublicKey = $(cat "$SERVER_PUB")
-PresharedKey = $psk
-Endpoint = $ENDPOINT:$WG_PORT
-AllowedIPs = ${allowed//,/, }
-PersistentKeepalive = 25
-EOF
+    write_file "$conf" 600 <<<"$content"
+    content=""
     priv=""
     psk=""
     db_put "$name" "$ip $pub $allowed"

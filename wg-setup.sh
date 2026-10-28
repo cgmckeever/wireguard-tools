@@ -298,12 +298,9 @@ EOF
 
 # warp mode: order wg0 after warp at boot and stop it with warp.
 write_dropin() {
-    write_file "$DROPIN" 644 <<EOF
-$MARKER
-[Unit]
-After=wg-quick@$WARP_IF.service
-Requires=wg-quick@$WARP_IF.service
-EOF
+    local content
+    content=$(render_template wg-quick-after-warp.conf.tmpl WG_IF="$WG_IF" WARP_IF="$WARP_IF")
+    write_file "$DROPIN" 644 <<<"$content"
     if [ "$WROTE" -eq 1 ]; then run systemctl daemon-reload; fi
 }
 
