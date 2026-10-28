@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wg-setup.sh — Set up this Debian/Ubuntu server as a WireGuard VPN server.
-# Client traffic exits through Cloudflare WARP (--exit warp, default) or
-# straight out this server's own IP (--exit direct).
+# Two modes, each its own command: `direct` (client traffic exits via this
+# server's IP) or `warp` (client traffic exits through Cloudflare WARP).
 # Clients are managed with wg-client.sh. See README.md.
 
 set -Eeuo pipefail
@@ -16,16 +16,20 @@ usage() {
     cat <<EOF
 Usage: $PROG [options] <command>
 
-Sets up this server as a WireGuard VPN server. Order:
-  --exit warp (default):  $PROG warp   (check its tests)   then  $PROG server
-  --exit direct:          $PROG --exit direct server
-Then add clients with wg-client.sh.
+Sets up this server as a WireGuard VPN server. Pick one mode:
+
+  $PROG direct   Clients' traffic exits via this server's own IP
+  $PROG warp     Clients' traffic exits through Cloudflare WARP
+
+Then add clients with wg-client.sh. Re-run the same command to apply changes
+(e.g. --port); to switch modes, rollback first.
 
 Commands:
-  warp        Install deps + wgcf, register a free WARP account, write
-              $WG_DIR/$WARP_IF.conf (Table = off), bring it up, run the WARP tests
-  server      Create $WG_IF: routing/NAT out through WARP or this server's IP,
-              firewall, IPv4 forwarding, systemd units, server keys
+  direct      Create $WG_IF: server keys, NAT out this server's public
+              interface, firewall, IPv4 forwarding, systemd unit
+  warp        First the WARP tunnel: install wgcf, register a free WARP account,
+              bring up $WARP_IF (Table = off), run the WARP tests. If they pass,
+              and you confirm, create $WG_IF routed out through $WARP_IF
   test        All verification checks; exits non-zero on any FAIL
   status      Interfaces, handshakes, routes, rules
   backup [dir]  Archive keys, configs and clients (default dir /root/wg-backups)
@@ -34,7 +38,6 @@ Commands:
   help        This text
 
 Options:
-  --exit warp|direct    Where client traffic exits (saved; switch via rollback)
   --dry-run             Show what would change; change nothing
   --yes, -y             Don't prompt before network changes
   --force               Regenerate existing keys, reinstall wgcf, regenerate the
@@ -42,11 +45,10 @@ Options:
                         take over configs not made by wireguard-tools
   --purge               With rollback: also delete keys, clients, WARP account
 
-Config (flag / environment variable; saved by warp/server for later runs):
-  --exit         WG_EXIT              $EXIT
+Config (flag / environment variable; saved by direct/warp for later runs):
   --subnet       WG_SUBNET            $WG_SUBNET
   --port         WG_PORT              $WG_PORT
-  --mtu          WG_MTU               $WG_MTU  (default 1280 for warp, 1420 for direct)
+  --mtu          WG_MTU               (default 1420 for direct, 1280 for warp)
   --warp-mtu     WARP_MTU             $WARP_MTU
   --dns          WG_DNS               $WG_DNS  (DNS server given to clients)
   --endpoint     ENDPOINT             ${ENDPOINT:-<auto-detected public IPv4>}
@@ -207,7 +209,6 @@ write_warp_conf() {
 }
 
 cmd_warp() {
-    [ "$EXIT" = warp ] || die "--exit direct doesn't use WARP; run '$PROG --exit direct server'"
     take_lock
     # Create the WARP account folder first, so account files registered on
     # another machine can be copied in even if this run fails later.
@@ -222,12 +223,31 @@ cmd_warp() {
     guard_default_route
     if [ "$DRY_RUN" -eq 1 ]; then
         log "Dry run: skipping WARP tests"
+        setup_server
         return 0
     fi
     log "WARP tests"
     run_tests warp
-    report_tests
-    info "Next: $PROG server"
+    if [ "$T_FAIL" -gt 0 ]; then
+        info "fix WARP before going on (see '$PROG status'), then re-run '$PROG warp'"
+        report_tests
+    fi
+    info "WARP is working ($T_PASS checks passed)"
+    if ! continue_to_server; then
+        info "stopped after WARP; re-run '$PROG warp' to set up the WireGuard server"
+        return 0
+    fi
+    setup_server
+}
+
+# Ask whether to go on from the WARP tunnel to the WireGuard server.
+continue_to_server() {
+    if [ "$DRY_RUN" -eq 1 ] || [ "$YES" -eq 1 ]; then return 0; fi
+    have_tty || return 1
+    local reply=""
+    echo ""
+    read -r -p "    Set up the WireGuard server ($WG_IF) through $WARP_IF now? [Y/n] " reply </dev/tty || true
+    [[ ! $reply =~ ^[Nn] ]]
 }
 
 # --- server ---
@@ -300,11 +320,16 @@ open_firewall() {
     fi
 }
 
-cmd_server() {
+cmd_direct() {
     take_lock
+    setup_server
+}
+
+# Create or update wg0 for the current mode (called by direct and warp).
+setup_server() {
     if [ "$EXIT" = warp ]; then
-        [ -f "$WARP_CONF" ] || [ "$DRY_RUN" -eq 1 ] || die "no $WARP_CONF; run '$PROG warp' first (or use --exit direct)"
-        if_exists "$WARP_IF" || [ "$DRY_RUN" -eq 1 ] || die "$WARP_IF is down; run '$PROG warp' first"
+        [ -f "$WARP_CONF" ] || [ "$DRY_RUN" -eq 1 ] || die "no $WARP_CONF; the WARP step didn't complete"
+        if_exists "$WARP_IF" || [ "$DRY_RUN" -eq 1 ] || die "$WARP_IF is down; check '$PROG status', then re-run '$PROG warp'"
     fi
     if [ -n "$SAVED_SUBNET" ] && [ "$SAVED_SUBNET" != "$WG_SUBNET" ] && [ -n "$(db_entries)" ] && [ "$FORCE" -eq 0 ]; then
         die "clients exist in $SAVED_SUBNET; changing to $WG_SUBNET breaks them (--force, then re-add every client)"
@@ -312,7 +337,7 @@ cmd_server() {
     ensure_managed "$WG_CONF"
     save_config
     record_baseline
-    info "exit mode: $EXIT (client traffic leaves via $(out_if))"
+    log "WireGuard server ($EXIT mode: client traffic leaves via $(out_if))"
     install_packages
     ensure_server_keys
     resolve_endpoint 1
@@ -335,7 +360,7 @@ cmd_server() {
 
 cmd_status() {
     local ifc unit active enabled t c r
-    log "Mode: exit $EXIT (out via $(out_if))"
+    log "Mode: $EXIT (client traffic leaves via $(out_if))"
     log "Interfaces"
     for ifc in "$WARP_IF" "$WG_IF"; do
         if [ "$ifc" = "$WARP_IF" ] && [ "$EXIT" != warp ]; then continue; fi
@@ -443,7 +468,7 @@ run_tests() {
     check "default route unchanged since install ($(state_get DEFAULT_ROUTE))" t_default_route
     [ "$1" != warp ] || return 0
     if [ ! -f "$WG_CONF" ]; then
-        t_result SKIP "$WG_IF checks (run '$PROG server' first)"
+        t_result SKIP "$WG_IF checks (the WireGuard server isn't set up yet)"
         return 0
     fi
     check "$WG_IF listening on udp/$WG_PORT" t_listen
@@ -473,7 +498,7 @@ report_tests() {
 }
 
 cmd_test() {
-    log "Tests (exit $EXIT)"
+    log "Tests ($EXIT mode)"
     run_tests all
     report_tests
 }
@@ -493,7 +518,7 @@ cmd_backup() {
     run tar -czf "$out" -P "${paths[@]}"
     run chmod 600 "$out"
     warn "the archive contains private keys; keep it somewhere safe"
-    info "restore on a fresh server: tar -xzpf <archive> -P, then '$PROG server'"
+    info "restore on a fresh server: tar -xzpf <archive> -P, then '$PROG $EXIT'"
     info "fetch it with: scp root@$(state_get ENDPOINT | tr -d '[]'):$out ."
 }
 
@@ -526,8 +551,8 @@ cmd_rollback() {
     out=$(out_if)
     local ifs="$WG_IF"
     if [ "$EXIT" = warp ]; then ifs="$WG_IF and $WARP_IF"; fi
-    step "Roll back (exit $EXIT): stop $ifs, remove routing/NAT/firewall rules, restore original files" \
-        "$PROG warp && $PROG server (or --exit direct server)"
+    step "Roll back ($EXIT mode): stop $ifs, remove routing/NAT/firewall rules, restore original files" \
+        "$PROG $EXIT"
     if [ "$PURGE" -eq 1 ]; then
         warn "--purge also deletes the WARP account, server and client keys, and client configs (irreversible)"
     fi
@@ -572,14 +597,22 @@ cmd_rollback() {
 
 # --- main ---
 
+# The setup commands choose the mode; everything else uses the saved one.
+command_mode() {
+    case "$1" in
+        direct|warp) echo "$1" ;;
+    esac
+}
+
 main() {
     init "$@"
     set -- "${ARGS[@]}"
     local cmd="$1"
     shift
     case "$cmd" in
+        direct)   cmd_direct ;;
         warp)     cmd_warp ;;
-        server)   cmd_server ;;
+        server)   die "'server' is now '$PROG direct' or '$PROG warp'" ;;
         test)     cmd_test ;;
         status)   cmd_status ;;
         backup)   cmd_backup "$@" ;;

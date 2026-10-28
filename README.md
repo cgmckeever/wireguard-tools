@@ -1,17 +1,17 @@
 # wireguard-tools
 
 Turn a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or arm64) into a WireGuard
-VPN server, and manage its clients. Client traffic exits one of two ways:
+VPN server, and manage its clients. Pick one of two modes:
 
-| `--exit` | Clients' traffic leaves via | Sites see | Use it for |
-|----------|----------------------------|-----------|------------|
-| `warp` (default) | [Cloudflare WARP](https://1.1.1.1/), tunnelled from the server | a Cloudflare IP | hiding the VPS's IP, getting Cloudflare's network |
+| Mode | Clients' traffic leaves via | Sites see | Use it for |
+|------|----------------------------|-----------|------------|
 | `direct` | the server's own public interface | the VPS's IP | a plain, fast WireGuard VPN |
+| `warp` | [Cloudflare WARP](https://1.1.1.1/), tunnelled from the server | a Cloudflare IP | hiding the VPS's IP, getting Cloudflare's network |
 
 Two commands, both run as root on the server:
 
-- **`wg-setup.sh`** sets up the server: WARP (in `warp` mode), the `wg0`
-  interface, routing/NAT, firewall, systemd. Also `test`, `status`, `backup`, `rollback`.
+- **`wg-setup.sh`** sets up the server (`direct` or `warp`), plus `test`,
+  `status`, `backup`, `rollback`.
 - **`wg-client.sh`** manages clients: `add`, `rotate`, `remove`, `list`, `show`, `share`.
 
 Both are safe to re-run, support `--dry-run`, back up every file they change,
@@ -22,10 +22,10 @@ and never print private keys unless you ask for a QR code.
 Nothing else is needed on the server; `wg-setup.sh` installs its own packages.
 
 ```bash
-sudo apt-get update && sudo apt-get install -y git
-sudo git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
-cd /opt/wireguard-tools
 sudo -i   # everything below runs as root
+apt-get update && apt-get install -y git
+git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
+cd /opt/wireguard-tools
 ```
 
 Optional, to run them from anywhere:
@@ -35,28 +35,43 @@ Update later with `git -C /opt/wireguard-tools pull`.
 
 ## Set up the server
 
-Try any step with `--dry-run` first to see exactly what it will change.
+Run one of these. Add `--dry-run` first to see exactly what it will change.
 
-### WARP exit (default)
-
-```bash
-./wg-setup.sh warp      # install wgcf, register a free WARP account, bring up `warp`, test it
-                        # check its tests pass before going on
-./wg-setup.sh server    # create wg0, route its clients out through warp
-```
-
-### Direct exit
+### Direct
 
 ```bash
-./wg-setup.sh --exit direct server
+./wg-setup.sh direct
 ```
 
-Then **open UDP 51820** (or your `--port`) in your VPS provider's firewall /
+Creates `wg0` with server keys, NAT out the server's public interface, IPv4
+forwarding and its systemd unit.
+
+### WARP
+
+```bash
+./wg-setup.sh warp
+```
+
+Runs in two stages:
+
+1. **WARP tunnel:** installs `wgcf`, registers a free WARP account, brings up
+   the `warp` interface and tests it. If a test fails it stops here, with
+   nothing else changed. (Registration refused? See
+   [Register WARP on another machine](#register-warp-on-another-machine).)
+2. **WireGuard server:** asks to continue (`--yes` skips the question), then
+   creates `wg0` routed out through `warp`. Answering no stops cleanly; run
+   `./wg-setup.sh warp` again later and it picks up where it left off.
+
+### Then, for either mode
+
+**Open UDP 51820** (or your `--port`) in your VPS provider's firewall /
 security group. The script opens it on the server itself (ufw or iptables) but
 can't reach the provider's firewall.
 
-The mode is saved. To switch: `./wg-setup.sh rollback`, then set up again with
-the other `--exit`. Existing clients keep working after a switch.
+To change a setting, re-run the same command with the new flag, e.g.
+`./wg-setup.sh direct --port 51821`. The mode is saved; to switch, run
+`./wg-setup.sh rollback`, then the other command. Existing clients keep working
+after a switch.
 
 ## Manage clients
 
@@ -109,8 +124,8 @@ on, every routing/NAT rule exists exactly once, the services start at boot in
 the right order, and whether any client has connected.
 
 A backup holds private keys (it's created mode 600). To restore on a fresh
-server: `tar -xzpf <archive> -P`, then run `./wg-setup.sh server` (after
-`warp`, in `warp` mode).
+server: `tar -xzpf <archive> -P`, then run `./wg-setup.sh direct` or
+`./wg-setup.sh warp` (whichever it was).
 
 ## Options
 
@@ -120,10 +135,9 @@ automatically. Precedence: flag > environment variable > saved > default.
 
 | Flag | Env | Default | |
 |------|-----|---------|---|
-| `--exit` | `WG_EXIT` | `warp` | `warp` or `direct` |
 | `--subnet` | `WG_SUBNET` | `10.8.0.0/24` | VPN network; server is `.1` |
 | `--port` | `WG_PORT` | `51820` | UDP listen port |
-| `--mtu` | `WG_MTU` | `1280` warp, `1420` direct | tunnel MTU for server and clients |
+| `--mtu` | `WG_MTU` | `1420` direct, `1280` warp | tunnel MTU for server and clients |
 | `--warp-mtu` | `WARP_MTU` | `1280` | |
 | `--dns` | `WG_DNS` | `1.1.1.1` | DNS server given to clients |
 | `--endpoint` | `ENDPOINT` | detected public IPv4 | server address written into client configs |
@@ -180,8 +194,8 @@ Secrets are mode 600 in 700 directories. Every change leaves a timestamped
 - **`wgcf register` fails:** WARP may refuse registrations from some server IPs.
   Retry later, or register on another machine and copy the account over
   ([below](#register-warp-on-another-machine)). If the WARP tests still fail
-  (no handshake), the provider is blocking WARP's traffic: use `--exit direct`.
-- **Some sites hang in WARP mode:** lower `--mtu` (e.g. 1200), re-run `server`, then `rotate` the clients so they get the new MTU.
+  (no handshake), the provider is blocking WARP's traffic: use `direct`.
+- **Some sites hang in WARP mode:** lower `--mtu` (e.g. 1200), re-run `./wg-setup.sh warp`, then `rotate` the clients so they get the new MTU.
 - **Anything else:** `./wg-setup.sh status` and `./wg-setup.sh test`.
 
 ### Register WARP on another machine
@@ -202,7 +216,7 @@ cd ~ && rm -rf ~/wgcf-vps      # local copies hold the device's private key
 ```
 
 Then re-run `./wg-setup.sh warp` on the server; it uses the copied account and
-carries on. Use these files on that server only: they are one WARP device.
+carries on to the tests and the WireGuard server. Use these files on that server only: they are one WARP device.
 
 ## Upgrading from the old scripts
 

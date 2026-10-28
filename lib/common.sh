@@ -14,11 +14,11 @@
 # list (hook_cmds), so PostDown and rollback exactly invert PostUp.
 
 # --- Config ---
-# Saved in the state file by `wg-setup.sh warp/server`, so later runs and
+# Saved in the state file by `wg-setup.sh direct/warp`, so later runs and
 # wg-client.sh use the server's real settings.
 # Precedence: flag > environment variable > saved value > default.
 CONFIG_KEYS=(EXIT WG_SUBNET WG_PORT WG_MTU WARP_MTU WG_DNS WG_IF WARP_IF RT_TABLE CLIENT_ALLOWED_IPS)
-EXIT="${WG_EXIT:-}"
+EXIT=""                 # set by wg-setup.sh direct/warp, else the saved mode
 WG_SUBNET="${WG_SUBNET:-}"
 WG_PORT="${WG_PORT:-}"
 WG_MTU="${WG_MTU:-}"
@@ -116,7 +116,6 @@ redact() { sed -E 's/^([[:space:]]*(PrivateKey|PresharedKey)[[:space:]]*=[[:spac
 # Map a config flag to its variable.
 set_opt() {
     case "$1" in
-        --exit)        EXIT="$2" ;;
         --subnet)      WG_SUBNET="$2" ;;
         --port)        WG_PORT="$2" ;;
         --mtu)         WG_MTU="$2" ;;
@@ -142,7 +141,7 @@ parse_args() {
             --qr)      QR=1 ;;
             -h|--help) ARGS=(help); return 0 ;;
             --*=*)     set_opt "${1%%=*}" "${1#*=}" ;;
-            --exit|--subnet|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips)
+            --subnet|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips)
                 [ $# -ge 2 ] || die "$1 needs a value"
                 set_opt "$1" "$2"
                 shift
@@ -171,7 +170,7 @@ load_config() {
     SAVED_SUBNET=$(state_get WG_SUBNET)
     # Switching modes in place would mix two rule sets; rollback frees the mode.
     if [ -n "$EXIT" ] && [ -n "$SAVED_EXIT" ] && [ "$EXIT" != "$SAVED_EXIT" ]; then
-        die "this server is set up with --exit $SAVED_EXIT; run 'wg-setup.sh rollback' before switching to --exit $EXIT"
+        die "this server is set up for '$SAVED_EXIT'; run 'wg-setup.sh rollback' before setting it up for '$EXIT'"
     fi
     for k in "${CONFIG_KEYS[@]}"; do
         if [ -z "${!k}" ]; then
@@ -210,7 +209,7 @@ in_range() { [[ $1 =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
 # Check config values and derive subnet addresses and per-interface paths.
 finalize_config() {
     local ifre='^[A-Za-z0-9_-]{1,15}$' net octet mask
-    case "$EXIT" in warp|direct) ;; *) die "--exit must be warp or direct: $EXIT" ;; esac
+    case "$EXIT" in warp|direct) ;; *) die "bad saved mode: $EXIT (expected warp or direct)" ;; esac
     [[ $WG_IF =~ $ifre ]] || die "bad interface name: $WG_IF"
     [[ $WARP_IF =~ $ifre ]] || die "bad interface name: $WARP_IF"
     [ "$WG_IF" != "$WARP_IF" ] || die "WG_IF and WARP_IF must differ"
@@ -269,6 +268,7 @@ preflight() {
 # Leaves the subcommand and its args in ARGS. Exits after `help`.
 init() {
     parse_args "$@"
+    if declare -F command_mode >/dev/null; then EXIT=$(command_mode "${ARGS[0]:-}"); fi
     if [ "${ARGS[0]:-}" = help ] || [ ${#ARGS[@]} -eq 0 ]; then
         apply_defaults
         usage
@@ -439,7 +439,7 @@ guard_default_route() {
 }
 
 # Client endpoint: --endpoint / ENDPOINT, saved value, or detected public IPv4.
-# Saved only when <save> is 1 (wg-setup.sh server).
+# Saved only when <save> is 1 (wg-setup.sh direct/warp).
 resolve_endpoint() {
     local save="$1" ep="$ENDPOINT"
     [ -n "$ep" ] || ep=$(state_get ENDPOINT)
@@ -528,7 +528,7 @@ db_put() {
 render_wg_conf() {
     local line name ip pub _ psk
     cat <<EOF
-$MARKER (exit: $EXIT); peers are rebuilt from $CLIENT_DB (use wg-client.sh)
+$MARKER ($EXIT mode); peers are rebuilt from $CLIENT_DB (use wg-client.sh)
 [Interface]
 Address = $SERVER_IP/$PFX
 ListenPort = $WG_PORT

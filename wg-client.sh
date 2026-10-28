@@ -72,11 +72,11 @@ pick_client() {
     fi
 }
 
-# The server must be set up first (wg-setup.sh server).
+# The server must be set up first (wg-setup.sh direct or warp).
 require_server() {
     [ -n "$SAVED_EXIT" ] && [ -f "$WG_CONF" ] && [ -s "$SERVER_PUB" ] && return 0
     [ "$DRY_RUN" -eq 1 ] && { warn "server not set up yet; showing what would happen"; return 0; }
-    die "no WireGuard server here yet; run wg-setup.sh server first"
+    die "no WireGuard server here yet; run 'wg-setup.sh direct' or 'wg-setup.sh warp' first"
 }
 
 # First unused host address in the subnet (the server takes .1).
@@ -98,7 +98,7 @@ cmd_share() {
     valid_name "$name"
     conf="$CLIENT_DIR/$name.conf"
     [ -f "$conf" ] || die "no config for '$name' (see: $PROG list)"
-    command -v wormhole >/dev/null || die "magic-wormhole not installed (apt-get install magic-wormhole, or re-run wg-setup.sh server)"
+    command -v wormhole >/dev/null || die "magic-wormhole not installed (apt-get install magic-wormhole)"
     if [ "$DRY_RUN" -eq 1 ]; then
         info "[dry-run] would run: wormhole send $conf"
         return 0
