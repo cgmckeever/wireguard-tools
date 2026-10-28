@@ -347,7 +347,6 @@ write_dropin() {
 # unchanged, so only the configs need re-sending.
 sync_client_configs() {
     local want="$ENDPOINT:$WG_PORT" conf src old name ip _ addr stale=()
-    migrate_client_dir
     # Configs are found via clients.db, so editing the template can't hide one.
     while read -r name ip _; do
         conf=$(client_conf "$name")
@@ -638,8 +637,8 @@ prune_archives() {
 # then prune old archives and change copies.
 cmd_backup() {
     local dir="${1:-$BACKUP_DIR}" out paths=() p
-    # CLIENT_DIR is inside WG_DIR; OLD_CLIENT_DIR exists only if not yet migrated.
-    for p in "$WG_DIR" "$OLD_CLIENT_DIR" "$SYSCTL_FILE" "$DROPIN_DIR"; do
+    # CLIENT_DIR is inside WG_DIR.
+    for p in "$WG_DIR" "$SYSCTL_FILE" "$DROPIN_DIR"; do
         if [ -e "$p" ]; then paths+=("$p"); fi
     done
     [ ${#paths[@]} -gt 0 ] || die "nothing to back up"
@@ -683,8 +682,6 @@ cmd_restore() {
         "$PROG rollback --purge"
     confirm "Restore from this backup?"
     local paths=("$WG_DIR") keep_map=""
-    # Archives from older versions keep client configs in OLD_CLIENT_DIR; setup moves them.
-    if grep -q "^$OLD_CLIENT_DIR/" <<<"$members"; then paths+=("$OLD_CLIENT_DIR"); fi
     # This server's own backup record (left by an earlier rollback) lists its
     # original files; keep it over the archive's, which describes the old server.
     if [ -f "$BACKUP_MAP" ]; then keep_map="$TMPD/backups"; cp -a "$BACKUP_MAP" "$keep_map"; fi
@@ -703,7 +700,7 @@ cmd_restore() {
     while IFS= read -r m; do
         case "$m" in */|*.bak|"$BACKUP_MAP") continue ;; esac
         if [ -f "$m" ] && [ -z "$(backup_orig "$m")" ]; then printf '%s\tNEW\n' "$m" >>"$BACKUP_MAP"; fi
-    done < <(grep -E "^($WG_DIR|$OLD_CLIENT_DIR)/" <<<"$members")
+    done < <(grep "^$WG_DIR/" <<<"$members")
     chmod 600 "$BACKUP_MAP" 2>/dev/null || true
     info "restored; clients: $(db_entries | awk '{ printf "%s ", $1 }')"
     if [ "$mode" = warp ]; then
@@ -797,7 +794,7 @@ cmd_rollback() {
             if [ -f "$f" ] && grep -qF "$MARKER" "$f"; then run rm -f "$f"; fi
         done
         run rm -f "$SERVER_KEY" "$SERVER_PUB" "$CLIENT_DB" "$STATE" "$BACKUP_MAP"
-        run rm -rf "$WGCF_DIR" "$CLIENT_DIR" "$OLD_CLIENT_DIR" "$PSK_DIR"
+        run rm -rf "$WGCF_DIR" "$CLIENT_DIR" "$PSK_DIR"
         info "left installed: packages and $WGCF_BIN"
     else
         # Free the mode (and its MTU default) so the next setup can pick either.

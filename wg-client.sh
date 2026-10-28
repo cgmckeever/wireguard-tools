@@ -285,12 +285,6 @@ main() {
     set -- "${ARGS[@]}"
     local cmd="$1"
     shift
-    # Configs from older versions live in OLD_CLIENT_DIR; move them first.
-    if [ -d "$OLD_CLIENT_DIR" ] && [ "$cmd" != help ]; then
-        take_lock
-        migrate_client_dir
-        flock -u 9
-    fi
     case "$cmd" in
         add)    cmd_add "$@" ;;
         rotate) cmd_rotate "$@" ;;
