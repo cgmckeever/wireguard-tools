@@ -109,7 +109,8 @@ cmd_share() {
     warn "this sends '$name''s private key; give the code only to that person"
     info "receiver runs:  wormhole receive <code>   (then imports $(basename "$conf") into WireGuard)"
     info "waiting up to 10 minutes; Ctrl-C cancels"
-    timeout 600 wormhole send --code-length 3 "$conf" || die "not received (cancelled or timed out); nothing was sent"
+    # --foreground keeps wormhole in the terminal's process group, so Ctrl-C reaches it.
+    timeout --foreground 600 wormhole send --code-length 3 "$conf" || die "not received (cancelled or timed out); nothing was sent"
 }
 
 # Print a config as a terminal QR code. Comments, blank lines and padding spaces
