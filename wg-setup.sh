@@ -620,7 +620,21 @@ cmd_test() {
 
 # --- backup ---
 
-# Archive keys, configs, clients and state (mode 600; it holds private keys).
+# Keep the KEEP_ARCHIVES newest backup archives in <dir>.
+prune_archives() {
+    local a archives=() i
+    for a in "$1"/wireguard-tools.*.tar.gz; do
+        if [ -f "$a" ]; then archives+=("$a"); fi
+    done
+    # Names end in a timestamp, so the glob's order is oldest first.
+    for (( i = 0; i < ${#archives[@]} - KEEP_ARCHIVES; i++ )); do
+        run rm -f "${archives[$i]}"
+        info "pruned old archive: ${archives[$i]}"
+    done
+}
+
+# Archive keys, configs, clients and state (mode 600; it holds private keys),
+# then prune old archives and change copies.
 cmd_backup() {
     local dir="${1:-$BACKUP_DIR}" out paths=() p
     for p in "$WG_DIR" "$CLIENT_DIR" "$SYSCTL_FILE" "$DROPIN_DIR"; do
@@ -633,6 +647,8 @@ cmd_backup() {
     run install -d -m 700 "$dir"
     run tar -czf "$out" -P "${paths[@]}"
     run chmod 600 "$out"
+    prune_archives "$dir"
+    prune_all_changes
     warn "the archive contains private keys; keep it somewhere safe"
     info "restore on a fresh server: $PROG restore <archive>"
     info "fetch it with: scp root@$(state_get ENDPOINT | tr -d '[]'):$out ."
@@ -695,9 +711,6 @@ cmd_restore() {
 }
 
 # --- rollback ---
-
-# A file's original backup path from the backup record, or NEW if we created it.
-backup_orig() { awk -F'\t' -v f="$1" '$1 == f { print $2; exit }' "$BACKUP_MAP" 2>/dev/null || true; }
 
 # Restore a file's original backup; files we created are removed if <rm_new> is 1.
 restore_original() {
@@ -763,9 +776,11 @@ cmd_rollback() {
 
     if [ "$PURGE" -eq 1 ]; then
         for f in "$WG_CONF" "$WARP_CONF" "$SERVER_KEY" "$SERVER_PUB" "$CLIENT_DB" "$SYSCTL_FILE"; do
-            # shellcheck disable=SC2086  # glob on purpose: this file's .bak copies
+            # shellcheck disable=SC2086  # glob on purpose: copies left by older versions
             run rm -f $f.*.bak
         done
+        # Originals were restored above; the change copies hold old keys.
+        run rm -rf "$CHANGE_DIR"
         # Configs carrying our marker are ours (a restored original never does).
         for f in "$WG_CONF" "$WARP_CONF"; do
             if [ -f "$f" ] && grep -qF "$MARKER" "$f"; then run rm -f "$f"; fi

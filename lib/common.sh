@@ -64,6 +64,9 @@ BLACKHOLE_METRIC=4096
 MARKER="# Managed by wireguard-tools"
 TEMPLATE_DIR="$(dirname "$SELF")/templates"
 BACKUP_DIR="$(dirname "$SELF")/backup"   # untracked (.gitignore); mode 700
+CHANGE_DIR="$BACKUP_DIR/files"           # per-change copies, mirroring each file's path
+KEEP_CHANGES=5                           # newest copies kept per file (plus its original)
+KEEP_ARCHIVES=10                         # newest `backup` archives kept
 
 # --- Flags ---
 DRY_RUN=0
@@ -389,12 +392,20 @@ state_unset() {
     install -m 600 "$tmp" "$STATE"
 }
 
-# Copy a file to a timestamped .bak before changing it; remember the first
-# (original) backup per file, or NEW if we created it, for rollback.
+# A file's original backup path from the backup record, or NEW if we created it.
+backup_orig() { awk -F'\t' -v f="$1" '$1 == f { print $2; exit }' "$BACKUP_MAP" 2>/dev/null || true; }
+
+# Where a file's change copies go: CHANGE_DIR plus its own directory.
+change_dir() { echo "$CHANGE_DIR$(dirname "$1")"; }
+
+# Copy a file to a timestamped .bak in CHANGE_DIR before changing it; remember
+# the first (original) backup per file, or NEW if we created it, for rollback.
 backup_file() {
-    local f="$1" bak="NEW"
+    local f="$1" bak="NEW" dir
     if [ -e "$f" ]; then
-        bak="$f.$(date +%Y%m%d-%H%M%S).bak"
+        dir=$(change_dir "$f")
+        install -d -m 700 "$dir"
+        bak="$dir/$(basename "$f").$(date +%Y%m%d-%H%M%S).bak"
         while [ -e "$bak" ]; do bak="${bak%.bak}.$RANDOM.bak"; done
         cp -a "$f" "$bak"
         info "backup: $bak"
@@ -404,6 +415,53 @@ backup_file() {
         printf '%s\t%s\n' "$f" "$bak" >>"$BACKUP_MAP"
         chmod 600 "$BACKUP_MAP"
     fi
+    prune_changes "$f"
+}
+
+# Point the backup record's entry for <file> at <path>.
+backup_map_move() {
+    local tmp
+    tmp=$(mktemp)
+    awk -F'\t' -v OFS='\t' -v f="$1" -v p="$2" '$1 == f { $2 = p } { print }' "$BACKUP_MAP" >"$tmp"
+    install -m 600 "$tmp" "$BACKUP_MAP"
+}
+
+# Keep <file>'s original copy (what rollback restores) and its KEEP_CHANGES
+# newest; delete the rest. Copies left next to the file by older versions are
+# moved (the original) or deleted (the rest).
+prune_changes() {
+    local f="$1" orig dir b n=0 i baks=()
+    [ "$DRY_RUN" -eq 0 ] || return 0
+    orig=$(backup_orig "$f")
+    dir=$(change_dir "$f")
+    for b in "$f".*.bak; do
+        [ -f "$b" ] || continue
+        if [ "$b" = "$orig" ]; then
+            install -d -m 700 "$dir"
+            mv -f "$b" "$dir/"
+            orig="$dir/$(basename "$b")"
+            backup_map_move "$f" "$orig"
+        else
+            rm -f "$b"
+        fi
+    done
+    for b in "$dir/$(basename "$f")".*.bak; do
+        if [ -f "$b" ]; then baks+=("$b"); fi
+    done
+    # Names end in a timestamp, so the glob's order is oldest first.
+    for (( i = ${#baks[@]} - 1; i >= 0; i-- )); do
+        b="${baks[$i]}"
+        [ "$b" != "$orig" ] || continue
+        n=$(( n + 1 ))
+        if [ "$n" -gt "$KEEP_CHANGES" ]; then rm -f "$b"; fi
+    done
+}
+
+# Prune every file in the backup record.
+prune_all_changes() {
+    local f _
+    [ -f "$BACKUP_MAP" ] || return 0
+    while IFS=$'\t' read -r f _; do prune_changes "$f"; done < <(cat "$BACKUP_MAP")
 }
 
 # Write stdin to <path> with <mode> if it differs: back up first, replace
@@ -678,7 +736,7 @@ start_unit() {
         run systemctl enable --now "$unit"
         enabled=1
     elif [ "$changed" -eq 1 ]; then
-        step "Restart $unit to apply its new config" "restore the .bak in $WG_DIR, then systemctl restart $unit"
+        step "Restart $unit to apply its new config" "restore the .bak in $CHANGE_DIR, then systemctl restart $unit"
         confirm "Restart $ifc now?"
         if systemctl is-active -q "$unit"; then
             run systemctl restart "$unit"

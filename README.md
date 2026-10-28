@@ -154,7 +154,9 @@ re-run changes `--endpoint` or `--port`. An endpoint set as a hostname
 server means clients need nothing.
 
 Backups go in `backup/` inside the checkout (mode 700, ignored by git, so
-`git pull` never touches them); `backup <dir>` writes elsewhere. A backup holds
+`git pull` never touches them; don't delete the checkout while relying on
+`rollback`, which restores originals from `backup/files/`); `backup <dir>`
+writes elsewhere. Each `backup` also prunes old archives and file copies. A backup holds
 private keys (it's created mode 600); keep it somewhere safe. In
 WARP mode, stop the old server once the new one works: both would be using the
 same WARP device.
@@ -230,8 +232,11 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1` |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` (warp mode) |
 
-Secrets are mode 600 in 700 directories. Every change leaves a timestamped
-`.bak`; `rollback` restores the originals.
+Secrets are mode 600 in 700 directories. Before any file is changed, a
+timestamped copy goes to `backup/files/<its path>` (e.g.
+`backup/files/etc/wireguard/clients.db.<date>.bak`); `rollback` restores the
+originals. Each file keeps its original plus the 5 newest copies, and
+`wg-setup.sh backup` keeps the 10 newest archives.
 
 ### Templates
 

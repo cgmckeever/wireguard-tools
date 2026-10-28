@@ -214,10 +214,17 @@ cmd_remove() {
     # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
     if [ -n "$SAVED_EXIT" ]; then write_wg_conf; else info "server not set up; $WG_CONF is rebuilt at the next setup"; fi
     # The config, preshared key and their .bak copies all hold this client's secrets.
-    # Also any copy left under an older server name or from before server names.
+    # Also any copy left under an older server name or from before server names,
+    # and copies older versions kept next to the files.
+    local d
     # shellcheck disable=SC2086  # globs on purpose
-    run rm -f $CLIENT_DIR/*.$name.conf $CLIENT_DIR/*.$name.conf.*.bak "$CLIENT_DIR/$name.conf" $CLIENT_DIR/$name.conf.*.bak \
-        "$PSK_DIR/$name.psk" $PSK_DIR/$name.psk.*.bak
+    for d in "$CLIENT_DIR" "$(change_dir "$CLIENT_DIR/x")"; do
+        run rm -f $d/*.$name.conf $d/*.$name.conf.*.bak $d/$name.conf $d/$name.conf.*.bak
+    done
+    # shellcheck disable=SC2086
+    for d in "$PSK_DIR" "$(change_dir "$PSK_DIR/x")"; do
+        run rm -f $d/$name.psk $d/$name.psk.*.bak
+    done
 }
 
 cmd_list() {
