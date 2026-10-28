@@ -49,6 +49,7 @@ Options:
   --purge               With rollback: also delete keys, clients, WARP account
 
 Config (flag / environment variable; saved by direct/warp for later runs):
+  --name         SERVER_NAME          $SERVER_NAME  (client configs: <name>.<client>.conf)
   --subnet       WG_SUBNET            $WG_SUBNET
   --port         WG_PORT              $WG_PORT
   --mtu          WG_MTU               (default 1420 for direct, 1280 for warp)
@@ -308,20 +309,31 @@ write_dropin() {
     if [ "$WROTE" -eq 1 ]; then run systemctl daemon-reload; fi
 }
 
-# Point every client config at the current endpoint and port. Keys are
-# unchanged, so only the configs need re-sending.
-sync_client_endpoints() {
-    local want="$ENDPOINT:$WG_PORT" conf name _ stale=()
+# Keep every client config named <server>.<client>.conf (renaming ones from an
+# older server name, or from before server names) and pointed at the current
+# endpoint and port. Keys are unchanged, so only the configs need re-sending.
+sync_client_configs() {
+    local want="$ENDPOINT:$WG_PORT" conf src old name _ stale=()
     # Configs are found via clients.db, so editing the template can't hide one.
     while read -r name _; do
-        conf="$CLIENT_DIR/$name.conf"
-        [ -f "$conf" ] || continue
-        grep -qxF "Endpoint = $want" "$conf" && continue
-        write_file "$conf" 600 < <(sed "s|^Endpoint = .*|Endpoint = $want|" "$conf")
-        stale+=("$name")
+        conf=$(client_conf "$name")
+        src="$conf"
+        if [ ! -f "$conf" ]; then
+            for old in ${SAVED_SERVER_NAME:+"$CLIENT_DIR/$SAVED_SERVER_NAME.$name.conf"} "$CLIENT_DIR/$name.conf"; do
+                if [ -f "$old" ]; then src="$old"; break; fi
+            done
+            [ -f "$src" ] || continue
+            step "Rename $src to $(basename "$conf")" "mv $conf $src"
+            run mv "$src" "$conf"
+            if [ "$DRY_RUN" -eq 0 ]; then src="$conf"; fi
+            stale+=("$name")
+        fi
+        grep -qxF "Endpoint = $want" "$src" && continue
+        write_file "$conf" 600 < <(sed "s|^Endpoint = .*|Endpoint = $want|" "$src")
+        [[ " ${stale[*]} " == *" $name "* ]] || stale+=("$name")
     done < <(db_entries)
     if [ ${#stale[@]} -gt 0 ]; then
-        warn "server address is now $want; re-send these clients' configs (wg-client.sh share/show --qr): ${stale[*]}"
+        warn "client configs changed (now $SERVER_NAME.<client>.conf at $want); re-send them (wg-client.sh share/show --qr): ${stale[*]}"
     fi
 }
 
@@ -373,7 +385,7 @@ setup_server() {
     install_packages
     ensure_server_keys
     resolve_endpoint 1
-    sync_client_endpoints
+    sync_client_configs
     write_sysctl
     if [ "$EXIT" = warp ]; then write_dropin; fi
     write_wg_conf

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # wg-client.sh — Manage WireGuard clients on a server set up by wg-setup.sh.
 # Each client gets a keypair, a preshared key and the next free address; its
-# config is written to /root/clients/<name>.conf. See README.md.
+# config is written to /root/clients/<server>.<name>.conf. See README.md.
 
 set -Eeuo pipefail
 
@@ -20,7 +20,7 @@ to the running server immediately; other clients stay connected.
 
 Commands:
   add <name>      New client: keypair, preshared key, next free address,
-                  config at $CLIENT_DIR/<name>.conf
+                  config at $CLIENT_DIR/$SERVER_NAME.<name>.conf
   rotate [name]   Issue new keys for an existing client (same address); the old
                   config stops working
   remove [name]   Remove the client, its keys and its config
@@ -96,7 +96,7 @@ cmd_share() {
     local name="${1:-}" conf
     [ -n "$name" ] || name=$(pick_client share) || exit 1
     valid_name "$name"
-    conf="$CLIENT_DIR/$name.conf"
+    conf=$(client_conf "$name")
     [ -f "$conf" ] || die "no config for '$name' (see: $PROG list)"
     command -v wormhole >/dev/null || die "magic-wormhole not installed (apt-get install magic-wormhole)"
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -104,7 +104,7 @@ cmd_share() {
         return 0
     fi
     warn "this sends '$name''s private key; give the code only to that person"
-    info "receiver runs:  wormhole receive <code>   (then imports $name.conf into WireGuard)"
+    info "receiver runs:  wormhole receive <code>   (then imports $(basename "$conf") into WireGuard)"
     info "waiting up to 10 minutes; Ctrl-C cancels"
     timeout 600 wormhole send --code-length 3 "$conf" || die "not received (cancelled or timed out); nothing was sent"
 }
@@ -120,7 +120,7 @@ show_qr() {
 # and update clients.db, wg0.conf and the live interface. <old_pub> is replaced.
 issue_client() {
     local name="$1" ip="$2" allowed="$3" old_pub="${4:-}" conf priv pub psk content
-    conf="$CLIENT_DIR/$name.conf"
+    conf=$(client_conf "$name")
     if [ "$DRY_RUN" -eq 1 ]; then
         info "[dry-run] would generate a keypair + preshared key, write $conf (mode 600),"
         info "[dry-run] and add the peer to $WG_CONF and live $WG_IF (AllowedIPs ${allowed//,/, })"
@@ -132,7 +132,7 @@ issue_client() {
     psk=$(wg genpsk)
     # Render first: a template error must stop us before anything is written.
     content=$(render_template client.conf.tmpl \
-        NAME="$name" PRIVATE_KEY="$priv" ADDRESS="$ip" DNS="$WG_DNS" MTU="$WG_MTU" \
+        NAME="$name" SERVER_NAME="$SERVER_NAME" PRIVATE_KEY="$priv" ADDRESS="$ip" DNS="$WG_DNS" MTU="$WG_MTU" \
         SERVER_PUBLIC_KEY="$(cat "$SERVER_PUB")" PRESHARED_KEY="$psk" \
         ENDPOINT="$ENDPOINT:$WG_PORT" ALLOWED_IPS="${allowed//,/, }")
     write_file "$PSK_DIR/$name.psk" 600 <<<"$psk"
@@ -166,7 +166,7 @@ cmd_add() {
     require_server
     existing=$(db_get "$name")
     if [ -n "$existing" ]; then
-        info "client '$name' already exists (${existing%% *}); config: $CLIENT_DIR/$name.conf"
+        info "client '$name' already exists (${existing%% *}); config: $(client_conf "$name")"
         info "use '$PROG rotate $name' to issue new keys"
         return 0
     fi
@@ -214,7 +214,10 @@ cmd_remove() {
     # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
     if [ -n "$SAVED_EXIT" ]; then write_wg_conf; else info "server not set up; $WG_CONF is rebuilt at the next setup"; fi
     # The config, preshared key and their .bak copies all hold this client's secrets.
-    run rm -f "$CLIENT_DIR/$name.conf" "$CLIENT_DIR/$name.conf".*.bak "$PSK_DIR/$name.psk" "$PSK_DIR/$name.psk".*.bak
+    # Also any copy left under an older server name or from before server names.
+    # shellcheck disable=SC2086  # globs on purpose
+    run rm -f $CLIENT_DIR/*.$name.conf $CLIENT_DIR/*.$name.conf.*.bak "$CLIENT_DIR/$name.conf" $CLIENT_DIR/$name.conf.*.bak \
+        "$PSK_DIR/$name.psk" $PSK_DIR/$name.psk.*.bak
 }
 
 cmd_list() {
@@ -235,7 +238,7 @@ cmd_show() {
     local name="${1:-}" conf
     [ -n "$name" ] || name=$(pick_client show) || exit 1
     valid_name "$name"
-    conf="$CLIENT_DIR/$name.conf"
+    conf=$(client_conf "$name")
     [ -f "$conf" ] || die "no config for '$name' (see: $PROG list)"
     info "$conf"
     echo ""

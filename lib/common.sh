@@ -20,8 +20,9 @@
 # Saved in the state file by `wg-setup.sh direct/warp`, so later runs and
 # wg-client.sh use the server's real settings.
 # Precedence: flag > environment variable > saved value > default.
-CONFIG_KEYS=(EXIT WG_SUBNET WG_PORT WG_MTU WARP_MTU WG_DNS WG_IF WARP_IF RT_TABLE CLIENT_ALLOWED_IPS)
+CONFIG_KEYS=(EXIT SERVER_NAME WG_SUBNET WG_PORT WG_MTU WARP_MTU WG_DNS WG_IF WARP_IF RT_TABLE CLIENT_ALLOWED_IPS)
 EXIT=""                 # set by wg-setup.sh direct/warp, else the saved mode
+SERVER_NAME="${SERVER_NAME:-}"
 WG_SUBNET="${WG_SUBNET:-}"
 WG_PORT="${WG_PORT:-}"
 WG_MTU="${WG_MTU:-}"
@@ -123,6 +124,7 @@ redact() { sed -E 's/^([[:space:]]*(PrivateKey|PresharedKey)[[:space:]]*=[[:spac
 # Map a config flag to its variable.
 set_opt() {
     case "$1" in
+        --name)        SERVER_NAME="$2" ;;
         --subnet)      WG_SUBNET="$2" ;;
         --port)        WG_PORT="$2" ;;
         --mtu)         WG_MTU="$2" ;;
@@ -148,7 +150,7 @@ parse_args() {
             --qr)      QR=1 ;;
             -h|--help) ARGS=(help); return 0 ;;
             --*=*)     set_opt "${1%%=*}" "${1#*=}" ;;
-            --subnet|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips)
+            --name|--subnet|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips)
                 [ $# -ge 2 ] || die "$1 needs a value"
                 set_opt "$1" "$2"
                 shift
@@ -165,6 +167,10 @@ apply_defaults() {
     : "${EXIT:=warp}" "${WG_SUBNET:=10.8.0.0/24}" "${WG_PORT:=51820}" "${WARP_MTU:=1280}"
     : "${WG_DNS:=1.1.1.1}" "${WG_IF:=wg0}" "${WARP_IF:=warp}" "${RT_TABLE:=100}"
     : "${CLIENT_ALLOWED_IPS:=0.0.0.0/0, ::/0}"
+    if [ -z "$SERVER_NAME" ]; then
+        SERVER_NAME=$(hostname -s 2>/dev/null | tr -c 'A-Za-z0-9_\n-' - | cut -c1-32)
+        : "${SERVER_NAME:=wg}"
+    fi
     if [ -z "$WG_MTU" ]; then
         if [ "$EXIT" = warp ]; then WG_MTU=1280; else WG_MTU=1420; fi
     fi
@@ -175,6 +181,7 @@ load_config() {
     local k v
     SAVED_EXIT=$(state_get EXIT)
     SAVED_SUBNET=$(state_get WG_SUBNET)
+    SAVED_SERVER_NAME=$(state_get SERVER_NAME)
     # Switching modes in place would mix two rule sets; rollback frees the mode.
     if [ -n "$EXIT" ] && [ -n "$SAVED_EXIT" ] && [ "$EXIT" != "$SAVED_EXIT" ]; then
         die "this server is set up for '$SAVED_EXIT'; run 'wg-setup.sh rollback' before setting it up for '$EXIT'"
@@ -217,6 +224,7 @@ in_range() { [[ $1 =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
 finalize_config() {
     local ifre='^[A-Za-z0-9_-]{1,15}$' net octet mask
     case "$EXIT" in warp|direct) ;; *) die "bad saved mode: $EXIT (expected warp or direct)" ;; esac
+    [[ $SERVER_NAME =~ ^[A-Za-z0-9_-]{1,32}$ ]] || die "server name must be 1-32 of [A-Za-z0-9_-]: '$SERVER_NAME'"
     [[ $WG_IF =~ $ifre ]] || die "bad interface name: $WG_IF"
     [[ $WARP_IF =~ $ifre ]] || die "bad interface name: $WARP_IF"
     [ "$WG_IF" != "$WARP_IF" ] || die "WG_IF and WARP_IF must differ"
@@ -530,6 +538,10 @@ run_hooks() {
 
 # --- Clients registry: "name ip public-key allowed-ips" per line ---
 # No private or preshared keys here; allowed-ips is comma-separated, no spaces.
+
+# A client's config file: <server>.<client>.conf, so downloads from different
+# servers don't collide.
+client_conf() { echo "$CLIENT_DIR/$SERVER_NAME.$1.conf"; }
 
 db_entries() {
     [ -f "$CLIENT_DB" ] || return 0

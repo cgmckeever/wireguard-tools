@@ -36,6 +36,8 @@ Update later with `git -C /opt/wireguard-tools pull`.
 ## Set up the server
 
 Run one of these. Add `--dry-run` first to see exactly what it will change.
+Give the server a name with `--name` (e.g. `./wg-setup.sh warp --name dengar`);
+it defaults to the short hostname and prefixes every client config file.
 
 ### Direct
 
@@ -71,7 +73,7 @@ can't reach the provider's firewall.
 To change a setting, re-run the same command with the new flag, e.g.
 `./wg-setup.sh direct --port 51821`. The mode is saved; to switch, run
 `./wg-setup.sh rollback`, then the other command. Existing clients keep working
-after a switch.
+after a switch. Changing `--name` renames the client configs; re-send them.
 
 ## Manage clients
 
@@ -89,7 +91,8 @@ Leave out the name on `rotate`, `remove`, `show` or `share` to pick from a
 numbered list. Changes apply live; other clients stay connected.
 
 Each client gets its own keypair, a preshared key and the next free address.
-Its config is written to `/root/clients/<name>.conf`.
+Its config is written to `/root/clients/<server>.<name>.conf` (e.g.
+`dengar.laptop.conf`), so configs from different servers don't collide.
 
 ### Getting a config onto a device
 
@@ -97,7 +100,7 @@ Its config is written to `/root/clients/<name>.conf`.
 |-----|---------|----------|
 | Magic Wormhole | `./wg-client.sh share laptop`; recipient runs `wormhole receive <code>` | sending it to someone else, no SSH needed |
 | QR code | `./wg-client.sh show laptop --qr` | phones (WireGuard app → scan) |
-| scp | `scp root@<server>:/root/clients/laptop.conf .` | your own machines |
+| scp | `scp root@<server>:/root/clients/dengar.laptop.conf .` | your own machines |
 
 `share` prints a one-time code (like `7-guitar-revenge-tidy`) and waits up to 10
 minutes. The file is encrypted end to end; a wrong guess at the code ends the
@@ -162,6 +165,7 @@ automatically. Precedence: flag > environment variable > saved > default.
 
 | Flag | Env | Default | |
 |------|-----|---------|---|
+| `--name` | `SERVER_NAME` | short hostname | server name; client configs are `<name>.<client>.conf` |
 | `--subnet` | `WG_SUBNET` | `10.8.0.0/24` | VPN network; server is `.1` |
 | `--port` | `WG_PORT` | `51820` | UDP listen port |
 | `--mtu` | `WG_MTU` | `1420` direct, `1280` warp | tunnel MTU for server and clients |
@@ -209,7 +213,7 @@ IPv4 only, so apps fall back to it).
 | `/etc/wireguard/server.key`, `server.pub` | server keypair |
 | `/etc/wireguard/clients.db` | `name address public-key allowed-ips`, no private keys |
 | `/etc/wireguard/psk/<name>.psk` | per-client preshared keys |
-| `/root/clients/<name>.conf` | client configs (the only copy of each client's private key) |
+| `/root/clients/<server>.<name>.conf` | client configs (the only copy of each client's private key) |
 | `/etc/wireguard/wg-tools.state` | saved settings, recorded default route |
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1` |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` (warp mode) |
@@ -223,7 +227,7 @@ Two files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
 
 | Template | Becomes |
 |----------|---------|
-| `client.conf.tmpl` | each `/root/clients/<name>.conf` |
+| `client.conf.tmpl` | each `/root/clients/<server>.<name>.conf` |
 | `wg-quick-after-warp.conf.tmpl` | the systemd drop-in that starts `wg0` after `warp` (warp mode) |
 
 Edit them to change what every new client gets (e.g. `PersistentKeepalive`).
