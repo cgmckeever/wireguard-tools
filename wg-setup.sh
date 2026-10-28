@@ -51,6 +51,7 @@ Options:
 Config (flag / environment variable; saved by direct/warp for later runs):
   --name         SERVER_NAME          $SERVER_NAME  (client configs: <name>.<client>.conf)
   --subnet       WG_SUBNET            $WG_SUBNET
+  --subnet6      WG_SUBNET6           ${WG_SUBNET6:-<random fd::/64 at setup>}  (client IPv6; "off" disables)
   --port         WG_PORT              $WG_PORT
   --mtu          WG_MTU               (default 1420 for direct, 1280 for warp)
   --warp-mtu     WARP_MTU             $WARP_MTU
@@ -152,15 +153,15 @@ register_warp() {
     fi
 }
 
-# Render warp.conf from the wgcf profile: Table = off, our MTU, no DNS, no
-# IPv6 entries without IPv6, IPv4 endpoint on IPv4-only hosts, keepalive, and
-# loose rp_filter (strict would drop WARP's replies), and RT_TABLE's default
-# route (it goes when warp goes down; see lib/common.sh).
+# Render warp.conf from the wgcf profile: Table = off, our MTU, no DNS,
+# WARP's IPv6 address kept only when client IPv6 goes through it, IPv4
+# endpoint on IPv4-only hosts, keepalive, loose rp_filter (strict would drop
+# WARP's replies), and RT_TABLE's default route(s) (they go when warp goes
+# down; see lib/common.sh).
 render_warp_conf() {
-    local profile="$1" v6=0 ep host port ip4
-    if has_ipv6; then v6=1; fi
+    local profile="$1" v6="$IPV6" ep host port ip4 routes
     ep=$(awk '/^[[:space:]]*Endpoint[[:space:]]*=/ { sub(/^[^=]*=[[:space:]]*/, ""); print; exit }' "$profile")
-    if [ "$v6" -eq 0 ] && [ -n "$ep" ]; then
+    if ! has_ipv6 && [ -n "$ep" ]; then
         host="${ep%:*}"
         port="${ep##*:}"
         if ! [[ $host =~ ^[0-9.]+$ ]]; then
@@ -168,7 +169,8 @@ render_warp_conf() {
             if [ -n "$ip4" ]; then ep="$ip4:$port"; else warn "could not resolve $host to IPv4; keeping it"; fi
         fi
     fi
-    awk -v v6="$v6" -v mtu="$WARP_MTU" -v ep="$ep" -v marker="$MARKER" -v route="$(warp_route)" '
+    routes=$(warp_route | paste -sd'|' -)
+    awk -v v6="$v6" -v mtu="$WARP_MTU" -v ep="$ep" -v marker="$MARKER" -v routes="$routes" '
         function addrs(key, val,   n, i, a, out) {
             n = split(val, a, /[[:space:]]*,[[:space:]]*/)
             out = ""
@@ -182,7 +184,7 @@ render_warp_conf() {
         /^[[:space:]]*\[Interface\]/ {
             print "[Interface]"; print "MTU = " mtu; print "Table = off"
             print "PostUp = sysctl -q -w net.ipv4.conf.%i.rp_filter=2"
-            print "PostUp = " route
+            n = split(routes, r, "|"); for (i = 1; i <= n; i++) print "PostUp = " r[i]
             sec = "i"; next
         }
         /^[[:space:]]*\[Peer\]/ { print ""; print "[Peer]"; sec = "p"; next }
@@ -218,6 +220,7 @@ cmd_warp() {
     take_lock
     # Refuse a breaking change before saving config or touching WARP.
     check_server_change
+    ensure_subnet6
     # Create the WARP account folder first, so account files registered on
     # another machine can be copied in even if this run fails later.
     if [ "$DRY_RUN" -eq 0 ]; then install -d -m 700 "$WGCF_DIR"; fi
@@ -288,17 +291,46 @@ orig_forward() {
     echo "${v:-$(sysctl -n net.ipv4.ip_forward)}"
 }
 
-# Persist and apply net.ipv4.ip_forward=1.
-write_sysctl() {
-    if [ ! -f "$SYSCTL_FILE" ] || [ "$(sysctl -n net.ipv4.ip_forward)" != 1 ]; then
-        step "Enable IPv4 forwarding ($SYSCTL_FILE)" "$PROG rollback (restores ip_forward=$(orig_forward))"
-        confirm "Enable IPv4 forwarding?"
+# The forwarding sysctls to persist, as "key = value" lines. With IPv6
+# forwarding on, a host that gets its own IPv6 from router advertisements
+# would stop accepting them (and lose its IPv6 route) unless accept_ra is 2.
+sysctl_lines() {
+    local pub
+    echo "net.ipv4.ip_forward = 1"
+    [ "$IPV6" -eq 1 ] || return 0
+    echo "net.ipv6.conf.all.forwarding = 1"
+    pub=$(pub_if)
+    if has_ipv6 && [ "$(sysctl -n "net.ipv6.conf.$pub.accept_ra" 2>/dev/null)" != 0 ]; then
+        echo "net.ipv6.conf.$pub.accept_ra = 2"
     fi
-    write_file "$SYSCTL_FILE" 644 <<EOF
-$MARKER
-net.ipv4.ip_forward = 1
-EOF
-    if [ "$(sysctl -n net.ipv4.ip_forward)" != 1 ]; then run sysctl -q -w net.ipv4.ip_forward=1; fi
+}
+
+# Persist and apply the forwarding sysctls.
+write_sysctl() {
+    local lines k v pub
+    lines=$(sysctl_lines)
+    pub=$(pub_if)
+    # Remember accept_ra before we change it, so rollback can restore it.
+    if [[ $lines == *accept_ra* ]] && [ -z "$(state_get ORIG_ACCEPT_RA)" ]; then
+        state_set ORIG_ACCEPT_RA "$(sysctl -n "net.ipv6.conf.$pub.accept_ra")"
+    fi
+    if ! { [ -f "$SYSCTL_FILE" ] && [ "$(grep -v '^#' "$SYSCTL_FILE")" = "$lines" ]; }; then
+        step "Enable forwarding ($SYSCTL_FILE: ${lines//$'\n'/; })" "$PROG rollback (restores ip_forward=$(orig_forward))"
+        confirm "Enable forwarding?"
+    fi
+    write_file "$SYSCTL_FILE" 644 < <(echo "$MARKER"; echo "$lines")
+    while IFS='=' read -r k v; do
+        k="${k// /}"; v="${v// /}"
+        if [ "$(sysctl -n "$k")" != "$v" ]; then run sysctl -q -w "$k=$v"; fi
+    done <<<"$lines"
+}
+
+# Pick the client IPv6 /64 once (saved by save_config).
+ensure_subnet6() {
+    if [ -z "$WG_SUBNET6" ]; then
+        WG_SUBNET6=$(random_subnet6)
+        finalize_config
+    fi
 }
 
 # warp mode: order wg0 after warp at boot and stop it with warp.
@@ -310,14 +342,16 @@ write_dropin() {
 }
 
 # Keep every client config named <server>.<client>.conf (renaming ones from an
-# older server name, or from before server names) and pointed at the current
-# endpoint and port. Keys are unchanged, so only the configs need re-sending.
+# older server name, or from before server names), pointed at the current
+# endpoint and port, and with its current addresses (IPv6 on or off). Keys are
+# unchanged, so only the configs need re-sending.
 sync_client_configs() {
-    local want="$ENDPOINT:$WG_PORT" conf src old name _ stale=()
+    local want="$ENDPOINT:$WG_PORT" conf src old name ip _ addr stale=()
     # Configs are found via clients.db, so editing the template can't hide one.
-    while read -r name _; do
+    while read -r name ip _; do
         conf=$(client_conf "$name")
         src="$conf"
+        addr=$(client_addrs "$ip" | sed 's/,/, /')
         if [ ! -f "$conf" ]; then
             for old in ${SAVED_SERVER_NAME:+"$CLIENT_DIR/$SAVED_SERVER_NAME.$name.conf"} "$CLIENT_DIR/$name.conf"; do
                 if [ -f "$old" ]; then src="$old"; break; fi
@@ -328,8 +362,8 @@ sync_client_configs() {
             if [ "$DRY_RUN" -eq 0 ]; then src="$conf"; fi
             stale+=("$name")
         fi
-        grep -qxF "Endpoint = $want" "$src" && continue
-        write_file "$conf" 600 < <(sed "s|^Endpoint = .*|Endpoint = $want|" "$src")
+        grep -qxF "Endpoint = $want" "$src" && grep -qxF "Address = $addr" "$src" && continue
+        write_file "$conf" 600 < <(sed -e "s|^Endpoint = .*|Endpoint = $want|" -e "s|^Address = .*|Address = $addr|" "$src")
         [[ " ${stale[*]} " == *" $name "* ]] || stale+=("$name")
     done < <(db_entries)
     if [ ${#stale[@]} -gt 0 ]; then
@@ -379,6 +413,7 @@ setup_server() {
         if_exists "$WARP_IF" || [ "$DRY_RUN" -eq 1 ] || die "$WARP_IF is down; check '$PROG status', then re-run '$PROG warp'"
     fi
     check_server_change
+    ensure_subnet6
     save_config
     record_baseline
     log "WireGuard server ($EXIT mode: client traffic leaves via $(out_if))"
@@ -404,7 +439,7 @@ setup_server() {
 # --- status ---
 
 cmd_status() {
-    local ifc unit active enabled t c r
+    local ifc unit active enabled x t c r f
     require_mode
     log "Mode: $EXIT (client traffic leaves via $(out_if))"
     log "Interfaces"
@@ -432,15 +467,22 @@ cmd_status() {
     log "Routes"
     info "main default: $(default_route)  (recorded: $(state_get DEFAULT_ROUTE))"
     if [ "$EXIT" = warp ]; then
-        ip rule show | grep -F "lookup $RT_TABLE" | sed 's/^/    rule: /' || true
-        ip route show table "$RT_TABLE" 2>/dev/null | sed "s/^/    table $RT_TABLE: /" || true
+        while IFS= read -r f; do
+            $f rule show | grep -F "lookup $RT_TABLE" | sed "s/^/    $f rule: /" || true
+            $f route show table "$RT_TABLE" 2>/dev/null | sed "s/^/    $f table $RT_TABLE: /" || true
+        done < <(ip_families)
     fi
     log "Rules"
-    while IFS='|' read -r t c r; do
+    while IFS='|' read -r x t c r; do
         # shellcheck disable=SC2086  # $r is a rule: split into iptables args
-        if iptables -t "$t" -C "$c" $r 2>/dev/null; then info "present  -t $t $c $r"; else info "missing  -t $t $c $r"; fi
+        if $x -t "$t" -C "$c" $r 2>/dev/null; then info "present  $x -t $t $c $r"; else info "missing  $x -t $t $c $r"; fi
     done < <(ipt_rules)
     info "ip_forward = $(sysctl -n net.ipv4.ip_forward)"
+    if [ "$IPV6" -eq 1 ]; then
+        info "IPv6: clients in $WG_SUBNET6, ipv6 forwarding = $(sysctl -n net.ipv6.conf.all.forwarding)"
+    else
+        info "IPv6: off${WG_SUBNET6:+ ($( [ "$WG_SUBNET6" = off ] && echo disabled || echo "no IPv6 way out in $EXIT mode"))}"
+    fi
 }
 
 # --- test ---
@@ -479,20 +521,32 @@ t_default_route() {
 }
 t_listen() { [ "$(wg show "$WG_IF" listen-port 2>/dev/null)" = "$WG_PORT" ]; }
 t_forward() { [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ]; }
-t_ip_rule() { [ "$(ip rule show | grep -cF "from $WG_SUBNET lookup $RT_TABLE")" -eq 1 ]; }
+t_forward6() { [ "$(sysctl -n net.ipv6.conf.all.forwarding)" = 1 ]; }
+t_warp6_on() {
+    local out
+    out=$(curl -6 -fsS --max-time 10 --interface "$WARP_IF" "https://[2606:4700:4700::1111]/cdn-cgi/trace" 2>/dev/null || true)
+    [[ $out == *$'\nwarp=on'* || $out == *$'\nwarp=plus'* ]]
+}
+# ip rule / table checks for family $1 ("ip" or "ip -6").
+t_ip_rule() {
+    local net="$WG_SUBNET"
+    if [ "$1" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+    [ "$($1 rule show | grep -cF "from $net lookup $RT_TABLE")" -eq 1 ]
+}
 t_table() {
-    local r
-    r=$(ip route show table "$RT_TABLE" 2>/dev/null || true)
+    local r net="$WG_SUBNET"
+    if [ "$1" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+    r=$($1 route show table "$RT_TABLE" 2>/dev/null || true)
     grep -qE "^default dev $WARP_IF( |$)" <<<"$r" \
         && grep -qE "^blackhole default( |$)" <<<"$r" \
-        && grep -qE "^${WG_SUBNET//./\\.} dev $WG_IF( |$)" <<<"$r"
+        && grep -qE "^${net//./\\.} dev $WG_IF( |$)" <<<"$r"
 }
-# Exactly one copy of an iptables rule ("table|chain|rule"), via iptables -S.
+# Exactly one copy of a firewall rule ("command|table|chain|rule"), via -S.
 t_ipt_once() {
-    local t c r re
-    IFS='|' read -r t c r <<<"$1"
+    local x t c r re
+    IFS='|' read -r x t c r <<<"$1"
     re=$(sed -E 's/\./\\./g; s/-p (tcp|udp) /-p \1 (-m \1 )?/' <<<"-A $c $r")
-    [ "$(iptables -t "$t" -S "$c" 2>/dev/null | grep -cE "^${re}\$")" -eq 1 ]
+    [ "$($x -t "$t" -S "$c" 2>/dev/null | grep -cE "^${re}\$")" -eq 1 ]
 }
 t_enabled() {
     systemctl is-enabled -q "wg-quick@$WG_IF" || return 1
@@ -508,6 +562,7 @@ run_tests() {
     local rule
     if [ "$EXIT" = warp ]; then
         check "$WARP_IF: curl --interface $WARP_IF shows warp=on" t_warp_on
+        if [ "$IPV6" -eq 1 ]; then check "$WARP_IF: IPv6 through $WARP_IF shows warp=on" t_warp6_on; fi
         check "$WARP_IF: handshake within the last 3 minutes" t_warp_handshake
         check "server's own traffic is not tunneled (plain curl shows warp=off)" t_untunneled
     fi
@@ -519,12 +574,18 @@ run_tests() {
     fi
     check "$WG_IF listening on udp/$WG_PORT" t_listen
     check "net.ipv4.ip_forward = 1" t_forward
+    if [ "$IPV6" -eq 1 ]; then check "net.ipv6.conf.all.forwarding = 1" t_forward6; fi
     if [ "$EXIT" = warp ]; then
-        check "ip rule: from $WG_SUBNET lookup $RT_TABLE (exactly once)" t_ip_rule
-        check "table $RT_TABLE: default via $WARP_IF, blackhole fallback, $WG_SUBNET via $WG_IF" t_table
+        local f net
+        while IFS= read -r f; do
+            net="$WG_SUBNET"
+            if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+            check "$f rule: from $net lookup $RT_TABLE (exactly once)" t_ip_rule "$f"
+            check "$f table $RT_TABLE: default via $WARP_IF, blackhole fallback, $net via $WG_IF" t_table "$f"
+        done < <(ip_families)
     fi
     while IFS= read -r rule; do
-        check "iptables exactly once: ${rule//|/ }" t_ipt_once "$rule"
+        check "exactly once: ${rule//|/ }" t_ipt_once "$rule"
     done < <(ipt_rules)
     check "wg-quick units enabled at boot" t_enabled
     if [ "$EXIT" = warp ]; then
@@ -606,7 +667,7 @@ cmd_restore() {
         info "[dry-run] would then run: $PROG $mode"
         return 0
     fi
-    for k in DEFAULT_ROUTE PUB_IF ORIG_IP_FORWARD UFW; do state_unset "$k"; done
+    for k in DEFAULT_ROUTE PUB_IF ORIG_IP_FORWARD ORIG_IP6_FORWARD ORIG_ACCEPT_RA UFW; do state_unset "$k"; done
     ep=$(state_get ENDPOINT)
     if [[ $ep =~ ^\[?[0-9a-fA-F:.]+\]?$ ]]; then state_unset ENDPOINT; fi
     if [ -n "$keep_map" ]; then install -m 600 "$keep_map" "$BACKUP_MAP"; else rm -f "$BACKUP_MAP"; fi
@@ -653,8 +714,11 @@ restore_original() {
 
 cmd_rollback() {
     take_lock
-    local orig_fwd f out
+    local orig_fwd orig_fwd6 orig_ra f out pub
     orig_fwd=$(state_get ORIG_IP_FORWARD)
+    orig_fwd6=$(state_get ORIG_IP6_FORWARD)
+    orig_ra=$(state_get ORIG_ACCEPT_RA)
+    pub=$(pub_if)
     out=$(out_if)
     local ifs="$WG_IF"
     if [ "$EXIT" = warp ]; then ifs="$WG_IF and $WARP_IF"; fi
@@ -685,6 +749,8 @@ cmd_rollback() {
     run systemctl daemon-reload
     restore_original "$SYSCTL_FILE" 1
     if [ -n "$orig_fwd" ]; then run sysctl -q -w "net.ipv4.ip_forward=$orig_fwd"; fi
+    if [ -n "$orig_fwd6" ]; then run sysctl -q -w "net.ipv6.conf.all.forwarding=$orig_fwd6"; fi
+    if [ -n "$orig_ra" ]; then run sysctl -q -w "net.ipv6.conf.$pub.accept_ra=$orig_ra" || true; fi
     restore_original "$WG_CONF" "$PURGE"
     restore_original "$WARP_CONF" "$PURGE"
 

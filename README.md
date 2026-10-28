@@ -79,7 +79,7 @@ after a switch. Changing `--name` renames the client configs; re-send them.
 
 ```bash
 ./wg-client.sh add laptop                            # full tunnel (default)
-./wg-client.sh add printer --allowed-ips 10.8.0.0/24 # split tunnel: VPN network only
+./wg-client.sh add printer --allowed-ips "10.8.0.0/24, fdXX:XXXX:XXXX::/64" # split tunnel: VPN network only
 ./wg-client.sh list                                  # address, last seen, traffic, allowed IPs
 ./wg-client.sh show laptop                           # config with keys redacted
 ./wg-client.sh share laptop                          # send the config via magic-wormhole (one-time code)
@@ -167,6 +167,7 @@ automatically. Precedence: flag > environment variable > saved > default.
 |------|-----|---------|---|
 | `--name` | `SERVER_NAME` | short hostname | server name; client configs are `<name>.<client>.conf` |
 | `--subnet` | `WG_SUBNET` | `10.8.0.0/24` | VPN network; server is `.1` |
+| `--subnet6` | `WG_SUBNET6` | random `fd…::/64` | clients' IPv6 network; `off` disables IPv6 |
 | `--port` | `WG_PORT` | `51820` | UDP listen port |
 | `--mtu` | `WG_MTU` | `1420` direct, `1280` warp | tunnel MTU for server and clients |
 | `--warp-mtu` | `WARP_MTU` | `1280` | |
@@ -199,9 +200,18 @@ so restarting WARP on its own doesn't cut clients off.
 **Both.** All routing/NAT/firewall rules live in `wg0.conf`'s
 `PostUp`/`PostDown`, generated from one list so `PostDown` and `rollback` undo
 exactly what `PostUp` did. Forward rules are inserted at the top so ufw/Docker
-can't block them, and TCP MSS is clamped to avoid MTU stalls. Clients'
-`AllowedIPs` include `::/0` so their IPv6 can't bypass the tunnel (clients get
-IPv4 only, so apps fall back to it).
+can't block them, and TCP MSS is clamped to avoid MTU stalls.
+
+**IPv6.** Each client also gets an IPv6 address in a private `fd…::/64`
+(picked at random once at setup and saved; `--subnet6` sets your own), with the
+same host number as its IPv4 address (`10.8.0.5` → `fd…::5`). Its IPv6 is
+NATed out the same way as IPv4: in WARP mode through WARP's own IPv6, which
+works even on an IPv4-only server, with the same table 100 route and blackhole
+fallback; in direct mode out the public interface, if the server has IPv6
+(otherwise clients get IPv4 only). `wg-setup.sh status` shows which. Clients'
+`AllowedIPs` include `::/0` either way, so their IPv6 can't bypass the tunnel.
+Turning IPv6 on for an existing server (re-run setup) adds the address to
+every client config; re-send them. `--subnet6 off` disables it.
 
 ### Files
 

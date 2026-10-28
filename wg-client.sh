@@ -33,7 +33,7 @@ Commands:
 Options:
   --allowed-ips <cidrs>  With add/rotate: what the client sends through the VPN.
                          Default (set at server setup): $CLIENT_ALLOWED_IPS
-                         e.g. "$WG_SUBNET" for VPN-network-only (split tunnel)
+                         e.g. "$WG_SUBNET$( [ "$IPV6" -eq 1 ] && echo ", $WG_SUBNET6")" for VPN-network-only (split tunnel)
   --endpoint <host>      With add/rotate: override the server address in the config
   --qr                   With add/rotate/show: print the config as a QR code
                          (it contains the client's private key)
@@ -132,7 +132,7 @@ issue_client() {
     psk=$(wg genpsk)
     # Render first: a template error must stop us before anything is written.
     content=$(render_template client.conf.tmpl \
-        NAME="$name" SERVER_NAME="$SERVER_NAME" PRIVATE_KEY="$priv" ADDRESS="$ip" DNS="$WG_DNS" MTU="$WG_MTU" \
+        NAME="$name" SERVER_NAME="$SERVER_NAME" PRIVATE_KEY="$priv" ADDRESS="$(client_addrs "$ip" | sed 's/,/, /')" DNS="$WG_DNS" MTU="$WG_MTU" \
         SERVER_PUBLIC_KEY="$(cat "$SERVER_PUB")" PRESHARED_KEY="$psk" \
         ENDPOINT="$ENDPOINT:$WG_PORT" ALLOWED_IPS="${allowed//,/, }")
     write_file "$PSK_DIR/$name.psk" 600 <<<"$psk"
@@ -144,7 +144,7 @@ issue_client() {
     write_wg_conf
     if if_exists "$WG_IF"; then
         if [ -n "$old_pub" ] && [ "$old_pub" != "$pub" ]; then wg set "$WG_IF" peer "$old_pub" remove; fi
-        wg set "$WG_IF" peer "$pub" preshared-key "$PSK_DIR/$name.psk" allowed-ips "$ip/32"
+        wg set "$WG_IF" peer "$pub" preshared-key "$PSK_DIR/$name.psk" allowed-ips "$(client_addrs "$ip")"
         info "peer live on $WG_IF (other clients unaffected)"
     else
         warn "$WG_IF is not up; the peer is in $WG_CONF and loads when it starts"

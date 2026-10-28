@@ -10,6 +10,11 @@
 #           clients fail closed (no leak via the VPS's own IP) if warp drops.
 #   direct  client traffic is NATed out the server's public interface.
 #
+# IPv6: clients also get an address in WG_SUBNET6 (a ULA /64, random by
+# default) and their IPv6 is NATed out the same way: through WARP's own IPv6
+# in warp mode (which works on IPv4-only hosts), or out the public interface
+# in direct mode when the host has IPv6. WG_SUBNET6=off disables it.
+#
 # Every routing/NAT rule lives in wg0.conf PostUp/PostDown, generated from one
 # list (hook_cmds), so PostDown and rollback exactly invert PostUp. The one
 # exception: warp.conf's PostUp also re-adds RT_TABLE's default route
@@ -20,10 +25,11 @@
 # Saved in the state file by `wg-setup.sh direct/warp`, so later runs and
 # wg-client.sh use the server's real settings.
 # Precedence: flag > environment variable > saved value > default.
-CONFIG_KEYS=(EXIT SERVER_NAME WG_SUBNET WG_PORT WG_MTU WARP_MTU WG_DNS WG_IF WARP_IF RT_TABLE CLIENT_ALLOWED_IPS)
+CONFIG_KEYS=(EXIT SERVER_NAME WG_SUBNET WG_SUBNET6 WG_PORT WG_MTU WARP_MTU WG_DNS WG_IF WARP_IF RT_TABLE CLIENT_ALLOWED_IPS)
 EXIT=""                 # set by wg-setup.sh direct/warp, else the saved mode
 SERVER_NAME="${SERVER_NAME:-}"
 WG_SUBNET="${WG_SUBNET:-}"
+WG_SUBNET6="${WG_SUBNET6:-}"   # ULA /64, or "off"; setup picks a random one
 WG_PORT="${WG_PORT:-}"
 WG_MTU="${WG_MTU:-}"
 WARP_MTU="${WARP_MTU:-}"
@@ -126,6 +132,7 @@ set_opt() {
     case "$1" in
         --name)        SERVER_NAME="$2" ;;
         --subnet)      WG_SUBNET="$2" ;;
+        --subnet6)     WG_SUBNET6="$2" ;;
         --port)        WG_PORT="$2" ;;
         --mtu)         WG_MTU="$2" ;;
         --warp-mtu)    WARP_MTU="$2" ;;
@@ -150,7 +157,7 @@ parse_args() {
             --qr)      QR=1 ;;
             -h|--help) ARGS=(help); return 0 ;;
             --*=*)     set_opt "${1%%=*}" "${1#*=}" ;;
-            --name|--subnet|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips)
+            --name|--subnet|--subnet6|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips)
                 [ $# -ge 2 ] || die "$1 needs a value"
                 set_opt "$1" "$2"
                 shift
@@ -217,6 +224,33 @@ int2ip() {
 # True if we can prompt on the terminal.
 have_tty() { { : </dev/tty; } 2>/dev/null; }
 
+# Lowercase a "<groups>::/64" prefix and drop leading zeros, as ip(8) prints it.
+canon_subnet6() {
+    local p="${1,,}" g out=""
+    [[ $p =~ ^([0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4}::/64$ ]] || return 1
+    p="${p%::/64}"
+    for g in ${p//:/ }; do
+        g=$(( 16#$g ))
+        out="$out${out:+:}$(printf '%x' "$g")"
+    done
+    echo "$out::/64"
+}
+
+# A new random ULA /64 (RFC 4193): fdXX:XXXX:XXXX::/64.
+random_subnet6() {
+    local h
+    h=$(od -An -N5 -tx1 /dev/urandom | tr -d ' \n')
+    canon_subnet6 "fd${h:0:2}:${h:2:4}:${h:6:4}::/64"
+}
+
+# The client IPv6 matching an IPv4 address: same host number in WG_SUBNET6.
+ip6_of() { echo "$P6::$(printf '%x' $(( $(ip2int "$1") - NET_INT )))"; }
+
+# A client's addresses as "ip/32" or "ip/32,ip6/128" (comma list, no spaces).
+client_addrs() {
+    if [ "$IPV6" -eq 1 ]; then echo "$1/32,$(ip6_of "$1")/128"; else echo "$1/32"; fi
+}
+
 # True if $1 is an integer in [$2, $3].
 in_range() { [[ $1 =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
 
@@ -249,6 +283,19 @@ finalize_config() {
     SERVER_IP=$(int2ip $(( NET_INT + 1 )))
     FIRST_HOST=$(( NET_INT + 2 ))
     LAST_HOST=$(( NET_INT + (1 << (32 - PFX)) - 2 ))
+
+    # IPv6 is on when a /64 is set (setup picks one) and there's a way out:
+    # WARP's IPv6 (warp), or the host's own (direct).
+    IPV6=0
+    case "$WG_SUBNET6" in
+        ""|off) ;;
+        *)
+            WG_SUBNET6=$(canon_subnet6 "$WG_SUBNET6") || die "bad --subnet6 (want a /64 like fd12:3456:789a::/64, or off): $WG_SUBNET6"
+            P6="${WG_SUBNET6%::/64}"
+            if [ "$EXIT" = warp ] && kernel_ipv6; then IPV6=1
+            elif [ "$EXIT" = direct ] && has_ipv6; then IPV6=1; fi
+            ;;
+    esac
 
     WARP_CONF="$WG_DIR/$WARP_IF.conf"
     WG_CONF="$WG_DIR/$WG_IF.conf"
@@ -417,6 +464,7 @@ route_key() {
 route_dev() { route_key "$1" | awk '{ print $4 }'; }
 
 has_ipv6() { [ -n "$(ip -6 route show default 2>/dev/null)" ]; }
+kernel_ipv6() { [ -f /proc/net/if_inet6 ] && [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null)" = 0 ]; }
 if_exists() { ip link show dev "$1" >/dev/null 2>&1; }
 
 # Fetch one field (warp=, ip=) from Cloudflare's trace; extra args go to curl.
@@ -440,6 +488,10 @@ record_baseline() {
         state_set DEFAULT_ROUTE "$route"
         state_set PUB_IF "$(route_dev "$route")"
         state_set ORIG_IP_FORWARD "$(sysctl -n net.ipv4.ip_forward)"
+    fi
+    # Recorded separately: servers set up before IPv6 support lack it.
+    if [ -z "$(state_get ORIG_IP6_FORWARD)" ] && kernel_ipv6; then
+        state_set ORIG_IP6_FORWARD "$(sysctl -n net.ipv6.conf.all.forwarding)"
     fi
     info "default route: $route (public interface $(route_dev "$route"))"
 }
@@ -485,47 +537,76 @@ resolve_endpoint() {
 
 # --- Routing / NAT rules (single source for PostUp, PostDown, rollback, test) ---
 
-rule_spec() { echo "from $WG_SUBNET lookup $RT_TABLE priority $RULE_PRIO"; }
+# Policy rule for "ip" (IPv4) or "ip -6" with that family's subnet.
+rule_spec() {
+    local net="$WG_SUBNET"
+    if [ "$1" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+    echo "from $net lookup $RT_TABLE priority $RULE_PRIO"
+}
 
-# RT_TABLE's default route out through warp (in wg0's PostUp and warp.conf's).
-warp_route() { echo "ip route replace default dev $WARP_IF table $RT_TABLE"; }
+# "ip", plus "ip -6" when IPv6 is on.
+ip_families() {
+    echo "ip"
+    if [ "$IPV6" -eq 1 ]; then echo "ip -6"; fi
+}
 
-# iptables rules as "table|chain|rule". Inserted (-I) so ufw/Docker DROP
-# policies can't shadow them.
+# RT_TABLE's default route(s) out through warp (in wg0's PostUp and warp.conf's).
+warp_route() {
+    local f
+    while IFS= read -r f; do echo "$f route replace default dev $WARP_IF table $RT_TABLE"; done < <(ip_families)
+}
+
+# Firewall rules as "command|table|chain|rule". Inserted (-I) so ufw/Docker
+# DROP policies can't shadow them.
 ipt_rules() {
-    local out
+    local out cmd net
     out=$(out_if)
-    printf '%s\n' \
-        "nat|POSTROUTING|-s $WG_SUBNET -o $out -j MASQUERADE" \
-        "filter|FORWARD|-i $WG_IF -o $out -j ACCEPT" \
-        "filter|FORWARD|-i $out -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" \
-        "mangle|FORWARD|-o $out -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu" \
-        "filter|INPUT|-p udp --dport $WG_PORT -j ACCEPT"
+    for cmd in iptables ip6tables; do
+        net="$WG_SUBNET"
+        if [ "$cmd" = ip6tables ]; then
+            [ "$IPV6" -eq 1 ] || continue
+            net="$WG_SUBNET6"
+        fi
+        printf '%s\n' \
+            "$cmd|nat|POSTROUTING|-s $net -o $out -j MASQUERADE" \
+            "$cmd|filter|FORWARD|-i $WG_IF -o $out -j ACCEPT" \
+            "$cmd|filter|FORWARD|-i $out -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" \
+            "$cmd|mangle|FORWARD|-o $out -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+    done
+    echo "iptables|filter|INPUT|-p udp --dport $WG_PORT -j ACCEPT"
 }
 
 # Shell lines for wg0's PostUp (up) or PostDown (down). Each is idempotent;
 # down is the exact inverse of up, in reverse order. Policy routing is warp-only.
 hook_cmds() {
-    local t c r
+    local x t c r f net
     if [ "$1" = up ]; then
         if [ "$EXIT" = warp ]; then
-            echo "while ip rule del $(rule_spec) 2>/dev/null; do :; done; ip rule add $(rule_spec)"
-            echo "ip route replace $WG_SUBNET dev $WG_IF table $RT_TABLE"
-            warp_route
-            echo "ip route replace blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE"
+            while IFS= read -r f; do
+                net="$WG_SUBNET"
+                if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+                echo "while $f rule del $(rule_spec "$f") 2>/dev/null; do :; done; $f rule add $(rule_spec "$f")"
+                echo "$f route replace $net dev $WG_IF table $RT_TABLE"
+                echo "$f route replace default dev $WARP_IF table $RT_TABLE"
+                echo "$f route replace blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE"
+            done < <(ip_families)
         fi
-        while IFS='|' read -r t c r; do
-            echo "iptables -t $t -C $c $r 2>/dev/null || iptables -t $t -I $c $r"
+        while IFS='|' read -r x t c r; do
+            echo "$x -t $t -C $c $r 2>/dev/null || $x -t $t -I $c $r"
         done < <(ipt_rules)
     else
-        while IFS='|' read -r t c r; do
-            echo "while iptables -t $t -C $c $r 2>/dev/null; do iptables -t $t -D $c $r || break; done"
+        while IFS='|' read -r x t c r; do
+            echo "while $x -t $t -C $c $r 2>/dev/null; do $x -t $t -D $c $r || break; done"
         done < <(ipt_rules | tac)
         if [ "$EXIT" = warp ]; then
-            echo "ip route del blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE 2>/dev/null || true"
-            echo "ip route del default dev $WARP_IF table $RT_TABLE 2>/dev/null || true"
-            echo "ip route del $WG_SUBNET dev $WG_IF table $RT_TABLE 2>/dev/null || true"
-            echo "while ip rule del $(rule_spec) 2>/dev/null; do :; done"
+            while IFS= read -r f; do
+                net="$WG_SUBNET"
+                if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+                echo "$f route del blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE 2>/dev/null || true"
+                echo "$f route del default dev $WARP_IF table $RT_TABLE 2>/dev/null || true"
+                echo "$f route del $net dev $WG_IF table $RT_TABLE 2>/dev/null || true"
+                echo "while $f rule del $(rule_spec "$f") 2>/dev/null; do :; done"
+            done < <(ip_families | tac)
         fi
     fi
 }
@@ -567,7 +648,7 @@ render_wg_conf() {
     cat <<EOF
 $MARKER ($EXIT mode); peers are rebuilt from $CLIENT_DB (use wg-client.sh)
 [Interface]
-Address = $SERVER_IP/$PFX
+Address = $SERVER_IP/$PFX$(if [ "$IPV6" -eq 1 ]; then echo ", $P6::1/64"; fi)
 ListenPort = $WG_PORT
 MTU = $WG_MTU
 PostUp = wg set %i private-key $SERVER_KEY
@@ -578,7 +659,7 @@ EOF
         printf '\n[Peer]\n# %s\nPublicKey = %s\n' "$name" "$pub"
         psk="$PSK_DIR/$name.psk"
         if [ -s "$psk" ]; then printf 'PresharedKey = %s\n' "$(cat "$psk")"; fi
-        printf 'AllowedIPs = %s/32\n' "$ip"
+        printf 'AllowedIPs = %s\n' "$(client_addrs "$ip" | sed 's/,/, /')"
     done < <(db_entries)
 }
 
