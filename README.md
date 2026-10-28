@@ -177,9 +177,32 @@ Secrets are mode 600 in 700 directories. Every change leaves a timestamped
 ## Troubleshooting
 
 - **Clients can't connect:** the provider firewall usually still blocks UDP 51820.
-- **`wgcf register` fails:** WARP refuses some datacenter IP ranges; try another provider/region or `--exit direct`.
+- **`wgcf register` fails:** WARP may refuse registrations from some server IPs.
+  Retry later, or register on another machine and copy the account over
+  ([below](#register-warp-on-another-machine)). If the WARP tests still fail
+  (no handshake), the provider is blocking WARP's traffic: use `--exit direct`.
 - **Some sites hang in WARP mode:** lower `--mtu` (e.g. 1200), re-run `server`, then `rotate` the clients so they get the new MTU.
 - **Anything else:** `./wg-setup.sh status` and `./wg-setup.sh test`.
+
+### Register WARP on another machine
+
+If `./wg-setup.sh warp` stops with `wgcf register failed`, register the WARP
+account somewhere WARP accepts (your Mac: `brew install wgcf`) and copy it over.
+Registration happens once, and `warp` skips it when the account file exists.
+The failed run already created `/etc/wireguard/wgcf/` for it.
+
+```bash
+# on your Mac
+mkdir -p ~/wgcf-vps && cd ~/wgcf-vps
+wgcf register --accept-tos     # a new WARP device, separate from your Mac's WARP app
+wgcf generate                  # uses the API too, so do it here as well
+scp wgcf-account.toml wgcf-profile.conf root@vps:/etc/wireguard/wgcf/
+ssh root@vps 'chmod 600 /etc/wireguard/wgcf/*'
+cd ~ && rm -rf ~/wgcf-vps      # local copies hold the device's private key
+```
+
+Then re-run `./wg-setup.sh warp` on the server; it uses the copied account and
+carries on. Use these files on that server only: they are one WARP device.
 
 ## Upgrading from the old scripts
 

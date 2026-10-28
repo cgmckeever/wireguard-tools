@@ -128,9 +128,10 @@ register_warp() {
     else
         step "Register a free WARP account (accepts Cloudflare's WARP terms)" "rm -rf $WGCF_DIR"
         if [ "$DRY_RUN" -eq 0 ]; then
-            install -d -m 700 "$WGCF_DIR"
             ( cd "$WGCF_DIR" && umask 077 && "$WGCF_BIN" register --accept-tos ) >"$log" 2>&1 \
-                || die "wgcf register failed; see $log (some datacenter IPs are refused by WARP)"
+                || die "wgcf register failed; see $log. WARP may refuse registrations from some server IPs:
+       retry later, or register on another machine and copy wgcf-account.toml and
+       wgcf-profile.conf into $WGCF_DIR/, then re-run '$PROG warp' (see README)"
         fi
     fi
     if [ -f "$WGCF_DIR/wgcf-profile.conf" ] && [ "$FORCE" -eq 0 ]; then
@@ -208,6 +209,9 @@ write_warp_conf() {
 cmd_warp() {
     [ "$EXIT" = warp ] || die "--exit direct doesn't use WARP; run '$PROG --exit direct server'"
     take_lock
+    # Create the WARP account folder first, so account files registered on
+    # another machine can be copied in even if this run fails later.
+    if [ "$DRY_RUN" -eq 0 ]; then install -d -m 700 "$WGCF_DIR"; fi
     save_config
     record_baseline
     install_packages
