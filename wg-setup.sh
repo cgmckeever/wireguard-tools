@@ -522,9 +522,16 @@ t_default_route() {
 t_listen() { [ "$(wg show "$WG_IF" listen-port 2>/dev/null)" = "$WG_PORT" ]; }
 t_forward() { [ "$(sysctl -n net.ipv4.ip_forward)" = 1 ]; }
 t_forward6() { [ "$(sysctl -n net.ipv6.conf.all.forwarding)" = 1 ]; }
+# warp has no IPv6 route in the main table (Table = off), and IPv6 won't use
+# an interface without one, so route WARP's own address through RT_TABLE for
+# the length of the check.
 t_warp6_on() {
-    local out
-    out=$(curl -6 -fsS --max-time 10 --interface "$WARP_IF" "https://[2606:4700:4700::1111]/cdn-cgi/trace" 2>/dev/null || true)
+    local src out prio=$(( RULE_PRIO - 1 ))
+    src=$(ip -6 addr show dev "$WARP_IF" scope global | awk '/inet6/ { sub(/\/.*/, "", $2); print $2; exit }')
+    [ -n "$src" ] || return 1
+    ip -6 rule add from "$src" lookup "$RT_TABLE" priority "$prio" 2>/dev/null || true
+    out=$(curl -6 -fsS --max-time 10 --interface "$src" "https://[2606:4700:4700::1111]/cdn-cgi/trace" 2>/dev/null || true)
+    ip -6 rule del from "$src" lookup "$RT_TABLE" priority "$prio" 2>/dev/null || true
     [[ $out == *$'\nwarp=on'* || $out == *$'\nwarp=plus'* ]]
 }
 # ip rule / table checks for family $1 ("ip" or "ip -6").
