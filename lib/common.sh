@@ -28,6 +28,8 @@ WG_IF="${WG_IF:-}"
 WARP_IF="${WARP_IF:-}"
 RT_TABLE="${RT_TABLE:-}"
 CLIENT_ALLOWED_IPS="${CLIENT_ALLOWED_IPS:-}"
+ALLOWED_IPS_GIVEN=0     # 1 if --allowed-ips or CLIENT_ALLOWED_IPS was given
+if [ -n "$CLIENT_ALLOWED_IPS" ]; then ALLOWED_IPS_GIVEN=1; fi
 ENDPOINT="${ENDPOINT:-}"
 WGCF_VERSION="${WGCF_VERSION:-latest}"
 WGCF_SHA256="${WGCF_SHA256:-}"
@@ -126,7 +128,7 @@ set_opt() {
         --wg-if)       WG_IF="$2" ;;
         --warp-if)     WARP_IF="$2" ;;
         --table)       RT_TABLE="$2" ;;
-        --allowed-ips) CLIENT_ALLOWED_IPS="$2" ;;
+        --allowed-ips) CLIENT_ALLOWED_IPS="$2"; ALLOWED_IPS_GIVEN=1 ;;
         *) die "unknown option: $1 (see: $PROG help)" ;;
     esac
 }
@@ -587,6 +589,12 @@ start_unit() {
         systemctl is-active -q "$unit" || warn "$ifc is up but not via $unit (started by hand?)"
     fi
     if ! systemctl is-enabled -q "$unit" 2>/dev/null; then run systemctl enable "$unit"; fi
+    # Taking warp down drops table RT_TABLE's default route. systemd restarts wg0
+    # (rerunning its PostUp) only on `systemctl restart` of warp, so if wg0 stayed
+    # up, put the route back (same line as wg0's PostUp; idempotent).
+    if [ "$ifc" = "$WARP_IF" ] && [ "$EXIT" = warp ] && if_exists "$WG_IF"; then
+        run ip route replace default dev "$WARP_IF" table "$RT_TABLE"
+    fi
 }
 
 # Human-readable age of a handshake timestamp.

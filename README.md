@@ -140,7 +140,7 @@ scp root@old:/root/wg-backups/wireguard-tools.*.tar.gz .      # or: wormhole sen
 allowed IPs), the settings and, in WARP mode, the WARP account (so it doesn't
 need to register again). It then runs the same setup the backup came from
 (`direct` or `warp`). It won't overwrite a server that's already set up
-(`rollback --purge` first, or `--force`).
+(`rollback` or `rollback --purge` first).
 
 The new server records its own default route and public interface, and an IP
 endpoint is re-detected. If the address changed, every client config's
@@ -227,6 +227,8 @@ Two files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
 Edit them to change what every new client gets (e.g. `PersistentKeepalive`).
 Changes apply to clients added or rotated afterwards. Every placeholder must
 stay: a missing value stops the script before anything is written.
+Your edits are local changes to this git checkout: commit them (or
+`git stash` around `git pull`) so updates don't stop on a conflict.
 `wg0.conf` and `warp.conf` are built in code, since their contents depend on
 the mode, the routing rules and the client list.
 

@@ -187,7 +187,7 @@ cmd_rotate() {
     read -r ip old_pub old_allowed <<<"$existing"
     # Keep the client's own AllowedIPs unless --allowed-ips was given.
     allowed=$(allowed_list "$CLIENT_ALLOWED_IPS")
-    if [ "$CLIENT_ALLOWED_IPS" = "$(state_get CLIENT_ALLOWED_IPS)" ] && [ -n "$old_allowed" ]; then
+    if [ "$ALLOWED_IPS_GIVEN" -eq 0 ] && [ -n "$old_allowed" ]; then
         allowed="$old_allowed"
     fi
     resolve_endpoint 0
@@ -211,7 +211,8 @@ cmd_remove() {
     confirm "Remove $name?"
     if if_exists "$WG_IF"; then run wg set "$WG_IF" peer "$pub" remove; fi
     db_put "$name"
-    write_wg_conf
+    # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
+    if [ -n "$SAVED_EXIT" ]; then write_wg_conf; else info "server not set up; $WG_CONF is rebuilt at the next setup"; fi
     # The config, preshared key and their .bak copies all hold this client's secrets.
     run rm -f "$CLIENT_DIR/$name.conf" "$CLIENT_DIR/$name.conf".*.bak "$PSK_DIR/$name.psk" "$PSK_DIR/$name.psk".*.bak
 }

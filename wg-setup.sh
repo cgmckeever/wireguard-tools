@@ -213,6 +213,8 @@ write_warp_conf() {
 
 cmd_warp() {
     take_lock
+    # Refuse a breaking change before saving config or touching WARP.
+    check_server_change
     # Create the WARP account folder first, so account files registered on
     # another machine can be copied in even if this run fails later.
     if [ "$DRY_RUN" -eq 0 ]; then install -d -m 700 "$WGCF_DIR"; fi
@@ -307,14 +309,15 @@ write_dropin() {
 # Point every client config at the current endpoint and port. Keys are
 # unchanged, so only the configs need re-sending.
 sync_client_endpoints() {
-    local want="$ENDPOINT:$WG_PORT" conf stale=()
-    for conf in "$CLIENT_DIR"/*.conf; do
+    local want="$ENDPOINT:$WG_PORT" conf name _ stale=()
+    # Configs are found via clients.db, so editing the template can't hide one.
+    while read -r name _; do
+        conf="$CLIENT_DIR/$name.conf"
         [ -f "$conf" ] || continue
-        grep -q '^# wireguard-tools client' "$conf" || continue
         grep -qxF "Endpoint = $want" "$conf" && continue
         write_file "$conf" 600 < <(sed "s|^Endpoint = .*|Endpoint = $want|" "$conf")
-        stale+=("$(basename "$conf" .conf)")
-    done
+        stale+=("$name")
+    done < <(db_entries)
     if [ ${#stale[@]} -gt 0 ]; then
         warn "server address is now $want; re-send these clients' configs (wg-client.sh share/show --qr): ${stale[*]}"
     fi
@@ -341,16 +344,27 @@ cmd_direct() {
     setup_server
 }
 
+# Refuse to change the subnet under existing clients, or to take over a
+# wg0.conf we didn't create. Must run before save_config records the new values.
+check_server_change() {
+    if [ -n "$SAVED_SUBNET" ] && [ "$SAVED_SUBNET" != "$WG_SUBNET" ] && [ -n "$(db_entries)" ] && [ "$FORCE" -eq 0 ]; then
+        die "clients exist in $SAVED_SUBNET; changing to $WG_SUBNET breaks them (--force, then re-add every client)"
+    fi
+    ensure_managed "$WG_CONF"
+}
+
+# The server must be set up (direct or warp); after rollback no mode is saved.
+require_mode() {
+    [ -n "$SAVED_EXIT" ] || die "not set up (no saved mode); run '$PROG direct' or '$PROG warp'"
+}
+
 # Create or update wg0 for the current mode (called by direct and warp).
 setup_server() {
     if [ "$EXIT" = warp ]; then
         [ -f "$WARP_CONF" ] || [ "$DRY_RUN" -eq 1 ] || die "no $WARP_CONF; the WARP step didn't complete"
         if_exists "$WARP_IF" || [ "$DRY_RUN" -eq 1 ] || die "$WARP_IF is down; check '$PROG status', then re-run '$PROG warp'"
     fi
-    if [ -n "$SAVED_SUBNET" ] && [ "$SAVED_SUBNET" != "$WG_SUBNET" ] && [ -n "$(db_entries)" ] && [ "$FORCE" -eq 0 ]; then
-        die "clients exist in $SAVED_SUBNET; changing to $WG_SUBNET breaks them (--force, then re-add every client)"
-    fi
-    ensure_managed "$WG_CONF"
+    check_server_change
     save_config
     record_baseline
     log "WireGuard server ($EXIT mode: client traffic leaves via $(out_if))"
@@ -377,6 +391,7 @@ setup_server() {
 
 cmd_status() {
     local ifc unit active enabled t c r
+    require_mode
     log "Mode: $EXIT (client traffic leaves via $(out_if))"
     log "Interfaces"
     for ifc in "$WARP_IF" "$WG_IF"; do
@@ -515,6 +530,7 @@ report_tests() {
 }
 
 cmd_test() {
+    require_mode
     log "Tests ($EXIT mode)"
     run_tests all
     report_tests
@@ -529,6 +545,7 @@ cmd_backup() {
         if [ -e "$p" ]; then paths+=("$p"); fi
     done
     [ ${#paths[@]} -gt 0 ] || die "nothing to back up"
+    take_lock   # don't archive mid-change
     out="$dir/wireguard-tools.$(hostname -s).$(date +%Y%m%d-%H%M%S).tar.gz"
     step "Back up ${paths[*]} to $out" "rm $out"
     run install -d -m 700 "$dir"
@@ -552,8 +569,9 @@ cmd_restore() {
     archive=$(readlink -f "$archive")
     members=$(tar -tzf "$archive" 2>/dev/null) || die "$archive is not a readable .tar.gz"
     grep -qx "$STATE" <<<"$members" || die "$archive is not a wireguard-tools backup (no $STATE inside)"
-    if [ -n "$SAVED_EXIT" ] && [ "$FORCE" -eq 0 ]; then
-        die "this server is already set up ($SAVED_EXIT); run '$PROG rollback --purge' first, or use --force to overwrite"
+    # Restoring over a live setup would orphan its rules and lose its rollback record.
+    if [ -n "$SAVED_EXIT" ]; then
+        die "this server is already set up ($SAVED_EXIT); run '$PROG rollback' (or 'rollback --purge') first"
     fi
     mode=$(tar -xzOf "$archive" -P "$STATE" | sed -n 's/^EXIT=//p' | tail -n 1)
     case "$mode" in direct|warp) ;; *) die "backup has no usable mode (EXIT=$mode)" ;; esac
@@ -564,8 +582,11 @@ cmd_restore() {
     step "Restore $what from $archive ($mode mode)" \
         "$PROG rollback --purge"
     confirm "Restore from this backup?"
-    local paths=("$WG_DIR")
+    local paths=("$WG_DIR") keep_map=""
     if grep -q "^$CLIENT_DIR/" <<<"$members"; then paths+=("$CLIENT_DIR"); fi
+    # This server's own backup record (left by an earlier rollback) lists its
+    # original files; keep it over the archive's, which describes the old server.
+    if [ -f "$BACKUP_MAP" ]; then keep_map="$TMPD/backups"; cp -a "$BACKUP_MAP" "$keep_map"; fi
     run tar -xzpf "$archive" -P "${paths[@]}"
     if [ "$DRY_RUN" -eq 1 ]; then
         info "[dry-run] would then run: $PROG $mode"
@@ -574,7 +595,7 @@ cmd_restore() {
     for k in DEFAULT_ROUTE PUB_IF ORIG_IP_FORWARD UFW; do state_unset "$k"; done
     ep=$(state_get ENDPOINT)
     if [[ $ep =~ ^\[?[0-9a-fA-F:.]+\]?$ ]]; then state_unset ENDPOINT; fi
-    rm -f "$BACKUP_MAP"
+    if [ -n "$keep_map" ]; then install -m 600 "$keep_map" "$BACKUP_MAP"; else rm -f "$BACKUP_MAP"; fi
     info "restored; clients: $(db_entries | awk '{ printf "%s ", $1 }')"
     if [ "$mode" = warp ]; then
         warn "the WARP account is now on this server too; don't keep running it on the old one"
@@ -583,15 +604,19 @@ cmd_restore() {
     local flags=()
     if [ "$YES" -eq 1 ]; then flags+=(--yes); fi
     log "Setting up ($mode)"
+    rm -rf "$TMPD"   # exec skips the EXIT trap
     exec "$SELF" "${flags[@]+"${flags[@]}"}" "$mode"
 }
 
 # --- rollback ---
 
+# A file's original backup path from the backup record, or NEW if we created it.
+backup_orig() { awk -F'\t' -v f="$1" '$1 == f { print $2; exit }' "$BACKUP_MAP" 2>/dev/null || true; }
+
 # Restore a file's original backup; files we created are removed if <rm_new> is 1.
 restore_original() {
     local f="$1" rm_new="$2" orig
-    orig=$(awk -F'\t' -v f="$f" '$1 == f { print $2; exit }' "$BACKUP_MAP" 2>/dev/null || true)
+    orig=$(backup_orig "$f")
     case "$orig" in
         "") ;;
         NEW)
@@ -634,6 +659,9 @@ cmd_rollback() {
         state_unset UFW
     fi
 
+    # Our own drop-in's .bak copies would keep its directory from being removed.
+    # shellcheck disable=SC2086  # glob on purpose
+    if [ "$(backup_orig "$DROPIN")" = NEW ]; then run rm -f $DROPIN.*.bak; fi
     restore_original "$DROPIN" 1
     if [ -d "$DROPIN_DIR" ]; then run rmdir --ignore-fail-on-non-empty "$DROPIN_DIR"; fi
     run systemctl daemon-reload
