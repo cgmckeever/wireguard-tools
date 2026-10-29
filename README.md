@@ -121,7 +121,7 @@ send them only to that client's owner.
 ```bash
 ./wg-setup.sh test              # PASS/FAIL checks; non-zero exit on any FAIL
 ./wg-setup.sh status            # interfaces, handshakes, routes, rules
-./wg-setup.sh backup            # backup/wireguard-tools.<host>.<date>.tar.gz
+./wg-setup.sh backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 ./wg-setup.sh restore <archive> # set this server up from a backup
 ./wg-setup.sh rollback          # stop everything, remove all rules, restore original files
 ./wg-setup.sh rollback --purge  # ...and delete keys, clients and the WARP account
@@ -138,7 +138,7 @@ the right order, and whether any client has connected.
 ```bash
 # old server
 ./wg-setup.sh backup
-scp root@old:/opt/wireguard-tools/backup/wireguard-tools.*.tar.gz .   # or: wormhole send <archive>
+scp root@old:/var/backups/wireguard-tools/wireguard-tools.*.tar.gz .   # or: wormhole send <archive>
 
 # new server (after Install)
 ./wg-setup.sh restore wireguard-tools.<host>.<date>.tar.gz
@@ -158,10 +158,9 @@ re-run changes `--endpoint` or `--port`. An endpoint set as a hostname
 (`--endpoint vpn.example.com`) is kept, so pointing that DNS name at the new
 server means clients need nothing.
 
-Backups go in `backup/` inside the checkout (mode 700, ignored by git, so
-`git pull` never touches them; don't delete the checkout while relying on
-`rollback`, which restores originals from `backup/files/`); `backup <dir>`
-writes elsewhere. Each `backup` also prunes old archives and file copies. A backup holds
+Backups go in `/var/backups/wireguard-tools/` (mode 700, outside the checkout,
+so re-cloning the tools keeps them; `rollback` restores originals from its
+`files/`); `backup <dir>` writes elsewhere. Each `backup` also prunes old archives and file copies. A backup holds
 private keys (it's created mode 600); keep it somewhere safe. In
 WARP mode, stop the old server once the new one works: both would be using the
 same WARP device.
@@ -238,8 +237,8 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` (warp mode) |
 
 Secrets are mode 600 in 700 directories. Before any file is changed, a
-timestamped copy goes to `backup/files/<its path>` (e.g.
-`backup/files/etc/wireguard/clients.db.<date>.bak`); `rollback` restores the
+timestamped copy goes to `/var/backups/wireguard-tools/files/<its path>` (e.g.
+`files/etc/wireguard/clients.db.<date>.bak`); `rollback` restores the
 originals. Each file keeps its original plus the 5 newest copies, and
 `wg-setup.sh backup` keeps the 10 newest archives.
 

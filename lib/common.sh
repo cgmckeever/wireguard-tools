@@ -63,8 +63,8 @@ TRACE_URL=https://www.cloudflare.com/cdn-cgi/trace
 BLACKHOLE_METRIC=4096
 MARKER="# Managed by wireguard-tools"
 TEMPLATE_DIR="$(dirname "$SELF")/templates"
-BACKUP_DIR="$(dirname "$SELF")/backup"   # untracked (.gitignore); mode 700
-CHANGE_DIR="$BACKUP_DIR/files"           # per-change copies, mirroring each file's path
+BACKUP_DIR=/var/backups/wireguard-tools   # mode 700; outside the checkout
+CHANGE_DIR="$BACKUP_DIR/files"            # per-change copies, mirroring each file's path
 KEEP_CHANGES=5                           # newest copies kept per file (plus its original)
 KEEP_ARCHIVES=10                         # newest `backup` archives kept
 
@@ -405,7 +405,7 @@ backup_file() {
     local f="$1" bak="NEW" dir
     if [ -e "$f" ]; then
         dir=$(change_dir "$f")
-        install -d -m 700 "$dir"
+        install -d -m 700 "$BACKUP_DIR" "$dir"   # parents of $dir get 755; BACKUP_DIR guards them
         bak="$dir/$(basename "$f").$(date +%Y%m%d-%H%M%S).bak"
         while [ -e "$bak" ]; do bak="${bak%.bak}.$RANDOM.bak"; done
         cp -a "$f" "$bak"
@@ -438,7 +438,7 @@ prune_changes() {
     for b in "$f".*.bak; do
         [ -f "$b" ] || continue
         if [ "$b" = "$orig" ]; then
-            install -d -m 700 "$dir"
+            install -d -m 700 "$BACKUP_DIR" "$dir"
             mv -f "$b" "$dir/"
             orig="$dir/$(basename "$b")"
             backup_map_move "$f" "$orig"
