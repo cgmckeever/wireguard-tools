@@ -43,6 +43,9 @@ Update later with `git -C /opt/wireguard-tools pull`.
 ./wg-setup.sh setup --name dengar --dry-run    # see exactly what it would change first
 ```
 
+The first setup asks for the client subnet (`Client subnet [10.8.0.0/24]:`;
+Enter takes the default). `--subnet`, `--yes` or `--dry-run` skip the question.
+
 ### Flags
 
 All optional. Settings are saved in `/etc/wireguard/wg-tools.state`, so
@@ -56,7 +59,7 @@ also be set as an environment variable (flag > env > saved > default).
 | `--endpoint <host-or-ip>` | `ENDPOINT` | detected public IPv4 | address written into client configs (a hostname lets you move servers without re-sending configs) |
 | `--dns <ip>` | `WG_DNS` | `1.1.1.1` | DNS server given to clients |
 | `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new clients (per client on `add`/`rotate`); `"10.8.0.0/24, fd…::/64"` for VPN-network only |
-| `--subnet <cidr>` | `WG_SUBNET` | `10.8.0.0/24` | clients' IPv4 network (server is `.1`) |
+| `--subnet <cidr>` | `WG_SUBNET` | `10.8.0.0/24` | clients' IPv4 network (server is `.1`); first setup asks, Enter takes the default |
 | `--subnet6 <cidr>` | `WG_SUBNET6` | random `fd…::/64` | clients' IPv6 network; `off` disables client IPv6 |
 | `--mtu <bytes>` | `WG_MTU` | `1280` | tunnel MTU for server and clients |
 | *Rarely needed:* | | | |

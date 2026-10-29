@@ -214,6 +214,9 @@ load_config() {
             if [ -n "$v" ]; then printf -v "$k" '%s' "$v"; fi
         fi
     done
+    # Neither --subnet nor a saved one: a first setup asks (default on Enter).
+    SUBNET_DEFAULTED=0
+    if [ -z "$WG_SUBNET" ]; then SUBNET_DEFAULTED=1; fi
     apply_defaults
 }
 

@@ -463,8 +463,24 @@ require_setup() {
 # setting (on for a new install). WARP failing on a first install leaves it
 # off; on an existing install with WARP on it stays on (fail closed: clients
 # are blocked, not leaked) until fixed or switched off.
+# First setup without --subnet: ask for the client subnet, Enter keeps the
+# default. --yes, --dry-run and no terminal take the default.
+ask_subnet() {
+    [ "$SUBNET_DEFAULTED" -eq 1 ] || return 0
+    if [ "$DRY_RUN" -eq 1 ] || [ "$YES" -eq 1 ] || ! have_tty; then return 0; fi
+    local def="$WG_SUBNET" reply err
+    while :; do
+        read -r -p "    Client subnet [$def]: " reply </dev/tty || true
+        WG_SUBNET="${reply:-$def}"
+        if err=$( (finalize_config) 2>&1 ); then break; fi
+        printf '    %s\n' "${err#ERROR: }"
+    done
+    finalize_config
+}
+
 cmd_setup() {
     take_lock
+    ask_subnet
     # Refuse a breaking change before saving config or touching anything.
     check_server_change
     renumber_clients
