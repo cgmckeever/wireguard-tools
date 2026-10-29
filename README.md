@@ -39,11 +39,29 @@ Update later with `git -C /opt/wireguard-tools pull`.
 ## Set up the server
 
 ```bash
-./wg-setup.sh setup              # add --dry-run first to see exactly what it will change
+./wg-setup.sh setup --name dengar              # typical: just name it
+./wg-setup.sh setup --name dengar --dry-run    # see exactly what it would change first
 ```
 
-Give the server a name with `--name` (e.g. `./wg-setup.sh setup --name dengar`);
-it defaults to the short hostname and prefixes every client config file.
+### Setup flags
+
+All optional. Each is saved, so re-runs and `wg-client.sh` reuse it; pass a
+flag again to change it.
+
+| Flag | Default | What it sets |
+|------|---------|--------------|
+| `--name <name>` | short hostname | server name; client configs are `<name>.<client>.conf` |
+| `--port <port>` | `51820` | UDP port clients connect to |
+| `--endpoint <host-or-ip>` | detected public IPv4 | address written into client configs (use a hostname to move servers without re-sending configs) |
+| `--dns <ip>` | `1.1.1.1` | DNS server given to clients |
+| `--allowed-ips <cidrs>` | `0.0.0.0/0, ::/0` (all traffic) | default for new clients; `"10.8.0.0/24, fd…::/64"` for VPN-network only |
+| `--subnet <cidr>` | `10.8.0.0/24` | clients' IPv4 network (server is `.1`) |
+| `--subnet6 <cidr>` | random `fd…::/64` | clients' IPv6 network; `off` disables client IPv6 |
+| `--mtu <bytes>` | `1280` | tunnel MTU for server and clients |
+
+Example: `./wg-setup.sh setup --name dengar --port 51821 --endpoint vpn.example.com`.
+Rarely needed ones (interface names, routing table, WARP MTU, wgcf version)
+are under [All options](#all-options).
 
 Setup runs in two stages:
 
@@ -167,11 +185,12 @@ so re-cloning the tools keeps them; `rollback` restores originals from its
 private keys (it's created mode 600); keep it somewhere safe. Stop the old
 server once the new one works: both would be using the same WARP device.
 
-## Options
+## All options
 
-Flags work on both commands. Settings chosen at setup are saved in
-`/etc/wireguard/wg-tools.state`, so later runs and `wg-client.sh` use them
-automatically. Precedence: flag > environment variable > saved > default.
+Settings chosen at setup are saved in `/etc/wireguard/wg-tools.state`, so
+later runs and `wg-client.sh` use them automatically. Each can also be given
+as an environment variable. Precedence: flag > environment variable > saved >
+default.
 
 | Flag | Env | Default | |
 |------|-----|---------|---|
@@ -189,8 +208,16 @@ automatically. Precedence: flag > environment variable > saved > default.
 | | `WGCF_VERSION` | `latest` | e.g. `v2.2.22` |
 | | `WGCF_SHA256` | | pin the wgcf binary's checksum |
 
-Plus `--dry-run`, `--yes` (no prompts), `--force` (regenerate keys, reinstall
-wgcf, take over configs these tools didn't create), `--purge`, `--qr` / `--no-qr`.
+Behaviour flags (not saved):
+
+| Flag | Works with | Does |
+|------|-----------|------|
+| `--dry-run` | everything | show what would change; change nothing |
+| `--yes`, `-y` | everything | don't prompt |
+| `--force` | `setup` | regenerate server keys, reinstall wgcf, regenerate the WARP profile, change the subnet with clients present, take over configs these tools didn't create |
+| `--purge` | `rollback` | also delete keys, clients and the WARP account |
+| `--qr` / `--no-qr` | `wg-client.sh add`, `rotate`, `show` | force or skip the QR code |
+
 `help` on either command lists everything.
 
 ## How it works
