@@ -74,7 +74,7 @@ Behaviour flags (not saved):
 |------|-----------|------|
 | `--dry-run` | everything | show what would change; change nothing |
 | `--yes`, `-y` | everything | don't prompt |
-| `--force` | `setup` | regenerate server keys, reinstall wgcf, regenerate the WARP profile, change the subnet with clients present, take over configs these tools didn't create |
+| `--force` | `setup` | regenerate server keys, reinstall wgcf, regenerate the WARP profile, take over configs these tools didn't create |
 | `--purge` | `rollback` | also delete keys, clients and the WARP account |
 | `--qr` / `--no-qr` | `wg-client.sh add`, `rotate`, `show` | force or skip the QR code |
 
@@ -100,6 +100,12 @@ can't reach the provider's firewall.
 To change a setting, re-run setup with the new flag, e.g.
 `./wg-setup.sh setup --port 51821`. Changing `--name` renames the client
 configs; re-send them.
+
+Changing `--subnet` with clients present moves them: each keeps its host
+number and keys (`--subnet 192.168.250.0/24` turns `10.8.0.5` into
+`192.168.250.5`), and allowed-IPs entries naming the old subnet are updated.
+Their configs are rewritten, so re-send them. The new subnet must be at least
+as large as the old one.
 
 ### WARP on or off
 

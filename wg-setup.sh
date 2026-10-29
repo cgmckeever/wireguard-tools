@@ -47,8 +47,8 @@ Options:
   --dry-run             Show what would change; change nothing
   --yes, -y             Don't prompt before network changes
   --force               Regenerate existing keys, reinstall wgcf, regenerate the
-                        WARP profile, change the subnet with clients present, or
-                        take over configs not made by wireguard-tools
+                        WARP profile, or take over configs not made by
+                        wireguard-tools
   --purge               With rollback: also delete keys, clients, WARP account
 
 Config (flag / environment variable; saved by setup for later runs):
@@ -353,12 +353,13 @@ write_watchdog() {
 
 # Keep every client config named <server>.<client>.conf (renaming ones from an
 # older server name, or from before server names), pointed at the current
-# endpoint and port, and with its current addresses (IPv6 on or off). Keys are
+# endpoint and port, and with its current addresses (IPv6 on or off) and
+# allowed IPs from clients.db. Keys are
 # unchanged, so only the configs need re-sending.
 sync_client_configs() {
-    local want="$ENDPOINT:$WG_PORT" conf src old name ip _ addr stale=()
+    local want="$ENDPOINT:$WG_PORT" conf src old name ip _ allowed addr stale=()
     # Configs are found via clients.db, so editing the template can't hide one.
-    while read -r name ip _; do
+    while read -r name ip _ allowed; do
         conf=$(client_conf "$name")
         src="$conf"
         addr=$(client_addrs "$ip" | sed 's/,/, /')
@@ -372,8 +373,12 @@ sync_client_configs() {
             if [ "$DRY_RUN" -eq 0 ]; then src="$conf"; fi
             stale+=("$name")
         fi
-        grep -qxF "Endpoint = $want" "$src" && grep -qxF "Address = $addr" "$src" && continue
-        write_file "$conf" 600 < <(sed -e "s|^Endpoint = .*|Endpoint = $want|" -e "s|^Address = .*|Address = $addr|" "$src")
+        allowed="${allowed//,/, }"
+        grep -qxF "Endpoint = $want" "$src" && grep -qxF "Address = $addr" "$src" \
+            && { [ -z "$allowed" ] || grep -qxF "AllowedIPs = $allowed" "$src"; } && continue
+        local edits=(-e "s|^Endpoint = .*|Endpoint = $want|" -e "s|^Address = .*|Address = $addr|")
+        if [ -n "$allowed" ]; then edits+=(-e "s|^AllowedIPs = .*|AllowedIPs = $allowed|"); fi
+        write_file "$conf" 600 < <(sed "${edits[@]}" "$src")
         [[ " ${stale[*]} " == *" $name "* ]] || stale+=("$name")
     done < <(db_entries)
     if [ ${#stale[@]} -gt 0 ]; then
@@ -398,13 +403,55 @@ open_firewall() {
     fi
 }
 
-# Refuse to change the subnet under existing clients, or to take over a
-# wg0.conf we didn't create. Must run before save_config records the new values.
+# Refuse to take over a wg0.conf we didn't create. Must run before
+# save_config records the new values.
 check_server_change() {
-    if [ -n "$SAVED_SUBNET" ] && [ "$SAVED_SUBNET" != "$WG_SUBNET" ] && [ -n "$(db_entries)" ] && [ "$FORCE" -eq 0 ]; then
-        die "clients exist in $SAVED_SUBNET; changing to $WG_SUBNET breaks them (--force, then re-add every client)"
-    fi
     ensure_managed "$WG_CONF"
+}
+
+# A new --subnet with clients present: move each client to the same host
+# number in the new subnet (10.8.0.5 -> 192.168.250.5), keeping its keys, and
+# rewrite allowed-IPs entries that name the old subnet. sync_client_configs
+# then updates their configs (re-send them; keys are unchanged).
+renumber_clients() {
+    [ -n "$SAVED_SUBNET" ] && [ "$SAVED_SUBNET" != "$WG_SUBNET" ] || return 0
+    [ -n "$(db_entries)" ] || return 0
+    local old_net old_pfx old_int name ip pub allowed n new moves=() lines=()
+    old_net="${SAVED_SUBNET%/*}"
+    old_pfx="${SAVED_SUBNET#*/}"
+    old_int=$(( $(ip2int "$old_net") & ((0xFFFFFFFF << (32 - old_pfx)) & 0xFFFFFFFF) ))
+    while read -r name ip pub allowed; do
+        n=$(( NET_INT + $(ip2int "$ip") - old_int ))
+        [ "$n" -ge "$FIRST_HOST" ] && [ "$n" -le "$LAST_HOST" ] \
+            || die "client '$name' ($ip) has no matching address in $WG_SUBNET; use a subnet at least as large as $SAVED_SUBNET"
+        new=$(int2ip "$n")
+        allowed=$(tr ',' '\n' <<<"$allowed" | sed "s|^$SAVED_SUBNET\$|$WG_SUBNET|" | paste -sd, -)
+        moves+=("$name $ip -> $new")
+        lines+=("$name $new $pub $allowed")
+    done < <(db_entries)
+    step "Move ${#moves[@]} client(s) from $SAVED_SUBNET to $WG_SUBNET (same host numbers and keys; their configs change, re-send them)" \
+        "$PROG setup --subnet $SAVED_SUBNET"
+    printf '    %s\n' "${moves[@]}"
+    confirm "Move the clients to $WG_SUBNET?"
+    write_file "$CLIENT_DB" 600 < <(
+        echo "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
+        printf '%s\n' "${lines[@]}"
+    )
+}
+
+# wg0's config is about to change: stop wg0 with its current config first, so
+# its PostDown removes exactly the rules its PostUp added (old subnet, old
+# port); restarting after the rewrite would run the new PostDown instead and
+# leave the old rules behind. start_unit then brings it up with the new one.
+WG_STOPPED=0
+stop_before_rewrite() {
+    local unit="wg-quick@$WG_IF"
+    if_exists "$WG_IF" && [ -f "$WG_CONF" ] || return 0
+    ! cmp -s <(render_wg_conf) "$WG_CONF" || return 0
+    step "Restart $WG_IF for its new config (clients reconnect in a few seconds)" "restore the .bak in $CHANGE_DIR, then systemctl restart $unit"
+    confirm "Restart $WG_IF now?"
+    if systemctl is-active -q "$unit"; then run systemctl stop "$unit"; else run wg-quick down "$WG_IF"; fi
+    WG_STOPPED=1
 }
 
 # The server must be set up; after rollback no WARP setting is saved.
@@ -420,6 +467,7 @@ cmd_setup() {
     take_lock
     # Refuse a breaking change before saving config or touching anything.
     check_server_change
+    renumber_clients
     ensure_subnet6
     save_config
     state_unset EXIT   # older versions' mode key; WARP replaces it
@@ -442,12 +490,17 @@ cmd_setup() {
     sync_client_configs
     write_sysctl
     write_dropin
+    stop_before_rewrite
     write_wg_conf
     local changed="$WROTE"
     if [ "$KEYS_CHANGED" -eq 1 ]; then changed=1; fi
     open_firewall
     CLEANUP_ON_ERR=1
-    start_unit "$WG_IF" "$changed"
+    if [ "$WG_STOPPED" -eq 1 ] && [ "$DRY_RUN" -eq 1 ]; then
+        info "[dry-run] would then start wg-quick@$WG_IF with the new config"
+    else
+        start_unit "$WG_IF" "$changed"
+    fi
     CLEANUP_ON_ERR=0
     guard_default_route
     write_watchdog
