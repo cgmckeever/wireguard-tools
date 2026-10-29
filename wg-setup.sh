@@ -45,7 +45,7 @@ Commands:
 
 Options:
   --dry-run             Show what would change; change nothing
-  --yes, -y             Don't prompt before network changes
+  --yes, -y             Skip the per-step prompts (setup still asks to confirm its settings)
   --force               Regenerate existing keys, reinstall wgcf, regenerate the
                         WARP profile, or take over configs not made by
                         wireguard-tools
@@ -476,15 +476,76 @@ ask_subnet() {
         printf '    %s\n' "${err#ERROR: }"
     done
     finalize_config
+    if [ -n "$reply" ]; then SUBNET_ASKED=1; fi
+}
+
+# Where a setting's value comes from.
+setting_src() {
+    local k="$1"
+    if [ -n "${GIVEN_FLAG[$k]:-}" ]; then echo flag
+    elif [ -n "${GIVEN_ENV[$k]:-}" ]; then echo env
+    elif [ "$k" = WG_SUBNET ] && [ "$SUBNET_ASKED" -eq 1 ]; then echo entered
+    elif [ -n "${SAVED[$k]}" ]; then echo saved
+    elif [ "$k" = WG_SUBNET6 ]; then echo "random (new)"
+    elif [ "$k" = ENDPOINT ]; then echo detected
+    else echo default
+    fi
+}
+
+# Before anything changes: show the settings this run uses, where each comes
+# from and what differs from the last setup, then ask to continue (even with
+# --yes; --dry-run doesn't ask).
+review_settings() {
+    local fresh=0 k label def row changes=() cfg=0
+    if [ -z "${SAVED[WG_SUBNET]}" ]; then fresh=1; fi
+    if [ -z "$ENDPOINT" ]; then ENDPOINT="${SAVED[ENDPOINT]}"; fi
+    if [ -z "$ENDPOINT" ]; then ENDPOINT=$(trace_field ip -4 2>/dev/null || true); fi
+    if [ "$fresh" -eq 1 ]; then log "Settings (first setup)"; else log "Settings (re-run; saved in $STATE)"; fi
+    # key|label|default (a row with a default is only shown when it differs)
+    for row in "SERVER_NAME|name|" "ENDPOINT|endpoint|" "WG_PORT|port|" "WG_SUBNET|subnet|" \
+               "WG_SUBNET6|subnet6|" "WARP|WARP|" "WG_DNS|DNS|" "CLIENT_ALLOWED_IPS|allowed IPs|" \
+               "WG_MTU|MTU|" "WARP_MTU|WARP MTU|1280" "WG_IF|interface|wg0" "WARP_IF|WARP interface|warp" \
+               "RT_TABLE|table|100"; do
+        IFS='|' read -r k label def <<<"$row"
+        if [ -n "$def" ] && [ "${!k}" = "$def" ] && [ "${SAVED[$k]:-$def}" = "$def" ]; then continue; fi
+        printf '    %-15s %-24s %s\n' "$label" "${!k:-<not detected>}" "$(setting_src "$k")"
+        if [ "$fresh" -eq 0 ] && [ -n "${SAVED[$k]}" ] && [ "${SAVED[$k]}" != "${!k}" ]; then
+            changes+=("$(printf '%-15s %s -> %s' "$label" "${SAVED[$k]}" "${!k}")")
+            case "$k" in SERVER_NAME|ENDPOINT|WG_PORT|WG_SUBNET|WG_SUBNET6|WG_DNS|WG_MTU) cfg=1 ;; esac
+        fi
+    done
+    if [ "$fresh" -eq 1 ]; then
+        info "Nothing is set up yet; these are saved for re-runs and wg-client.sh."
+    elif [ ${#changes[@]} -eq 0 ]; then
+        info "No changes to settings since the last setup."
+    else
+        info "Changes since the last setup:"
+        for k in "${changes[@]}"; do info "  $k"; done
+        if [ "$cfg" -eq 1 ] && [ -n "$(db_entries)" ]; then
+            info "Client configs will be rewritten; re-send them."
+        fi
+    fi
+    STEP="review settings"
+    if [ "$DRY_RUN" -eq 1 ]; then return 0; fi
+    # --yes skips the step prompts, not this one; it only lets a run with no
+    # terminal (a script) carry on past it.
+    if ! have_tty; then
+        [ "$YES" -eq 1 ] || die "no terminal to confirm the settings; re-run with --yes"
+        return 0
+    fi
+    local reply=""
+    read -r -p "    Continue? [Y/n] " reply </dev/tty || true
+    [[ ${reply:-y} =~ ^[Yy] ]] || die "aborted at: review settings (nothing changed)"
 }
 
 cmd_setup() {
     take_lock
     ask_subnet
+    ensure_subnet6
+    review_settings
     # Refuse a breaking change before saving config or touching anything.
     check_server_change
     renumber_clients
-    ensure_subnet6
     save_config
     state_unset EXIT   # older versions' mode key; WARP replaces it
     record_baseline

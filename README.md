@@ -46,6 +46,12 @@ Update later with `git -C /opt/wireguard-tools pull`.
 The first setup asks for the client subnet (`Client subnet [10.8.0.0/24]:`;
 Enter takes the default). `--subnet`, `--yes` or `--dry-run` skip the question.
 
+Every run then shows the settings it will use and where each came from (flag,
+env, saved, default, detected), plus what changed since the last setup, or that
+nothing did, and asks `Continue? [Y/n]` before changing anything. `--yes`
+skips the per-step questions but not this one; it only carries on past it when
+there's no terminal (a script). `--dry-run` shows it without asking.
+
 ### Flags
 
 All optional. Settings are saved in `/etc/wireguard/wg-tools.state`, so

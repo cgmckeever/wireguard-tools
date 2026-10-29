@@ -44,6 +44,14 @@ CLIENT_ALLOWED_IPS="${CLIENT_ALLOWED_IPS:-}"
 ALLOWED_IPS_GIVEN=0     # 1 if --allowed-ips or CLIENT_ALLOWED_IPS was given
 if [ -n "$CLIENT_ALLOWED_IPS" ]; then ALLOWED_IPS_GIVEN=1; fi
 ENDPOINT="${ENDPOINT:-}"
+# Where each setting came from, for setup's review: GIVEN_FLAG/GIVEN_ENV mark
+# keys set on the command line or in the environment; SAVED holds the state
+# file's values (filled by load_config).
+declare -A GIVEN_FLAG=() GIVEN_ENV=() SAVED=()
+for _k in "${CONFIG_KEYS[@]}" ENDPOINT; do
+    if [ -n "${!_k}" ]; then GIVEN_ENV[$_k]=1; fi
+done
+unset _k
 WGCF_VERSION="${WGCF_VERSION:-latest}"
 WGCF_SHA256="${WGCF_SHA256:-}"
 RULE_PRIO=10000
@@ -80,6 +88,7 @@ KEEP_ARCHIVES=10                         # newest `backup` archives kept
 # --- Flags ---
 DRY_RUN=0
 YES=0
+SUBNET_ASKED=0   # 1 once setup asked for the subnet
 FORCE=0
 PURGE=0
 QR=0     # 1 = --qr, -1 = --no-qr, 0 = add/rotate decide (on if a terminal)
@@ -145,21 +154,24 @@ redact() { sed -E 's/^([[:space:]]*(PrivateKey|PresharedKey)[[:space:]]*=[[:spac
 
 # Map a config flag to its variable.
 set_opt() {
+    local var
     case "$1" in
-        --name)        SERVER_NAME="$2" ;;
-        --subnet)      WG_SUBNET="$2" ;;
-        --subnet6)     WG_SUBNET6="$2" ;;
-        --port)        WG_PORT="$2" ;;
-        --mtu)         WG_MTU="$2" ;;
-        --warp-mtu)    WARP_MTU="$2" ;;
-        --dns)         WG_DNS="$2" ;;
-        --endpoint)    ENDPOINT="$2" ;;
-        --wg-if)       WG_IF="$2" ;;
-        --warp-if)     WARP_IF="$2" ;;
-        --table)       RT_TABLE="$2" ;;
-        --allowed-ips) CLIENT_ALLOWED_IPS="$2"; ALLOWED_IPS_GIVEN=1 ;;
+        --name)        var=SERVER_NAME ;;
+        --subnet)      var=WG_SUBNET ;;
+        --subnet6)     var=WG_SUBNET6 ;;
+        --port)        var=WG_PORT ;;
+        --mtu)         var=WG_MTU ;;
+        --warp-mtu)    var=WARP_MTU ;;
+        --dns)         var=WG_DNS ;;
+        --endpoint)    var=ENDPOINT ;;
+        --wg-if)       var=WG_IF ;;
+        --warp-if)     var=WARP_IF ;;
+        --table)       var=RT_TABLE ;;
+        --allowed-ips) var=CLIENT_ALLOWED_IPS; ALLOWED_IPS_GIVEN=1 ;;
         *) die "unknown option: $1 (see: $PROG help)" ;;
     esac
+    printf -v "$var" '%s' "$2"
+    GIVEN_FLAG[$var]=1
 }
 
 # Parse flags anywhere on the command line; positionals go to ARGS.
@@ -208,11 +220,10 @@ load_config() {
     SAVED_SUBNET=$(state_get WG_SUBNET)
     SAVED_SERVER_NAME=$(state_get SERVER_NAME)
     if [ -z "$WARP" ]; then WARP="$SAVED_WARP"; fi
+    for k in "${CONFIG_KEYS[@]}" ENDPOINT; do SAVED[$k]=$(state_get "$k"); done
     for k in "${CONFIG_KEYS[@]}"; do
-        if [ -z "${!k}" ]; then
-            v=$(state_get "$k")
-            if [ -n "$v" ]; then printf -v "$k" '%s' "$v"; fi
-        fi
+        v="${SAVED[$k]}"
+        if [ -z "${!k}" ] && [ -n "$v" ]; then printf -v "$k" '%s' "$v"; fi
     done
     # Neither --subnet nor a saved one: a first setup asks (default on Enter).
     SUBNET_DEFAULTED=0
