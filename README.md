@@ -185,7 +185,7 @@ send them only to that client's owner.
 
 ```bash
 ./wg-setup.sh test              # PASS/FAIL checks; non-zero exit on any FAIL
-./wg-setup.sh status            # interfaces, handshakes, routes, rules
+./wg-setup.sh status            # settings (vs what wg0 runs), interfaces, clients, routes, rules
 ./wg-setup.sh backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 ./wg-setup.sh restore <archive> # set this server up from a backup
 ./wg-setup.sh rollback          # stop everything, remove all rules, restore original files

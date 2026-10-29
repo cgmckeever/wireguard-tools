@@ -34,7 +34,7 @@ Commands:
               Switch where clients exit (live: $WG_IF isn't restarted, clients
               stay connected); no argument shows the current setting
   test        All verification checks; exits non-zero on any FAIL
-  status      Interfaces, handshakes, routes, rules
+  status      Settings (and whether wg0 runs them), interfaces, clients, routes, rules
   backup [dir]  Archive keys, configs and clients (default dir $BACKUP_DIR)
   restore <archive>
               Set this server up from a backup: same keys, clients, WARP
@@ -492,15 +492,35 @@ setting_src() {
     fi
 }
 
-# Before anything changes: show the settings this run uses, where each comes
-# from and what differs from the last setup, then ask to continue (even with
-# --yes; --dry-run doesn't ask).
-review_settings() {
-    local fresh=0 k label def row changes=() cfg=0
-    if [ -z "${SAVED[WG_SUBNET]}" ]; then fresh=1; fi
-    if [ -z "$ENDPOINT" ]; then ENDPOINT="${SAVED[ENDPOINT]}"; fi
-    if [ -z "$ENDPOINT" ]; then ENDPOINT=$(trace_field ip -4 2>/dev/null || true); fi
-    if [ "$fresh" -eq 1 ]; then log "Settings (first setup)"; else log "Settings (re-run; saved in $STATE)"; fi
+# What wg0/warp are actually running for a setting, if it can be read.
+running_value() {
+    case "$1" in
+        WG_PORT)    wg show "$WG_IF" listen-port 2>/dev/null ;;
+        WG_SUBNET)  ip -4 -o addr show dev "$WG_IF" 2>/dev/null | awk '{ print $4; exit }' ;;
+        WG_SUBNET6) ip -6 -o addr show dev "$WG_IF" scope global 2>/dev/null | awk '{ print $4; exit }' ;;
+        WG_MTU)     cat "/sys/class/net/$WG_IF/mtu" 2>/dev/null ;;
+        WARP_MTU)   cat "/sys/class/net/$WARP_IF/mtu" 2>/dev/null ;;
+        WARP)       if [[ $(ip rule show) == *"from $WG_SUBNET lookup $RT_TABLE"* ]]; then echo on; else echo off; fi ;;
+    esac
+}
+
+# The running value a setting should have (none for settings that only live
+# in client configs: name, endpoint, DNS, allowed IPs).
+expected_running() {
+    case "$1" in
+        WG_SUBNET)  echo "$SERVER_IP/$PFX" ;;
+        WG_SUBNET6) if [ "$IPV6" -eq 1 ]; then echo "$P6::1/64"; fi ;;
+        WG_PORT|WG_MTU|WARP_MTU|WARP) echo "${!1}" ;;
+    esac
+}
+
+# The settings table: value and where it came from, plus with <running>=1
+# what wg0/warp run now (MISMATCH when it differs). Fills SETTING_CHANGES with
+# differences from the saved values, and SETTING_CFG=1 if any changes client
+# configs; RUNNING_MISMATCH counts mismatches.
+settings_table() {
+    local running="${1:-0}" k label def row now want extra
+    SETTING_CHANGES=() SETTING_CFG=0 RUNNING_MISMATCH=0
     # key|label|default (a row with a default is only shown when it differs)
     for row in "SERVER_NAME|name|" "ENDPOINT|endpoint|" "WG_PORT|port|" "WG_SUBNET|subnet|" \
                "WG_SUBNET6|subnet6|" "WARP|WARP|" "WG_DNS|DNS|" "CLIENT_ALLOWED_IPS|allowed IPs|" \
@@ -508,20 +528,41 @@ review_settings() {
                "RT_TABLE|table|100"; do
         IFS='|' read -r k label def <<<"$row"
         if [ -n "$def" ] && [ "${!k}" = "$def" ] && [ "${SAVED[$k]:-$def}" = "$def" ]; then continue; fi
-        printf '    %-15s %-24s %s\n' "$label" "${!k:-<not detected>}" "$(setting_src "$k")"
-        if [ "$fresh" -eq 0 ] && [ -n "${SAVED[$k]}" ] && [ "${SAVED[$k]}" != "${!k}" ]; then
-            changes+=("$(printf '%-15s %s -> %s' "$label" "${SAVED[$k]}" "${!k}")")
-            case "$k" in SERVER_NAME|ENDPOINT|WG_PORT|WG_SUBNET|WG_SUBNET6|WG_DNS|WG_MTU) cfg=1 ;; esac
+        extra=""
+        if [ "$running" -eq 1 ]; then
+            now=$(running_value "$k")
+            want=$(expected_running "$k")
+            if [ -n "$want" ] || [ -n "$now" ]; then
+                extra="running: ${now:-none}"
+                if [ "$now" != "$want" ]; then extra="$extra  MISMATCH"; RUNNING_MISMATCH=$(( RUNNING_MISMATCH + 1 )); fi
+            fi
+        fi
+        printf '    %-15s %-24s %-8s %s\n' "$label" "${!k:-<not detected>}" "$(setting_src "$k")" "$extra" | sed 's/ *$//'
+        if [ -n "${SAVED[$k]}" ] && [ "${SAVED[$k]}" != "${!k}" ]; then
+            SETTING_CHANGES+=("$(printf '%-15s %s -> %s' "$label" "${SAVED[$k]}" "${!k}")")
+            case "$k" in SERVER_NAME|ENDPOINT|WG_PORT|WG_SUBNET|WG_SUBNET6|WG_DNS|WG_MTU) SETTING_CFG=1 ;; esac
         fi
     done
+}
+
+# Before anything changes: show the settings this run uses, where each comes
+# from and what differs from the last setup, then ask to continue (even with
+# --yes; --dry-run doesn't ask).
+review_settings() {
+    local fresh=0 k
+    if [ -z "${SAVED[WG_SUBNET]}" ]; then fresh=1; fi
+    if [ -z "$ENDPOINT" ]; then ENDPOINT="${SAVED[ENDPOINT]}"; fi
+    if [ -z "$ENDPOINT" ]; then ENDPOINT=$(trace_field ip -4 2>/dev/null || true); fi
+    if [ "$fresh" -eq 1 ]; then log "Settings (first setup)"; else log "Settings (re-run; saved in $STATE)"; fi
+    settings_table 0
     if [ "$fresh" -eq 1 ]; then
         info "Nothing is set up yet; these are saved for re-runs and wg-client.sh."
-    elif [ ${#changes[@]} -eq 0 ]; then
+    elif [ ${#SETTING_CHANGES[@]} -eq 0 ]; then
         info "No changes to settings since the last setup."
     else
         info "Changes since the last setup:"
-        for k in "${changes[@]}"; do info "  $k"; done
-        if [ "$cfg" -eq 1 ] && [ -n "$(db_entries)" ]; then
+        for k in "${SETTING_CHANGES[@]}"; do info "  $k"; done
+        if [ "$SETTING_CFG" -eq 1 ] && [ -n "$(db_entries)" ]; then
             info "Client configs will be rewritten; re-send them."
         fi
     fi
@@ -626,6 +667,12 @@ cmd_warp() {
 cmd_status() {
     local ifc unit active enabled x t c r f
     require_setup
+    if [ -z "$ENDPOINT" ]; then ENDPOINT="${SAVED[ENDPOINT]}"; fi
+    log "Settings (saved in $STATE)"
+    settings_table 1
+    if [ "$RUNNING_MISMATCH" -gt 0 ]; then
+        warn "$RUNNING_MISMATCH setting(s) differ from what's running; re-run: $PROG setup"
+    fi
     log "WARP $WARP (client traffic leaves via $(out_if))"
     log "Interfaces"
     for ifc in "$WARP_IF" "$WG_IF"; do
@@ -641,18 +688,26 @@ cmd_status() {
     local wd_last
     wd_last=$(journalctl -t "$WATCHDOG" -n 1 -o short-iso --no-pager -q 2>/dev/null | cut -c1-25 || true)
     info "watchdog: $WATCHDOG.timer $(systemctl is-active "$WATCHDOG.timer" 2>/dev/null || true); last port change: ${wd_last:-never}"
-    log "Handshakes"
+    log "WARP handshake"
     if if_exists "$WARP_IF"; then
         info "$WARP_IF: $(ago "$(wg show "$WARP_IF" latest-handshakes | awk '$2 > m { m = $2 } END { print m + 0 }')")"
     fi
+    local -A hs=() rx=() tx=()
+    local k ts b name ip pub allowed seen n=0
     if if_exists "$WG_IF"; then
-        local -A hs=()
-        local k ts name ip pub _
         while read -r k ts; do hs[$k]="$ts"; done < <(wg show "$WG_IF" latest-handshakes)
-        while read -r name ip pub _; do
-            if is_disabled "$name"; then info "$name ($ip): disabled"; else info "$name ($ip): $(ago "${hs[$pub]:-0}")"; fi
-        done < <(db_entries)
+        while read -r k ts b; do rx[$k]="$ts"; tx[$k]="$b"; done < <(wg show "$WG_IF" transfer)
     fi
+    log "Clients"
+    info "$(printf '%-20s %-15s %-14s %-12s %s' NAME ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS")"
+    while read -r name ip pub allowed; do
+        n=$(( n + 1 ))
+        seen=$(ago "${hs[$pub]:-0}")
+        if is_disabled "$name"; then seen=disabled; fi
+        info "$(printf '%-20s %-15s %-14s %-12s %s' "$name" "$ip" "$seen" \
+            "$(( ${rx[$pub]:-0} / 1048576 ))/$(( ${tx[$pub]:-0} / 1048576 ))" "${allowed//,/, }")"
+    done < <(db_entries)
+    if [ "$n" -eq 0 ]; then info "none yet (add one: wg-client.sh add <name>)"; fi
     log "Routes"
     info "main default: $(default_route)  (recorded: $(state_get DEFAULT_ROUTE))"
     while IFS= read -r f; do
