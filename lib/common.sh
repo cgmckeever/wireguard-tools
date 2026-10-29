@@ -104,12 +104,15 @@ run() {
     fi
 }
 
-# Ask before a network change; --yes and --dry-run skip the prompt.
+# Ask before a network change; --yes and --dry-run skip the prompt. A second
+# argument of y makes Enter mean yes (for steps the setup can't work without).
 confirm() {
     if [ "$DRY_RUN" -eq 1 ] || [ "$YES" -eq 1 ]; then return 0; fi
     have_tty || die "no terminal to confirm \"$1\"; re-run with --yes"
-    local reply=""
-    read -r -p "    $1 [y/N] " reply </dev/tty || true
+    local reply="" hint="[y/N]"
+    if [ "${2:-}" = y ]; then hint="[Y/n]"; fi
+    read -r -p "    $1 $hint " reply </dev/tty || true
+    if [ -z "$reply" ] && [ "${2:-}" = y ]; then reply=y; fi
     [[ $reply =~ ^[Yy] ]] || die "aborted at: $STEP (nothing further changed; --yes skips prompts)"
 }
 
@@ -733,7 +736,7 @@ start_unit() {
     local ifc="$1" changed="$2" unit="wg-quick@$1" enabled=0
     if ! if_exists "$ifc"; then
         step "Bring up $ifc ($unit, enabled at boot)" "systemctl disable --now $unit"
-        confirm "Bring up $ifc now?"
+        confirm "Bring up $ifc now?" y   # the setup is useless without it
         run systemctl enable --now "$unit"
         enabled=1
     elif [ "$changed" -eq 1 ]; then

@@ -316,7 +316,7 @@ write_sysctl() {
     fi
     if ! { [ -f "$SYSCTL_FILE" ] && [ "$(grep -v '^#' "$SYSCTL_FILE")" = "$lines" ]; }; then
         step "Enable forwarding ($SYSCTL_FILE: ${lines//$'\n'/; })" "$PROG rollback (restores ip_forward=$(orig_forward))"
-        confirm "Enable forwarding?"
+        confirm "Enable forwarding?" y   # clients get nowhere without it
     fi
     write_file "$SYSCTL_FILE" 644 < <(echo "$MARKER"; echo "$lines")
     while IFS='=' read -r k v; do
