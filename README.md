@@ -192,7 +192,7 @@ send them only to that client's owner.
 
 ```bash
 ./wg-setup.sh test              # PASS/FAIL checks; non-zero exit on any FAIL
-./wg-setup.sh status            # settings (vs what wg0 runs), interfaces, clients, routes, rules
+./wg-setup.sh status            # settings (and any not running yet), interfaces, clients, routes, rules
 ./wg-setup.sh backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 ./wg-setup.sh restore <archive> # set this server up from a backup
 ./wg-setup.sh rollback          # stop everything, remove all rules, restore original files
@@ -332,8 +332,8 @@ the WARP setting, the routing rules and the client list.
   and TCP MSS is clamped; try `./wg-setup.sh warp off` to see if it's WARP's path.
 - **Handshake works but nothing loads:** the device's config is out of date
   (e.g. after a `--subnet` change) or its `Address` is mistyped; re-send it.
-- **Anything else:** `./wg-setup.sh status` (flags settings that differ from
-  what's running) and `./wg-setup.sh test`.
+- **Anything else:** `./wg-setup.sh status` (marks saved settings still
+  pending, i.e. not running yet) and `./wg-setup.sh test`.
 
 ### Register WARP on another machine
 
@@ -355,10 +355,3 @@ cd ~ && rm -rf ~/wgcf-vps      # local copies hold the device's private key
 Then run `./wg-setup.sh warp on` on the server; it uses the copied account,
 tests WARP and switches clients to it. Use these files on that server only:
 they are one WARP device.
-
-## Upgrading from the old scripts
-
-The earlier `scripts/` versions (`setup.sh`, `client-setup.sh`, …) are in git
-history. The new tools won't overwrite a `wg0.conf` they didn't create
-(`--force` overrides). To move a server over: back up `/etc/wireguard`, run
-`wg-setup.sh` (with `--force`), then re-add clients with `wg-client.sh add`.

@@ -517,12 +517,13 @@ expected_running() {
 }
 
 # The settings table: value and where it came from, plus with <running>=1
-# what wg0/warp run now (MISMATCH when it differs). Fills SETTING_CHANGES with
+# what wg0/warp run now (pending when it differs: saved but not applied yet,
+# re-run setup). Fills SETTING_CHANGES with
 # differences from the saved values, and SETTING_CFG=1 if any changes client
-# configs; RUNNING_MISMATCH counts mismatches.
+# configs; RUNNING_PENDING counts pending settings.
 settings_table() {
     local running="${1:-0}" k label def row now want extra
-    SETTING_CHANGES=() SETTING_CFG=0 RUNNING_MISMATCH=0
+    SETTING_CHANGES=() SETTING_CFG=0 RUNNING_PENDING=0
     # key|label|default (a row with a default is only shown when it differs)
     for row in "SERVER_NAME|name|" "ENDPOINT|endpoint|" "WG_PORT|port|" "WG_SUBNET|subnet|" \
                "WG_SUBNET6|subnet6|" "WARP|WARP|" "WG_DNS|DNS|" "CLIENT_ALLOWED_IPS|allowed IPs|" \
@@ -536,7 +537,7 @@ settings_table() {
             want=$(expected_running "$k")
             if [ -n "$want" ] || [ -n "$now" ]; then
                 extra="running: ${now:-none}"
-                if [ "$now" != "$want" ]; then extra="$extra  MISMATCH"; RUNNING_MISMATCH=$(( RUNNING_MISMATCH + 1 )); fi
+                if [ "$now" != "$want" ]; then extra="$extra  (pending)"; RUNNING_PENDING=$(( RUNNING_PENDING + 1 )); fi
             fi
         fi
         printf '    %-15s %-24s %-8s %s\n' "$label" "${!k:-<not detected>}" "$(setting_src "$k")" "$extra" | sed 's/ *$//'
@@ -672,8 +673,8 @@ cmd_status() {
     if [ -z "$ENDPOINT" ]; then ENDPOINT="${SAVED[ENDPOINT]}"; fi
     log "Settings (saved in $STATE)"
     settings_table 1
-    if [ "$RUNNING_MISMATCH" -gt 0 ]; then
-        warn "$RUNNING_MISMATCH setting(s) differ from what's running; re-run: $PROG setup"
+    if [ "$RUNNING_PENDING" -gt 0 ]; then
+        warn "$RUNNING_PENDING saved setting(s) pending (not running yet); apply with: $PROG setup"
     fi
     log "WARP $WARP (client traffic leaves via $(out_if))"
     log "Interfaces"
