@@ -15,10 +15,12 @@ Two commands, both run as root on the server:
 
 - **`wg-setup.sh`** sets up the server (`setup`), switches WARP (`warp on|off`),
   plus `test`, `status`, `backup`, `restore`, `rollback`.
-- **`wg-client.sh`** manages clients: `add`, `rotate`, `remove`, `list`, `show`, `share`.
+- **`wg-client.sh`** manages clients: `add`, `rotate`, `remove`, `disable`, `enable`,
+  `list`, `show`, `share`.
 
 Both are safe to re-run, support `--dry-run`, back up every file they change,
-and never print private keys unless you ask for a QR code.
+and never print private keys except inside a client's QR code (shown by `add`
+and `rotate`, or `show --qr`).
 
 ## Install
 
@@ -43,11 +45,13 @@ Update later with `git -C /opt/wireguard-tools pull`.
 ./wg-setup.sh setup --name dengar --dry-run    # see exactly what it would change first
 ```
 
-The first setup asks for the client subnet (`Client subnet [10.8.0.0/24]:`;
-Enter takes the default). `--subnet`, `--yes` or `--dry-run` skip the question.
+The first setup asks for the client subnet, offering a random
+`10.<1-10>.<1-10>.0/24` that doesn't overlap a route the server already has
+(`Client subnet [10.4.5.0/24]:`; Enter takes it). `--subnet`, `--yes` or
+`--dry-run` skip the question and use that random one.
 
 Every run then shows the settings it will use and where each came from (flag,
-env, saved, default, detected), plus what changed since the last setup, or that
+env, entered, saved, default, detected, random), plus what changed since the last setup, or that
 nothing did, and asks `Continue? [Y/n]` before changing anything. `--yes`
 skips the per-step questions but not this one; it only carries on past it when
 there's no terminal (a script). `--dry-run` shows it without asking.
@@ -64,10 +68,10 @@ also be set as an environment variable (flag > env > saved > default).
 | `--port <port>` | `WG_PORT` | `51820` | UDP port clients connect to |
 | `--endpoint <host-or-ip>` | `ENDPOINT` | detected public IPv4 | address written into client configs (a hostname lets you move servers without re-sending configs) |
 | `--dns <ip>` | `WG_DNS` | `1.1.1.1` | DNS server given to clients |
-| `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new clients (per client on `add`/`rotate`); `"10.8.0.0/24, fd…::/64"` for VPN-network only |
-| `--subnet <cidr>` | `WG_SUBNET` | `10.8.0.0/24` | clients' IPv4 network (server is `.1`); first setup asks, Enter takes the default |
+| `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new clients (per client on `add`/`rotate`); `"10.4.5.0/24, fd…::/64"` (your subnets) for VPN-network only |
+| `--subnet <cidr>` | `WG_SUBNET` | random `10.<1-10>.<1-10>.0/24` | clients' IPv4 network (server is `.1`); first setup asks, Enter takes the random one |
 | `--subnet6 <cidr>` | `WG_SUBNET6` | random `fd…::/64` | clients' IPv6 network; `off` disables client IPv6 |
-| `--mtu <bytes>` | `WG_MTU` | `1280` | tunnel MTU for server and clients |
+| `--mtu <bytes>` | `WG_MTU` | `1280` | tunnel MTU for server and clients (1280 minimum, at most `--warp-mtu`) |
 | *Rarely needed:* | | | |
 | `--warp-mtu <bytes>` | `WARP_MTU` | `1280` | MTU of the WARP tunnel |
 | `--wg-if` / `--warp-if` | `WG_IF` / `WARP_IF` | `wg0` / `warp` | interface names |
@@ -82,7 +86,7 @@ Behaviour flags (not saved):
 | Flag | Works with | Does |
 |------|-----------|------|
 | `--dry-run` | everything | show what would change; change nothing |
-| `--yes`, `-y` | everything | don't prompt |
+| `--yes`, `-y` | everything | skip the per-step prompts; `setup` still asks to confirm its settings (unless there's no terminal) |
 | `--force` | `setup` | regenerate server keys, reinstall wgcf, regenerate the WARP profile, take over configs these tools didn't create |
 | `--purge` | `rollback` | also delete keys, clients and the WARP account |
 | `--qr` / `--no-qr` | `wg-client.sh add`, `rotate`, `show` | force or skip the QR code |
@@ -97,7 +101,8 @@ Setup runs in two stages:
    the `warp` interface and tests it. (Registration refused? See
    [Register WARP on another machine](#register-warp-on-another-machine).)
 2. **WireGuard server:** creates `wg0` with server keys, NAT for both ways out
-   (WARP and the public interface), forwarding and systemd units, with WARP on.
+   (WARP and the public interface), forwarding and systemd units, with WARP on,
+   plus the [WARP watchdog](#how-it-works).
 
 If WARP can't be set up on a first install, setup still finishes, with WARP
 off; fix it, then `./wg-setup.sh warp on`.
@@ -107,11 +112,13 @@ security group. The script opens it on the server itself (ufw or iptables) but
 can't reach the provider's firewall.
 
 To change a setting, re-run setup with the new flag, e.g.
-`./wg-setup.sh setup --port 51821`. Changing `--name` renames the client
-configs; re-send them.
+`./wg-setup.sh setup --port 51821`. A change that affects clients (`--name`,
+`--endpoint`, `--port`, `--dns`, `--mtu`, `--subnet`, `--subnet6`) rewrites
+their configs (renames them for `--name`) and lists which to re-send; keys
+don't change.
 
 Changing `--subnet` with clients present moves them: each keeps its host
-number and keys (`--subnet 192.168.250.0/24` turns `10.8.0.5` into
+number and keys (`--subnet 192.168.250.0/24` turns `10.4.5.5` into
 `192.168.250.5`), and allowed-IPs entries naming the old subnet are updated.
 Their configs are rewritten, so re-send them. The new subnet must be at least
 as large as the old one.
@@ -134,7 +141,7 @@ without public IPv6 gives clients IPv4 only while WARP is off.
 
 ```bash
 ./wg-client.sh add laptop                            # full tunnel (default); prints a QR code
-./wg-client.sh add printer --allowed-ips "10.8.0.0/24, fdXX:XXXX:XXXX::/64" # split tunnel: VPN network only
+./wg-client.sh add printer --allowed-ips "10.4.5.0/24, fdXX:XXXX:XXXX::/64" # split tunnel: VPN network only (your subnets)
 ./wg-client.sh list                                  # address, last seen, traffic, allowed IPs
 ./wg-client.sh show laptop                           # config with keys redacted
 ./wg-client.sh show laptop --qr                      # QR code again (phones: WireGuard app → scan)
@@ -196,8 +203,8 @@ send them only to that client's owner.
 `warp=on` while the server's own traffic shows `warp=off`, the server's
 default route never changed, `wg0` is listening, forwarding is on, the WARP
 rule is there exactly once (WARP on) or absent (off), every NAT/firewall rule
-exists exactly once, the services start at boot in the right order, and
-whether any client has connected. With WARP off, WARP problems are warnings.
+exists exactly once, the services start at boot in the right order, the WARP
+watchdog timer is running, and whether any client has connected. With WARP off, WARP problems are warnings.
 
 ### Moving to a new server (or rebuilding)
 
@@ -212,8 +219,8 @@ scp root@old:/var/backups/wireguard-tools/wireguard-tools.*.tar.gz .   # or: wor
 
 `restore` brings over the server keys, every client (same keys, addresses and
 allowed IPs), the settings (including WARP on or off) and the WARP account
-(so it doesn't need to register again), then runs setup. It won't overwrite a server that's already set up
-(`rollback` or `rollback --purge` first).
+(so it doesn't need to register again), then runs setup. It won't overwrite a
+server that's already set up (`rollback` or `rollback --purge` first).
 
 The new server records its own default route and public interface, and an IP
 endpoint is re-detected. If the address changed, every client config's
@@ -225,8 +232,9 @@ server means clients need nothing.
 
 Backups go in `/var/backups/wireguard-tools/` (mode 700, outside the checkout,
 so re-cloning the tools keeps them; `rollback` restores originals from its
-`files/`); `backup <dir>` writes elsewhere. Each `backup` also prunes old archives and file copies. A backup holds
-private keys (it's created mode 600); keep it somewhere safe. Stop the old
+`files/`); `backup <dir>` writes elsewhere. Each `backup` also prunes old
+archives and file copies. A backup holds private keys (it's created mode 600);
+keep it somewhere safe. Stop the old
 server once the new one works: both would be using the same WARP device.
 
 ## How it works
@@ -263,7 +271,7 @@ can't block them, and TCP MSS is clamped to avoid MTU stalls.
 
 **IPv6.** Each client also gets an IPv6 address in a private `fd…::/64`
 (picked at random once at setup and saved; `--subnet6` sets your own), with the
-same host number as its IPv4 address (`10.8.0.5` → `fd…::5`). Its IPv6 is
+same host number as its IPv4 address (`10.4.5.5` → `fd…::5`). Its IPv6 is
 NATed out the same way as IPv4: with WARP on through WARP's own IPv6, which
 works even on an IPv4-only server, with the same table 100 route and blackhole
 fallback; with WARP off out the public interface, if the server has IPv6
@@ -285,7 +293,7 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/psk/<name>.psk` | per-client preshared keys |
 | `/etc/wireguard/clients/<server>.<name>.conf` | client configs (the only copy of each client's private key) |
 | `/etc/wireguard/wg-tools.state` | saved settings (including `WARP=on|off`), recorded default route |
-| `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1` |
+| `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1`, plus IPv6 forwarding (and `accept_ra = 2` on the public interface) when IPv6 is on |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
 | `/usr/local/sbin/wg-tools-warp-watchdog`, `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog |
 
@@ -320,8 +328,12 @@ the WARP setting, the routing rules and the client list.
   Retry later, or register on another machine and copy the account over
   ([below](#register-warp-on-another-machine)). If the WARP tests still fail
   (no handshake), the provider is blocking WARP's traffic: `./wg-setup.sh warp off`.
-- **Some sites hang with WARP on:** lower `--mtu` (e.g. 1200), re-run `./wg-setup.sh setup`, then `rotate` the clients so they get the new MTU.
-- **Anything else:** `./wg-setup.sh status` and `./wg-setup.sh test`.
+- **Some sites hang with WARP on:** MTU is already 1280 (the lowest allowed)
+  and TCP MSS is clamped; try `./wg-setup.sh warp off` to see if it's WARP's path.
+- **Handshake works but nothing loads:** the device's config is out of date
+  (e.g. after a `--subnet` change) or its `Address` is mistyped; re-send it.
+- **Anything else:** `./wg-setup.sh status` (flags settings that differ from
+  what's running) and `./wg-setup.sh test`.
 
 ### Register WARP on another machine
 
@@ -341,7 +353,8 @@ cd ~ && rm -rf ~/wgcf-vps      # local copies hold the device's private key
 ```
 
 Then run `./wg-setup.sh warp on` on the server; it uses the copied account,
-tests WARP and switches clients to it. Use these files on that server only: they are one WARP device.
+tests WARP and switches clients to it. Use these files on that server only:
+they are one WARP device.
 
 ## Upgrading from the old scripts
 

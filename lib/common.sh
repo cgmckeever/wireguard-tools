@@ -198,9 +198,22 @@ parse_args() {
     done
 }
 
+# A random 10.<1-10>.<1-10>.0/24 for a first setup (saved from then on), not
+# one this server already has a route into.
+random_subnet() {
+    local net routes
+    routes=$(ip -4 route show table all 2>/dev/null || true)
+    for _ in $(seq 20); do
+        net="10.$(( RANDOM % 10 + 1 )).$(( RANDOM % 10 + 1 ))"
+        grep -qE "(^|[^0-9.])${net//./\\.}\." <<<"$routes" || break
+    done
+    echo "$net.0/24"
+}
+
 # Fill unset config from defaults.
 apply_defaults() {
-    : "${WARP:=on}" "${WG_SUBNET:=10.8.0.0/24}" "${WG_PORT:=51820}" "${WARP_MTU:=1280}" "${WG_MTU:=1280}"
+    if [ -z "$WG_SUBNET" ]; then WG_SUBNET=$(random_subnet); fi
+    : "${WARP:=on}" "${WG_PORT:=51820}" "${WARP_MTU:=1280}" "${WG_MTU:=1280}"
     : "${WG_DNS:=1.1.1.1}" "${WG_IF:=wg0}" "${WARP_IF:=warp}" "${RT_TABLE:=100}"
     : "${CLIENT_ALLOWED_IPS:=0.0.0.0/0, ::/0}"
     if [ -z "$SERVER_NAME" ]; then

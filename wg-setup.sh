@@ -53,7 +53,7 @@ Options:
 
 Config (flag / environment variable; saved by setup for later runs):
   --name         SERVER_NAME          $SERVER_NAME  (client configs: <name>.<client>.conf)
-  --subnet       WG_SUBNET            $WG_SUBNET
+  --subnet       WG_SUBNET            ${SAVED[WG_SUBNET]:-<random 10.[1-10].[1-10].0/24 at setup>}  (setup asks)
   --subnet6      WG_SUBNET6           ${WG_SUBNET6:-<random fd::/64 at setup>}  (client IPv6; "off" disables)
   --port         WG_PORT              $WG_PORT
   --mtu          WG_MTU               $WG_MTU
@@ -353,8 +353,8 @@ write_watchdog() {
 
 # Keep every client config named <server>.<client>.conf (renaming ones from an
 # older server name, or from before server names), pointed at the current
-# endpoint and port, and with its current addresses (IPv6 on or off) and
-# allowed IPs from clients.db. Keys are
+# endpoint and port, DNS and MTU, and with its current addresses (IPv6 on or
+# off) and allowed IPs from clients.db. Keys are
 # unchanged, so only the configs need re-sending.
 sync_client_configs() {
     local want="$ENDPOINT:$WG_PORT" conf src old name ip _ allowed addr stale=()
@@ -375,8 +375,10 @@ sync_client_configs() {
         fi
         allowed="${allowed//,/, }"
         grep -qxF "Endpoint = $want" "$src" && grep -qxF "Address = $addr" "$src" \
+            && grep -qxF "DNS = $WG_DNS" "$src" && grep -qxF "MTU = $WG_MTU" "$src" \
             && { [ -z "$allowed" ] || grep -qxF "AllowedIPs = $allowed" "$src"; } && continue
-        local edits=(-e "s|^Endpoint = .*|Endpoint = $want|" -e "s|^Address = .*|Address = $addr|")
+        local edits=(-e "s|^Endpoint = .*|Endpoint = $want|" -e "s|^Address = .*|Address = $addr|"
+                     -e "s|^DNS = .*|DNS = $WG_DNS|" -e "s|^MTU = .*|MTU = $WG_MTU|")
         if [ -n "$allowed" ]; then edits+=(-e "s|^AllowedIPs = .*|AllowedIPs = $allowed|"); fi
         write_file "$conf" 600 < <(sed "${edits[@]}" "$src")
         [[ " ${stale[*]} " == *" $name "* ]] || stale+=("$name")
@@ -486,7 +488,7 @@ setting_src() {
     elif [ -n "${GIVEN_ENV[$k]:-}" ]; then echo env
     elif [ "$k" = WG_SUBNET ] && [ "$SUBNET_ASKED" -eq 1 ]; then echo entered
     elif [ -n "${SAVED[$k]}" ]; then echo saved
-    elif [ "$k" = WG_SUBNET6 ]; then echo "random (new)"
+    elif [ "$k" = WG_SUBNET ] || [ "$k" = WG_SUBNET6 ]; then echo "random (new)"
     elif [ "$k" = ENDPOINT ]; then echo detected
     else echo default
     fi
