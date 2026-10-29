@@ -1,0 +1,7 @@
+# Managed by wireguard-tools
+[Unit]
+Description=wireguard-tools WARP watchdog (new source port if {{WARP_IF}} stops handshaking)
+
+[Service]
+Type=oneshot
+ExecStart={{SCRIPT}}

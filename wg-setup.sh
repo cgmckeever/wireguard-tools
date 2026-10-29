@@ -331,6 +331,26 @@ write_dropin() {
     if [ "$WROTE" -eq 1 ]; then run systemctl daemon-reload; fi
 }
 
+# Install the WARP watchdog (script + service + timer) and keep its timer on.
+write_watchdog() {
+    local changed=0 content
+    content=$(render_template warp-watchdog.sh.tmpl WARP_IF="$WARP_IF" STALE="$WATCHDOG_STALE")
+    write_file "$WATCHDOG_BIN" 755 <<<"$content"
+    if [ "$WROTE" -eq 1 ]; then changed=1; fi
+    content=$(render_template warp-watchdog.service.tmpl WARP_IF="$WARP_IF" SCRIPT="$WATCHDOG_BIN")
+    write_file "$WATCHDOG_SERVICE" 644 <<<"$content"
+    if [ "$WROTE" -eq 1 ]; then changed=1; fi
+    content=$(render_template warp-watchdog.timer.tmpl)
+    write_file "$WATCHDOG_TIMER" 644 <<<"$content"
+    if [ "$WROTE" -eq 1 ]; then changed=1; fi
+    if [ "$changed" -eq 1 ]; then run systemctl daemon-reload; fi
+    if ! systemctl is-active -q "$WATCHDOG.timer" || ! systemctl is-enabled -q "$WATCHDOG.timer" 2>/dev/null; then
+        step "Start the WARP watchdog ($WATCHDOG.timer: new source port for $WARP_IF after ${WATCHDOG_STALE}s without a handshake)" \
+            "systemctl disable --now $WATCHDOG.timer"
+        run systemctl enable --now "$WATCHDOG.timer"
+    fi
+}
+
 # Keep every client config named <server>.<client>.conf (renaming ones from an
 # older server name, or from before server names), pointed at the current
 # endpoint and port, and with its current addresses (IPv6 on or off). Keys are
@@ -430,6 +450,7 @@ cmd_setup() {
     start_unit "$WG_IF" "$changed"
     CLEANUP_ON_ERR=0
     guard_default_route
+    write_watchdog
     echo ""
     info "WARP is $WARP; switch with: $PROG warp on|off"
     info "REMINDER: open UDP $WG_PORT in your VPS provider's firewall / security group."
@@ -487,6 +508,9 @@ cmd_status() {
             info "$ifc: absent  [${enabled:-disabled}]"
         fi
     done
+    local wd_last
+    wd_last=$(journalctl -t "$WATCHDOG" -n 1 -o short-iso --no-pager -q 2>/dev/null | cut -c1-25 || true)
+    info "watchdog: $WATCHDOG.timer $(systemctl is-active "$WATCHDOG.timer" 2>/dev/null || true); last port change: ${wd_last:-never}"
     log "Handshakes"
     if if_exists "$WARP_IF"; then
         info "$WARP_IF: $(ago "$(wg show "$WARP_IF" latest-handshakes | awk '$2 > m { m = $2 } END { print m + 0 }')")"
@@ -597,6 +621,7 @@ t_ipt_once() {
     [ "$($x -t "$t" -S "$c" 2>/dev/null | grep -cE "^${re}\$")" -eq 1 ]
 }
 t_enabled() { systemctl is-enabled -q "wg-quick@$WG_IF"; }
+t_watchdog() { systemctl is-enabled -q "$WATCHDOG.timer" && systemctl is-active -q "$WATCHDOG.timer"; }
 t_warp_enabled() { systemctl is-enabled -q "wg-quick@$WARP_IF"; }
 t_ordering() {
     [[ " $(systemctl show -p After --value "wg-quick@$WG_IF") " == *" wg-quick@$WARP_IF.service "* ]] \
@@ -638,6 +663,7 @@ run_tests() {
     check "wg-quick@$WG_IF enabled at boot" t_enabled
     check_warp "wg-quick@$WARP_IF enabled at boot" t_warp_enabled
     check "wg-quick@$WG_IF ordered after (and wants) wg-quick@$WARP_IF" t_ordering
+    check "WARP watchdog timer enabled and running" t_watchdog
     if wg show "$WG_IF" latest-handshakes 2>/dev/null | awk '$2 > 0 { f = 1 } END { exit !f }'; then
         t_result PASS "at least one client handshake"
     else
@@ -792,6 +818,7 @@ cmd_rollback() {
     fi
     confirm "Proceed with rollback?"
 
+    run systemctl disable --now "$WATCHDOG.timer" 2>/dev/null || true
     run systemctl disable --now "wg-quick@$WG_IF" 2>/dev/null || true
     run systemctl disable --now "wg-quick@$WARP_IF" 2>/dev/null || true
     if if_exists "$WG_IF"; then run ip link del dev "$WG_IF"; fi
@@ -811,6 +838,8 @@ cmd_rollback() {
     if [ "$(backup_orig "$DROPIN")" = NEW ]; then run rm -f $DROPIN.*.bak; fi
     restore_original "$DROPIN" 1
     if [ -d "$DROPIN_DIR" ]; then run rmdir --ignore-fail-on-non-empty "$DROPIN_DIR"; fi
+    for f in "$WATCHDOG_TIMER" "$WATCHDOG_SERVICE" "$WATCHDOG_BIN"; do restore_original "$f" 1; done
+    run rm -f /run/$WATCHDOG
     run systemctl daemon-reload
     restore_original "$SYSCTL_FILE" 1
     if [ -n "$orig_fwd" ]; then run sysctl -q -w "net.ipv4.ip_forward=$orig_fwd"; fi

@@ -223,6 +223,14 @@ traffic follows the server's normal routes out the public interface.
 `warp on|off` adds or removes the rule live and rewrites `wg0.conf` so it
 sticks; `wg0` isn't restarted.
 
+**WARP watchdog.** Cloudflare occasionally stops answering the WARP tunnel's
+handshakes (seen after some reboots: packets go out, nothing comes back, and
+with WARP on clients are blocked). A new source port fixes it within seconds.
+`wg-tools-warp-watchdog.timer` checks every 30s; if `warp` has had no
+handshake for 180s on two checks in a row, it moves `warp` to a new source
+port (`wg set warp listen-port 0`, no restart) and logs it
+(`journalctl -t wg-tools-warp-watchdog`). `status` shows the last time it acted.
+
 **Always.** All routing/NAT/firewall rules live in `wg0.conf`'s
 `PostUp`/`PostDown`, generated from one list so `PostDown` and `rollback` undo
 exactly what `PostUp` did. Forward rules are inserted at the top so ufw/Docker
@@ -253,6 +261,7 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/wg-tools.state` | saved settings (including `WARP=on|off`), recorded default route |
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1` |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
+| `/usr/local/sbin/wg-tools-warp-watchdog`, `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog |
 
 Secrets are mode 600 in 700 directories. Before any file is changed, a
 timestamped copy goes to `/var/backups/wireguard-tools/files/<its path>` (e.g.
@@ -262,12 +271,13 @@ originals. Each file keeps its original plus the 5 newest copies, and
 
 ### Templates
 
-Two files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
+These files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
 
 | Template | Becomes |
 |----------|---------|
 | `client.conf.tmpl` | each `/etc/wireguard/clients/<server>.<name>.conf` |
 | `wg-quick-after-warp.conf.tmpl` | the systemd drop-in that starts `wg0` after `warp` |
+| `warp-watchdog.sh.tmpl`, `warp-watchdog.service.tmpl`, `warp-watchdog.timer.tmpl` | the WARP watchdog script and its systemd units |
 
 Edit them to change what every new client gets (e.g. `PersistentKeepalive`).
 Changes apply to clients added or rotated afterwards. Every placeholder must

@@ -1,0 +1,25 @@
+#!/bin/sh
+# Managed by wireguard-tools
+# WARP watchdog, run every 30s by wg-tools-warp-watchdog.timer. If {{WARP_IF}}
+# has had no handshake for {{STALE}}s on two checks in a row, give it a new
+# source port: Cloudflare sometimes stops answering one flow (seen after
+# reboots), and a new port gets a handshake within seconds. Nothing restarts.
+ifc={{WARP_IF}}
+stale={{STALE}}
+mark=/run/wg-tools-warp-watchdog
+ip link show dev "$ifc" >/dev/null 2>&1 || { rm -f "$mark"; exit 0; }
+newest=$(wg show "$ifc" latest-handshakes 2>/dev/null | awk '$2 > m { m = $2 } END { print m + 0 }')
+now=$(date +%s)
+if [ "$newest" -gt 0 ] && [ $(( now - newest )) -le "$stale" ]; then
+    rm -f "$mark"
+    exit 0
+fi
+# Unhealthy: act on the second check in a row, so a just-started tunnel gets time.
+if [ ! -f "$mark" ]; then
+    : >"$mark"
+    exit 0
+fi
+old=$(wg show "$ifc" listen-port)
+wg set "$ifc" listen-port 0
+rm -f "$mark"
+logger -t wg-tools-warp-watchdog "$ifc: no handshake for over ${stale}s; moved from port $old to $(wg show "$ifc" listen-port)"
