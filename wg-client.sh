@@ -24,7 +24,11 @@ Commands:
   rotate [name]   Issue new keys for an existing client (same address); the old
                   config stops working
   remove [name]   Remove the client, its keys and its config
-  list            Clients with address, allowed IPs, last handshake, traffic
+  disable [name]  Cut the client off now, keeping its keys, config and address
+                  (stays off across restarts)
+  enable [name]   Let a disabled client back in with its existing config
+  list            Clients with address, allowed IPs, last handshake (or
+                  "disabled"), traffic
   show [name]     Config path and contents with keys redacted (--qr for a QR code)
   share [name]    Send the config with magic-wormhole: prints a one-time code;
                   the recipient runs: wormhole receive <code>
@@ -161,10 +165,12 @@ issue_client() {
     psk=""
     db_put "$name" "$ip $pub $allowed"
     write_wg_conf
-    if if_exists "$WG_IF"; then
+    if is_disabled "$name"; then
+        if if_exists "$WG_IF" && [ -n "$old_pub" ]; then wg set "$WG_IF" peer "$old_pub" remove; fi
+        info "'$name' is disabled; the new config works once enabled ($PROG enable $name)"
+    elif if_exists "$WG_IF"; then
         if [ -n "$old_pub" ] && [ "$old_pub" != "$pub" ]; then wg set "$WG_IF" peer "$old_pub" remove; fi
-        wg set "$WG_IF" peer "$pub" preshared-key "$PSK_DIR/$name.psk" allowed-ips "$(client_addrs "$ip")"
-        info "peer live on $WG_IF (other clients unaffected)"
+        add_live_peer "$name" "$pub" "$ip"
     else
         warn "$WG_IF is not up; the peer is in $WG_CONF and loads when it starts"
     fi
@@ -177,6 +183,12 @@ issue_client() {
     echo ""
     info "client config: $conf"
     info "fetch it with: scp root@$(tr -d '[]' <<<"$ENDPOINT"):$conf ."
+}
+
+# Add a client's peer to the running wg0.
+add_live_peer() {
+    run wg set "$WG_IF" peer "$2" preshared-key "$PSK_DIR/$1.psk" allowed-ips "$(client_addrs "$3")"
+    info "peer live on $WG_IF (other clients unaffected)"
 }
 
 # --allowed-ips as a comma list without spaces.
@@ -235,6 +247,7 @@ cmd_remove() {
     confirm "Remove $name?"
     if if_exists "$WG_IF"; then run wg set "$WG_IF" peer "$pub" remove; fi
     db_put "$name"
+    if is_disabled "$name"; then set_disabled "$name" 0; fi
     # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
     if [ -n "$SAVED_WARP" ]; then write_wg_conf; else info "server not set up; $WG_CONF is rebuilt at the next setup"; fi
     # The config, preshared key and their .bak copies all hold this client's secrets.
@@ -251,6 +264,42 @@ cmd_remove() {
     done
 }
 
+# Disable or enable a client: disable <name> 1|0. Keys, config and address
+# stay; only its peer leaves (or rejoins) wg0, live and in wg0.conf.
+cmd_disable() {
+    local name="$1" on="$2" existing ip pub what=disable
+    if [ "$on" -eq 0 ]; then what=enable; fi
+    [ -n "$name" ] || name=$(pick_client "$what") || exit 1
+    valid_name "$name"
+    take_lock
+    require_server
+    existing=$(db_get "$name")
+    [ -n "$existing" ] || die "no client '$name' (see: $PROG list)"
+    read -r ip pub _ <<<"$existing"
+    if is_disabled "$name"; then
+        if [ "$on" -eq 1 ]; then info "'$name' is already disabled"; return 0; fi
+    elif [ "$on" -eq 0 ]; then
+        info "'$name' is already enabled"
+        return 0
+    fi
+    if [ "$on" -eq 1 ]; then
+        step "Disable client '$name' ($ip): cut off now; keys, config and address kept" "$PROG enable $name"
+        confirm "Disable $name?"
+    else
+        step "Enable client '$name' ($ip) with its existing config" "$PROG disable $name"
+    fi
+    set_disabled "$name" "$on"
+    write_wg_conf
+    if ! if_exists "$WG_IF"; then
+        info "$WG_IF is down; applies when it starts"
+    elif [ "$on" -eq 1 ]; then
+        run wg set "$WG_IF" peer "$pub" remove
+        info "peer removed from $WG_IF (other clients unaffected)"
+    else
+        add_live_peer "$name" "$pub" "$ip"
+    fi
+}
+
 cmd_list() {
     local -A hs=() rx=() tx=()
     local k a b name ip pub allowed
@@ -260,7 +309,10 @@ cmd_list() {
     fi
     printf '%-20s %-15s %-14s %-12s %s\n' NAME ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
     while read -r name ip pub allowed; do
-        printf '%-20s %-15s %-14s %-12s %s\n' "$name" "$ip" "$(ago "${hs[$pub]:-0}")" \
+        local seen
+        seen=$(ago "${hs[$pub]:-0}")
+        if is_disabled "$name"; then seen=disabled; fi
+        printf '%-20s %-15s %-14s %-12s %s\n' "$name" "$ip" "$seen" \
             "$(( ${rx[$pub]:-0} / 1048576 ))/$(( ${tx[$pub]:-0} / 1048576 ))" "${allowed//,/, }"
     done < <(db_entries)
 }
@@ -289,6 +341,8 @@ main() {
         add)    cmd_add "$@" ;;
         rotate) cmd_rotate "$@" ;;
         remove) cmd_remove "$@" ;;
+        disable) cmd_disable "${1:-}" 1 ;;
+        enable)  cmd_disable "${1:-}" 0 ;;
         list)   cmd_list ;;
         show)   cmd_show "$@" ;;
         share)  cmd_share "$@" ;;

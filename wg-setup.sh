@@ -519,7 +519,9 @@ cmd_status() {
         local -A hs=()
         local k ts name ip pub _
         while read -r k ts; do hs[$k]="$ts"; done < <(wg show "$WG_IF" latest-handshakes)
-        while read -r name ip pub _; do info "$name ($ip): $(ago "${hs[$pub]:-0}")"; done < <(db_entries)
+        while read -r name ip pub _; do
+            if is_disabled "$name"; then info "$name ($ip): disabled"; else info "$name ($ip): $(ago "${hs[$pub]:-0}")"; fi
+        done < <(db_entries)
     fi
     log "Routes"
     info "main default: $(default_route)  (recorded: $(state_get DEFAULT_ROUTE))"

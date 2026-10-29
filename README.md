@@ -125,11 +125,21 @@ without public IPv6 gives clients IPv4 only while WARP is off.
 ./wg-client.sh show laptop --qr                      # QR code again (phones: WireGuard app → scan)
 ./wg-client.sh share laptop                          # send the config via magic-wormhole (one-time code)
 ./wg-client.sh rotate laptop                         # new keys, same address; old config stops working
+./wg-client.sh disable laptop                        # cut it off now; keys, config and address kept
+./wg-client.sh enable laptop                         # let it back in with the same config
 ./wg-client.sh remove laptop
 ```
 
-Leave out the name on `rotate`, `remove`, `show` or `share` to pick from a
-numbered list. Changes apply live; other clients stay connected.
+Leave out the name on `rotate`, `remove`, `disable`, `enable`, `show` or
+`share` to pick from a numbered list. Changes apply live; other clients stay
+connected.
+
+`disable` removes the client's peer from the running `wg0` and leaves it out of
+`wg0.conf`, so it stays off across restarts; `list` shows it as `disabled`.
+Nothing on the device changes: its tunnel just gets no handshake (with a
+full-tunnel config, no internet until its tunnel is switched off). `enable`
+puts it back; the same config works, nothing to re-send. Disabled clients are
+listed in `/etc/wireguard/clients.disabled`.
 
 Each client gets its own keypair, a preshared key and the next free address.
 Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
@@ -256,6 +266,7 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/wgcf/` | WARP account and profile |
 | `/etc/wireguard/server.key`, `server.pub` | server keypair |
 | `/etc/wireguard/clients.db` | `name address public-key allowed-ips`, no private keys |
+| `/etc/wireguard/clients.disabled` | names of disabled clients |
 | `/etc/wireguard/psk/<name>.psk` | per-client preshared keys |
 | `/etc/wireguard/clients/<server>.<name>.conf` | client configs (the only copy of each client's private key) |
 | `/etc/wireguard/wg-tools.state` | saved settings (including `WARP=on|off`), recorded default route |

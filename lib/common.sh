@@ -56,6 +56,7 @@ WGCF_BIN=/usr/local/bin/wgcf
 STATE="$WG_DIR/wg-tools.state"
 BACKUP_MAP="$WG_DIR/wg-tools.backups"
 CLIENT_DB="$WG_DIR/clients.db"
+DISABLED_DB="$WG_DIR/clients.disabled"   # names of disabled clients, one per line
 PSK_DIR="$WG_DIR/psk"
 CLIENT_DIR="$WG_DIR/clients"
 SERVER_KEY="$WG_DIR/server.key"
@@ -716,6 +717,17 @@ db_entries() {
 }
 db_get() { db_entries | awk -v n="$1" '$1 == n { print $2, $3, $4; exit }'; }
 
+# Disabled clients keep their keys, config and address, but aren't peers.
+is_disabled() { [ -f "$DISABLED_DB" ] && grep -qxF "$1" "$DISABLED_DB"; }
+# Mark <name> disabled (1) or enabled (0).
+set_disabled() {
+    local name="$1" on="$2"
+    write_file "$DISABLED_DB" 600 < <(
+        if [ -f "$DISABLED_DB" ]; then grep -vxF "$name" "$DISABLED_DB" || true; fi
+        if [ "$on" -eq 1 ]; then echo "$name"; fi
+    )
+}
+
 # Rewrite clients.db with <name> removed, optionally adding "<name> <entry>".
 db_put() {
     local name="$1" entry="${2:-}"
@@ -728,7 +740,8 @@ db_put() {
 
 # --- wg0.conf ---
 
-# Render wg0.conf: interface + hook rules + one [Peer] per clients.db entry.
+# Render wg0.conf: interface + hook rules + one [Peer] per enabled clients.db
+# entry (a disabled one leaves just a comment).
 render_wg_conf() {
     local line name ip pub _ psk
     cat <<EOF
@@ -742,6 +755,10 @@ EOF
     while IFS= read -r line; do echo "PostUp = $line"; done < <(hook_cmds up)
     while IFS= read -r line; do echo "PostDown = $line"; done < <(hook_cmds down)
     while read -r name ip pub _; do
+        if is_disabled "$name"; then
+            printf '\n# %s (%s): disabled (wg-client.sh enable %s)\n' "$name" "$ip" "$name"
+            continue
+        fi
         printf '\n[Peer]\n# %s\nPublicKey = %s\n' "$name" "$pub"
         psk="$PSK_DIR/$name.psk"
         if [ -s "$psk" ]; then printf 'PresharedKey = %s\n' "$(cat "$psk")"; fi
