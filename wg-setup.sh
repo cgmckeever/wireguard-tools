@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# wg-setup.sh — Set up this Debian/Ubuntu server as a WireGuard VPN server.
-# Two modes, each its own command: `direct` (client traffic exits via this
-# server's IP) or `warp` (client traffic exits through Cloudflare WARP).
-# Clients are managed with wg-client.sh. See README.md.
+# wg-setup.sh — Set up this Debian/Ubuntu server as a WireGuard VPN server,
+# with Cloudflare WARP as a switch: `warp on` sends client traffic out through
+# WARP, `warp off` out this server's own IP. Clients are managed with
+# wg-client.sh. See README.md.
 
 set -Eeuo pipefail
 
@@ -16,26 +16,29 @@ usage() {
     cat <<EOF
 Usage: $PROG [options] <command>
 
-Sets up this server as a WireGuard VPN server. Pick one mode:
+Sets up this server as a WireGuard VPN server whose clients exit either
+through Cloudflare WARP or via this server's own IP, switchable at any time:
 
-  $PROG direct   Clients' traffic exits via this server's own IP
-  $PROG warp     Clients' traffic exits through Cloudflare WARP
+  $PROG setup      Install or update everything (WARP on by default)
+  $PROG warp off   Clients exit via this server's IP
+  $PROG warp on    Clients exit through WARP (blocked, not leaked, if WARP drops)
 
-Then add clients with wg-client.sh. Re-run the same command to apply changes
-(e.g. --port); to switch modes, rollback first.
+Then add clients with wg-client.sh. Re-run setup to apply changes (e.g. --port).
 
 Commands:
-  direct      Create $WG_IF: server keys, NAT out this server's public
-              interface, firewall, IPv4 forwarding, systemd unit
-  warp        First the WARP tunnel: install wgcf, register a free WARP account,
-              bring up $WARP_IF (Table = off), run the WARP tests. If they pass,
-              and you confirm, create $WG_IF routed out through $WARP_IF
+  setup       Install packages and wgcf, register a free WARP account, bring up
+              $WARP_IF (Table = off) and test it, then create $WG_IF: server
+              keys, NAT for both ways out, firewall, forwarding, systemd units.
+              If WARP can't be set up on a first install, finishes with WARP off
+  warp [on|off]
+              Switch where clients exit (live: $WG_IF isn't restarted, clients
+              stay connected); no argument shows the current setting
   test        All verification checks; exits non-zero on any FAIL
   status      Interfaces, handshakes, routes, rules
   backup [dir]  Archive keys, configs and clients (default dir $BACKUP_DIR)
   restore <archive>
               Set this server up from a backup: same keys, clients, WARP
-              account and settings, then runs direct or warp as before
+              account and settings, then runs setup
   rollback    Stop/disable the interfaces, remove all rules, restore original
               files; keeps keys and clients unless --purge
   help        This text
@@ -48,18 +51,18 @@ Options:
                         take over configs not made by wireguard-tools
   --purge               With rollback: also delete keys, clients, WARP account
 
-Config (flag / environment variable; saved by direct/warp for later runs):
+Config (flag / environment variable; saved by setup for later runs):
   --name         SERVER_NAME          $SERVER_NAME  (client configs: <name>.<client>.conf)
   --subnet       WG_SUBNET            $WG_SUBNET
   --subnet6      WG_SUBNET6           ${WG_SUBNET6:-<random fd::/64 at setup>}  (client IPv6; "off" disables)
   --port         WG_PORT              $WG_PORT
-  --mtu          WG_MTU               (default 1420 for direct, 1280 for warp)
+  --mtu          WG_MTU               $WG_MTU
   --warp-mtu     WARP_MTU             $WARP_MTU
   --dns          WG_DNS               $WG_DNS  (DNS server given to clients)
   --endpoint     ENDPOINT             ${ENDPOINT:-<auto-detected public IPv4>}
   --wg-if        WG_IF                $WG_IF
   --warp-if      WARP_IF              $WARP_IF
-  --table        RT_TABLE             $RT_TABLE  (warp policy-routing table)
+  --table        RT_TABLE             $RT_TABLE  (WARP policy-routing table)
   --allowed-ips  CLIENT_ALLOWED_IPS   $CLIENT_ALLOWED_IPS  (default for new clients)
                  WGCF_VERSION         $WGCF_VERSION  (e.g. v2.2.22)
                  WGCF_SHA256          ${WGCF_SHA256:-<unset>}  (pin the wgcf binary)
@@ -85,6 +88,8 @@ install_packages() {
 }
 
 # Download wgcf for this architecture from GitHub, check it, install it.
+# Returns 1 if it can't be fetched (setup can carry on without WARP); a
+# checksum mismatch is fatal.
 install_wgcf() {
     if [ -x "$WGCF_BIN" ] && "$WGCF_BIN" --help >/dev/null 2>&1 && [ "$FORCE" -eq 0 ]; then
         info "wgcf present: $WGCF_BIN"
@@ -101,11 +106,11 @@ install_wgcf() {
     else
         api="https://api.github.com/repos/ViRb3/wgcf/releases/tags/$WGCF_VERSION"
     fi
-    json=$(curl -fsSL --max-time 30 "$api") || die "cannot reach GitHub releases API ($api)"
+    json=$(curl -fsSL --max-time 30 "$api") || { warn "cannot reach GitHub releases API ($api)"; return 1; }
     url=$(grep -oE '"browser_download_url": *"[^"]+"' <<<"$json" | grep -oE 'https://[^"]+' | grep -E "_linux_${ARCH}\$" | head -n 1 || true)
-    [ -n "$url" ] || die "no linux_$ARCH asset in wgcf release $WGCF_VERSION"
+    [ -n "$url" ] || { warn "no linux_$ARCH asset in wgcf release $WGCF_VERSION"; return 1; }
     sums_url=$(grep -oE '"browser_download_url": *"[^"]+"' <<<"$json" | grep -oE 'https://[^"]+' | grep -iE 'checksums|sha256' | head -n 1 || true)
-    curl -fsSL --max-time 120 -o "$TMPD/wgcf" "$url" || die "download failed: $url"
+    curl -fsSL --max-time 120 -o "$TMPD/wgcf" "$url" || { warn "download failed: $url"; return 1; }
 
     got=$(sha256sum "$TMPD/wgcf" | awk '{ print $1 }')
     if [ -n "$WGCF_SHA256" ]; then
@@ -122,12 +127,13 @@ install_wgcf() {
         warn "release publishes no checksums; set WGCF_SHA256=$got to pin this binary"
     fi
     chmod 755 "$TMPD/wgcf"
-    "$TMPD/wgcf" --help >/dev/null 2>&1 || die "downloaded wgcf does not run"
+    "$TMPD/wgcf" --help >/dev/null 2>&1 || { warn "downloaded wgcf does not run"; return 1; }
     install -m 755 "$TMPD/wgcf" "$WGCF_BIN"
     info "installed $(basename "$url")"
 }
 
 # Register a WARP account and generate the WireGuard profile (once).
+# Returns 1 if WARP refuses (setup can carry on without WARP).
 register_warp() {
     local log="$WGCF_DIR/wgcf.log"
     if [ -f "$WGCF_DIR/wgcf-account.toml" ]; then
@@ -135,10 +141,12 @@ register_warp() {
     else
         step "Register a free WARP account (accepts Cloudflare's WARP terms)" "rm -rf $WGCF_DIR"
         if [ "$DRY_RUN" -eq 0 ]; then
-            ( cd "$WGCF_DIR" && umask 077 && "$WGCF_BIN" register --accept-tos ) >"$log" 2>&1 \
-                || die "wgcf register failed; see $log. WARP may refuse registrations from some server IPs:
-       retry later, or register on another machine and copy wgcf-account.toml and
-       wgcf-profile.conf into $WGCF_DIR/, then re-run '$PROG warp' (see README)"
+            if ! ( cd "$WGCF_DIR" && umask 077 && "$WGCF_BIN" register --accept-tos ) >"$log" 2>&1; then
+                warn "wgcf register failed; see $log. WARP may refuse registrations from some server IPs:
+       retry later ('$PROG warp on'), or register on another machine and copy
+       wgcf-account.toml and wgcf-profile.conf into $WGCF_DIR/ (see README)"
+                return 1
+            fi
         fi
     fi
     if [ -f "$WGCF_DIR/wgcf-profile.conf" ] && [ "$FORCE" -eq 0 ]; then
@@ -147,8 +155,10 @@ register_warp() {
     fi
     step "Generate WARP WireGuard profile" "rm $WGCF_DIR/wgcf-profile.conf"
     if [ "$DRY_RUN" -eq 0 ]; then
-        ( cd "$WGCF_DIR" && umask 077 && "$WGCF_BIN" generate ) >>"$log" 2>&1 \
-            || die "wgcf generate failed; see $log"
+        if ! ( cd "$WGCF_DIR" && umask 077 && "$WGCF_BIN" generate ) >>"$log" 2>&1; then
+            warn "wgcf generate failed; see $log"
+            return 1
+        fi
         chmod 600 "$WGCF_DIR"/*
     fi
 }
@@ -216,49 +226,28 @@ write_warp_conf() {
     WARP_CHANGED=$WROTE
 }
 
-cmd_warp() {
-    take_lock
-    # Refuse a breaking change before saving config or touching WARP.
-    check_server_change
-    ensure_subnet6
-    # Create the WARP account folder first, so account files registered on
-    # another machine can be copied in even if this run fails later.
+# Install, register and bring up the WARP tunnel, then test it. Returns 1 if
+# WARP isn't usable (nothing on the client side depends on it yet).
+provision_warp() {
+    log "WARP tunnel"
     if [ "$DRY_RUN" -eq 0 ]; then install -d -m 700 "$WGCF_DIR"; fi
-    save_config
-    record_baseline
-    install_packages
-    install_wgcf
-    register_warp
+    install_wgcf || return 1
+    register_warp || return 1
     write_warp_conf
     start_unit "$WARP_IF" "$WARP_CHANGED"
     guard_default_route
     if [ "$DRY_RUN" -eq 1 ]; then
         log "Dry run: skipping WARP tests"
-        setup_server
         return 0
     fi
     log "WARP tests"
+    T_PASS=0 T_FAIL=0 T_WARN=0
     run_tests warp
     if [ "$T_FAIL" -gt 0 ]; then
-        info "fix WARP before going on (see '$PROG status'), then re-run '$PROG warp'"
-        report_tests
+        warn "WARP failed $T_FAIL check(s); see '$PROG status'"
+        return 1
     fi
     info "WARP is working ($T_PASS checks passed)"
-    if ! continue_to_server; then
-        info "stopped after WARP; re-run '$PROG warp' to set up the WireGuard server"
-        return 0
-    fi
-    setup_server
-}
-
-# Ask whether to go on from the WARP tunnel to the WireGuard server.
-continue_to_server() {
-    if [ "$DRY_RUN" -eq 1 ] || [ "$YES" -eq 1 ]; then return 0; fi
-    have_tty || return 1
-    local reply=""
-    echo ""
-    read -r -p "    Set up the WireGuard server ($WG_IF) through $WARP_IF now? [Y/n] " reply </dev/tty || true
-    [[ ! $reply =~ ^[Nn] ]]
 }
 
 # --- server ---
@@ -333,7 +322,8 @@ ensure_subnet6() {
     fi
 }
 
-# warp mode: order wg0 after warp at boot and stop it with warp.
+# Start wg0 after warp at boot (Wants, not Requires: with WARP off, wg0 must
+# come up even if warp can't; with it on, RT_TABLE's blackhole fails closed).
 write_dropin() {
     local content
     content=$(render_template wg-quick-after-warp.conf.tmpl WG_IF="$WG_IF" WARP_IF="$WARP_IF")
@@ -371,25 +361,21 @@ sync_client_configs() {
     fi
 }
 
-# ufw (if active): allow the WireGuard port and wg0 -> exit forwarding.
+# ufw (if active): allow the WireGuard port and wg0 -> both ways out.
 open_firewall() {
     local st out
-    out=$(out_if)
     st=$(ufw status 2>/dev/null || true)
     if [[ $st == *"Status: active"* ]]; then
-        step "ufw: allow $WG_PORT/udp and routing $WG_IF -> $out" \
-            "ufw delete allow $WG_PORT/udp; ufw route delete allow in on $WG_IF out on $out"
+        step "ufw: allow $WG_PORT/udp and routing $WG_IF -> $(exit_ifs | paste -sd' ' -)" \
+            "ufw delete allow $WG_PORT/udp; ufw route delete allow in on $WG_IF out on <each>"
         run ufw allow "$WG_PORT/udp" comment wireguard-tools
-        run ufw route allow in on "$WG_IF" out on "$out" comment wireguard-tools
+        while IFS= read -r out; do
+            run ufw route allow in on "$WG_IF" out on "$out" comment wireguard-tools
+        done < <(exit_ifs)
         if [ "$(state_get UFW)" != 1 ]; then state_set UFW 1; fi
     else
         info "ufw not active; $WG_IF's PostUp opens udp/$WG_PORT in iptables INPUT"
     fi
-}
-
-cmd_direct() {
-    take_lock
-    setup_server
 }
 
 # Refuse to change the subnet under existing clients, or to take over a
@@ -401,28 +387,41 @@ check_server_change() {
     ensure_managed "$WG_CONF"
 }
 
-# The server must be set up (direct or warp); after rollback no mode is saved.
-require_mode() {
-    [ -n "$SAVED_EXIT" ] || die "not set up (no saved mode); run '$PROG direct' or '$PROG warp'"
+# The server must be set up; after rollback no WARP setting is saved.
+require_setup() {
+    [ -n "$SAVED_WARP" ] || die "not set up; run '$PROG setup'"
 }
 
-# Create or update wg0 for the current mode (called by direct and warp).
-setup_server() {
-    if [ "$EXIT" = warp ]; then
-        [ -f "$WARP_CONF" ] || [ "$DRY_RUN" -eq 1 ] || die "no $WARP_CONF; the WARP step didn't complete"
-        if_exists "$WARP_IF" || [ "$DRY_RUN" -eq 1 ] || die "$WARP_IF is down; check '$PROG status', then re-run '$PROG warp'"
-    fi
+# Install or update everything: WARP tunnel, then wg0 with the saved WARP
+# setting (on for a new install). WARP failing on a first install leaves it
+# off; on an existing install with WARP on it stays on (fail closed: clients
+# are blocked, not leaked) until fixed or switched off.
+cmd_setup() {
+    take_lock
+    # Refuse a breaking change before saving config or touching anything.
     check_server_change
     ensure_subnet6
     save_config
+    state_unset EXIT   # older versions' mode key; WARP replaces it
     record_baseline
-    log "WireGuard server ($EXIT mode: client traffic leaves via $(out_if))"
     install_packages
+    local warp_ok=1
+    provision_warp || warp_ok=0
+    if [ "$warp_ok" -eq 0 ]; then
+        if [ -z "$SAVED_WARP" ] && [ "$WARP" = on ]; then
+            warn "WARP isn't usable here; finishing with WARP off (clients exit via this server's IP). Fix it, then: $PROG warp on"
+            WARP=off
+            save_config
+        elif [ "$WARP" = on ]; then
+            warn "WARP is on but not working: clients are blocked until it is (or: $PROG warp off)"
+        fi
+    fi
+    log "WireGuard server (WARP $WARP: client traffic leaves via $(out_if))"
     ensure_server_keys
     resolve_endpoint 1
     sync_client_configs
     write_sysctl
-    if [ "$EXIT" = warp ]; then write_dropin; fi
+    write_dropin
     write_wg_conf
     local changed="$WROTE"
     if [ "$KEYS_CHANGED" -eq 1 ]; then changed=1; fi
@@ -432,19 +431,53 @@ setup_server() {
     CLEANUP_ON_ERR=0
     guard_default_route
     echo ""
+    info "WARP is $WARP; switch with: $PROG warp on|off"
     info "REMINDER: open UDP $WG_PORT in your VPS provider's firewall / security group."
     info "Next: wg-client.sh add <name>"
+}
+
+# Show or switch WARP. Switching rewrites wg0.conf (for the next start) and
+# adds/removes the policy rule live; wg0 isn't restarted.
+cmd_warp() {
+    local want="${1:-}"
+    require_setup
+    case "$want" in
+        "")
+            info "WARP is $WARP: client traffic leaves via $(out_if)"
+            return 0
+            ;;
+        on|off) ;;
+        *) die "usage: $PROG warp [on|off]" ;;
+    esac
+    take_lock
+    if [ "$want" = on ]; then
+        provision_warp || die "WARP isn't working; leaving it off (see '$PROG status')"
+    fi
+    if [ "$WARP" = "$want" ] && [ -f "$WG_CONF" ] && grep -qF "(WARP $want)" "$WG_CONF"; then
+        info "WARP is already $want (client traffic leaves via $(out_if))"
+        if if_exists "$WG_IF"; then run_hooks warp "$want" >/dev/null; fi
+        return 0
+    fi
+    WARP="$want"
+    step "WARP $want: client traffic leaves via $(out_if)" "$PROG warp $( [ "$want" = on ] && echo off || echo on)"
+    save_config
+    write_wg_conf
+    if if_exists "$WG_IF"; then
+        run_hooks warp "$want"
+        info "applied live; clients stay connected (open connections reset once)"
+    else
+        info "$WG_IF is down; applies when it starts"
+    fi
 }
 
 # --- status ---
 
 cmd_status() {
     local ifc unit active enabled x t c r f
-    require_mode
-    log "Mode: $EXIT (client traffic leaves via $(out_if))"
+    require_setup
+    log "WARP $WARP (client traffic leaves via $(out_if))"
     log "Interfaces"
     for ifc in "$WARP_IF" "$WG_IF"; do
-        if [ "$ifc" = "$WARP_IF" ] && [ "$EXIT" != warp ]; then continue; fi
         unit="wg-quick@$ifc"
         active=$(systemctl is-active "$unit" 2>/dev/null || true)
         enabled=$(systemctl is-enabled "$unit" 2>/dev/null || true)
@@ -455,7 +488,7 @@ cmd_status() {
         fi
     done
     log "Handshakes"
-    if [ "$EXIT" = warp ] && if_exists "$WARP_IF"; then
+    if if_exists "$WARP_IF"; then
         info "$WARP_IF: $(ago "$(wg show "$WARP_IF" latest-handshakes | awk '$2 > m { m = $2 } END { print m + 0 }')")"
     fi
     if if_exists "$WG_IF"; then
@@ -466,12 +499,10 @@ cmd_status() {
     fi
     log "Routes"
     info "main default: $(default_route)  (recorded: $(state_get DEFAULT_ROUTE))"
-    if [ "$EXIT" = warp ]; then
-        while IFS= read -r f; do
-            $f rule show | grep -F "lookup $RT_TABLE" | sed "s/^/    $f rule: /" || true
-            $f route show table "$RT_TABLE" 2>/dev/null | sed "s/^/    $f table $RT_TABLE: /" || true
-        done < <(ip_families)
-    fi
+    while IFS= read -r f; do
+        $f rule show | grep -F "lookup $RT_TABLE" | sed "s/^/    $f rule: /" || info "$f rule: none (WARP off)"
+        $f route show table "$RT_TABLE" 2>/dev/null | sed "s/^/    $f table $RT_TABLE: /" || true
+    done < <(ip_families)
     log "Rules"
     while IFS='|' read -r x t c r; do
         # shellcheck disable=SC2086  # $r is a rule: split into iptables args
@@ -481,7 +512,7 @@ cmd_status() {
     if [ "$IPV6" -eq 1 ]; then
         info "IPv6: clients in $WG_SUBNET6, ipv6 forwarding = $(sysctl -n net.ipv6.conf.all.forwarding)"
     else
-        info "IPv6: off${WG_SUBNET6:+ ($( [ "$WG_SUBNET6" = off ] && echo disabled || echo "no IPv6 way out in $EXIT mode"))}"
+        info "IPv6: off${WG_SUBNET6:+ ($( [ "$WG_SUBNET6" = off ] && echo disabled || echo "kernel IPv6 disabled"))}"
     fi
 }
 
@@ -501,6 +532,14 @@ check() {
     local desc="$1"
     shift
     if "$@"; then t_result PASS "$desc"; else t_result FAIL "$desc"; fi
+}
+# A WARP check: a FAIL only while WARP is on (or while testing WARP itself).
+check_warp() {
+    local desc="$1"
+    shift
+    if "$@"; then t_result PASS "$desc"
+    elif [ "$WARP" = on ] || [ "$T_SCOPE" = warp ]; then t_result FAIL "$desc"
+    else t_result WARN "$desc (WARP is off)"; fi
 }
 
 t_warp_on() {
@@ -534,11 +573,13 @@ t_warp6_on() {
     ip -6 rule del from "$src" lookup "$RT_TABLE" priority "$prio" 2>/dev/null || true
     [[ $out == *$'\nwarp=on'* || $out == *$'\nwarp=plus'* ]]
 }
-# ip rule / table checks for family $1 ("ip" or "ip -6").
+# ip rule / table checks for family $1 ("ip" or "ip -6"). The rule is there
+# exactly once with WARP on, and absent with it off.
 t_ip_rule() {
-    local net="$WG_SUBNET"
+    local net="$WG_SUBNET" want=0
     if [ "$1" = "ip -6" ]; then net="$WG_SUBNET6"; fi
-    [ "$($1 rule show | grep -cF "from $net lookup $RT_TABLE")" -eq 1 ]
+    if [ "$WARP" = on ]; then want=1; fi
+    [ "$($1 rule show | grep -cF "from $net lookup $RT_TABLE")" -eq "$want" ]
 }
 t_table() {
     local r net="$WG_SUBNET"
@@ -555,24 +596,23 @@ t_ipt_once() {
     re=$(sed -E 's/\./\\./g; s/-p (tcp|udp) /-p \1 (-m \1 )?/' <<<"-A $c $r")
     [ "$($x -t "$t" -S "$c" 2>/dev/null | grep -cE "^${re}\$")" -eq 1 ]
 }
-t_enabled() {
-    systemctl is-enabled -q "wg-quick@$WG_IF" || return 1
-    [ "$EXIT" != warp ] || systemctl is-enabled -q "wg-quick@$WARP_IF"
-}
+t_enabled() { systemctl is-enabled -q "wg-quick@$WG_IF"; }
+t_warp_enabled() { systemctl is-enabled -q "wg-quick@$WARP_IF"; }
 t_ordering() {
     [[ " $(systemctl show -p After --value "wg-quick@$WG_IF") " == *" wg-quick@$WARP_IF.service "* ]] \
-        && [[ " $(systemctl show -p Requires --value "wg-quick@$WG_IF") " == *" wg-quick@$WARP_IF.service "* ]]
+        && [[ " $(systemctl show -p Wants --value "wg-quick@$WG_IF") " == *" wg-quick@$WARP_IF.service "* ]]
 }
 
-# Run the checks; "warp" stops after the WARP checks.
+# Run the checks; "warp" stops after the WARP checks. WARP checks only fail
+# the run while WARP is on.
+T_SCOPE=all
 run_tests() {
-    local rule
-    if [ "$EXIT" = warp ]; then
-        check "$WARP_IF: curl --interface $WARP_IF shows warp=on" t_warp_on
-        if [ "$IPV6" -eq 1 ]; then check "$WARP_IF: IPv6 through $WARP_IF shows warp=on" t_warp6_on; fi
-        check "$WARP_IF: handshake within the last 3 minutes" t_warp_handshake
-        check "server's own traffic is not tunneled (plain curl shows warp=off)" t_untunneled
-    fi
+    local rule f net
+    T_SCOPE="$1"
+    check_warp "$WARP_IF: curl --interface $WARP_IF shows warp=on" t_warp_on
+    if [ "$IPV6" -eq 1 ]; then check_warp "$WARP_IF: IPv6 through $WARP_IF shows warp=on" t_warp6_on; fi
+    check_warp "$WARP_IF: handshake within the last 3 minutes" t_warp_handshake
+    check "server's own traffic is not tunneled (plain curl shows warp=off)" t_untunneled
     check "default route unchanged since install ($(state_get DEFAULT_ROUTE))" t_default_route
     [ "$1" != warp ] || return 0
     if [ ! -f "$WG_CONF" ]; then
@@ -582,22 +622,22 @@ run_tests() {
     check "$WG_IF listening on udp/$WG_PORT" t_listen
     check "net.ipv4.ip_forward = 1" t_forward
     if [ "$IPV6" -eq 1 ]; then check "net.ipv6.conf.all.forwarding = 1" t_forward6; fi
-    if [ "$EXIT" = warp ]; then
-        local f net
-        while IFS= read -r f; do
-            net="$WG_SUBNET"
-            if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
-            check "$f rule: from $net lookup $RT_TABLE (exactly once)" t_ip_rule "$f"
-            check "$f table $RT_TABLE: default via $WARP_IF, blackhole fallback, $net via $WG_IF" t_table "$f"
-        done < <(ip_families)
-    fi
+    while IFS= read -r f; do
+        net="$WG_SUBNET"
+        if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+        if [ "$WARP" = on ]; then
+            check "$f rule: from $net lookup $RT_TABLE (exactly once; WARP on)" t_ip_rule "$f"
+        else
+            check "$f rule: none from $net (WARP off)" t_ip_rule "$f"
+        fi
+        check_warp "$f table $RT_TABLE: default via $WARP_IF, blackhole fallback, $net via $WG_IF" t_table "$f"
+    done < <(ip_families)
     while IFS= read -r rule; do
         check "exactly once: ${rule//|/ }" t_ipt_once "$rule"
     done < <(ipt_rules)
-    check "wg-quick units enabled at boot" t_enabled
-    if [ "$EXIT" = warp ]; then
-        check "wg-quick@$WG_IF ordered after and requires wg-quick@$WARP_IF" t_ordering
-    fi
+    check "wg-quick@$WG_IF enabled at boot" t_enabled
+    check_warp "wg-quick@$WARP_IF enabled at boot" t_warp_enabled
+    check "wg-quick@$WG_IF ordered after (and wants) wg-quick@$WARP_IF" t_ordering
     if wg show "$WG_IF" latest-handshakes 2>/dev/null | awk '$2 > 0 { f = 1 } END { exit !f }'; then
         t_result PASS "at least one client handshake"
     else
@@ -612,8 +652,8 @@ report_tests() {
 }
 
 cmd_test() {
-    require_mode
-    log "Tests ($EXIT mode)"
+    require_setup
+    log "Tests (WARP $WARP)"
     run_tests all
     report_tests
 }
@@ -660,25 +700,23 @@ cmd_backup() {
 # Set this server up from a backup archive. Only keys, clients, the WARP
 # account and settings come across; the old server's baseline (default route,
 # interface, ip_forward), firewall record and file-backup records are dropped,
-# and an IP endpoint is re-detected. Then the saved mode's setup runs.
+# and an IP endpoint is re-detected. Then setup runs, with the saved WARP setting.
 cmd_restore() {
-    local archive="${1:-}" members mode ep k
+    local archive="${1:-}" members ep k
     [ -n "$archive" ] || die "usage: $PROG restore <archive.tar.gz>"
     [ -f "$archive" ] || die "no such file: $archive"
     archive=$(readlink -f "$archive")
     members=$(tar -tzf "$archive" 2>/dev/null) || die "$archive is not a readable .tar.gz"
     grep -qx "$STATE" <<<"$members" || die "$archive is not a wireguard-tools backup (no $STATE inside)"
     # Restoring over a live setup would orphan its rules and lose its rollback record.
-    if [ -n "$SAVED_EXIT" ]; then
-        die "this server is already set up ($SAVED_EXIT); run '$PROG rollback' (or 'rollback --purge') first"
+    if [ -n "$SAVED_WARP" ]; then
+        die "this server is already set up; run '$PROG rollback' (or 'rollback --purge') first"
     fi
-    mode=$(tar -xzOf "$archive" -P "$STATE" | sed -n 's/^EXIT=//p' | tail -n 1)
-    case "$mode" in direct|warp) ;; *) die "backup has no usable mode (EXIT=$mode)" ;; esac
 
     take_lock
-    local what="keys, clients and settings"
-    if [ "$mode" = warp ]; then what="keys, clients, settings and WARP account"; fi
-    step "Restore $what from $archive ($mode mode)" \
+    local what="keys, clients and settings" has_warp=0
+    if grep -q "^$WGCF_DIR/wgcf-account.toml\$" <<<"$members"; then has_warp=1; what="keys, clients, settings and WARP account"; fi
+    step "Restore $what from $archive" \
         "$PROG rollback --purge"
     confirm "Restore from this backup?"
     local paths=("$WG_DIR") keep_map=""
@@ -687,7 +725,7 @@ cmd_restore() {
     if [ -f "$BACKUP_MAP" ]; then keep_map="$TMPD/backups"; cp -a "$BACKUP_MAP" "$keep_map"; fi
     run tar -xzpf "$archive" -P "${paths[@]}"
     if [ "$DRY_RUN" -eq 1 ]; then
-        info "[dry-run] would then run: $PROG $mode"
+        info "[dry-run] would then run: $PROG setup"
         return 0
     fi
     for k in DEFAULT_ROUTE PUB_IF ORIG_IP_FORWARD ORIG_IP6_FORWARD ORIG_ACCEPT_RA UFW; do state_unset "$k"; done
@@ -703,19 +741,19 @@ cmd_restore() {
     done < <(grep "^$WG_DIR/" <<<"$members")
     chmod 600 "$BACKUP_MAP" 2>/dev/null || true
     info "restored; clients: $(db_entries | awk '{ printf "%s ", $1 }')"
-    if [ "$mode" = warp ]; then
+    if [ "$has_warp" -eq 1 ]; then
         warn "the WARP account is now on this server too; don't keep running it on the old one"
     fi
     flock -u 9
     local flags=()
     if [ "$YES" -eq 1 ]; then flags+=(--yes); fi
-    log "Setting up ($mode)"
-    info "if setup stops, fix the cause and run '$PROG $mode' (the restored files stay in place)"
+    log "Setting up"
+    info "if setup stops, fix the cause and run '$PROG setup' (the restored files stay in place)"
     # exec skips the EXIT trap: remove our temp dir and hand back the caller's
     # TMPDIR, or the new process's mktemp would use the deleted dir.
     rm -rf "$TMPD"
     if [ -n "$CALLER_TMPDIR" ]; then export TMPDIR="$CALLER_TMPDIR"; else unset TMPDIR; fi
-    exec "$SELF" "${flags[@]+"${flags[@]}"}" "$mode"
+    exec "$SELF" "${flags[@]+"${flags[@]}"}" setup
 }
 
 # --- rollback ---
@@ -747,11 +785,8 @@ cmd_rollback() {
     orig_fwd6=$(state_get ORIG_IP6_FORWARD)
     orig_ra=$(state_get ORIG_ACCEPT_RA)
     pub=$(pub_if)
-    out=$(out_if)
-    local ifs="$WG_IF"
-    if [ "$EXIT" = warp ]; then ifs="$WG_IF and $WARP_IF"; fi
-    step "Roll back ($EXIT mode): stop $ifs, remove routing/NAT/firewall rules, restore original files" \
-        "$PROG $EXIT"
+    step "Roll back: stop $WG_IF and $WARP_IF, remove routing/NAT/firewall rules, restore original files" \
+        "$PROG setup"
     if [ "$PURGE" -eq 1 ]; then
         warn "--purge also deletes the WARP account, server and client keys, and client configs (irreversible)"
     fi
@@ -765,7 +800,9 @@ cmd_rollback() {
 
     if [ "$(state_get UFW)" = 1 ] && command -v ufw >/dev/null; then
         run ufw delete allow "$WG_PORT/udp" || true
-        run ufw route delete allow in on "$WG_IF" out on "$out" || true
+        while IFS= read -r out; do
+            run ufw route delete allow in on "$WG_IF" out on "$out" || true
+        done < <(exit_ifs)
         state_unset UFW
     fi
 
@@ -797,9 +834,9 @@ cmd_rollback() {
         run rm -rf "$WGCF_DIR" "$CLIENT_DIR" "$PSK_DIR"
         info "left installed: packages and $WGCF_BIN"
     else
-        # Free the mode (and its MTU default) so the next setup can pick either.
+        # Not set up any more (wg-client.sh and restore check this).
+        state_unset WARP
         state_unset EXIT
-        state_unset WG_MTU
         local kept="keys, clients ($CLIENT_DB, $CLIENT_DIR)"
         if [ -d "$WGCF_DIR" ]; then kept="$kept, WARP account ($WGCF_DIR)"; fi
         info "kept: $kept (rollback --purge removes them)"
@@ -809,22 +846,15 @@ cmd_rollback() {
 
 # --- main ---
 
-# The setup commands choose the mode; everything else uses the saved one.
-command_mode() {
-    case "$1" in
-        direct|warp) echo "$1" ;;
-    esac
-}
-
 main() {
     init "$@"
     set -- "${ARGS[@]}"
     local cmd="$1"
     shift
     case "$cmd" in
-        direct)   cmd_direct ;;
-        warp)     cmd_warp ;;
-        server)   die "'server' is now '$PROG direct' or '$PROG warp'" ;;
+        setup)    cmd_setup ;;
+        warp)     cmd_warp "$@" ;;
+        direct|server) die "'$cmd' is now '$PROG setup', then '$PROG warp off' for no WARP" ;;
         test)     cmd_test ;;
         status)   cmd_status ;;
         backup)   cmd_backup "$@" ;;

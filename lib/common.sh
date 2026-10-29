@@ -2,18 +2,21 @@
 # shellcheck disable=SC2034  # globals here are used by wg-setup.sh / wg-client.sh
 # lib/common.sh — shared by wg-setup.sh and wg-client.sh. Not run directly.
 #
-# Exit modes:
-#   warp    client traffic exits through Cloudflare WARP. The server's main
-#           routing table is never touched (warp.conf uses Table = off); only
-#           packets from the WireGuard subnet are policy-routed into RT_TABLE,
-#           whose default is the warp interface, with a blackhole fallback so
-#           clients fail closed (no leak via the VPS's own IP) if warp drops.
-#   direct  client traffic is NATed out the server's public interface.
+# One setup, with WARP as a switch (WARP=on|off, `wg-setup.sh warp on|off`):
+# wg0 plus the WARP tunnel are always set up; NAT and forwarding rules exist
+# for both ways out, and RT_TABLE always holds "default dev warp" with a
+# blackhole fallback. The only difference is one policy rule per family:
+#   on   `ip rule from WG_SUBNET lookup RT_TABLE`: client traffic exits through
+#        Cloudflare WARP, and fails closed (blackhole, no leak via the VPS's
+#        own IP) if warp drops. The main table is never touched (warp.conf
+#        uses Table = off).
+#   off  no rule: client traffic follows the main table out the public interface.
+# Switching only adds or removes that rule, so wg0 never restarts for it.
 #
 # IPv6: clients also get an address in WG_SUBNET6 (a ULA /64, random by
-# default) and their IPv6 is NATed out the same way: through WARP's own IPv6
-# in warp mode (which works on IPv4-only hosts), or out the public interface
-# in direct mode when the host has IPv6. WG_SUBNET6=off disables it.
+# default), NATed out the same way: through WARP's own IPv6 when on (works on
+# IPv4-only hosts), or out the public interface when off (if the host has
+# IPv6). WG_SUBNET6=off disables it.
 #
 # Every routing/NAT rule lives in wg0.conf PostUp/PostDown, generated from one
 # list (hook_cmds), so PostDown and rollback exactly invert PostUp. The one
@@ -22,11 +25,11 @@
 # restart wg0 can't leave clients blackholed.
 
 # --- Config ---
-# Saved in the state file by `wg-setup.sh direct/warp`, so later runs and
+# Saved in the state file by `wg-setup.sh setup` (and `warp on|off`), so later runs and
 # wg-client.sh use the server's real settings.
 # Precedence: flag > environment variable > saved value > default.
-CONFIG_KEYS=(EXIT SERVER_NAME WG_SUBNET WG_SUBNET6 WG_PORT WG_MTU WARP_MTU WG_DNS WG_IF WARP_IF RT_TABLE CLIENT_ALLOWED_IPS)
-EXIT=""                 # set by wg-setup.sh direct/warp, else the saved mode
+CONFIG_KEYS=(WARP SERVER_NAME WG_SUBNET WG_SUBNET6 WG_PORT WG_MTU WARP_MTU WG_DNS WG_IF WARP_IF RT_TABLE CLIENT_ALLOWED_IPS)
+WARP=""                 # on|off: client traffic out through WARP or not (saved; not read from the environment)
 SERVER_NAME="${SERVER_NAME:-}"
 WG_SUBNET="${WG_SUBNET:-}"
 WG_SUBNET6="${WG_SUBNET6:-}"   # ULA /64, or "off"; setup picks a random one
@@ -177,30 +180,28 @@ parse_args() {
     done
 }
 
-# Fill unset config from defaults (MTU default depends on the exit mode).
+# Fill unset config from defaults.
 apply_defaults() {
-    : "${EXIT:=warp}" "${WG_SUBNET:=10.8.0.0/24}" "${WG_PORT:=51820}" "${WARP_MTU:=1280}"
+    : "${WARP:=on}" "${WG_SUBNET:=10.8.0.0/24}" "${WG_PORT:=51820}" "${WARP_MTU:=1280}" "${WG_MTU:=1280}"
     : "${WG_DNS:=1.1.1.1}" "${WG_IF:=wg0}" "${WARP_IF:=warp}" "${RT_TABLE:=100}"
     : "${CLIENT_ALLOWED_IPS:=0.0.0.0/0, ::/0}"
     if [ -z "$SERVER_NAME" ]; then
         SERVER_NAME=$(hostname -s 2>/dev/null | tr -c 'A-Za-z0-9_\n-' - | cut -c1-32)
         : "${SERVER_NAME:=wg}"
     fi
-    if [ -z "$WG_MTU" ]; then
-        if [ "$EXIT" = warp ]; then WG_MTU=1280; else WG_MTU=1420; fi
-    fi
 }
 
 # Fill unset config from the state file, then defaults.
 load_config() {
     local k v
-    SAVED_EXIT=$(state_get EXIT)
+    # WARP is saved once set up; older versions saved EXIT=warp|direct instead.
+    SAVED_WARP=$(state_get WARP)
+    if [ -z "$SAVED_WARP" ]; then
+        case "$(state_get EXIT)" in warp) SAVED_WARP=on ;; direct) SAVED_WARP=off ;; esac
+    fi
     SAVED_SUBNET=$(state_get WG_SUBNET)
     SAVED_SERVER_NAME=$(state_get SERVER_NAME)
-    # Switching modes in place would mix two rule sets; rollback frees the mode.
-    if [ -n "$EXIT" ] && [ -n "$SAVED_EXIT" ] && [ "$EXIT" != "$SAVED_EXIT" ]; then
-        die "this server is set up for '$SAVED_EXIT'; run 'wg-setup.sh rollback' before setting it up for '$EXIT'"
-    fi
+    if [ -z "$WARP" ]; then WARP="$SAVED_WARP"; fi
     for k in "${CONFIG_KEYS[@]}"; do
         if [ -z "${!k}" ]; then
             v=$(state_get "$k")
@@ -265,7 +266,7 @@ in_range() { [[ $1 =~ ^[0-9]+$ ]] && [ "$1" -ge "$2" ] && [ "$1" -le "$3" ]; }
 # Check config values and derive subnet addresses and per-interface paths.
 finalize_config() {
     local ifre='^[A-Za-z0-9_-]{1,15}$' net octet mask
-    case "$EXIT" in warp|direct) ;; *) die "bad saved mode: $EXIT (expected warp or direct)" ;; esac
+    case "$WARP" in on|off) ;; *) die "bad WARP setting: $WARP (expected on or off)" ;; esac
     [[ $SERVER_NAME =~ ^[A-Za-z0-9_-]{1,32}$ ]] || die "server name must be 1-32 of [A-Za-z0-9_-]: '$SERVER_NAME'"
     [[ $WG_IF =~ $ifre ]] || die "bad interface name: $WG_IF"
     [[ $WARP_IF =~ $ifre ]] || die "bad interface name: $WARP_IF"
@@ -273,7 +274,7 @@ finalize_config() {
     in_range "$WG_PORT" 1 65535 || die "bad port: $WG_PORT"
     in_range "$WG_MTU" 1280 9000 || die "bad MTU (1280-9000): $WG_MTU"
     in_range "$WARP_MTU" 1280 9000 || die "bad WARP MTU (1280-9000): $WARP_MTU"
-    if [ "$EXIT" = warp ] && [ "$WG_MTU" -gt "$WARP_MTU" ]; then
+    if [ "$WG_MTU" -gt "$WARP_MTU" ]; then
         die "WG_MTU ($WG_MTU) must not exceed WARP_MTU ($WARP_MTU)"
     fi
     in_range "$RT_TABLE" 1 252 || die "bad table (1-252): $RT_TABLE"
@@ -292,16 +293,15 @@ finalize_config() {
     FIRST_HOST=$(( NET_INT + 2 ))
     LAST_HOST=$(( NET_INT + (1 << (32 - PFX)) - 2 ))
 
-    # IPv6 is on when a /64 is set (setup picks one) and there's a way out:
-    # WARP's IPv6 (warp), or the host's own (direct).
+    # IPv6 is on when a /64 is set (setup picks one) and the kernel has IPv6:
+    # WARP's IPv6 is a way out even on IPv4-only hosts.
     IPV6=0
     case "$WG_SUBNET6" in
         ""|off) ;;
         *)
             WG_SUBNET6=$(canon_subnet6 "$WG_SUBNET6") || die "bad --subnet6 (want a /64 like fd12:3456:789a::/64, or off): $WG_SUBNET6"
             P6="${WG_SUBNET6%::/64}"
-            if [ "$EXIT" = warp ] && kernel_ipv6; then IPV6=1
-            elif [ "$EXIT" = direct ] && has_ipv6; then IPV6=1; fi
+            if kernel_ipv6; then IPV6=1; fi
             ;;
     esac
 
@@ -338,7 +338,6 @@ preflight() {
 # Leaves the subcommand and its args in ARGS. Exits after `help`.
 init() {
     parse_args "$@"
-    if declare -F command_mode >/dev/null; then EXIT=$(command_mode "${ARGS[0]:-}"); fi
     if [ "${ARGS[0]:-}" = help ] || [ ${#ARGS[@]} -eq 0 ]; then
         apply_defaults
         usage
@@ -566,10 +565,11 @@ pub_if() {
     echo "${p:-$(route_dev "$(default_route)")}"
 }
 
-# Interface client traffic leaves through.
+# Interface client traffic leaves through now, and both ways out.
 out_if() {
-    if [ "$EXIT" = warp ]; then echo "$WARP_IF"; else pub_if; fi
+    if [ "$WARP" = on ]; then echo "$WARP_IF"; else pub_if; fi
 }
+exit_ifs() { echo "$WARP_IF"; pub_if; }
 
 # Abort (and stop warp) if the default route moved: SSH depends on it.
 guard_default_route() {
@@ -578,13 +578,13 @@ guard_default_route() {
     rec=$(state_get DEFAULT_ROUTE)
     if [ "$(route_key "$(default_route)")" != "$(route_key "$rec")" ]; then
         warn "default route changed (was: $rec, now: $(default_route))"
-        if [ "$EXIT" = warp ]; then systemctl stop "wg-quick@$WARP_IF" || true; fi
+        systemctl stop "wg-quick@$WARP_IF" || true
         die "default route changed; investigate before re-running"
     fi
 }
 
 # Client endpoint: --endpoint / ENDPOINT, saved value, or detected public IPv4.
-# Saved only when <save> is 1 (wg-setup.sh direct/warp).
+# Saved only when <save> is 1 (wg-setup.sh setup).
 resolve_endpoint() {
     local save="$1" ep="$ENDPOINT"
     [ -n "$ep" ] || ep=$(state_get ENDPOINT)
@@ -619,41 +619,56 @@ warp_route() {
     while IFS= read -r f; do echo "$f route replace default dev $WARP_IF table $RT_TABLE"; done < <(ip_families)
 }
 
-# Firewall rules as "command|table|chain|rule". Inserted (-I) so ufw/Docker
-# DROP policies can't shadow them.
+# Firewall rules as "command|table|chain|rule", for both ways out (WARP and
+# the public interface: each matches only its own -o, so both can stay in
+# place). Inserted (-I) so ufw/Docker DROP policies can't shadow them.
 ipt_rules() {
     local out cmd net
-    out=$(out_if)
     for cmd in iptables ip6tables; do
         net="$WG_SUBNET"
         if [ "$cmd" = ip6tables ]; then
             [ "$IPV6" -eq 1 ] || continue
             net="$WG_SUBNET6"
         fi
-        printf '%s\n' \
-            "$cmd|nat|POSTROUTING|-s $net -o $out -j MASQUERADE" \
-            "$cmd|filter|FORWARD|-i $WG_IF -o $out -j ACCEPT" \
-            "$cmd|filter|FORWARD|-i $out -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" \
-            "$cmd|mangle|FORWARD|-o $out -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+        while IFS= read -r out; do
+            printf '%s\n' \
+                "$cmd|nat|POSTROUTING|-s $net -o $out -j MASQUERADE" \
+                "$cmd|filter|FORWARD|-i $WG_IF -o $out -j ACCEPT" \
+                "$cmd|filter|FORWARD|-i $out -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" \
+                "$cmd|mangle|FORWARD|-o $out -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+        done < <(exit_ifs)
     done
     echo "iptables|filter|INPUT|-p udp --dport $WG_PORT -j ACCEPT"
 }
 
+# The WARP switch: shell lines that add (on) or remove (off) the policy rules
+# sending client traffic to RT_TABLE. Both are idempotent.
+warp_rule_cmds() {
+    local f
+    while IFS= read -r f; do
+        if [ "$1" = on ]; then
+            echo "while $f rule del $(rule_spec "$f") 2>/dev/null; do :; done; $f rule add $(rule_spec "$f")"
+        else
+            echo "while $f rule del $(rule_spec "$f") 2>/dev/null; do :; done"
+        fi
+    done < <(ip_families)
+}
+
 # Shell lines for wg0's PostUp (up) or PostDown (down). Each is idempotent;
-# down is the exact inverse of up, in reverse order. Policy routing is warp-only.
+# down is the exact inverse of up, in reverse order. RT_TABLE is filled either
+# way; only the policy rule depends on WARP. warp's route is optional here
+# (warp may be down; its own PostUp adds it).
 hook_cmds() {
     local x t c r f net
     if [ "$1" = up ]; then
-        if [ "$EXIT" = warp ]; then
-            while IFS= read -r f; do
-                net="$WG_SUBNET"
-                if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
-                echo "while $f rule del $(rule_spec "$f") 2>/dev/null; do :; done; $f rule add $(rule_spec "$f")"
-                echo "$f route replace $net dev $WG_IF table $RT_TABLE"
-                echo "$f route replace default dev $WARP_IF table $RT_TABLE"
-                echo "$f route replace blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE"
-            done < <(ip_families)
-        fi
+        while IFS= read -r f; do
+            net="$WG_SUBNET"
+            if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+            echo "$f route replace $net dev $WG_IF table $RT_TABLE"
+            echo "$f route replace default dev $WARP_IF table $RT_TABLE 2>/dev/null || true"
+            echo "$f route replace blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE"
+        done < <(ip_families)
+        if [ "$WARP" = on ]; then warp_rule_cmds on; fi
         while IFS='|' read -r x t c r; do
             echo "$x -t $t -C $c $r 2>/dev/null || $x -t $t -I $c $r"
         done < <(ipt_rules)
@@ -661,23 +676,26 @@ hook_cmds() {
         while IFS='|' read -r x t c r; do
             echo "while $x -t $t -C $c $r 2>/dev/null; do $x -t $t -D $c $r || break; done"
         done < <(ipt_rules | tac)
-        if [ "$EXIT" = warp ]; then
-            while IFS= read -r f; do
-                net="$WG_SUBNET"
-                if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
-                echo "$f route del blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE 2>/dev/null || true"
-                echo "$f route del default dev $WARP_IF table $RT_TABLE 2>/dev/null || true"
-                echo "$f route del $net dev $WG_IF table $RT_TABLE 2>/dev/null || true"
-                echo "while $f rule del $(rule_spec "$f") 2>/dev/null; do :; done"
-            done < <(ip_families | tac)
-        fi
+        warp_rule_cmds off | tac
+        while IFS= read -r f; do
+            net="$WG_SUBNET"
+            if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+            echo "$f route del blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE 2>/dev/null || true"
+            echo "$f route del default dev $WARP_IF table $RT_TABLE 2>/dev/null || true"
+            echo "$f route del $net dev $WG_IF table $RT_TABLE 2>/dev/null || true"
+        done < <(ip_families | tac)
     fi
 }
 
-# Run the hook lines directly (rollback and error cleanup).
+# Run hook lines directly: run_hooks up|down (rollback, error cleanup), or
+# run_hooks warp on|off (the switch, live).
 run_hooks() {
     local line
-    while IFS= read -r line; do run bash -c "$line"; done < <(hook_cmds "$1")
+    if [ "$1" = warp ]; then
+        while IFS= read -r line; do run bash -c "$line"; done < <(warp_rule_cmds "$2")
+    else
+        while IFS= read -r line; do run bash -c "$line"; done < <(hook_cmds "$1")
+    fi
 }
 
 # --- Clients registry: "name ip public-key allowed-ips" per line ---
@@ -709,7 +727,7 @@ db_put() {
 render_wg_conf() {
     local line name ip pub _ psk
     cat <<EOF
-$MARKER ($EXIT mode); peers are rebuilt from $CLIENT_DB (use wg-client.sh)
+$MARKER (WARP $WARP); peers are rebuilt from $CLIENT_DB (use wg-client.sh)
 [Interface]
 Address = $SERVER_IP/$PFX$(if [ "$IPV6" -eq 1 ]; then echo ", $P6::1/64"; fi)
 ListenPort = $WG_PORT

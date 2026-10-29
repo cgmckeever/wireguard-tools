@@ -75,11 +75,11 @@ pick_client() {
     fi
 }
 
-# The server must be set up first (wg-setup.sh direct or warp).
+# The server must be set up first (wg-setup.sh setup).
 require_server() {
-    [ -n "$SAVED_EXIT" ] && [ -f "$WG_CONF" ] && [ -s "$SERVER_PUB" ] && return 0
+    [ -n "$SAVED_WARP" ] && [ -f "$WG_CONF" ] && [ -s "$SERVER_PUB" ] && return 0
     [ "$DRY_RUN" -eq 1 ] && { warn "server not set up yet; showing what would happen"; return 0; }
-    die "no WireGuard server here yet; run 'wg-setup.sh direct' or 'wg-setup.sh warp' first"
+    die "no WireGuard server here yet; run 'wg-setup.sh setup' first"
 }
 
 # First unused host address in the subnet (the server takes .1).
@@ -236,7 +236,7 @@ cmd_remove() {
     if if_exists "$WG_IF"; then run wg set "$WG_IF" peer "$pub" remove; fi
     db_put "$name"
     # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
-    if [ -n "$SAVED_EXIT" ]; then write_wg_conf; else info "server not set up; $WG_CONF is rebuilt at the next setup"; fi
+    if [ -n "$SAVED_WARP" ]; then write_wg_conf; else info "server not set up; $WG_CONF is rebuilt at the next setup"; fi
     # The config, preshared key and their .bak copies all hold this client's secrets.
     # Also any copy left under an older server name or from before server names,
     # and copies older versions kept next to the files.

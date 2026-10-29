@@ -1,6 +1,7 @@
 # Managed by wireguard-tools
-# systemd drop-in for wg-quick@{{WG_IF}} (warp mode): start after the WARP
-# tunnel, and stop/restart with it, since wg0's routes go out through it.
+# systemd drop-in for wg-quick@{{WG_IF}}: start after the WARP tunnel. Wants,
+# not Requires: with WARP off, {{WG_IF}} must start even if WARP can't; with it
+# on, the routing table's blackhole blocks clients until WARP is back.
 [Unit]
 After=wg-quick@{{WARP_IF}}.service
-Requires=wg-quick@{{WARP_IF}}.service
+Wants=wg-quick@{{WARP_IF}}.service
