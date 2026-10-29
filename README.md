@@ -43,25 +43,44 @@ Update later with `git -C /opt/wireguard-tools pull`.
 ./wg-setup.sh setup --name dengar --dry-run    # see exactly what it would change first
 ```
 
-### Setup flags
+### Flags
 
-All optional. Each is saved, so re-runs and `wg-client.sh` reuse it; pass a
-flag again to change it.
+All optional. Settings are saved in `/etc/wireguard/wg-tools.state`, so
+re-runs and `wg-client.sh` reuse them; pass a flag again to change it. Each can
+also be set as an environment variable (flag > env > saved > default).
 
-| Flag | Default | What it sets |
-|------|---------|--------------|
-| `--name <name>` | short hostname | server name; client configs are `<name>.<client>.conf` |
-| `--port <port>` | `51820` | UDP port clients connect to |
-| `--endpoint <host-or-ip>` | detected public IPv4 | address written into client configs (use a hostname to move servers without re-sending configs) |
-| `--dns <ip>` | `1.1.1.1` | DNS server given to clients |
-| `--allowed-ips <cidrs>` | `0.0.0.0/0, ::/0` (all traffic) | default for new clients; `"10.8.0.0/24, fd…::/64"` for VPN-network only |
-| `--subnet <cidr>` | `10.8.0.0/24` | clients' IPv4 network (server is `.1`) |
-| `--subnet6 <cidr>` | random `fd…::/64` | clients' IPv6 network; `off` disables client IPv6 |
-| `--mtu <bytes>` | `1280` | tunnel MTU for server and clients |
+| Flag | Env | Default | What it sets |
+|------|-----|---------|--------------|
+| `--name <name>` | `SERVER_NAME` | short hostname | server name; client configs are `<name>.<client>.conf` |
+| `--port <port>` | `WG_PORT` | `51820` | UDP port clients connect to |
+| `--endpoint <host-or-ip>` | `ENDPOINT` | detected public IPv4 | address written into client configs (a hostname lets you move servers without re-sending configs) |
+| `--dns <ip>` | `WG_DNS` | `1.1.1.1` | DNS server given to clients |
+| `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new clients (per client on `add`/`rotate`); `"10.8.0.0/24, fd…::/64"` for VPN-network only |
+| `--subnet <cidr>` | `WG_SUBNET` | `10.8.0.0/24` | clients' IPv4 network (server is `.1`) |
+| `--subnet6 <cidr>` | `WG_SUBNET6` | random `fd…::/64` | clients' IPv6 network; `off` disables client IPv6 |
+| `--mtu <bytes>` | `WG_MTU` | `1280` | tunnel MTU for server and clients |
+| *Rarely needed:* | | | |
+| `--warp-mtu <bytes>` | `WARP_MTU` | `1280` | MTU of the WARP tunnel |
+| `--wg-if` / `--warp-if` | `WG_IF` / `WARP_IF` | `wg0` / `warp` | interface names |
+| `--table <n>` | `RT_TABLE` | `100` | routing table used for WARP |
+| | `WGCF_VERSION` | `latest` | wgcf release to install, e.g. `v2.2.22` |
+| | `WGCF_SHA256` | | pin the wgcf binary's checksum |
 
 Example: `./wg-setup.sh setup --name dengar --port 51821 --endpoint vpn.example.com`.
-Rarely needed ones (interface names, routing table, WARP MTU, wgcf version)
-are under [All options](#all-options).
+
+Behaviour flags (not saved):
+
+| Flag | Works with | Does |
+|------|-----------|------|
+| `--dry-run` | everything | show what would change; change nothing |
+| `--yes`, `-y` | everything | don't prompt |
+| `--force` | `setup` | regenerate server keys, reinstall wgcf, regenerate the WARP profile, change the subnet with clients present, take over configs these tools didn't create |
+| `--purge` | `rollback` | also delete keys, clients and the WARP account |
+| `--qr` / `--no-qr` | `wg-client.sh add`, `rotate`, `show` | force or skip the QR code |
+
+`help` on either command lists everything.
+
+### What setup does
 
 Setup runs in two stages:
 
@@ -184,41 +203,6 @@ so re-cloning the tools keeps them; `rollback` restores originals from its
 `files/`); `backup <dir>` writes elsewhere. Each `backup` also prunes old archives and file copies. A backup holds
 private keys (it's created mode 600); keep it somewhere safe. Stop the old
 server once the new one works: both would be using the same WARP device.
-
-## All options
-
-Settings chosen at setup are saved in `/etc/wireguard/wg-tools.state`, so
-later runs and `wg-client.sh` use them automatically. Each can also be given
-as an environment variable. Precedence: flag > environment variable > saved >
-default.
-
-| Flag | Env | Default | |
-|------|-----|---------|---|
-| `--name` | `SERVER_NAME` | short hostname | server name; client configs are `<name>.<client>.conf` |
-| `--subnet` | `WG_SUBNET` | `10.8.0.0/24` | VPN network; server is `.1` |
-| `--subnet6` | `WG_SUBNET6` | random `fd…::/64` | clients' IPv6 network; `off` disables IPv6 |
-| `--port` | `WG_PORT` | `51820` | UDP listen port |
-| `--mtu` | `WG_MTU` | `1280` | tunnel MTU for server and clients (fits inside WARP) |
-| `--warp-mtu` | `WARP_MTU` | `1280` | |
-| `--dns` | `WG_DNS` | `1.1.1.1` | DNS server given to clients |
-| `--endpoint` | `ENDPOINT` | detected public IPv4 | server address written into client configs |
-| `--allowed-ips` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` | default for new clients; per client on `add`/`rotate` |
-| `--wg-if` / `--warp-if` | `WG_IF` / `WARP_IF` | `wg0` / `warp` | interface names |
-| `--table` | `RT_TABLE` | `100` | routing table for WARP |
-| | `WGCF_VERSION` | `latest` | e.g. `v2.2.22` |
-| | `WGCF_SHA256` | | pin the wgcf binary's checksum |
-
-Behaviour flags (not saved):
-
-| Flag | Works with | Does |
-|------|-----------|------|
-| `--dry-run` | everything | show what would change; change nothing |
-| `--yes`, `-y` | everything | don't prompt |
-| `--force` | `setup` | regenerate server keys, reinstall wgcf, regenerate the WARP profile, change the subnet with clients present, take over configs these tools didn't create |
-| `--purge` | `rollback` | also delete keys, clients and the WARP account |
-| `--qr` / `--no-qr` | `wg-client.sh add`, `rotate`, `show` | force or skip the QR code |
-
-`help` on either command lists everything.
 
 ## How it works
 
