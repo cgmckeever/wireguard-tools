@@ -24,7 +24,8 @@ and `rotate`, or `show --qr`).
 
 ## Install
 
-Nothing else is needed on the server; `wg-setup.sh` installs its own packages.
+Nothing else is needed on the server; `wg-setup.sh` installs its own packages
+(WireGuard, iptables, curl, ping, qrencode, magic-wormhole).
 
 ```bash
 sudo -i   # everything below runs as root

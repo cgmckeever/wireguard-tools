@@ -72,10 +72,11 @@ EOF
 # --- warp ---
 
 # Install missing packages (qrencode and magic-wormhole are for wg-client.sh
-# --qr and share).
+# --qr and share; iputils-ping for checking connectivity, often missing from
+# minimal images).
 install_packages() {
     local p missing=()
-    for p in wireguard wireguard-tools iptables curl ca-certificates qrencode magic-wormhole; do
+    for p in wireguard wireguard-tools iptables curl ca-certificates iputils-ping qrencode magic-wormhole; do
         [ "$(dpkg-query -W -f='${Status}' "$p" 2>/dev/null || true)" = "install ok installed" ] || missing+=("$p")
     done
     if [ ${#missing[@]} -eq 0 ]; then
