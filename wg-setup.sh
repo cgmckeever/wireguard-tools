@@ -1045,6 +1045,8 @@ cmd_rollback() {
         done
         # Originals were restored above; the change copies hold old keys.
         run rm -rf "$CHANGE_DIR"
+        # Gone too if nothing else is in it (backup archives are kept).
+        if [ -d "$BACKUP_DIR" ]; then run rmdir --ignore-fail-on-non-empty "$BACKUP_DIR"; fi
         # Configs carrying our marker are ours (a restored original never does).
         for f in "$WG_CONF" "$WARP_CONF"; do
             if [ -f "$f" ] && grep -qF "$MARKER" "$f"; then run rm -f "$f"; fi
