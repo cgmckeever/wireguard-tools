@@ -39,7 +39,7 @@ def active_clients(snap: store.Snapshot, code: str, handshakes: Dict[str, int], 
 
 def active_count(ctx: Ctx, code: str) -> int:
     """How many of <code>'s clients are active right now."""
-    return len(active_clients(ctx.snap, code, live.handshakes(ctx.runner, ctx.cfg.WG_IF), time.time()))
+    return len(active_clients(ctx.snap, code, live.handshakes(ctx.runner, ctx.cfg.WG_IF), ctx.clock()))
 
 
 def print_list(ctx: Ctx) -> None:

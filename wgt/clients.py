@@ -12,7 +12,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 from typing import TYPE_CHECKING, List, Optional
 
 from . import live, net, ops, render, rules, store, system, ui
@@ -212,7 +211,7 @@ def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
     """A table row per client, in clients.db order."""
     hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
     tx = live.transfers(ctx.runner, ctx.cfg.WG_IF)
-    now = time.time()
+    now = ctx.clock()
     rows = []
     for cl in ctx.snap.clients:
         seen = "disabled" if ctx.snap.is_disabled(cl.name) else ui.ago(hs.get(cl.pub, 0), now)

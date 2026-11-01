@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import socket
-import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
@@ -72,7 +71,7 @@ def resolve4(host: str) -> Optional[str]:
     return str(infos[0][4][0]) if infos else None
 
 
-def preflight() -> None:
+def preflight(runner: Runner) -> None:
     """Root, OS and architecture checks; refuse anything unsupported."""
     if os.geteuid() != 0:
         raise WgtError("must run as root")
@@ -92,6 +91,6 @@ def preflight() -> None:
         raise WgtError(f"unsupported Ubuntu {ver} (need 20.04+)")
     if osid not in ("debian", "ubuntu"):
         raise WgtError(f"unsupported OS: {osid} {ver} (need Debian 11+ or Ubuntu 20.04+)")
-    arch = subprocess.run(["dpkg", "--print-architecture"], stdout=subprocess.PIPE, text=True).stdout.strip()
+    arch = runner.query(["dpkg", "--print-architecture"]).strip()
     if arch not in ("amd64", "arm64"):
         raise WgtError(f"unsupported architecture: {arch} (need amd64 or arm64)")

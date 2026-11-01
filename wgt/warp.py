@@ -7,10 +7,9 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import tempfile
 import urllib.request
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 from . import host, render, store
 from .errors import WgtError
@@ -19,12 +18,17 @@ if TYPE_CHECKING:
     from .ctx import Ctx
 
 
-def install_wgcf(ctx: Ctx) -> bool:
-    """Download wgcf for this architecture from GitHub, check it, install it.
-    False if it can't be fetched (setup can carry on without WARP); a checksum
-    mismatch is fatal."""
+Fetch = Callable[[str, int], bytes]   # (url, timeout seconds) -> body
+
+
+def install_wgcf(ctx: Ctx, reinstall: bool = False, fetch: Optional[Fetch] = None) -> bool:
+    """Download wgcf for this architecture from GitHub, check it, install it
+    (unless a working one is there and not <reinstall>). False if it can't be
+    fetched (setup can carry on without WARP); a checksum mismatch is fatal.
+    <fetch> replaces the download (tests)."""
+    fetch = fetch or _fetch
     p = ctx.paths
-    if os.access(p.wgcf_bin, os.X_OK) and ctx.runner.ok([p.wgcf_bin, "--help"]) and not ctx.args.force:
+    if os.access(p.wgcf_bin, os.X_OK) and ctx.runner.ok([p.wgcf_bin, "--help"]) and not reinstall:
         ctx.out.info(f"wgcf present: {p.wgcf_bin}")
         return True
     version = os.environ.get("WGCF_VERSION", "latest")
@@ -36,7 +40,7 @@ def install_wgcf(ctx: Ctx) -> bool:
     api = ("https://api.github.com/repos/ViRb3/wgcf/releases/latest" if version == "latest"
            else f"https://api.github.com/repos/ViRb3/wgcf/releases/tags/{version}")
     try:
-        rel = json.loads(_fetch(api, 30))
+        rel = json.loads(fetch(api, 30))
     except (OSError, ValueError):
         ctx.out.warn(f"cannot reach GitHub releases API ({api})")
         return False
@@ -47,7 +51,7 @@ def install_wgcf(ctx: Ctx) -> bool:
         return False
     sums_url = next((u for u in urls if re.search(r"checksums|sha256", u, re.I)), "")
     try:
-        data = _fetch(url, 120)
+        data = fetch(url, 120)
     except OSError:
         ctx.out.warn(f"download failed: {url}")
         return False
@@ -56,7 +60,7 @@ def install_wgcf(ctx: Ctx) -> bool:
     if not want and sums_url:
         try:
             name = os.path.basename(url)
-            for line in _fetch(sums_url, 30).decode().splitlines():
+            for line in fetch(sums_url, 30).decode().splitlines():
                 f = line.split()
                 if len(f) == 2 and f[1].lstrip("*") == name:
                     want = f[0]
@@ -83,14 +87,16 @@ def install_wgcf(ctx: Ctx) -> bool:
 
 
 def _fetch(url: str, timeout: int) -> bytes:
+    """GET <url> (GitHub's API wants a User-Agent)."""
     req = urllib.request.Request(url, headers={"User-Agent": "wireguard-tools"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()
 
 
-def register(ctx: Ctx, directory: Optional[str] = None) -> bool:
+def register(ctx: Ctx, directory: Optional[str] = None, regenerate: bool = False) -> bool:
     """Register a WARP account and generate its WireGuard profile (once) in
-    <directory> (default the main one; each exit city has its own). False if
+    <directory> (default the main one; each exit city has its own; with
+    <regenerate> the profile is made again from the same account). False if
     WARP refuses (setup can carry on without WARP)."""
     d = directory or ctx.paths.wgcf_dir
     log = os.path.join(d, "wgcf.log")
@@ -105,7 +111,7 @@ def register(ctx: Ctx, directory: Optional[str] = None) -> bool:
                          "       retry later ('wgt warp on'), or register on another machine and copy\n"
                          f"       wgcf-account.toml and wgcf-profile.conf into {d}/ (see README)")
             return False
-    if os.path.isfile(ctx.paths.wgcf_profile(d)) and not ctx.args.force:
+    if os.path.isfile(ctx.paths.wgcf_profile(d)) and not regenerate:
         ctx.out.info("WARP profile exists")
         return True
     ctx.runner.step("Generate WARP WireGuard profile", f"rm {ctx.paths.wgcf_profile(d)}")
@@ -119,13 +125,8 @@ def register(ctx: Ctx, directory: Optional[str] = None) -> bool:
 
 
 def _wgcf(ctx: Ctx, d: str, args: List[str], log: str, append: bool) -> bool:
-    """Run wgcf in <d> (umask 077), output to <log>."""
-    old = os.umask(0o077)
-    try:
-        with open(log, "a" if append else "w") as f:
-            return subprocess.run([ctx.paths.wgcf_bin] + list(args), cwd=d, stdout=f, stderr=f).returncode == 0
-    finally:
-        os.umask(old)
+    """Run wgcf in <d>, output to <log>."""
+    return ctx.runner.run_logged([ctx.paths.wgcf_bin, *args], log, cwd=d, append=append)
 
 
 def render_profile(ctx: Ctx, profile_path: str, table: Optional[int] = None, mark: Optional[int] = None) -> str:

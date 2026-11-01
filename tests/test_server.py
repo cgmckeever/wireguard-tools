@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import io
+import os
+import shutil
 import tarfile
 from pathlib import Path
 
 import pytest
+from conftest import FIXTURES, KEYS
 
-from wgt import backup
+from wgt import backup, cli, host, ops
 from wgt import server as srv
+from wgt.const import Paths
 from wgt.errors import WgtError
+from wgt.host import Facts
+from wgt.system import FakeRunner, Out
 
 
 def _tar(path, members):
@@ -79,3 +85,59 @@ def test_force_keeps_server_keys(make_ctx):  # noqa: F811
         Path(p).write_text("KEY\n")
     assert srv.ensure_server_keys(ctx) is False
     assert cli.parse(["setup", "--new-server-keys"]).new_server_keys
+
+
+class WgcfRunner(FakeRunner):
+    """FakeRunner that plays wgcf: `register` writes an account, `generate` a
+    profile (the fixture's), as the real tool does in its working directory."""
+
+    def run_logged(self, args, log, cwd, append=False):
+        ok = super().run_logged(args, log, cwd, append)
+        if args[1:2] == ["register"]:
+            Path(cwd, "wgcf-account.toml").write_text("account\n")
+        elif args[1:2] == ["generate"]:
+            shutil.copy(os.path.join(FIXTURES, "exits", "wg", "wgcf", "wgcf-profile.conf"), cwd)
+        return ok
+
+
+def tree(root):
+    """Every file and directory under <root>, relative."""
+    return sorted(str(p.relative_to(root)) for p in Path(root).rglob("*"))
+
+
+def test_rollback_purge_undoes_a_fresh_setup(tmp_path, monkeypatch):
+    """Setup on an empty server, then rollback --purge: every file setup made
+    (configs, keys, state, drop-in, timers, sysctl, backups) is gone again."""
+    monkeypatch.setattr(host, "resolve4", lambda name: None)   # no DNS in tests
+    monkeypatch.setattr("time.sleep", lambda seconds: None)    # no retry waits
+    root = tmp_path / "box"
+    for d in ("wg", "systemd", "sbin", "run", "bin"):
+        (root / d).mkdir(parents=True)
+    wgcf = root / "bin" / "wgcf"
+    wgcf.write_text("#!/bin/sh\n")
+    wgcf.chmod(0o755)
+    paths = Paths(wg_dir=str(root / "wg"), backup_dir=str(root / "backups"), lock_file=str(tmp_path / "lock"),
+                  run_dir=str(root / "run"), systemd_dir=str(root / "systemd"), sbin_dir=str(root / "sbin"),
+                  sysctl_file=str(root / "99-wg.conf"), wgcf_bin=str(wgcf), hosts_file=str(root / "hosts"),
+                  cloud_cfg_dir=str(root / "cloud"))
+    route = "default via 192.0.2.1 dev eth0 proto static"
+    facts = Facts(kernel_ipv6=True, has_ipv6=False, hostname="test", routes4="", default_route=route)
+    answers = dict(KEYS, **{"ip -4 route show default": (0, route + "\n")})
+    before = tree(root)
+
+    def run(*argv):
+        runner = WgcfRunner(answers, out=Out())
+        ctx = cli.load(cli.parse([*argv, "--yes"]), paths=paths, runner=runner, env={}, facts=facts)
+        try:
+            cli.command(argv[0])(ctx, ctx.args.words[1:])
+        finally:
+            ops.release_lock(ctx)   # a real run releases it by exiting
+        return ctx
+
+    ctx = run("setup", "--name", "test", "--endpoint", "203.0.113.1")
+    made = set(tree(root)) - set(before)
+    assert {"wg/wg0.conf", "wg/warp.conf", "wg/server.key", "wg/wg-tools.state", "99-wg.conf",
+            "systemd/wg-tools-warp-watchdog.timer"} <= made, made
+    assert ctx.cfg.values["ENDPOINT"] == "203.0.113.1"
+    run("rollback", "--purge")
+    assert tree(root) == before

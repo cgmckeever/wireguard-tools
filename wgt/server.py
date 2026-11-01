@@ -101,7 +101,7 @@ def provision_warp(ctx: Ctx) -> bool:
     """Install, register and bring up the WARP tunnel, then test it. False if
     WARP isn't usable (nothing on the client side depends on it yet)."""
     ctx.out.log("WARP tunnel")
-    if not warp.install_wgcf(ctx) or not warp.register(ctx):
+    if not warp.install_wgcf(ctx, reinstall=ctx.args.force) or not warp.register(ctx, regenerate=ctx.args.force):
         return False
     profile = ctx.paths.wgcf_profile()
     changed = False
@@ -533,8 +533,7 @@ def _remove_units(ctx: Ctx) -> None:
     if store.backup_orig(store.read_text(ctx.paths.backup_map), cfg.dropin) == "NEW":
         f.remove(*glob.glob(cfg.dropin + ".*.bak"))
     f.restore_original(cfg.dropin, remove_new=True)
-    if os.path.isdir(cfg.dropin_dir) and not os.listdir(cfg.dropin_dir):
-        ctx.runner.run(["rmdir", cfg.dropin_dir])
+    f.remove_empty_dir(cfg.dropin_dir)
     units.remove_timer(ctx, WATCHDOG)
     units.remove_timer(ctx, EXIT_WATCHDOG)
     f.remove(ctx.paths.warp_marker)
@@ -561,8 +560,7 @@ def _purge(ctx: Ctx) -> None:
         f.remove(*glob.glob(path + ".*.bak"))   # copies left by older versions
     # The change copies hold old keys.
     f.remove_tree(p.change_dir)
-    if os.path.isdir(p.backup_dir) and not os.listdir(p.backup_dir):
-        ctx.runner.run(["rmdir", p.backup_dir])
+    f.remove_empty_dir(p.backup_dir)
     # Configs carrying our marker are ours (a restored original never does).
     for path in (cfg.wg_conf, cfg.warp_conf):
         text = store.read_text(path)

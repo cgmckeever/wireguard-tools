@@ -48,7 +48,9 @@ def settings_of(text: str) -> list:
 
 
 def write_private(path: str, content: str) -> None:
-    """A root-only file (mode 600), written atomically."""
+    """A root-only file (mode 600), written atomically. Used where Files.write
+    is deliberately skipped: the state file and server keys (no change copies
+    of keys; rollback reads the state rather than restoring it)."""
     atomic_write(path, content, 0o600)
 
 
@@ -119,6 +121,22 @@ class Runner:
     def sh(self, line: str, check: bool = True) -> int:
         """A shell line (the rule lines are shell)."""
         return self.run(["bash", "-c", line], check=check)[0]
+
+    def run_logged(self, args: Sequence[str], log: str, cwd: str, append: bool = False) -> bool:
+        """Run a command in <cwd> with its output going to <log> (umask 077: it
+        writes keys there); True if it succeeded. For wgcf, whose output is
+        only needed when it fails."""
+        if self.dry_run:
+            self.out.info(f"[dry-run] (in {cwd}) " + " ".join(args))
+            return True
+        old = os.umask(0o077)
+        try:
+            with open(log, "a" if append else "w") as f:
+                return subprocess.run(list(args), cwd=cwd, stdout=f, stderr=f).returncode == 0
+        except OSError:
+            return False
+        finally:
+            os.umask(old)
 
     def sh_lines(self, lines: Sequence[str]) -> None:
         for line in lines:
@@ -192,6 +210,9 @@ class FakeRunner(Runner):
         if check and rc != 0:
             raise WgtError(f"command failed (exit {rc}): {cmd}")
         return rc, stdout or ""
+
+    def run_logged(self, args: Sequence[str], log: str, cwd: str, append: bool = False) -> bool:
+        return self._exec([*args], check=False)[0] == 0
 
     def changes(self) -> List[str]:
         """The recorded commands, without logger lines."""
@@ -330,6 +351,15 @@ class Files:
             return
         for p in targets:
             os.remove(p)
+
+    def remove_empty_dir(self, path: str) -> None:
+        """Remove a directory if it exists and is empty; a dry run only says so."""
+        if not os.path.isdir(path) or os.listdir(path):
+            return
+        if self.runner.dry_run:
+            self.out.info(f"[dry-run] rmdir {path}")
+            return
+        os.rmdir(path)
 
     def remove_tree(self, path: str) -> None:
         if not os.path.isdir(path):

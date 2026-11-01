@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import time
 from typing import TYPE_CHECKING, List, Optional
 
 from . import exits as exit_cities
@@ -118,7 +117,7 @@ def _exits(ctx: Ctx) -> None:
     """One pass over the exit cities. Uses r.ok, not run: a timer job must get
     through every city whatever fails, and logs what it did instead."""
     r = ctx.runner
-    now = int(time.time())
+    now = int(ctx.clock())
     hs = live.handshakes(r, ctx.cfg.WG_IF)
     for e in ctx.snap.exits:
         if _held(ctx, e.code, now):

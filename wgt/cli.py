@@ -127,7 +127,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         if cmd == "watchdog":
             return run_watchdog(args, rest, out)
         if os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
-            host.preflight()
+            host.preflight(Runner())
         ctx = load(args)
         if args.dry_run:
             out.log("DRY RUN: nothing will be changed")

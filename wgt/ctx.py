@@ -5,8 +5,9 @@ type hints."""
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from . import host, store
 from .config import Config, resolve
@@ -105,6 +106,7 @@ class Ctx:
     cfg: Config
     snap: store.Snapshot
     lock_fd: Optional[int] = None
+    clock: Callable[[], float] = time.time   # "now" for handshake ages (tests set it)
 
     @property
     def out(self) -> Out:
