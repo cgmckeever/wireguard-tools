@@ -1169,9 +1169,9 @@ t_exit_tables() {
     local code="$1" w p m f
     w=$(exit_wtable "$code"); p=$(exit_ptable "$code"); m=$(printf '0x%x' "$(exit_mark "$code")")
     [[ $(ip rule show) == *"fwmark $m lookup $p"* ]] || return 1
-    grep -qE '^blackhole default' < <(ip route show table "$p") || return 1
+    [[ $'\n'$(ip route show table "$p") == *$'\nblackhole default'* ]] || return 1
     while IFS= read -r f; do
-        grep -qE '^blackhole default' < <($f route show table "$w") || return 1
+        [[ $'\n'$($f route show table "$w") == *$'\nblackhole default'* ]] || return 1
     done < <(ip_families)
 }
 t_exit_rules() {
