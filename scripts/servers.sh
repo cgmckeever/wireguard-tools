@@ -291,22 +291,29 @@ add_one_exit() {
 
 # exit-add <server> [number|file|all]: pick from this server's local configs.
 do_exit_add() {
-    local name="$1" target="$2" dir="$3" sel="${4:-}" src f files=() i link remote state picked=()
+    local name="$1" target="$2" dir="$3" sel="${4:-}" src f files=() i link remote picked=()
     src="$LOCAL/exits/$name"
     for f in "$src"/*.conf; do [ -f "$f" ] && files+=("$f"); done
     [ ${#files[@]} -gt 0 ] || die "no configs in $src (save Proton WireGuard configs there, any name ending .conf)"
     remote=$(ssh -n "${SSH_OPTS[@]}" "$target" "awk '!/^#/ { print \$1 }' /etc/wireguard/exits.db 2>/dev/null" || true)
     if [ -z "$sel" ]; then
+        local w=4 base code label onsrv
+        for f in "${files[@]}"; do base=$(basename "$f"); [ ${#base} -le $w ] || w=${#base}; done
         echo ""
+        printf '  %3s  %-*s  %-7s %-20s %s\n' "#" "$w" FILE CODE NAME "ON SERVER"
         for i in "${!files[@]}"; do
-            link=$(link_of "$name" "$(basename "${files[$i]}")")
-            if [ -z "$link" ]; then state="(new)"
-            elif grep -qx "${link%%$'\t'*}" <<<"$remote"; then state="${link//$'\t'/  }   on server"
-            else state="${link//$'\t'/  }"; fi
-            printf '  %2d) %-26s %s\n' $(( i + 1 )) "$(basename "${files[$i]}")" "$state"
+            base=$(basename "${files[$i]}")
+            link=$(link_of "$name" "$base")
+            code="-" label="(not named yet)" onsrv="no"
+            if [ -n "$link" ]; then
+                code="${link%%$'\t'*}"
+                label="${link#*$'\t'}"
+                if grep -qx "$code" <<<"$remote"; then onsrv=yes; fi
+            fi
+            printf '  %3d  %-*s  %-7s %-20s %s\n' $(( i + 1 )) "$w" "$base" "$code" "$label" "$onsrv"
         done
         echo ""
-        read -r -p "  Add which? [number, file, or all] " sel </dev/tty || true
+        read -r -p "  Add which? [number, file, or all]: " sel </dev/tty || true
     fi
     case "$sel" in
         "") die "nothing chosen" ;;
