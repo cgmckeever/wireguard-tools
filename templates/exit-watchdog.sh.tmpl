@@ -40,6 +40,6 @@ while read -r code _; do
     elif any_up "$code"; then
         systemctl stop "wg-quick@wx-$code" "wg-quick@px-$code"
         rm -f "$started"
-        logger -t "$tag" "exit $code: no active client for ${idle}s; taken down"
+        logger -t "$tag" "exit $code: no client handshake in the last ${idle}s; taken down"
     fi
 done <"$exits"

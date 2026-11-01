@@ -18,15 +18,16 @@
 #   ssh <s>               log in
 #   pull <s|all>          git pull its checkout
 #   branch <s> <branch>   switch its checkout to <branch> (then pull)
-#   setup|warp|status|test|exit|rollback <s|all> [args]
+#   setup|warp|status|test|exit|log|rollback <s|all> [args]
 #                         run wg-setup.sh <command> [args] there
+#                         (log [lines] [-f]: its changes, watchdogs and tunnels)
 #   client <s> [args]     run wg-client.sh [args] there (e.g. client boba list)
 #   push-exits <s> [code...]
 #                         install local/exits/<s>/*.conf as its exit cities
 #                         (scp, wg-setup.sh exit add, delete the upload)
 #   backup <s|all>        wg-setup.sh backup there, then fetch the archive to
 #                         local/backups/<s>/ (holds private keys; mode 600)
-#   forget <s>            remove from the list (nothing on the server changes)
+#   forget <s> [--yes]    remove from the list (nothing on the server changes)
 #
 # <s> is a list number or name; left out, you pick from the list. Runs with
 # macOS's bash 3.2.
@@ -277,10 +278,13 @@ do_push_exits() {
 }
 
 cmd_forget() {
-    local line name reply=""
-    line=$(pick "${1:-}") || exit 1
+    local line name reply="" sel="${1:-}"
+    [ "$sel" != --yes ] || sel=""
+    line=$(pick "$sel") || exit 1
     name="${line%% *}"
-    read -r -p "    Remove '$name' from $LIST? (nothing on the server changes) [y/N] " reply </dev/tty || true
+    if [[ " $* " == *" --yes "* ]]; then reply=y; else
+        read -r -p "    Remove '$name' from $LIST? (nothing on the server changes) [y/N] " reply </dev/tty || true
+    fi
     [[ $reply =~ ^[Yy] ]] || { info "kept"; return 0; }
     awk -v n="$name" '$1 != n' "$LIST" >"$LIST.new" && mv "$LIST.new" "$LIST" && chmod 600 "$LIST"
     info "forgot '$name'; its local/exits/$name and local/backups/$name stay"
@@ -296,7 +300,7 @@ case "$cmd" in
     ssh)        each "${1:-}" do_ssh ;;
     pull)       each "${1:-}" do_pull ;;
     branch)     sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_branch "$@" ;;
-    setup|warp|status|test|exit|rollback)
+    setup|warp|status|test|exit|log|rollback)
                 sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_wgsetup "$cmd" "$@" ;;
     client)     sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_client "$@" ;;
     push-exits) sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_push_exits "$@" ;;

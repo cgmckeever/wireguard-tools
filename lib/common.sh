@@ -117,6 +117,7 @@ YES=0
 SUBNET_ASKED=0   # 1 once setup asked for the subnet
 FORCE=0
 PURGE=0
+FOLLOW=0   # log --follow
 QR=0     # 1 = --qr, -1 = --no-qr, 0 = add/rotate decide (on if a terminal)
 EXIT_CODES=""   # wg-client.sh add --exit <code>[,<code>...]
 EXIT_LABEL=""   # wg-setup.sh exit add --label "<full name>"
@@ -134,11 +135,13 @@ info() { printf '    %s\n' "$*"; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-# Announce a step and how to undo it (printed before any change is made).
+# Announce a step and how to undo it (printed before any change is made),
+# and record it in the journal (wg-setup.sh log) unless this is a dry run.
 step() {
     STEP="$1"
     log "$1"
     if [ -n "${2:-}" ]; then info "undo: $2"; fi
+    if [ "$DRY_RUN" -eq 0 ]; then logger -t wg-tools "$PROG: $1" 2>/dev/null || true; fi
 }
 
 # Run a command, or just print it under --dry-run.
@@ -212,6 +215,7 @@ parse_args() {
             --yes|-y)  YES=1 ;;
             --force)   FORCE=1 ;;
             --purge)   PURGE=1 ;;
+            -f|--follow) FOLLOW=1 ;;
             --qr)      QR=1 ;;
             --no-qr)   QR=-1 ;;
             -h|--help) ARGS=(help); return 0 ;;

@@ -11,12 +11,20 @@ installed alongside and works as a switch:
 
 Switching is live: clients stay connected, only where their traffic exits changes.
 
+**Exit cities** add a third way out, chosen per client: through a Proton VPN
+server in a city you pick, with WARP inside it, so sites see a Cloudflare IP in
+that city (see [Exit cities](#exit-cities)).
+
 Two commands, both run as root on the server:
 
 - **`wg-setup.sh`** sets up the server (`setup`), switches WARP (`warp on|off`),
   plus `test`, `status`, `backup`, `restore`, `rollback`.
 - **`wg-client.sh`** manages clients: `add`, `rotate`, `remove`, `disable`, `enable`,
   `list`, `show`, `share`.
+
+And one for your own machine: **`scripts/servers.sh`** sets up new servers
+over SSH and runs all of the above on the servers you manage
+([Managing servers from your machine](#managing-servers-from-your-machine)).
 
 Both are safe to re-run, support `--dry-run`, back up every file they change,
 and never print private keys except inside a client's QR code (shown by `add`
@@ -38,6 +46,40 @@ Optional, to run them from anywhere:
 `ln -s /opt/wireguard-tools/wg-setup.sh /opt/wireguard-tools/wg-client.sh /usr/local/sbin/`
 
 Update later with `git -C /opt/wireguard-tools pull`.
+
+### Managing servers from your machine
+
+`scripts/servers.sh` (Mac or Linux, plain bash) does the same from your own
+machine over SSH, for every server it knows. The list is `local/servers`,
+untracked like everything under `local/`:
+
+```
+dengar  root@192.3.63.161
+boba    root@23.94.74.221      [checkout dir, default /opt/wireguard-tools]
+```
+
+```bash
+scripts/servers.sh                       # the servers, with branch@commit (or unreachable)
+scripts/servers.sh init                  # new server: asks address + name, installs, runs setup, adds it
+scripts/servers.sh init --branch exit-cities --address 1.2.3.4 --name lando -- --port 51821
+scripts/servers.sh pull all              # git pull everywhere
+scripts/servers.sh branch boba exit-cities
+scripts/servers.sh status boba           # also setup, warp, test, exit, log, rollback (wg-setup.sh)
+scripts/servers.sh log boba -f           # follow its log
+scripts/servers.sh client boba add phone # any wg-client.sh command
+scripts/servers.sh backup all            # wg-setup.sh backup, fetched to local/backups/<name>/
+scripts/servers.sh push-exits boba       # local/exits/boba/*.conf -> exit cities
+scripts/servers.sh ssh boba
+scripts/servers.sh forget boba           # drop from the list; the server is untouched
+```
+
+A server is a list number or name (or `all` for pull, status, test, backup);
+leave it out to pick from the list. `init` logs in as root, shows the host
+key for you to check against your provider's console on first contact, offers
+`ssh-copy-id` if only a password works, then installs git, clones this repo's
+`origin` and runs `wg-setup.sh setup --name <name>` with its usual prompts.
+The server is added to the list only once setup finishes. A server already
+running wireguard-tools is adopted under its saved name instead.
 
 ## Set up the server
 
@@ -200,11 +242,65 @@ other terminals and tmux always get). The image is streamed, never written to di
 Both the QR code and the wormhole transfer carry the client's private key:
 send them only to that client's owner.
 
+## Exit cities
+
+A client can leave through a city of your choosing instead of the server's
+own location: its traffic goes into a WARP tunnel that itself runs inside a
+Proton VPN tunnel to that city, so Cloudflare places it there and sites see a
+Cloudflare IP in that city (fewer CAPTCHAs and blocks than a VPN's own IPs;
+Proton sees only encrypted WARP traffic).
+
+```
+phone -> wg0 (this server) -> wx-par (WARP) -> inside px-par (Proton, Paris) -> Cloudflare, Paris
+```
+
+**Add a city.** In your Proton account: Downloads -> WireGuard configuration,
+platform Linux, NetShield off, Moderate NAT / NAT-PMP / VPN Accelerator off,
+pick a server in the city, Create, download. Each config is one key that can
+run on one server only, so download one per server per city. Then on the
+server:
+
+```bash
+./wg-setup.sh exit add par proton-FR-252.conf --label "Paris, FR"
+./wg-setup.sh exit list
+./wg-setup.sh exit test            # bring each one up and check it
+./wg-setup.sh exit remove par      # refused while clients use it
+```
+
+or from your machine: save it as `local/exits/<server>/par.conf` and run
+`scripts/servers.sh push-exits <server>` (it asks for the full name once).
+The code (`par`) is 2-6 of a-z0-9. `exit add` registers a separate WARP account
+for the city, wires its routing into `wg0` live (clients stay connected), and
+checks the result: `exit 'par' works: ip=104.28.x.x colo=CDG loc=FR warp=on`.
+
+**Clients.** A client of a city is named `<code>.<name>`. `add` asks which
+exit(s) when cities exist, or take them with `--exit`:
+
+```bash
+./wg-client.sh add laptop --exit warp,par   # laptop (default exit) and par.laptop
+./wg-client.sh add par.tablet
+```
+
+Each is a separate client with its own key, address and config
+(`dengar.par.laptop.conf`, whose `# exit:` line names the city). Import both on
+the device and switch exits by switching tunnels in the WireGuard app.
+`list` and `status` show each client's exit. The Android app takes tunnel
+names up to 15 characters; `add` says when one is longer.
+
+**On demand.** A city is only up while one of its clients is connected: the
+exit watchdog (every 10s) brings it up when a client handshakes, and takes
+it down after 5 minutes with none, so an idle city holds no Proton connection.
+A device switching to a city's tunnel waits about 10-15 seconds the first
+time. While a city is down, or broken, its clients are blocked (never sent out
+another way); an up city whose WARP stops handshaking is restarted. `test`
+checks each city's routing, and the tunnels when it's up.
+
 ## Check, back up, restore, undo
 
 ```bash
 ./wg-setup.sh test              # PASS/FAIL checks; non-zero exit on any FAIL
 ./wg-setup.sh status            # settings (and any not running yet), interfaces, clients, routes, rules
+./wg-setup.sh log [lines] [-f]  # its changes, both watchdogs and the tunnels, in one log
 ./wg-setup.sh backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 ./wg-setup.sh restore <archive> # set this server up from a backup
 ./wg-setup.sh rollback          # stop everything, remove all rules, restore original files
@@ -217,6 +313,8 @@ default route never changed, `wg0` is listening, forwarding is on, the WARP
 rule is there exactly once (WARP on) or absent (off), every NAT/firewall rule
 exists exactly once, the services start at boot in the right order, the WARP
 watchdog timer is running, and whether any client has connected. With WARP off, WARP problems are warnings.
+With exit cities: each city's routing (blackhole fallbacks, one rule per
+client address) and, if it's up, both its handshakes and a WARP trace through it.
 
 ### Moving to a new server (or rebuilding)
 
@@ -308,6 +406,13 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1`, plus IPv6 forwarding (and `accept_ra = 2` on the public interface) when IPv6 is on |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
 | `/usr/local/sbin/wg-tools-warp-watchdog`, `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog |
+| `/etc/wireguard/exits.db` | exit cities: `code index label` |
+| `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a city's Proton config and its own WARP account |
+| `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a city's Proton tunnel and the WARP tunnel inside it |
+| `/usr/local/sbin/wg-tools-exit-watchdog`, `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | exit watchdog (cities up on demand) |
+
+On your machine, `local/` (untracked) holds `servers`, `exits/<server>/<code>.conf`,
+`exits/labels` and `backups/<server>/`.
 
 Secrets are mode 600 in 700 directories. Before any file is changed, a
 timestamped copy goes to `/var/backups/wireguard-tools/files/<its path>` (e.g.
@@ -324,6 +429,7 @@ These files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
 | `client.conf.tmpl` | each `/etc/wireguard/clients/<server>.<name>.conf` |
 | `wg-quick-after-warp.conf.tmpl` | the systemd drop-in that starts `wg0` after `warp` |
 | `warp-watchdog.sh.tmpl`, `warp-watchdog.service.tmpl`, `warp-watchdog.timer.tmpl` | the WARP watchdog script and its systemd units |
+| `exit-watchdog.sh.tmpl`, `exit-watchdog.service.tmpl`, `exit-watchdog.timer.tmpl` | the exit watchdog script and its systemd units |
 
 Edit them to change what every new client gets (e.g. `PersistentKeepalive`).
 Changes apply to clients added or rotated afterwards. Every placeholder must

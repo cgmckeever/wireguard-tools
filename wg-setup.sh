@@ -43,6 +43,9 @@ Commands:
   exit remove <code>
               Remove an exit city (refused while clients use it)
   exit test   Bring each exit city up and check it
+  log [lines] [--follow]
+              wireguard-tools' changes, the watchdogs and the tunnels (wg0,
+              warp, exit cities) in one log (default 40 lines; -f follows)
   test        All verification checks; exits non-zero on any FAIL
   status      Settings (and whether wg0 runs them), interfaces, clients, routes, rules
   backup [dir]  Archive keys, configs and clients (default dir $BACKUP_DIR)
@@ -1047,6 +1050,24 @@ cmd_status() {
     fi
 }
 
+# --- log ---
+
+# One time-ordered log: wireguard-tools' own steps, both watchdogs, and the
+# wg-quick units (wg0, warp, each exit city's tunnels). log [lines] [--follow].
+cmd_log() {
+    local lines="${1:-40}" ifc code matches=()
+    [[ $lines =~ ^[0-9]+$ ]] || die "usage: $PROG log [lines] [--follow]"
+    for ifc in wg-tools "$WATCHDOG" "$EXIT_WATCHDOG"; do matches+=("SYSLOG_IDENTIFIER=$ifc" +); done
+    for ifc in "$WG_IF" "$WARP_IF" $(for code in $(exit_codes); do echo "px-$code wx-$code"; done); do
+        matches+=("_SYSTEMD_UNIT=wg-quick@$ifc.service" + "UNIT=wg-quick@$ifc.service" +)
+    done
+    unset 'matches[${#matches[@]}-1]'
+    if [ "$FOLLOW" -eq 1 ]; then
+        exec journalctl --no-pager -o short-iso -n "$lines" -f "${matches[@]}"
+    fi
+    journalctl --no-pager -o short-iso -n "$lines" "${matches[@]}"
+}
+
 # --- test ---
 
 T_PASS=0 T_FAIL=0 T_WARN=0
@@ -1461,6 +1482,7 @@ main() {
         setup)    cmd_setup ;;
         warp)     cmd_warp "$@" ;;
         exit)     cmd_exit "$@" ;;
+        log)      cmd_log "$@" ;;
         direct|server) die "'$cmd' is now '$PROG setup', then '$PROG warp off' for no WARP" ;;
         test)     cmd_test ;;
         status)   cmd_status ;;
