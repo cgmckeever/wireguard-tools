@@ -1,0 +1,652 @@
+"""The server's lifecycle: setup, warp on|off, backup, restore, rollback.
+
+Setup installs or updates everything: the WARP tunnel, then wg0 with the
+saved WARP setting (on for a new install). WARP failing on a first install
+leaves it off; on an existing install with WARP on it stays on (fail closed:
+clients are blocked, not leaked) until fixed or switched off."""
+
+from __future__ import annotations
+
+import copy
+import glob
+import os
+import re
+import subprocess
+import tarfile
+import time
+from typing import List
+
+from . import checks, exits, host, live, net, ops, render, rules, store, ui, units, warp
+from .const import CONFIG_KEYS, EXIT_WATCHDOG, KEEP_ARCHIVES, WATCHDOG
+from .errors import WgtError
+
+PACKAGES = ("wireguard", "wireguard-tools", "iptables", "curl", "ca-certificates", "iputils-ping",
+            "qrencode", "magic-wormhole")
+
+
+# --- small pieces ---
+
+def run_hooks(ctx, direction: str) -> None:
+    """Run wg0's PostUp/PostDown lines directly (rollback, error cleanup)."""
+    ctx.runner.sh_lines(rules.hook_cmds(ctx.cfg, ctx.snap, ctx.pub_if, direction))
+
+
+def install_packages(ctx) -> None:
+    missing = [p for p in PACKAGES
+               if ctx.runner.query(["dpkg-query", "-W", "-f=${Status}", p]).strip() != "install ok installed"]
+    if not missing:
+        ctx.out.info("packages present")
+        return
+    ctx.runner.step(f"Install packages: {' '.join(missing)}", f"apt-get remove {' '.join(missing)}")
+    ctx.runner.run(["apt-get", "update"])
+    ctx.runner.run(["env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y",
+                    "--no-install-recommends"] + missing)
+
+
+def guard_default_route(ctx) -> None:
+    """Abort (and stop warp) if the default route moved: SSH depends on it."""
+    if ctx.runner.dry_run:
+        return
+    rec = store.state_get(ctx.snap.state, "DEFAULT_ROUTE")
+    now = (ctx.runner.query(["ip", "-4", "route", "show", "default"]).splitlines() or [""])[0]
+    if host.route_key(now) != host.route_key(rec):
+        ctx.out.warn(f"default route changed (was: {rec}, now: {now})")
+        ctx.runner.run(["systemctl", "stop", f"wg-quick@{ctx.cfg.WARP_IF}"], check=False)
+        raise WgtError("default route changed; investigate before re-running")
+
+
+def start_unit(ctx, ifc: str, changed: bool) -> None:
+    """Enable an interface's wg-quick unit for boot and make it match its config."""
+    r, unit = ctx.runner, f"wg-quick@{ifc}"
+    enabled = False
+    if not live.if_exists(r, ifc):
+        r.step(f"Bring up {ifc} ({unit}, enabled at boot)", f"systemctl disable --now {unit}")
+        ops.confirm(ctx, f"Bring up {ifc} now?", default_yes=True)   # the setup is useless without it
+        r.run(["systemctl", "enable", "--now", unit])
+        enabled = True
+    elif changed:
+        r.step(f"Restart {unit} to apply its new config",
+               f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
+        ops.confirm(ctx, f"Restart {ifc} now?")
+        if live.unit_active(r, unit):
+            r.run(["systemctl", "restart", unit])
+        else:
+            r.run(["wg-quick", "down", ifc])
+            r.run(["systemctl", "enable", "--now", unit])
+            enabled = True
+    else:
+        ctx.out.info(f"{ifc} is up and unchanged")
+        if not live.unit_active(r, unit):
+            ctx.out.warn(f"{ifc} is up but not via {unit} (started by hand?)")
+    if not enabled and not live.unit_enabled(r, unit):
+        r.run(["systemctl", "enable", unit])
+
+
+def link_wgt(ctx) -> None:
+    """/usr/local/sbin/wgt -> this checkout's bin/wgt, so it runs from anywhere."""
+    link = os.path.join(ctx.paths.sbin_dir, "wgt")
+    target = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "wgt")
+    if os.path.islink(link) and os.readlink(link) == target:
+        return
+    ctx.runner.step(f"Link {link} -> {target}", f"rm {link}")
+    ctx.runner.run(["ln", "-sfn", target, link])
+
+
+# --- WARP ---
+
+def provision_warp(ctx) -> bool:
+    """Install, register and bring up the WARP tunnel, then test it. False if
+    WARP isn't usable (nothing on the client side depends on it yet)."""
+    ctx.out.log("WARP tunnel")
+    if not warp.install_wgcf(ctx) or not warp.register(ctx):
+        return False
+    profile = os.path.join(ctx.paths.wgcf_dir, "wgcf-profile.conf")
+    changed = False
+    if not os.path.isfile(profile):
+        if not ctx.runner.dry_run:
+            raise WgtError(f"missing {profile}")
+        ctx.out.info(f"[dry-run] would write {ctx.cfg.warp_conf} from {profile} "
+                     f"(Table = off, MTU {ctx.cfg.WARP_MTU}, no DNS)")
+    else:
+        ops.ensure_managed(ctx, ctx.cfg.warp_conf)
+        changed = ctx.files.write(ctx.cfg.warp_conf, 0o600, warp.render_profile(ctx, profile))
+    start_unit(ctx, ctx.cfg.WARP_IF, changed)
+    guard_default_route(ctx)
+    if ctx.runner.dry_run:
+        ctx.out.log("Dry run: skipping WARP tests")
+        return True
+    ctx.out.log("WARP tests")
+    res = checks.Tests(ctx).run("warp")
+    if res.failed:
+        ctx.out.warn(f"WARP failed {res.failed} check(s); see 'wgt status'")
+        return False
+    ctx.out.info(f"WARP is working ({res.passed} checks passed)")
+    return True
+
+
+# --- setup's questions and review ---
+
+def ask_subnet(ctx) -> bool:
+    """First setup without --subnet: ask for the client subnet, Enter keeps the
+    random default. --yes, --dry-run and no terminal take the default. True if
+    something was typed."""
+    if not ctx.cfg.subnet_defaulted or ctx.runner.dry_run or ctx.args.yes or not ui.have_tty():
+        return False
+    default = ctx.cfg.WG_SUBNET
+    while True:
+        reply = ui.ask(f"    Client subnet [{default}]: ")
+        trial = copy.deepcopy(ctx.cfg)
+        trial.values["WG_SUBNET"] = reply or default
+        try:
+            trial.finalize(ctx.facts.kernel_ipv6)
+        except WgtError as e:
+            ctx.out.info(str(e))
+            continue
+        ctx.cfg.values["WG_SUBNET"] = reply or default
+        ctx.cfg.finalize(ctx.facts.kernel_ipv6)
+        return bool(reply)
+
+
+def ensure_subnet6(ctx) -> None:
+    """Pick the client IPv6 /64 once (saved with the rest)."""
+    if not ctx.cfg.values.get("WG_SUBNET6"):
+        ctx.cfg.values["WG_SUBNET6"] = net.random_subnet6()
+        ctx.cfg.finalize(ctx.facts.kernel_ipv6)
+
+
+def review_settings(ctx, subnet_asked: bool) -> None:
+    """Before anything changes: the settings this run uses, where each comes
+    from and what differs from the last setup; then ask to continue (even with
+    --yes, unless there's no terminal; --dry-run doesn't ask)."""
+    fresh = not ctx.cfg.saved.get("WG_SUBNET")
+    if not ctx.cfg.values.get("ENDPOINT"):
+        ctx.cfg.values["ENDPOINT"] = live.trace_field(live.trace(ctx.runner, "-4"), "ip")
+    ctx.out.log("Settings (first setup)" if fresh else f"Settings (re-run; saved in {ctx.paths.state})")
+    rep = checks.settings_table(ctx, running=False, subnet_asked=subnet_asked)
+    for line in rep.lines:
+        print(line)
+    if fresh:
+        ctx.out.info("Nothing is set up yet; these are saved for re-runs and wgt client.")
+    elif not rep.changes:
+        ctx.out.info("No changes to settings since the last setup.")
+    else:
+        ctx.out.info("Changes since the last setup:")
+        for c in rep.changes:
+            ctx.out.info(f"  {c}")
+        if rep.changes_client_configs and ctx.snap.clients:
+            ctx.out.info("Client configs will be rewritten; re-send them.")
+    ctx.runner.current_step = "review settings"
+    if ctx.runner.dry_run:
+        return
+    if not ui.have_tty():
+        if not ctx.args.yes:
+            raise WgtError("no terminal to confirm the settings; re-run with --yes")
+        return
+    reply = ui.ask("    Continue? [Y/n] ")
+    if reply and not reply.lower().startswith("y"):
+        raise WgtError("aborted at: review settings (nothing changed)")
+
+
+def offer_hostname(ctx) -> None:
+    """Offer to rename the host to the server name when they differ (terminal
+    only). /etc/hosts is updated and cloud-init kept from restoring the old name."""
+    full = ctx.facts.hostname
+    cur = full.split(".")[0]
+    want = ctx.cfg.SERVER_NAME.lower()
+    if cur.lower() == want or not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", want):
+        return
+    if ctx.runner.dry_run or ctx.args.yes or not ui.have_tty():
+        return
+    reply = ui.ask(f"    Update hostname {cur} to {want}? [Y/n] ")
+    if reply and not reply.lower().startswith("y"):
+        return
+    new = want + (full[len(cur):] if "." in full else "")   # keep the domain part
+    ctx.runner.step(f"Rename host {full} -> {new}", f"hostnamectl set-hostname {full}")
+    ctx.runner.run(["hostnamectl", "set-hostname", new])
+    hosts = store.read_text("/etc/hosts") or ""
+    if re.search(rf"\b{re.escape(cur)}\b", hosts):
+        ctx.files.write("/etc/hosts", 0o644, re.sub(rf"\b{re.escape(cur)}\b", want, hosts))
+    if os.path.isdir("/etc/cloud/cloud.cfg.d"):
+        ctx.files.write("/etc/cloud/cloud.cfg.d/99-wg-tools-hostname.cfg", 0o644, "preserve_hostname: true\n")
+
+
+def renumber_clients(ctx) -> None:
+    """A new --subnet with clients present: move each client to the same host
+    number in the new subnet (keys unchanged) and rewrite allowed-IPs entries
+    naming the old subnet. Their configs are updated afterwards; re-send them."""
+    old = ctx.cfg.saved.get("WG_SUBNET", "")
+    if not old or old == ctx.cfg.WG_SUBNET or not ctx.snap.clients:
+        return
+    base, pfx = old.split("/")
+    old_int = net.ip2int(base) & ((0xFFFFFFFF << (32 - int(pfx))) & 0xFFFFFFFF)
+    moves, entries = [], []
+    for c in ctx.snap.clients:
+        n = ctx.cfg.net_int + net.ip2int(c.ip) - old_int
+        if not ctx.cfg.first_host <= n <= ctx.cfg.last_host:
+            raise WgtError(f"client '{c.name}' ({c.ip}) has no matching address in {ctx.cfg.WG_SUBNET}; "
+                           f"use a subnet at least as large as {old}")
+        new_ip = net.int2ip(n)
+        allowed = ",".join(ctx.cfg.WG_SUBNET if a == old else a for a in c.allowed.split(",")) if c.allowed else ""
+        moves.append(f"{c.name} {c.ip} -> {new_ip}")
+        entries.append(store.Client(c.name, new_ip, c.pub, allowed))
+    ctx.runner.step(f"Move {len(moves)} client(s) from {old} to {ctx.cfg.WG_SUBNET} (same host numbers and keys; "
+                    "their configs change, re-send them)", f"wgt setup --subnet {old}")
+    for m in moves:
+        ctx.out.info(m)
+    ops.confirm(ctx, f"Move the clients to {ctx.cfg.WG_SUBNET}?")
+    text = "\n".join([store.CLIENTS_HEADER] + [" ".join(x for x in (e.name, e.ip, e.pub, e.allowed) if x)
+                                               for e in entries]) + "\n"
+    ctx.files.write(ctx.paths.client_db, 0o600, text)
+    ctx.reload()
+
+
+def save_config(ctx) -> None:
+    """Persist the settings for later runs."""
+    for k in CONFIG_KEYS:
+        if store.state_get(ctx.snap.state, k) != ctx.cfg.values[k]:
+            ops.state_set(ctx, k, ctx.cfg.values[k])
+
+
+def record_baseline(ctx) -> None:
+    """Record the pre-install default route, public interface and forwarding once."""
+    route = ctx.facts.default_route
+    if not route:
+        raise WgtError("no IPv4 default route; refusing to continue")
+    if host.route_dev(route) == ctx.cfg.WARP_IF:
+        raise WgtError(f"default route already points at {ctx.cfg.WARP_IF}; fix routing first")
+    if not store.state_get(ctx.snap.state, "DEFAULT_ROUTE"):
+        ops.state_set(ctx, "DEFAULT_ROUTE", route)
+        ops.state_set(ctx, "PUB_IF", host.route_dev(route))
+        ops.state_set(ctx, "ORIG_IP_FORWARD", live.sysctl(ctx.runner, "net.ipv4.ip_forward"))
+    # Recorded separately: servers set up before IPv6 support lack it.
+    if not store.state_get(ctx.snap.state, "ORIG_IP6_FORWARD") and ctx.facts.kernel_ipv6:
+        ops.state_set(ctx, "ORIG_IP6_FORWARD", live.sysctl(ctx.runner, "net.ipv6.conf.all.forwarding"))
+    ctx.out.info(f"default route: {route} (public interface {host.route_dev(route)})")
+
+
+def ensure_server_keys(ctx) -> bool:
+    """Create the server keypair unless it exists (--force regenerates). True if new."""
+    p = ctx.paths
+    have = all(os.path.isfile(f) and os.path.getsize(f) > 0 for f in (p.server_key, p.server_pub))
+    if have and not ctx.args.force:
+        ctx.out.info("server keys present")
+        return False
+    if os.path.isfile(p.server_key) and os.path.getsize(p.server_key) > 0:
+        ctx.runner.step("Regenerate server keys (--force): every client must be re-issued (wgt client rotate)",
+                        f"restore {p.server_key} from its .bak")
+        if not ctx.runner.dry_run:
+            ctx.files.backup(p.server_key)
+            ctx.files.backup(p.server_pub)
+    else:
+        ctx.runner.step(f"Generate server keypair ({p.server_key})", f"rm {p.server_key} {p.server_pub}")
+    if ctx.runner.dry_run:
+        return True
+    key = ctx.runner.query(["wg", "genkey"]).strip()
+    pub = ctx.runner.query(["wg", "pubkey"], input=key + "\n").strip()
+    if not key or not pub:
+        raise WgtError("could not generate the server keys")
+    ops._write_private(p.server_key, key + "\n")
+    ops._write_private(p.server_pub, pub + "\n")
+    return True
+
+
+def sync_client_configs(ctx) -> None:
+    """Keep every client config named <server>.<client>.conf (renaming ones from
+    an older server name or from before server names), pointed at the current
+    endpoint, port, DNS and MTU, with its current addresses and allowed IPs.
+    Keys are unchanged, so only the configs need re-sending."""
+    want = f"{ctx.cfg.values['ENDPOINT']}:{ctx.cfg.WG_PORT}"
+    old_name = ctx.cfg.saved.get("SERVER_NAME", "")
+    stale: List[str] = []
+    for c in ctx.snap.clients:
+        conf = os.path.join(ctx.paths.client_dir, f"{ctx.cfg.SERVER_NAME}.{c.name}.conf")
+        src = conf
+        if not os.path.isfile(conf):
+            olds = ([os.path.join(ctx.paths.client_dir, f"{old_name}.{c.name}.conf")] if old_name else []) + \
+                   [os.path.join(ctx.paths.client_dir, f"{c.name}.conf")]
+            src = next((o for o in olds if os.path.isfile(o)), "")
+            if not src:
+                continue
+            ctx.runner.step(f"Rename {src} to {os.path.basename(conf)}", f"mv {conf} {src}")
+            if not ctx.runner.dry_run:
+                os.replace(src, conf)
+                src = conf
+            stale.append(c.name)
+        text = store.read_text(src) or ""
+        addr = ctx.cfg.client_addrs(c.ip).replace(",", ", ", 1)
+        allowed = c.allowed.replace(",", ", ")
+        lines = set(text.splitlines())
+        if {f"Endpoint = {want}", f"Address = {addr}", f"DNS = {ctx.cfg.WG_DNS}", f"MTU = {ctx.cfg.WG_MTU}"} <= lines \
+                and (not allowed or f"AllowedIPs = {allowed}" in lines):
+            continue
+        new = re.sub(r"(?m)^Endpoint = .*$", f"Endpoint = {want}", text)
+        new = re.sub(r"(?m)^Address = .*$", f"Address = {addr}", new)
+        new = re.sub(r"(?m)^DNS = .*$", f"DNS = {ctx.cfg.WG_DNS}", new)
+        new = re.sub(r"(?m)^MTU = .*$", f"MTU = {ctx.cfg.WG_MTU}", new)
+        if allowed:
+            new = re.sub(r"(?m)^AllowedIPs = .*$", f"AllowedIPs = {allowed}", new)
+        ctx.files.write(conf, 0o600, new)
+        if c.name not in stale:
+            stale.append(c.name)
+    if stale:
+        ctx.out.warn(f"client configs changed (now {ctx.cfg.SERVER_NAME}.<client>.conf at {want}); re-send them "
+                     f"(wgt client share/show --qr): {' '.join(stale)}")
+
+
+def write_sysctl(ctx) -> None:
+    """Persist and apply the forwarding sysctls."""
+    pub = ctx.pub_if
+    lines = render.sysctl_lines(ctx.cfg, pub, ctx.facts.has_ipv6, ctx.facts.accept_ra(ctx.runner, pub))
+    # Remember accept_ra before we change it, so rollback can restore it.
+    if any("accept_ra" in line for line in lines) and not store.state_get(ctx.snap.state, "ORIG_ACCEPT_RA"):
+        ops.state_set(ctx, "ORIG_ACCEPT_RA", live.sysctl(ctx.runner, f"net.ipv6.conf.{pub}.accept_ra"))
+    current = store.read_text(ctx.paths.sysctl_file)
+    if current is None or [line for line in current.splitlines() if not line.startswith("#")] != lines:
+        orig = store.state_get(ctx.snap.state, "ORIG_IP_FORWARD") or live.sysctl(ctx.runner, "net.ipv4.ip_forward")
+        ctx.runner.step(f"Enable forwarding ({ctx.paths.sysctl_file}: {'; '.join(lines)})",
+                        f"wgt rollback (restores ip_forward={orig})")
+        ops.confirm(ctx, "Enable forwarding?", default_yes=True)   # clients get nowhere without it
+    ctx.files.write(ctx.paths.sysctl_file, 0o644, render.render_sysctl(lines))
+    for line in lines:
+        k, v = (x.strip() for x in line.split("="))
+        if live.sysctl(ctx.runner, k) != v:
+            ctx.runner.run(["sysctl", "-q", "-w", f"{k}={v}"])
+
+
+def write_dropin(ctx) -> None:
+    """Start wg0 after warp at boot (Wants, not Requires: with WARP off, wg0 must
+    come up even if warp can't; with it on, RT_TABLE's blackhole fails closed)."""
+    if ctx.files.write(ctx.cfg.dropin, 0o644, render.render_dropin(ctx.cfg)):
+        ctx.runner.run(["systemctl", "daemon-reload"])
+
+
+def stop_before_rewrite(ctx) -> bool:
+    """wg0's config is about to change: stop wg0 with its current config first,
+    so its PostDown removes exactly the rules its PostUp added (old subnet, old
+    port). True if it was stopped."""
+    unit = f"wg-quick@{ctx.cfg.WG_IF}"
+    if not ops.wg_up(ctx) or store.read_text(ctx.cfg.wg_conf) in (None, ops.render_wg_conf(ctx)):
+        return False
+    ctx.runner.step(f"Restart {ctx.cfg.WG_IF} for its new config (clients reconnect in a few seconds)",
+                    f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
+    ops.confirm(ctx, f"Restart {ctx.cfg.WG_IF} now?")
+    if live.unit_active(ctx.runner, unit):
+        ctx.runner.run(["systemctl", "stop", unit])
+    else:
+        ctx.runner.run(["wg-quick", "down", ctx.cfg.WG_IF])
+    return True
+
+
+# --- commands ---
+
+def cmd_setup(ctx, words: List[str]) -> None:
+    ops.take_lock(ctx)
+    asked = ask_subnet(ctx)
+    ensure_subnet6(ctx)
+    review_settings(ctx, asked)
+    # Refuse to take over a wg0.conf we didn't create, before saving or touching anything.
+    ops.ensure_managed(ctx, ctx.cfg.wg_conf)
+    renumber_clients(ctx)
+    offer_hostname(ctx)
+    save_config(ctx)
+    ops.state_unset(ctx, "EXIT")   # older versions' mode key; WARP replaces it
+    record_baseline(ctx)
+    install_packages(ctx)
+    link_wgt(ctx)
+    first = not ctx.cfg.saved.get("WARP")
+    if not provision_warp(ctx):
+        if first and ctx.cfg.WARP == "on":
+            ctx.out.warn("WARP isn't usable here; finishing with WARP off (clients exit via this server's IP). "
+                         "Fix it, then: wgt warp on")
+            ctx.cfg.values["WARP"] = "off"
+            save_config(ctx)
+        elif ctx.cfg.WARP == "on":
+            ctx.out.warn("WARP is on but not working: clients are blocked until it is (or: wgt warp off)")
+    out_if = ctx.cfg.WARP_IF if ctx.cfg.WARP == "on" else ctx.pub_if
+    ctx.out.log(f"WireGuard server (WARP {ctx.cfg.WARP}: client traffic leaves via {out_if})")
+    keys_changed = ensure_server_keys(ctx)
+    ops.resolve_endpoint(ctx, save=True)
+    sync_client_configs(ctx)
+    write_sysctl(ctx)
+    write_dropin(ctx)
+    stopped = stop_before_rewrite(ctx)
+    changed = ops.write_wg_conf(ctx) or keys_changed
+    units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
+    if stopped and ctx.runner.dry_run:
+        ctx.out.info(f"[dry-run] would then start wg-quick@{ctx.cfg.WG_IF} with the new config")
+    else:
+        try:
+            start_unit(ctx, ctx.cfg.WG_IF, changed)
+        except Exception:
+            ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
+            run_hooks(ctx, "down")
+            raise
+    guard_default_route(ctx)
+    units.write_watchdog(ctx)
+    exits.sync(ctx)
+    print("")
+    ctx.out.info(f"WARP is {ctx.cfg.WARP}; switch with: wgt warp on|off")
+    ctx.out.info(f"REMINDER: open UDP {ctx.cfg.WG_PORT} in your VPS provider's firewall / security group.")
+    ctx.out.info("Next: wgt client add <name>")
+
+
+def cmd_warp(ctx, words: List[str]) -> None:
+    """Show or switch WARP: rewrites wg0.conf (for the next start) and adds or
+    removes the policy rule live; wg0 isn't restarted."""
+    ops.require_setup(ctx)
+    want = words[0] if words else ""
+    out_if = (lambda w: ctx.cfg.WARP_IF if w == "on" else ctx.pub_if)
+    if not want:
+        ctx.out.info(f"WARP is {ctx.cfg.WARP}: client traffic leaves via {out_if(ctx.cfg.WARP)}")
+        return
+    if want not in ("on", "off"):
+        raise WgtError("usage: wgt warp [on|off]")
+    ops.take_lock(ctx)
+    if want == "on" and not provision_warp(ctx):
+        raise WgtError("WARP isn't working; leaving it off (see 'wgt status')")
+    conf = store.read_text(ctx.cfg.wg_conf) or ""
+    if ctx.cfg.WARP == want and f"(WARP {want})" in conf:
+        ctx.out.info(f"WARP is already {want} (client traffic leaves via {out_if(want)})")
+        if ops.wg_up(ctx):
+            ctx.runner.sh_lines(rules.warp_rule_cmds(ctx.cfg, want == "on"))
+        return
+    ctx.cfg.values["WARP"] = want
+    ctx.runner.step(f"WARP {want}: client traffic leaves via {out_if(want)}", f"wgt warp {'off' if want == 'on' else 'on'}")
+    save_config(ctx)
+    ops.write_wg_conf(ctx)
+    if ops.wg_up(ctx):
+        ctx.runner.sh_lines(rules.warp_rule_cmds(ctx.cfg, want == "on"))
+        ctx.out.info("applied live; clients stay connected (open connections reset once)")
+    else:
+        ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
+
+
+def cmd_backup(ctx, words: List[str]) -> None:
+    """Archive keys, configs, clients, exit cities and state (mode 600: it holds
+    private keys), then prune old archives and change copies."""
+    d = words[0] if words else ctx.paths.backup_dir
+    paths = [p for p in (ctx.paths.wg_dir, ctx.paths.sysctl_file, ctx.cfg.dropin_dir) if os.path.exists(p)]
+    if not paths:
+        raise WgtError("nothing to back up")
+    ops.take_lock(ctx)   # don't archive mid-change
+    out = os.path.join(d, f"wireguard-tools.{ctx.facts.hostname.split('.')[0]}.{time.strftime('%Y%m%d-%H%M%S')}.tar.gz")
+    ctx.runner.step(f"Back up {' '.join(paths)} to {out}", f"rm {out}")
+    if not ctx.runner.dry_run:
+        os.makedirs(d, mode=0o700, exist_ok=True)
+        old = os.umask(0o077)
+        try:
+            ctx.runner.run(["tar", "-czf", out, "-P"] + paths)
+        finally:
+            os.umask(old)
+        os.chmod(out, 0o600)
+        archives = sorted(glob.glob(os.path.join(d, "wireguard-tools.*.tar.gz")))
+        for a in archives[: max(0, len(archives) - KEEP_ARCHIVES)]:
+            os.remove(a)
+            ctx.out.info(f"pruned old archive: {a}")
+        rec = store.read_text(ctx.paths.backup_map) or ""
+        for line in rec.splitlines():
+            ctx.files.prune(line.split("\t")[0])
+    ctx.out.warn("the archive contains private keys; keep it somewhere safe")
+    ctx.out.info("restore on a fresh server: wgt restore <archive>")
+    ep = store.state_get(ctx.snap.state, "ENDPOINT").strip("[]")
+    ctx.out.info(f"fetch it with: scp root@{ep or '<server>'}:{out} .")
+
+
+def cmd_restore(ctx, words: List[str]) -> None:
+    """Set this server up from a backup: keys, clients, WARP accounts, exit
+    cities and settings come across; the old server's baseline, firewall and
+    backup records are dropped and an IP endpoint is re-detected; then setup."""
+    if not words:
+        raise WgtError("usage: wgt restore <archive.tar.gz>")
+    archive = os.path.realpath(words[0])
+    if not os.path.isfile(archive):
+        raise WgtError(f"no such file: {words[0]}")
+    try:
+        with tarfile.open(archive, "r:gz") as t:
+            members = [m.name if m.name.startswith("/") else "/" + m.name for m in t.getmembers()]
+    except (tarfile.TarError, OSError):
+        raise WgtError(f"{archive} is not a readable .tar.gz")
+    if ctx.paths.state not in members:
+        raise WgtError(f"{archive} is not a wireguard-tools backup (no {ctx.paths.state} inside)")
+    if ctx.cfg.saved.get("WARP"):
+        raise WgtError("this server is already set up; run 'wgt rollback' (or 'rollback --purge') first")
+    ops.take_lock(ctx)
+    has_warp = os.path.join(ctx.paths.wgcf_dir, "wgcf-account.toml") in members
+    has_exits = any(re.match(re.escape(ctx.paths.exit_dir) + r"/.*/wgcf-account\.toml$", m) for m in members)
+    what = "keys, clients, settings" + (" and WARP account" if has_warp else "") + (", exit cities" if has_exits else "")
+    ctx.runner.step(f"Restore {what} from {archive}", "wgt rollback --purge")
+    ops.confirm(ctx, "Restore from this backup?")
+    keep_map = store.read_text(ctx.paths.backup_map)
+    ctx.runner.run(["tar", "-xzpf", archive, "-P", ctx.paths.wg_dir])
+    if ctx.runner.dry_run:
+        ctx.out.info("[dry-run] would then run: wgt setup")
+        return
+    ctx.reload()
+    for k in ("DEFAULT_ROUTE", "PUB_IF", "ORIG_IP_FORWARD", "ORIG_IP6_FORWARD", "ORIG_ACCEPT_RA", "UFW"):
+        ops.state_unset(ctx, k)
+    if re.match(r"^\[?[0-9a-fA-F:.]+\]?$", store.state_get(ctx.snap.state, "ENDPOINT")):
+        ops.state_unset(ctx, "ENDPOINT")
+    if keep_map is not None:
+        ops._write_private(ctx.paths.backup_map, keep_map)
+    elif os.path.exists(ctx.paths.backup_map):
+        os.remove(ctx.paths.backup_map)
+    # Everything restored is new to this server: record it so, or the first
+    # change would record the restored copy as the file's "original".
+    rec = store.read_text(ctx.paths.backup_map) or ""
+    for m in members:
+        if m.startswith(ctx.paths.wg_dir + "/") and not m.endswith(("/", ".bak")) and m != ctx.paths.backup_map \
+                and os.path.isfile(m) and not store.backup_orig(rec, m):
+            rec += f"{m}\tNEW\n"
+    ops._write_private(ctx.paths.backup_map, rec)
+    ctx.out.info("restored; clients: " + " ".join(c.name for c in store.load(ctx.paths).clients))
+    if has_warp:
+        ctx.out.warn("the WARP account is now on this server too; don't keep running it on the old one")
+    if has_exits:
+        ctx.out.warn("the exit cities' Proton keys and WARP accounts are now here too; remove them from the old server")
+    ops.release_lock()
+    ctx.out.log("Setting up")
+    ctx.out.info("if setup stops, fix the cause and run 'wgt setup' (the restored files stay in place)")
+    cmd = [units.wgt_command()] + (["--yes"] if ctx.args.yes else []) + ["setup"]
+    os.execv(cmd[0], cmd)
+
+
+def cmd_rollback(ctx, words: List[str]) -> None:
+    """Undo setup: stop everything, remove every rule, restore original files;
+    --purge also deletes keys, clients, WARP accounts and exit cities."""
+    ops.take_lock(ctx)
+    st = ctx.snap.state
+    orig_fwd, orig_fwd6 = store.state_get(st, "ORIG_IP_FORWARD"), store.state_get(st, "ORIG_IP6_FORWARD")
+    orig_ra, pub = store.state_get(st, "ORIG_ACCEPT_RA"), ctx.pub_if
+    c, r, f = ctx.cfg, ctx.runner, ctx.files
+    r.step(f"Roll back: stop {c.WG_IF}, {c.WARP_IF} and exit cities, remove routing/NAT/firewall rules, "
+           "restore original files", "wgt setup")
+    if ctx.args.purge:
+        ctx.out.warn("--purge also deletes the WARP accounts, server and client keys, client configs and "
+                     "exit cities (irreversible)")
+    ops.confirm(ctx, "Proceed with rollback?")
+    r.run(["systemctl", "disable", "--now", f"{WATCHDOG}.timer", f"{EXIT_WATCHDOG}.timer"], check=False)
+    for e in ctx.snap.exits:
+        exits.down(ctx, e.code)
+    for ifc in (c.WG_IF, c.WARP_IF):
+        r.run(["systemctl", "disable", "--now", f"wg-quick@{ifc}"], check=False)
+    for ifc in (c.WG_IF, c.WARP_IF):
+        if live.if_exists(r, ifc):
+            r.run(["ip", "link", "del", "dev", ifc])
+    run_hooks(ctx, "down")
+    if store.state_get(st, "UFW") == "1" and r.ok(["sh", "-c", "command -v ufw"]):
+        r.run(["ufw", "delete", "allow", f"{c.WG_PORT}/udp"], check=False)
+        for o in rules.out_ifs(c, pub, ctx.snap.exits):
+            r.run(["ufw", "route", "delete", "allow", "in", "on", c.WG_IF, "out", "on", o], check=False)
+        ops.state_unset(ctx, "UFW")
+    # Our own drop-in's copies would keep its directory from being removed.
+    if store.backup_orig(store.read_text(ctx.paths.backup_map), c.dropin) == "NEW":
+        f.remove(*glob.glob(c.dropin + ".*.bak"))
+    f.restore_original(c.dropin, remove_new=True)
+    if os.path.isdir(c.dropin_dir) and not os.listdir(c.dropin_dir):
+        r.run(["rmdir", c.dropin_dir])
+    units.remove_timer(ctx, WATCHDOG)
+    units.remove_timer(ctx, EXIT_WATCHDOG)
+    f.remove(os.path.join(ctx.paths.run_dir, WATCHDOG))
+    r.run(["systemctl", "daemon-reload"])
+    f.restore_original(ctx.paths.sysctl_file, remove_new=True)
+    if orig_fwd:
+        r.run(["sysctl", "-q", "-w", f"net.ipv4.ip_forward={orig_fwd}"])
+    if orig_fwd6:
+        r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.all.forwarding={orig_fwd6}"])
+    if orig_ra:
+        r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.{pub}.accept_ra={orig_ra}"], check=False)
+    for path in [c.wg_conf, c.warp_conf] + [ctx.paths.wg(f"{k}-{e.code}.conf") for e in ctx.snap.exits for k in ("px", "wx")]:
+        f.restore_original(path, remove_new=ctx.args.purge)
+    p = ctx.paths
+    if ctx.args.purge:
+        for path in (c.wg_conf, c.warp_conf, p.server_key, p.server_pub, p.client_db, p.sysctl_file):
+            f.remove(*glob.glob(path + ".*.bak"))   # copies left by older versions
+        # Originals were restored above; the change copies hold old keys.
+        f.remove_tree(p.change_dir)
+        if os.path.isdir(p.backup_dir) and not os.listdir(p.backup_dir):
+            r.run(["rmdir", p.backup_dir])
+        # Configs carrying our marker are ours (a restored original never does).
+        for path in (c.wg_conf, c.warp_conf):
+            text = store.read_text(path)
+            if text is not None and "# Managed by wireguard-tools" in text:
+                f.remove(path)
+        f.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.state, p.backup_map, p.exit_db)
+        for d in (p.wgcf_dir, p.client_dir, p.psk_dir, p.exit_dir):
+            f.remove_tree(d)
+        f.remove(os.path.join(p.sbin_dir, "wgt"))
+        ctx.out.info(f"left installed: packages and {p.wgcf_bin}")
+    else:
+        # Not set up any more (wgt client and restore check this).
+        ops.state_unset(ctx, "WARP")
+        ops.state_unset(ctx, "EXIT")
+        kept = f"keys, clients ({p.client_db}, {p.client_dir})"
+        if os.path.isdir(p.wgcf_dir):
+            kept += f", WARP account ({p.wgcf_dir})"
+        if ctx.snap.exits:
+            kept += f", exit cities ({p.exit_dir})"
+        ctx.out.info(f"kept: {kept} (rollback --purge removes them)")
+    ctx.out.log("Rollback done; the main routing table was never changed")
+
+
+def preflight(runner) -> None:
+    """Root, OS and architecture checks; refuse anything unsupported."""
+    if os.geteuid() != 0:
+        raise WgtError("must run as root")
+    try:
+        info = dict(line.split("=", 1) for line in open("/etc/os-release").read().splitlines() if "=" in line)
+    except OSError:
+        raise WgtError("cannot read /etc/os-release; unsupported OS")
+    osid = info.get("ID", "").strip('"')
+    ver = info.get("VERSION_ID", "").strip('"')
+    major = ver.split(".")[0]
+    if not major.isdigit():
+        raise WgtError(f"unsupported OS: {osid} {ver or '<no version>'} (need Debian 11+ or Ubuntu 20.04+)")
+    if osid == "debian" and int(major) < 11:
+        raise WgtError(f"unsupported Debian {ver} (need 11+)")
+    if osid == "ubuntu" and int(major) < 20:
+        raise WgtError(f"unsupported Ubuntu {ver} (need 20.04+)")
+    if osid not in ("debian", "ubuntu"):
+        raise WgtError(f"unsupported OS: {osid} {ver} (need Debian 11+ or Ubuntu 20.04+)")
+    arch = subprocess.run(["dpkg", "--print-architecture"], stdout=subprocess.PIPE, text=True).stdout.strip()
+    if arch not in ("amd64", "arm64"):
+        raise WgtError(f"unsupported architecture: {arch} (need amd64 or arm64)")

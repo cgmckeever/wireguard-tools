@@ -190,8 +190,13 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
 
 
 def _commands():
-    from . import checks, clients, exits, watchdog
+    from . import checks, clients, exits, server, watchdog
     return {
+        "setup": server.cmd_setup,
+        "warp": server.cmd_warp,
+        "backup": server.cmd_backup,
+        "restore": server.cmd_restore,
+        "rollback": server.cmd_rollback,
         "watchdog": watchdog.cmd_watchdog,
         "debug": cmd_debug,
         "status": checks.cmd_status,
@@ -213,6 +218,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         fn = _commands().get(cmd)
         if fn is None:
             raise WgtError(f"unknown command: {cmd} (see: wgt help)")
+        if os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
+            from .server import preflight
+            preflight(None)
         if cmd == "watchdog":
             quick = host.Facts(kernel_ipv6=os.path.exists("/proc/net/if_inet6"), has_ipv6=False,
                                hostname="", routes4="", default_route="")
@@ -220,6 +228,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             fn(load(args), rest)
         return 0
+    except SystemExit as e:
+        return int(e.code or 0)
     except WgtError as e:
         out.error(str(e))
         return 1
