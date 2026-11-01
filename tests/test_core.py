@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import os
 import random
 
 import pytest
+from conftest import ROOT
 
 from wgt import net, store
 from wgt.config import resolve, short_hostname_name
@@ -198,3 +200,28 @@ def test_ipt_count_matches_iptables_s():
     r = FakeRunner({"iptables -t filter -S INPUT": (0, "-A INPUT -p udp -m udp --dport 51820 -j ACCEPT\n"
                                                          "-A INPUT -p udp -m udp --dport 51820 -j ACCEPT\n")})
     assert live.ipt_count(r, "iptables", "filter", "INPUT", "-p udp --dport 51820 -j ACCEPT") == 2
+
+
+def test_ask_reads_the_terminal():
+    """ui.ask in a real (pseudo) terminal: the prompt shows and the reply comes back."""
+    import pty
+    import sys
+
+    code = (f"import sys; sys.path.insert(0, {ROOT!r}); from wgt import ui; "
+            "print('GOT=' + ui.ask('Which? '))")
+    pid, fd = pty.fork()
+    if pid == 0:
+        os.execv(sys.executable, [sys.executable, "-c", code])
+    os.write(fd, b"2\n")
+    out = b""
+    while True:
+        try:
+            chunk = os.read(fd, 1024)
+        except OSError:
+            break
+        if not chunk:
+            break
+        out += chunk
+    os.waitpid(pid, 0)
+    text = out.decode()
+    assert "Which? " in text and "GOT=2" in text, text

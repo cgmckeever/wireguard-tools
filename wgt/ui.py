@@ -30,12 +30,14 @@ def have_tty() -> bool:
 
 
 def ask(prompt: str) -> str:
-    """Read one line from the terminal ("" on EOF or no terminal)."""
+    """Read one line from the terminal ("" on EOF or no terminal). Opened
+    separately for writing and reading: Python can't open /dev/tty "r+" in
+    text mode (it isn't seekable), which used to make every prompt answer ""."""
     try:
-        with open("/dev/tty", "r+") as tty:
-            tty.write(prompt)
-            tty.flush()
-            return tty.readline().strip()
+        with open("/dev/tty", "w") as out, open("/dev/tty") as inp:
+            out.write(prompt)
+            out.flush()
+            return inp.readline().strip()
     except OSError:
         return ""
 
