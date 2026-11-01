@@ -68,7 +68,7 @@ scripts/servers.sh status boba           # also setup, warp, test, exit, log, ro
 scripts/servers.sh log boba -f           # follow its log
 scripts/servers.sh client boba add phone # any wg-client.sh command
 scripts/servers.sh backup all            # wg-setup.sh backup, fetched to local/backups/<name>/
-scripts/servers.sh push-exits boba       # local/exits/boba/*.conf -> exit cities
+scripts/servers.sh exit-add boba         # pick from local/exits/boba/*.conf (or: all) -> exit cities
 scripts/servers.sh ssh boba
 scripts/servers.sh forget boba           # drop from the list; the server is untouched
 ```
@@ -268,7 +268,8 @@ server:
 ```
 
 or from your machine: save it under `local/exits/<server>/` with any name
-(e.g. `paris.france.conf`) and run `scripts/servers.sh push-exits <server>`.
+(e.g. `paris.france.conf`) and run `scripts/servers.sh exit-add <server>`
+(pick one, or `all`).
 The first push of a file asks what it is ("Paris, France") and suggests a code
 (`par-fr`: city + Proton's country tag); the answer is kept in
 `local/exits/details.tsv`.

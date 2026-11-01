@@ -23,10 +23,11 @@
 #                         run wg-setup.sh <command> [args] there
 #                         (log [lines] [-f]: its changes, watchdogs and tunnels)
 #   client <s> [args]     run wg-client.sh [args] there (e.g. client boba list)
-#   push-exits <s> [file...]
-#                         install local/exits/<s>/*.conf as its exit cities
-#                         (scp, wg-setup.sh exit add, delete the upload); a new
-#                         file is named once: "Paris, France" -> code par-fr
+#   exit-add <s> [n|file|all]
+#                         add exit cities from local/exits/<s>/*.conf: lists
+#                         them (and which are on the server), copies the chosen
+#                         one(s) up and adds them; a new file is named once:
+#                         "Paris, France" -> code par-fr
 #   backup <s|all>        wg-setup.sh backup there, then fetch the archive to
 #                         local/backups/<s>/ (holds private keys; mode 600)
 #   forget <s> [--yes]    remove from the list (nothing on the server changes)
@@ -211,7 +212,7 @@ cmd_init() {
     rsh "$target" "$DEF_DIR/wg-setup.sh setup --name $(q "$name") $(q "${setup_args[@]+"${setup_args[@]}"}")" \
         || die "setup did not finish; fix the cause and re-run: $0 init --address $address --name $name"
     record "$name" "$target"
-    info "next: $0 client $name add <client>   (or push exit cities: $0 push-exits $name)"
+    info "next: $0 client $name add <client>   (or add exit cities: $0 exit-add $name)"
 }
 
 record() {
@@ -254,7 +255,7 @@ make_link() {
     local server="$1" f="$2" file name hint cc city code reply
     file=$(basename "$f")
     hint=$(awk '/^[[:space:]]*\[Peer\]/ { p = 1; next } p && /^[[:space:]]*#/ { sub(/^[[:space:]]*#[[:space:]]*/, ""); print; exit }' "$f")
-    [ -t 0 ] || die "$file has no link yet; run push-exits in a terminal once to name it"
+    [ -t 0 ] || die "$file has no link yet; run exit-add in a terminal once to name it"
     read -r -p "What is $file (Proton ${hint:-?})? e.g. Paris, France: " name </dev/tty || true
     [ -n "$name" ] || die "no name for $file"
     cc=$(sed -n 's/^\([A-Za-z][A-Za-z]\)#.*/\1/p' <<<"$hint" | tr 'A-Z' 'a-z')
@@ -270,30 +271,57 @@ make_link() {
     chmod 600 "$LINKS"
 }
 
-do_push_exits() {
-    local name="$1" target="$2" dir="$3" src f file link code label files=() inbox=/etc/wireguard/exits/incoming reply
-    shift 3
-    src="$LOCAL/exits/$name"
-    if [ $# -gt 0 ]; then
-        for file in "$@"; do files+=("$src/${file%.conf}.conf"); done
-    else
-        for f in "$src"/*.conf; do [ -f "$f" ] && files+=("$f"); done
-    fi
-    [ ${#files[@]} -gt 0 ] || die "no configs in $src (save Proton WireGuard configs there, any name ending .conf)"
+# Copy one local config to the server and add it there as its exit city
+# (named first if it has no entry in details.tsv yet). The uploaded copy is
+# deleted once exit add has imported it.
+add_one_exit() {
+    local name="$1" target="$2" dir="$3" f="$4" file link code label inbox=/etc/wireguard/exits/incoming
+    file=$(basename "$f")
+    chmod 600 "$f"
+    link=$(link_of "$name" "$file")
+    if [ -z "$link" ]; then make_link "$name" "$f"; link=$(link_of "$name" "$file"); fi
+    code="${link%%$'\t'*}"
+    label="${link#*$'\t'}"
+    log "$name: $file -> exit $code ($label)"
     ssh "${SSH_OPTS[@]}" "$target" "install -d -m 700 /etc/wireguard/exits $inbox" || die "cannot reach $target"
-    for f in "${files[@]}"; do
-        [ -f "$f" ] || die "missing $f"
-        chmod 600 "$f"
-        file=$(basename "$f")
-        link=$(link_of "$name" "$file")
-        if [ -z "$link" ]; then make_link "$name" "$f"; link=$(link_of "$name" "$file"); fi
-        code="${link%%$'\t'*}"
-        label="${link#*$'\t'}"
-        log "$name: $file -> exit $code ($label)"
-        scp -q -p "${SSH_OPTS[@]}" "$f" "$target:$inbox/$code.conf" || die "upload failed"
-        ssh "${SSH_OPTS[@]}" "$target" "$dir/wg-setup.sh exit add $(q "$code" "$inbox/$code.conf" --label "$label" --yes); rc=\$?; rm -f $inbox/$code.conf; exit \$rc" \
-            || die "exit add failed for $code (nothing left in $inbox)"
-    done
+    scp -q -p "${SSH_OPTS[@]}" "$f" "$target:$inbox/$code.conf" || die "upload failed"
+    ssh "${SSH_OPTS[@]}" "$target" "$dir/wg-setup.sh exit add $(q "$code" "$inbox/$code.conf" --label "$label" --yes); rc=\$?; rm -f $inbox/$code.conf; exit \$rc" \
+        || die "exit add failed for $code"
+}
+
+# exit-add <server> [number|file|all]: pick from this server's local configs.
+do_exit_add() {
+    local name="$1" target="$2" dir="$3" sel="${4:-}" src f files=() i link remote state picked=()
+    src="$LOCAL/exits/$name"
+    for f in "$src"/*.conf; do [ -f "$f" ] && files+=("$f"); done
+    [ ${#files[@]} -gt 0 ] || die "no configs in $src (save Proton WireGuard configs there, any name ending .conf)"
+    remote=$(ssh -n "${SSH_OPTS[@]}" "$target" "awk '!/^#/ { print \$1 }' /etc/wireguard/exits.db 2>/dev/null" || true)
+    if [ -z "$sel" ]; then
+        echo ""
+        for i in "${!files[@]}"; do
+            link=$(link_of "$name" "$(basename "${files[$i]}")")
+            if [ -z "$link" ]; then state="(new)"
+            elif grep -qx "${link%%$'\t'*}" <<<"$remote"; then state="${link//$'\t'/  }   on server"
+            else state="${link//$'\t'/  }"; fi
+            printf '  %2d) %-26s %s\n' $(( i + 1 )) "$(basename "${files[$i]}")" "$state"
+        done
+        echo ""
+        read -r -p "  Add which? [number, file, or all] " sel </dev/tty || true
+    fi
+    case "$sel" in
+        "") die "nothing chosen" ;;
+        all) picked=("${files[@]}") ;;
+        *)
+            if [[ $sel =~ ^[0-9]+$ ]] && [ "$sel" -ge 1 ] && [ "$sel" -le ${#files[@]} ]; then
+                picked=("${files[$(( sel - 1 ))]}")
+            elif [ -f "$src/${sel%.conf}.conf" ]; then
+                picked=("$src/${sel%.conf}.conf")
+            else
+                die "no config '$sel' in $src"
+            fi
+            ;;
+    esac
+    for f in "${picked[@]}"; do add_one_exit "$name" "$target" "$dir" "$f"; done
     log "$name exits"
     ssh "${SSH_OPTS[@]}" "$target" "$dir/wg-setup.sh exit list"
 }
@@ -324,7 +352,7 @@ case "$cmd" in
     setup|warp|status|test|exit|log|rollback)
                 sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_wgsetup "$cmd" "$@" ;;
     client)     sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_client "$@" ;;
-    push-exits) sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_push_exits "$@" ;;
+    exit-add)   sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_exit_add "$@" ;;
     backup)     each "${1:-}" do_backup ;;
     forget)     cmd_forget "$@" ;;
     help|-h|--help) usage ;;
