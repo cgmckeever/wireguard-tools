@@ -216,7 +216,7 @@ Behaviour flags (not saved):
 | `--qr` / `--no-qr` | `wgt client add`, `rotate`, `show` | force or skip the QR code |
 | `--exit <code>[,…]` | `wgt client add` | the client's exit(s); `warp` is the default exit |
 | `--label "<name>"` | `wgt exit add` | the exit city's full name, e.g. `"Paris, France"` |
-| `--follow`, `-f` | `wgt log` | keep printing new entries |
+| `--no-follow` | `wgt log` | print the last lines and stop (also when piped) |
 
 `wgt help` and `wgt-ctl help` list everything.
 
@@ -411,7 +411,7 @@ The server comes first, then the command:
 
 ```bash
 wgt-ctl                                # the servers, with branch@commit (or unreachable)
-wgt-ctl boba status                    # any wgt command: setup, warp, test, log -f, exit list, ...
+wgt-ctl boba status                    # any wgt command: setup, warp, test, log, exit list, ...
 wgt-ctl boba client add phone --exit par-fr
 wgt-ctl boba client                    # its client list and action menu
 wgt-ctl all test                       # each server in turn (one failing doesn't stop the rest)
@@ -447,7 +447,7 @@ names them in `exits/details.tsv`, and archives fetched by `backup` in
 ```bash
 wgt test              # PASS/FAIL checks; non-zero exit on any FAIL
 wgt status            # settings (and any not running yet), interfaces, clients, routes, rules
-wgt log [lines] [-f]  # its changes, both watchdogs and the tunnels, in one log
+wgt log [lines]       # its changes, both watchdogs and the tunnels: last lines, then follows (Ctrl-C stops)
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
 wgt rollback          # stop everything, remove all rules, restore original files

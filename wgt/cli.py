@@ -25,7 +25,7 @@ VALUE_FLAGS = {
 }
 BOOL_FLAGS = {
     "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--purge": "purge",
-    "--follow": "follow", "-f": "follow", "--tsv": "tsv",
+    "--follow": "follow", "-f": "follow", "--no-follow": "no_follow", "--tsv": "tsv",
 }
 
 USAGE = """\
@@ -35,7 +35,8 @@ A WireGuard server whose clients exit through Cloudflare WARP or this
 server's own IP (switchable), or per client through an exit city.
 
   setup                      install or update everything
-  status | test | log [N]    what's running / all checks / changes, watchdogs and tunnels
+  status | test              what's running / all checks
+  log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops)
   warp [on|off]              where clients exit (live)
   backup [dir] | restore <archive> | rollback [--purge]
 
@@ -43,7 +44,7 @@ server's own IP (switchable), or per client through an exit city.
          rotate <name> | rename <old> <new> | disable <name> | enable <name> | remove <name>
   exit   list | add <code> <file|-> [--label NAME] | remove <code> | test
 
-Options: --dry-run, --yes/-y, --force, --purge, --qr/--no-qr, --follow/-f
+Options: --dry-run, --yes/-y, --force, --purge, --qr/--no-qr
 Settings (saved by setup): --name --subnet --subnet6 --port --mtu --warp-mtu --dns
   --endpoint --wg-if --warp-if --table --allowed-ips
 """
@@ -60,6 +61,7 @@ class Args:
     force: bool = False
     purge: bool = False
     follow: bool = False
+    no_follow: bool = False
     tsv: bool = False
     qr: int = 0     # 1 = --qr, -1 = --no-qr, 0 = decide (on if a terminal)
     help: bool = False
@@ -172,7 +174,9 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
 
 def cmd_log(ctx: Ctx, words: List[str]) -> None:
     """One time-ordered log: these tools' own steps, both watchdogs, and the
-    wg-quick units (wg0, warp, each exit city's tunnels)."""
+    wg-quick units (wg0, warp, each exit city's tunnels). Like tail -f: the
+    last [lines] (default 40), then new entries until Ctrl-C. Not following
+    with --no-follow, or when the output isn't a terminal."""
     from .const import EXIT_WATCHDOG, WATCHDOG
     count = words[0] if words else "40"
     if not count.isdigit():
@@ -185,7 +189,8 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
         ifcs += [f"px-{e.code}", f"wx-{e.code}"]
     for ifc in ifcs:
         matches += [f"_SYSTEMD_UNIT=wg-quick@{ifc}.service", "+", f"UNIT=wg-quick@{ifc}.service", "+"]
-    cmd = ["journalctl", "--no-pager", "-o", "short-iso", "-n", count] + (["-f"] if ctx.args.follow else []) + matches[:-1]
+    follow = ctx.args.follow or (sys.stdout.isatty() and not ctx.args.no_follow)
+    cmd = ["journalctl", "--no-pager", "-o", "short-iso", "-n", count] + (["-f"] if follow else []) + matches[:-1]
     os.execvp(cmd[0], cmd)
 
 
