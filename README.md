@@ -542,8 +542,8 @@ The code is the `wgt/` package (standard library only); `bin/wgt` and
 is git tag `bash-final`.
 
 ```bash
-python3 -m venv .venv && .venv/bin/pip install pytest
-.venv/bin/python -m pytest -q tests           # also runs on every push (GitHub Actions)
+./test.sh                                     # all tests (first run sets up .venv with pytest); also on every push
+./test.sh -k exit                             # just the tests matching "exit" (any pytest option works)
 tools/parity.sh root@server ...               # read-only: render a live server's configs with both versions
 tools/trial.sh <proton.conf>                  # on a throwaway server: the full cycle, back to clean
 ```
