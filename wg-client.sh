@@ -229,7 +229,7 @@ issue_client() {
     fi
     echo ""
     info "client config: $conf"
-    info "fetch it with: scp root@$(tr -d '[]' <<<"$ENDPOINT"):$conf ."
+    fetch_hint "$conf"
 }
 
 # Add a client's peer to the running wg0.
@@ -385,17 +385,24 @@ cmd_list() {
         while read -r k a; do hs[$k]="$a"; done < <(wg show "$WG_IF" latest-handshakes)
         while read -r k a b; do rx[$k]="$a"; tx[$k]="$b"; done < <(wg show "$WG_IF" transfer)
     fi
-    printf '%3s %-20s %-6s %-15s %-14s %-12s %s\n' "#" NAME EXIT ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
+    if [ "$TSV" -eq 0 ]; then
+        printf '%3s %-20s %-6s %-15s %-14s %-12s %s\n' "#" NAME EXIT ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
+    fi
     while read -r name ip pub allowed; do
         local seen
         seen=$(ago "${hs[$pub]:-0}")
         if is_disabled "$name"; then seen=disabled; fi
+        if [ "$TSV" -eq 1 ]; then
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$name" "$(client_exit_label "$name")" "$ip" "$seen" \
+                "$(( ${rx[$pub]:-0} / 1048576 ))/$(( ${tx[$pub]:-0} / 1048576 ))" "${allowed//,/, }"
+            continue
+        fi
         n=$(( n + 1 )); names+=("$name")
         printf '%3s %-20s %-6s %-15s %-14s %-12s %s\n' "$n" "$name" "$(client_exit_label "$name")" "$ip" "$seen" \
             "$(( ${rx[$pub]:-0} / 1048576 ))/$(( ${tx[$pub]:-0} / 1048576 ))" "${allowed//,/, }"
     done < <(db_entries)
     # In a terminal: pick a client, then an action on it (Enter at either prompt exits).
-    if [ "$n" -gt 0 ] && [ -t 1 ] && [ "$YES" -eq 0 ] && have_tty; then list_menu "${names[@]}"; fi
+    if [ "$TSV" -eq 0 ] && [ "$n" -gt 0 ] && [ -t 1 ] && [ "$YES" -eq 0 ] && have_tty; then list_menu "${names[@]}"; fi
 }
 
 # After list: ask for a client number, then what to do with it; runs one action.
@@ -431,6 +438,14 @@ list_menu() {
     esac
 }
 
+# How to copy a config to your own machine (WGT_SSH_TARGET, set by
+# scripts/servers.sh, is the login that machine uses for this server).
+fetch_hint() {
+    local ep
+    ep=$(tr -d '[]' <<<"${ENDPOINT:-$(state_get ENDPOINT)}")
+    info "fetch it with: scp ${WGT_SSH_TARGET:-root@$ep}:$1 ."
+}
+
 cmd_show() {
     local name="${1:-}" conf
     [ -n "$name" ] || name=$(pick_client show) || exit 1
@@ -444,6 +459,8 @@ cmd_show() {
         echo ""
         show_qr "$conf"
     fi
+    echo ""
+    fetch_hint "$conf"
 }
 
 main() {

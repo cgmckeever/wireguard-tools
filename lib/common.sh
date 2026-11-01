@@ -118,6 +118,7 @@ SUBNET_ASKED=0   # 1 once setup asked for the subnet
 FORCE=0
 PURGE=0
 FOLLOW=0   # log --follow
+TSV=0      # list --tsv (for scripts/servers.sh)
 QR=0     # 1 = --qr, -1 = --no-qr, 0 = add/rotate decide (on if a terminal)
 EXIT_CODES=""   # wg-client.sh add --exit <code>[,<code>...]
 EXIT_LABEL=""   # wg-setup.sh exit add --label "<full name>"
@@ -216,6 +217,7 @@ parse_args() {
             --force)   FORCE=1 ;;
             --purge)   PURGE=1 ;;
             -f|--follow) FOLLOW=1 ;;
+            --tsv)     TSV=1 ;;
             --qr)      QR=1 ;;
             --no-qr)   QR=-1 ;;
             -h|--help) ARGS=(help); return 0 ;;

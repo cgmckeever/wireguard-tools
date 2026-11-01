@@ -22,7 +22,9 @@
 #   setup|warp|status|test|exit|log|rollback <s|all> [args]
 #                         run wg-setup.sh <command> [args] there
 #                         (log [lines] [-f]: its changes, watchdogs and tunnels)
-#   client <s> [args]     run wg-client.sh [args] there (e.g. client boba list)
+#   client [s] [args]     run wg-client.sh [args] there; no args: its client
+#                         list and action menu (no server: pick one first)
+#   clients               every client on every server, with exit and last seen
 #   exit-add <s> [n|file|all]
 #                         add exit cities from local/exits/<s>/*.conf: lists
 #                         them (and which are on the server), copies the chosen
@@ -232,7 +234,39 @@ do_branch() {
     ssh "${SSH_OPTS[@]}" "$2" "set -e; git -C $3 fetch -q; git -C $3 checkout -q $(q "$4"); git -C $3 pull -q; printf '    %s: ' \"\$(git -C $3 rev-parse --abbrev-ref HEAD)\"; git -C $3 log --oneline -1"
 }
 do_wgsetup() { local name="$1" target="$2" dir="$3"; shift 3; rsh "$target" "$dir/wg-setup.sh $(q "$@")"; }
-do_client()  { local name="$1" target="$2" dir="$3"; shift 3; rsh "$target" "$dir/wg-client.sh $(q "$@")"; }
+# wg-client.sh there (no args: its client list and action menu). Printed scp
+# hints use this machine's login for the server.
+do_client() {
+    local name="$1" target="$2" dir="$3"
+    shift 3
+    [ $# -gt 0 ] || set -- list
+    rsh "$target" "WGT_SSH_TARGET=$(q "$target") $dir/wg-client.sh $(q "$@")"
+}
+
+# Every client on every server in one table (a server whose tools predate
+# list --tsv gets its own list instead).
+cmd_clients() {
+    local name target dir out old=()
+    echo ""
+    printf '  %-10s %-20s %-6s %-15s %-14s %-12s %s\n' SERVER NAME EXIT ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
+    while read -r name target dir; do
+        if ! out=$(ssh -n -o BatchMode=yes "${SSH_OPTS[@]}" "$target" "$dir/wg-client.sh list --tsv" 2>/dev/null); then
+            if ssh -n -o BatchMode=yes "${SSH_OPTS[@]}" "$target" true 2>/dev/null; then old+=("$name $target $dir")
+            else printf '  %-10s (unreachable)\n' "$name"; fi
+            continue
+        fi
+        [ -n "$out" ] || { printf '  %-10s (no clients)\n' "$name"; continue; }
+        awk -F'\t' -v s="$name" '{ printf "  %-10s %-20s %-6s %-15s %-14s %-12s %s\n", s, $1, $2, $3, $4, $5, $6 }' <<<"$out"
+    done < <(entries)
+    local line
+    for line in ${old[@]+"${old[@]}"}; do
+        read -r name target dir <<<"$line"
+        echo ""
+        log "$name (older tools; update with: $0 pull $name)"
+        ssh -n "${SSH_OPTS[@]}" "$target" "$dir/wg-client.sh list --yes" 2>/dev/null | sed 's/^/  /'
+    done
+    echo ""
+}
 
 do_backup() {
     local name="$1" target="$2" dir="$3" out to
@@ -359,6 +393,7 @@ case "$cmd" in
     setup|warp|status|test|exit|log|rollback)
                 sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_wgsetup "$cmd" "$@" ;;
     client)     sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_client "$@" ;;
+    clients)    cmd_clients ;;
     exit-add)   sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_exit_add "$@" ;;
     backup)     each "${1:-}" do_backup ;;
     forget)     cmd_forget "$@" ;;
