@@ -28,7 +28,9 @@ Commands:
                   (stays off across restarts)
   enable [name]   Let a disabled client back in with its existing config
   list            Clients with address, allowed IPs, last handshake (or
-                  "disabled"), traffic
+                  "disabled"), traffic; in a terminal, then pick a client
+                  number and an action (show, qr, share, rotate,
+                  disable/enable, remove); Enter exits
   show [name]     Config path and contents with keys redacted (--qr for a QR code)
   share [name]    Send the config with magic-wormhole: prints a one-time code;
                   the recipient runs: wormhole receive <code>
@@ -302,19 +304,55 @@ cmd_disable() {
 
 cmd_list() {
     local -A hs=() rx=() tx=()
-    local k a b name ip pub allowed
+    local k a b name ip pub allowed n=0 names=()
     if if_exists "$WG_IF"; then
         while read -r k a; do hs[$k]="$a"; done < <(wg show "$WG_IF" latest-handshakes)
         while read -r k a b; do rx[$k]="$a"; tx[$k]="$b"; done < <(wg show "$WG_IF" transfer)
     fi
-    printf '%-20s %-15s %-14s %-12s %s\n' NAME ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
+    printf '%3s %-20s %-15s %-14s %-12s %s\n' "#" NAME ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
     while read -r name ip pub allowed; do
         local seen
         seen=$(ago "${hs[$pub]:-0}")
         if is_disabled "$name"; then seen=disabled; fi
-        printf '%-20s %-15s %-14s %-12s %s\n' "$name" "$ip" "$seen" \
+        n=$(( n + 1 )); names+=("$name")
+        printf '%3s %-20s %-15s %-14s %-12s %s\n' "$n" "$name" "$ip" "$seen" \
             "$(( ${rx[$pub]:-0} / 1048576 ))/$(( ${tx[$pub]:-0} / 1048576 ))" "${allowed//,/, }"
     done < <(db_entries)
+    # In a terminal: pick a client, then an action on it (Enter at either prompt exits).
+    if [ "$n" -gt 0 ] && [ -t 1 ] && [ "$YES" -eq 0 ] && have_tty; then list_menu "${names[@]}"; fi
+}
+
+# After list: ask for a client number, then what to do with it; runs one action.
+list_menu() {
+    local names=("$@") reply name toggle=disable
+    echo ""
+    read -r -p "  Client # (Enter to exit): " reply </dev/tty || true
+    [ -n "$reply" ] || return 0
+    [[ $reply =~ ^[0-9]+$ ]] && [ "$reply" -ge 1 ] && [ "$reply" -le ${#names[@]} ] \
+        || die "no client number '$reply'"
+    name="${names[$(( reply - 1 ))]}"
+    if is_disabled "$name"; then toggle=enable; fi
+    echo ""
+    echo "  $name:"
+    echo "    s) show      config, keys redacted"
+    echo "    q) qr        config as a QR code"
+    echo "    w) share     send with magic-wormhole"
+    echo "    r) rotate    new keys; the current config stops working"
+    printf '    d) %-9s %s\n' "$toggle" "$([ "$toggle" = disable ] && echo "cut off now, keep keys and address" || echo "let back in with its existing config")"
+    echo "    x) remove    delete the client, its keys and config"
+    read -r -p "  Action (Enter to exit): " reply </dev/tty || true
+    echo ""
+    case "$reply" in
+        "") return 0 ;;
+        s|show)   cmd_show "$name" ;;
+        q|qr)     QR=1; cmd_show "$name" ;;
+        w|share)  cmd_share "$name" ;;
+        r|rotate) cmd_rotate "$name" ;;
+        d|disable|enable)
+            if [ "$toggle" = disable ]; then cmd_disable "$name" 1; else cmd_disable "$name" 0; fi ;;
+        x|remove) cmd_remove "$name" ;;
+        *) die "unknown action: '$reply'" ;;
+    esac
 }
 
 cmd_show() {

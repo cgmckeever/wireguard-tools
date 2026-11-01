@@ -143,7 +143,7 @@ without public IPv6 gives clients IPv4 only while WARP is off.
 ```bash
 ./wg-client.sh add laptop                            # full tunnel (default); prints a QR code
 ./wg-client.sh add printer --allowed-ips "10.4.5.0/24, fdXX:XXXX:XXXX::/64" # split tunnel: VPN network only (your subnets)
-./wg-client.sh list                                  # address, last seen, traffic, allowed IPs
+./wg-client.sh list                                  # address, last seen, traffic, allowed IPs; then pick one to act on
 ./wg-client.sh show laptop                           # config with keys redacted
 ./wg-client.sh show laptop --qr                      # QR code again (phones: WireGuard app → scan)
 ./wg-client.sh share laptop                          # send the config via magic-wormhole (one-time code)
@@ -156,6 +156,11 @@ without public IPv6 gives clients IPv4 only while WARP is off.
 Leave out the name on `rotate`, `remove`, `disable`, `enable`, `show` or
 `share` to pick from a numbered list. Changes apply live; other clients stay
 connected.
+
+In a terminal, `list` then asks for a client number and offers its actions
+(show, QR, share, rotate, disable/enable, remove). It runs the one you choose
+and exits; Enter at either prompt exits without doing anything. With `--yes`
+or when piped, `list` only prints the table.
 
 `disable` removes the client's peer from the running `wg0` and leaves it out of
 `wg0.conf`, so it stays off across restarts; `list` shows it as `disabled`.
