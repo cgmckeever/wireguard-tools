@@ -1,0 +1,4 @@
+
+# Proton exit configs (private keys) staged on the dev machine; never commit
+exit-configs/*
+!exit-configs/.gitkeep
