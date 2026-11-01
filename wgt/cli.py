@@ -169,9 +169,35 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
         sys.stdout.write(f"=== {name}\n{redact(text)}")
 
 
-COMMANDS = {
-    "debug": cmd_debug,
-}
+def cmd_log(ctx: Ctx, words: List[str]) -> None:
+    """One time-ordered log: these tools' own steps, both watchdogs, and the
+    wg-quick units (wg0, warp, each exit city's tunnels)."""
+    from .const import EXIT_WATCHDOG, WATCHDOG
+    count = words[0] if words else "40"
+    if not count.isdigit():
+        raise WgtError("usage: wgt log [lines] [--follow]")
+    matches: List[str] = []
+    for tag in ("wg-tools", WATCHDOG, EXIT_WATCHDOG):
+        matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
+    ifcs = [ctx.cfg.WG_IF, ctx.cfg.WARP_IF]
+    for e in ctx.snap.exits:
+        ifcs += [f"px-{e.code}", f"wx-{e.code}"]
+    for ifc in ifcs:
+        matches += [f"_SYSTEMD_UNIT=wg-quick@{ifc}.service", "+", f"UNIT=wg-quick@{ifc}.service", "+"]
+    cmd = ["journalctl", "--no-pager", "-o", "short-iso", "-n", count] + (["-f"] if ctx.args.follow else []) + matches[:-1]
+    os.execvp(cmd[0], cmd)
+
+
+def _commands():
+    from . import checks, clients, exits
+    return {
+        "debug": cmd_debug,
+        "status": checks.cmd_status,
+        "test": checks.cmd_test,
+        "log": cmd_log,
+        "client": clients.cmd_client,
+        "exit": exits.cmd_exit,
+    }
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -182,7 +208,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             sys.stdout.write(USAGE)
             return 0 if args.help else 1
         cmd, rest = args.words[0], args.words[1:]
-        fn = COMMANDS.get(cmd)
+        fn = _commands().get(cmd)
         if fn is None:
             raise WgtError(f"unknown command: {cmd} (see: wgt help)")
         fn(load(args), rest)

@@ -109,3 +109,14 @@ class Paths:
 
     def unit_file(self, name: str) -> str:
         return os.path.join(self.systemd_dir, name)
+
+
+# The settings table (setup's review, status): key, label, default. A row with
+# a default is only shown when its value differs from it.
+SETTING_ROWS = (
+    ("SERVER_NAME", "name", ""), ("ENDPOINT", "endpoint", ""), ("WG_PORT", "port", ""),
+    ("WG_SUBNET", "subnet", ""), ("WG_SUBNET6", "subnet6", ""), ("WARP", "WARP", ""),
+    ("WG_DNS", "DNS", ""), ("CLIENT_ALLOWED_IPS", "allowed IPs", ""), ("WG_MTU", "MTU", ""),
+    ("WARP_MTU", "WARP MTU", "1280"), ("WG_IF", "interface", "wg0"), ("WARP_IF", "WARP interface", "warp"),
+    ("RT_TABLE", "table", "100"),
+)
