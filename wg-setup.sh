@@ -771,6 +771,15 @@ write_exit_confs() {
 
 exit_is_up() { if_exists "px-$1" && if_exists "wx-$1"; }
 
+# Give a just-started exit up to 10s for its WARP handshake.
+exit_wait_hs() {
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do
+        [ "$(wg show "wx-$1" latest-handshakes 2>/dev/null | awk '{ print $2 + 0 }')" -gt 0 ] && return 0
+        sleep 1
+    done
+}
+
 # Clients of <code> with a handshake within EXIT_IDLE (what keeps it up).
 exit_active() {
     local code="$1" name ip pub _ n=0 now
@@ -907,10 +916,7 @@ exit_add() {
     if [ "$EXIT_CHANGED" -eq 1 ] && exit_is_up "$code"; then exit_down "$code"; fi
     log "Checking exit '$code'"
     exit_up "$code"
-    for t in 1 2 3 4 5 6 7 8 9 10; do
-        [ "$(wg show "wx-$code" latest-handshakes 2>/dev/null | awk '{ print $2 + 0 }')" -gt 0 ] && break
-        sleep 1
-    done
+    exit_wait_hs "$code"
     t=$(exit_trace "$code")
     if [[ " $t " == *" warp=on "* || " $t " == *" warp=plus "* ]]; then
         info "exit '$code' works: $t"
@@ -1192,8 +1198,8 @@ run_exit_tests() {
         if ! exit_is_up "$code" && [ "$bring_up" -eq 1 ]; then
             exit_up "$code" >/dev/null
             started=1
-            sleep 3
         fi
+        if exit_is_up "$code"; then exit_wait_hs "$code"; fi
         if exit_is_up "$code"; then
             check "exit $code: Proton tunnel px-$code handshake within 3 minutes" t_exit_hs "px-$code"
             check "exit $code: WARP tunnel wx-$code handshake within 3 minutes" t_exit_hs "wx-$code"
