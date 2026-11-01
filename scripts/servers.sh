@@ -5,7 +5,7 @@
 # The list lives in local/servers (untracked): "name  ssh-target  [checkout]"
 # per line. Private files for each server stay under local/ too:
 #   local/exits/<name>/*.conf        Proton configs for its exit cities (any name)
-#   local/exits/links                server, local file, code on the server and
+#   local/exits/details.tsv          server, local file, code on the server and
 #                                    full name, tab-separated (asked at first push)
 #   local/backups/<name>/            backup archives fetched from it
 #
@@ -39,7 +39,7 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LOCAL="$ROOT/local"
 LIST="$LOCAL/servers"
-LINKS="$LOCAL/exits/links"   # server  local-file  code  full name (tab-separated)
+LINKS="$LOCAL/exits/details.tsv"   # server  local-file  code  full name (tab-separated)
 DEF_DIR=/opt/wireguard-tools
 SSH_OPTS=(-o ConnectTimeout=10 -o ServerAliveInterval=15)
 

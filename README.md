@@ -267,8 +267,11 @@ server:
 ./wg-setup.sh exit remove par      # refused while clients use it
 ```
 
-or from your machine: save it as `local/exits/<server>/par.conf` and run
-`scripts/servers.sh push-exits <server>` (it asks for the full name once).
+or from your machine: save it under `local/exits/<server>/` with any name
+(e.g. `paris.france.conf`) and run `scripts/servers.sh push-exits <server>`.
+The first push of a file asks what it is ("Paris, France") and suggests a code
+(`par-fr`: city + Proton's country tag); the answer is kept in
+`local/exits/details.tsv`.
 The code (`par`) is 2-6 of a-z0-9. `exit add` registers a separate WARP account
 for the city, wires its routing into `wg0` live (clients stay connected), and
 checks the result: `exit 'par' works: ip=104.28.x.x colo=CDG loc=FR warp=on`.
@@ -411,8 +414,9 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a city's Proton tunnel and the WARP tunnel inside it |
 | `/usr/local/sbin/wg-tools-exit-watchdog`, `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | exit watchdog (cities up on demand) |
 
-On your machine, `local/` (untracked) holds `servers`, `exits/<server>/<code>.conf`,
-`exits/labels` and `backups/<server>/`.
+On your machine, `local/` (untracked) holds `servers`, `exits/<server>/*.conf`,
+`exits/details.tsv` (which local file is which exit: server, file, code, full
+name) and `backups/<server>/`.
 
 Secrets are mode 600 in 700 directories. Before any file is changed, a
 timestamped copy goes to `/var/backups/wireguard-tools/files/<its path>` (e.g.
