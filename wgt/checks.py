@@ -298,7 +298,8 @@ CLIENT_FMT = "{:<20} {:<6} {:<15} {:<14} {:<12} {}"
 
 
 def client_rows(ctx) -> List[Tuple[str, str, str, str, str, str]]:
-    """(name, exit, address, last seen, rx/tx MiB, allowed IPs) per client."""
+    """(name, exit, address, last seen, rx/tx MiB, allowed IPs) per client, in
+    clients.db order (name is the full name, e.g. par-fr.mbp-1)."""
     hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
     tx = live.transfers(ctx.runner, ctx.cfg.WG_IF)
     now = time.time()
@@ -311,6 +312,16 @@ def client_rows(ctx) -> List[Tuple[str, str, str, str, str, str]]:
     return rows
 
 
+def device_of(name: str) -> str:
+    """The device part of a client name: par-fr.mbp-1 -> mbp-1."""
+    return name.split(".", 1)[1] if "." in name else name
+
+
+def device_order(rows):
+    """Rows grouped by device, its default exit first, then its exit cities."""
+    return sorted(rows, key=lambda r: (device_of(r[0]).lower(), "." in r[0], r[1]))
+
+
 def exit_label(ctx, name: str) -> str:
     """Where a client exits, for tables: its exit code, or warp/direct (the default)."""
     code = store.client_exit(name)
@@ -320,15 +331,16 @@ def exit_label(ctx, name: str) -> str:
 
 
 def print_clients(ctx, prefix: str = "", numbered: bool = True) -> List[str]:
-    """Print the clients table; returns the names in order."""
+    """Print the clients table, device first (the exit is its own column);
+    returns the full client names in the order shown."""
     head = ("NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
     if numbered:
         print(f"{prefix}{'#':>3} " + CLIENT_FMT.format(*head))
     else:
         print(prefix + CLIENT_FMT.format(*head))
     names = []
-    for i, row in enumerate(client_rows(ctx), 1):
+    for i, row in enumerate(device_order(client_rows(ctx)), 1):
         names.append(row[0])
-        line = CLIENT_FMT.format(*row)
+        line = CLIENT_FMT.format(device_of(row[0]), *row[1:])
         print(f"{prefix}{i:>3} {line}" if numbered else prefix + line)
     return names

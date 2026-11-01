@@ -264,8 +264,10 @@ def cmd_clients() -> None:
         rows = [line.split("\t") for line in o.splitlines() if line]
         if not rows:
             print(f"  {s.name:<10} (no clients)")
+        rows = [(r + [""] * 6)[:6] for r in rows]
+        rows.sort(key=lambda r: (r[0].split(".", 1)[-1].lower(), "." in r[0], r[1]))
         for r in rows:
-            print(fmt.format(s.name, *(r + [""] * 6)[:6]))
+            print(fmt.format(s.name, r[0].split(".", 1)[-1], *r[1:]))
     print("")
 
 

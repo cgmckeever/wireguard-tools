@@ -113,3 +113,13 @@ def test_dry_run_changes_nothing(server):
     clients.cmd_add(ctx, ["phone"])
     assert store.read_text(ctx.paths.client_db) == before
     assert not [c for c in ctx.runner.calls if c.startswith("wg set")]
+
+
+def test_list_shows_device_first(server, capsys):
+    from wgt import checks
+    ctx = server()
+    names = checks.print_clients(ctx, numbered=True)
+    shown = [line.split()[1:3] for line in capsys.readouterr().out.splitlines()[1:]]
+    # grouped by device, default exit first; the full names come back for the menu
+    assert shown == [["mbp-1", "warp"], ["mbp-1", "par-fr"], ["phone", "nyc-us"], ["tv", "par-fr"]]
+    assert names == ["mbp-1", "par-fr.mbp-1", "nyc-us.phone", "par-fr.tv"]

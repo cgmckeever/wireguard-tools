@@ -47,13 +47,14 @@ def next_free_ip(ctx, planned: List[str]) -> str:
 
 def pick_client(ctx, verb: str) -> str:
     """No name given: a numbered list of clients to pick from (needs a terminal)."""
-    clients = ctx.snap.clients
+    clients = sorted(ctx.snap.clients, key=lambda c: (checks.device_of(c.name).lower(), "." in c.name, c.exit))
     if not clients:
         raise WgtError("no clients yet (add one: wgt client add <name>)")
     if not ui.have_tty() or ctx.args.yes:
         raise WgtError(f"usage: wgt client {verb} <name>")
     try:
-        i = ui.menu("", [f"{c.name:<20} {c.ip}" for c in clients], f"{verb.capitalize()} which client?")
+        i = ui.menu("", [f"{checks.device_of(c.name):<20} {checks.exit_label(ctx, c.name):<6} {c.ip}" for c in clients],
+                    f"{verb.capitalize()} which client?")
     except ValueError as e:
         raise WgtError(f"no client number '{e}'")
     if i is None:
