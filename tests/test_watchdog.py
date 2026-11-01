@@ -116,3 +116,18 @@ def test_watchdog_error_is_logged_not_raised(make, monkeypatch):
     monkeypatch.setattr(system, "journal", lambda runner, tag, msg: logged.append((tag, msg)))
     assert cli.main(["watchdog", "exits"]) == 1
     assert ("wg-tools-exit-watchdog", "error: ValueError: bad wg output") in logged
+
+
+@pytest.mark.parametrize("active,px,wx,started,wx_hs,port_tried,want", [
+    (True, False, False, 0, 0, False, watchdog.UP),              # a client connects: bring it up
+    (True, True, False, 0, 0, False, watchdog.UP),               # half up: bring it up properly
+    (True, True, True, NOW - 5, 0, False, None),                 # just started: give WARP time
+    (True, True, True, NOW - 999, NOW - 5, False, None),         # healthy
+    (True, True, True, NOW - 999, NOW - 999, False, watchdog.NEW_PORT),   # WARP silent: new port first
+    (True, True, True, NOW - 999, NOW - 999, True, watchdog.RESTART),     # still silent after that: restart
+    (False, True, True, NOW - 999, NOW - 5, False, watchdog.DOWN),        # idle: take it down
+    (False, False, True, 0, 0, False, watchdog.DOWN),            # idle and half up: still down
+    (False, False, False, 0, 0, False, None),                    # idle and down: nothing to do
+])
+def test_decide(active, px, wx, started, wx_hs, port_tried, want):
+    assert watchdog.decide(active, px, wx, NOW, started, wx_hs, port_tried) == want

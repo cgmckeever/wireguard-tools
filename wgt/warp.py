@@ -16,7 +16,7 @@ from . import host, render, store
 from .errors import WgtError
 
 if TYPE_CHECKING:
-    from .cli import Ctx
+    from .ctx import Ctx
 
 
 def install_wgcf(ctx: Ctx) -> bool:

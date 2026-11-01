@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
 
 from .const import EXIT_MAX
 from .errors import WgtError
@@ -81,8 +81,11 @@ def saved_settings(text: Optional[str], keys: Iterable[str]) -> Dict[str, str]:
 
 # --- names ---
 
+EXIT_CODE_RULE = "2-6 of a-z0-9 and -, starting with a letter, not ending in -, not 'warp' (e.g. par-fr)"
+
+
 def valid_exit_code(code: str) -> bool:
-    """2-6 of a-z0-9 and -, starting with a letter, not ending in -, not "warp"."""
+    """See EXIT_CODE_RULE (the code names interfaces px-<code>, wx-<code>)."""
     return bool(_EXIT_CODE.fullmatch(code)) and code != "warp"
 
 
@@ -110,10 +113,10 @@ def device_of(name: str) -> str:
     return name.split(".", 1)[1] if "." in name else name
 
 
-def device_order(rows: Iterable[Sequence[str]]) -> List[Sequence[str]]:
-    """Rows (name, exit code, ...) grouped by device, its default exit first,
-    then its exit cities."""
-    return sorted(rows, key=lambda r: (device_of(r[0]).lower(), "." in r[0], r[1]))
+def device_key(name: str) -> Tuple[str, bool, str]:
+    """Sort key grouping clients by device: its default exit first, then its
+    exit cities by code."""
+    return device_of(name).lower(), "." in name, client_exit(name)
 
 
 @dataclass
@@ -131,7 +134,11 @@ class Client:
         return client_exit(self.name)
 
     def line(self) -> str:
-        return self.raw or " ".join(x for x in (self.name, self.ip, self.pub, self.allowed) if x)
+        """The clients.db line: as read, or built from the fields."""
+        return self.raw or self.fields_line()
+
+    def fields_line(self) -> str:
+        return " ".join(x for x in (self.name, self.ip, self.pub, self.allowed) if x)
 
 
 def parse_clients(text: Optional[str]) -> List[Client]:
@@ -145,13 +152,18 @@ def parse_clients(text: Optional[str]) -> List[Client]:
     return out
 
 
+def format_clients(lines: Iterable[str]) -> str:
+    """clients.db text: the header, then one line per client."""
+    return "\n".join([CLIENTS_HEADER, *lines]) + "\n"
+
+
 def put_client(text: Optional[str], name: str, entry: Optional[Client] = None) -> str:
     """clients.db with <name> removed (other lines kept as they are),
     optionally adding <entry> at the end."""
-    lines = [CLIENTS_HEADER] + [c.line() for c in parse_clients(text) if c.name != name]
+    lines = [c.line() for c in parse_clients(text) if c.name != name]
     if entry is not None:
-        lines.append(" ".join(x for x in (entry.name, entry.ip, entry.pub, entry.allowed) if x))
-    return "\n".join(lines) + "\n"
+        lines.append(entry.fields_line())
+    return format_clients(lines)
 
 
 def parse_disabled(text: Optional[str]) -> List[str]:
@@ -179,7 +191,23 @@ class Exit:
     raw: str = field(default="", compare=False, repr=False)
 
     def line(self) -> str:
+        """The exits.db line: as read, or built from the fields."""
         return self.raw or f"{self.code} {self.idx} {self.label}"
+
+    @property
+    def px(self) -> str:
+        """Its Proton tunnel's interface."""
+        return f"px-{self.code}"
+
+    @property
+    def wx(self) -> str:
+        """Its WARP tunnel's interface (inside the Proton one)."""
+        return f"wx-{self.code}"
+
+    @property
+    def units(self) -> List[str]:
+        """Its wg-quick units, in start order (Proton first)."""
+        return [f"wg-quick@{self.px}", f"wg-quick@{self.wx}"]
 
 
 def parse_exits(text: Optional[str]) -> List[Exit]:

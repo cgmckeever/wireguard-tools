@@ -39,7 +39,11 @@ EXIT_WATCHDOG = "wg-tools-exit-watchdog"
 EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a city
 WATCHDOG_STALE = 180         # seconds without a WARP handshake before it acts
 
+MIB = 1024 * 1024
 KEEP_CHANGES = 5             # newest copies kept per file (plus its original)
+# What setup records about this host (wg-tools.state): restore drops them
+# (they belong to the old server) and rollback uses them.
+HOST_STATE_KEYS = ("DEFAULT_ROUTE", "PUB_IF", "ORIG_IP_FORWARD", "ORIG_IP6_FORWARD", "ORIG_ACCEPT_RA", "UFW")
 KEEP_ARCHIVES = 10           # newest `backup` archives kept
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
@@ -150,6 +154,11 @@ class Paths:
     def warp_marker(self) -> str:
         """The WARP watchdog's note of an unhealthy run (it acts on the second)."""
         return os.path.join(self.run_dir, WATCHDOG)
+
+    def exit_port_marker(self, code: str) -> str:
+        """Present once the exit watchdog has tried a new WARP port for <code>:
+        if it still doesn't handshake, the next step is a restart."""
+        return self.exit_marker(code) + ".port"
 
     def exit_hold(self, code: str) -> str:
         """While it exists, the exit watchdog leaves <code> up (exit test)."""

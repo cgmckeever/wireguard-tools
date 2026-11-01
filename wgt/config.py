@@ -55,10 +55,17 @@ class Config:
     p6: str = ""
 
     def __getattr__(self, name: str) -> str:
+        """Each setting reads as an attribute: cfg.WG_IF is values["WG_IF"].
+        The keys are CONFIG_KEYS and DEFAULTS in const.py (plus ENDPOINT)."""
         values = self.__dict__.get("values", {})
         if name in values:
             return values[name]
         raise AttributeError(name)
+
+    @property
+    def warp_on(self) -> bool:
+        """Clients' default exit is WARP (WARP=on), not the public interface."""
+        return self.values.get("WARP") == "on"
 
     @property
     def warp_conf(self) -> str:
@@ -111,8 +118,7 @@ class Config:
         if not _in_range(pfx, 16, 30):
             raise WgtError(f"subnet prefix must be /16 to /30: {subnet}")
         self.pfx = int(pfx)
-        mask = (0xFFFFFFFF << (32 - self.pfx)) & 0xFFFFFFFF
-        self.net_int = net.ip2int(base) & mask
+        self.net_int = net.network_int(f"{base}/{self.pfx}")
         if net.int2ip(self.net_int) != base:
             raise WgtError(f"{subnet} is not a network address "
                            f"(did you mean {net.int2ip(self.net_int)}/{self.pfx}?)")

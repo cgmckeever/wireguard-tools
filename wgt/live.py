@@ -111,8 +111,10 @@ def is_warp_trace(text: str) -> bool:
 
 
 def ipt_count(r: Runner, cmd: str, tbl: str, chain: str, rule: str) -> int:
-    """How many copies of a firewall rule there are (via -S, which prints
-    "-p tcp -m tcp" for "-p tcp")."""
+    """How many copies of a firewall rule there are, read back with -S. -S adds
+    the implied match module, so the rule "-p tcp --tcp-flags SYN,RST SYN ..."
+    must also match the line "-A FORWARD -p tcp -m tcp --tcp-flags SYN,RST SYN ...":
+    each "-p tcp " in the pattern becomes "-p tcp (-m tcp )?", the rest is literal."""
     pat = ""
     for part in re.split(r"(-p (?:tcp|udp) )", f"-A {chain} {rule}"):
         m = re.fullmatch(r"-p (tcp|udp) ", part)

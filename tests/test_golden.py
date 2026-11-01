@@ -29,7 +29,7 @@ def test_warp_conf(server):
 
 def test_hooks(server):
     for direction in ("up", "down"):
-        got = lines(rules.hook_cmds(server.cfg, server.snap, server.pub_if, direction))
+        got = lines(rules.hook_cmds(server.cfg, server.snap, server.pub_if, up=direction == "up"))
         assert server.norm(got) == golden(server.case, f"hooks-{direction}.txt")
 
 
@@ -56,7 +56,7 @@ def test_exits(server):
                                      table=rules.exit_wtable(e), mark=rules.exit_mark(e))
         assert wx == golden(server.case, f"wx-{e.code}.conf")
         for direction in ("up", "down"):
-            got = lines(rules.exit_hook_cmds(server.cfg, server.snap, e, direction))
+            got = lines(rules.exit_hook_cmds(server.cfg, server.snap, e, up=direction == "up"))
             assert got == golden(server.case, f"exit-{e.code}-{direction}.txt")
         got = lines("|".join(r) for r in rules.ipt_rules_out(server.cfg, f"wx-{e.code}"))
         assert got == golden(server.case, f"exit-{e.code}-ipt.txt")

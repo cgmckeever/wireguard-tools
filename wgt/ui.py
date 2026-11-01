@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import time
-from typing import List, Optional, Sequence
+from typing import List, NamedTuple, Optional, Sequence
+
+from .store import device_of
 
 
 def ago(ts: int, now: Optional[float] = None) -> str:
@@ -65,3 +67,33 @@ def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[i
     n = pick_number(f"  {prompt} [1-{len(items)}, Enter exits]: ", len(items))
     return None if n is None else n - 1
 
+
+
+# --- the clients table (wgt client list, wgt-ctl clients) ---
+
+CLIENT_FMT = "{:<20} {:<16} {:<15} {:<14} {:<12} {}"
+CLIENT_HEAD = ("NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
+
+
+class ClientRow(NamedTuple):
+    """One client in the table; `wgt client list --tsv` prints these fields in
+    order (exit_label came last, so older servers send six)."""
+
+    name: str          # full name, e.g. par-fr.mbp-1
+    exit: str          # exit code, or warp/direct
+    ip: str
+    seen: str          # "3m ago", "never", "disabled"
+    traffic: str       # "rx/tx" MiB
+    allowed: str       # "0.0.0.0/0, ::/0"
+    exit_label: str = ""   # the exit city's full name ("Paris, France")
+
+    def tsv(self) -> str:
+        return "\t".join(self)
+
+    @classmethod
+    def from_tsv(cls, line: str) -> ClientRow:
+        return cls(*(line.split("\t") + [""] * 7)[:7])
+
+    def cells(self) -> Sequence[str]:
+        """The table's columns: the device, then where it exits (its full name)."""
+        return (device_of(self.name), self.exit_label or self.exit, self.ip, self.seen, self.traffic, self.allowed)

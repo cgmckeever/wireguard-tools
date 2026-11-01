@@ -189,3 +189,20 @@ def test_rename_dry_run_shows_one_peer(make_ctx):
     clients.cmd_rename(ctx, ["mbp-1", "zznew"])
     names = [c.name for c in ctx.snap.clients]
     assert "zznew" in names and "mbp-1" not in names
+
+
+def test_extra_words_are_refused(make_ctx):
+    """`wgt client remove a b` must not quietly remove only a."""
+    ctx = make_ctx()
+    with pytest.raises(WgtError, match="unexpected: tv"):
+        clients.cmd_remove(ctx, ["nyc-us.phone", "tv"])
+    assert ctx.snap.client("nyc-us.phone")
+
+
+def test_unknown_verb_lists_the_verbs(make_ctx):
+    from wgt import exits
+    ctx = make_ctx()
+    with pytest.raises(WgtError, match=r"unknown client command: nope \(list, add, show"):
+        clients.cmd_client(ctx, ["nope"])
+    with pytest.raises(WgtError, match=r"unknown exit command: nope \(list, add, remove, test;"):
+        exits.cmd_exit(ctx, ["nope"])

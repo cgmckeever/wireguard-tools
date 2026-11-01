@@ -7,14 +7,21 @@ import random
 import re
 from typing import Optional
 
+from .errors import WgtError
+
 
 def ip2int(ip: str) -> int:
-    from .errors import WgtError
     m = re.fullmatch(r"([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})", ip)
     if not m or any(int(x) > 255 for x in m.groups()):
         raise WgtError(f"not an IPv4 address: '{ip}'")
     a, b, c, d = (int(x) for x in m.groups())
     return (a << 24) | (b << 16) | (c << 8) | d
+
+
+def network_int(cidr: str) -> int:
+    """A subnet's network address as an integer: 10.8.0.0/24 -> 10.8.0.0's."""
+    base, pfx = cidr.split("/")
+    return ip2int(base) & ((0xFFFFFFFF << (32 - int(pfx))) & 0xFFFFFFFF)
 
 
 def int2ip(n: int) -> str:

@@ -58,8 +58,8 @@ def render_wg_conf(cfg: Config, snap: Snapshot, pub_if: str, psk: Callable[[str]
         f"MTU = {cfg.WG_MTU}",
         f"PostUp = wg set %i private-key {p.server_key}",
     ]
-    out += [f"PostUp = {line}" for line in rules.hook_cmds(cfg, snap, pub_if, "up")]
-    out += [f"PostDown = {line}" for line in rules.hook_cmds(cfg, snap, pub_if, "down")]
+    out += [f"PostUp = {line}" for line in rules.hook_cmds(cfg, snap, pub_if, up=True)]
+    out += [f"PostDown = {line}" for line in rules.hook_cmds(cfg, snap, pub_if, up=False)]
     text = "\n".join(out) + "\n"
     for c in snap.clients:
         if snap.is_disabled(c.name):

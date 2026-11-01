@@ -6,28 +6,12 @@ from __future__ import annotations
 
 import os
 import sys
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, List, Optional
 
 from . import host, render, rules, store
-from .config import Config, resolve
-from .const import CONFIG_KEYS, Paths
+from .ctx import Args, Ctx, load, parse
 from .errors import WgtError
-from .system import Files, Out, Runner
-
-# Flags that set a setting, and the setting they set.
-VALUE_FLAGS = {
-    "--name": "SERVER_NAME", "--subnet": "WG_SUBNET", "--subnet6": "WG_SUBNET6", "--port": "WG_PORT",
-    "--mtu": "WG_MTU", "--warp-mtu": "WARP_MTU", "--dns": "WG_DNS", "--endpoint": "ENDPOINT",
-    "--wg-if": "WG_IF", "--warp-if": "WARP_IF", "--table": "RT_TABLE", "--allowed-ips": "CLIENT_ALLOWED_IPS",
-    # Not settings, but they take a value:
-    "--exit": "EXIT_CODES", "--label": "EXIT_LABEL",
-}
-BOOL_FLAGS = {
-    "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--new-server-keys": "new_server_keys",
-    "--purge": "purge",
-    "--follow": "follow", "-f": "follow", "--no-follow": "no_follow", "--tsv": "tsv",
-}
+from .system import Out, Runner
 
 USAGE = """\
 Usage: wgt [options] <command> ...
@@ -54,109 +38,6 @@ Settings (saved by setup): --name --subnet --subnet6 --port --mtu --warp-mtu --d
 """
 
 
-@dataclass
-class Args:
-    """The command line: the words, plus every flag's value."""
-
-    words: List[str] = field(default_factory=list)
-    settings: Dict[str, str] = field(default_factory=dict)
-    exit_codes: str = ""
-    exit_label: str = ""
-    dry_run: bool = False
-    yes: bool = False
-    force: bool = False
-    new_server_keys: bool = False
-    purge: bool = False
-    follow: bool = False
-    no_follow: bool = False
-    tsv: bool = False
-    qr: int = 0     # 1 = --qr, -1 = --no-qr, 0 = decide (on if a terminal)
-    help: bool = False
-
-
-def parse(argv: List[str]) -> Args:
-    """Split argv into words and flags; flags may come anywhere."""
-    a = Args()
-    i = 0
-    while i < len(argv):
-        w = argv[i]
-        if w in ("-h", "--help", "help") and not a.words:
-            a.help = True
-        elif w in BOOL_FLAGS:
-            setattr(a, BOOL_FLAGS[w], True)
-        elif w == "--qr":
-            a.qr = 1
-        elif w == "--no-qr":
-            a.qr = -1
-        elif w.startswith("--") and "=" in w and w.split("=", 1)[0] in VALUE_FLAGS:
-            _set(a, w.split("=", 1)[0], w.split("=", 1)[1])
-        elif w in VALUE_FLAGS:
-            if i + 1 >= len(argv):
-                raise WgtError(f"{w} needs a value")
-            _set(a, w, argv[i + 1])
-            i += 1
-        elif w.startswith("-") and w != "-":
-            raise WgtError(f"unknown option: {w} (see: wgt help)")
-        else:
-            a.words.append(w)
-        i += 1
-    return a
-
-
-def _set(a: Args, flag: str, value: str) -> None:
-    """Store a value flag: --exit/--label on Args, the rest as settings."""
-    key = VALUE_FLAGS[flag]
-    if key == "EXIT_CODES":
-        a.exit_codes = value
-    elif key == "EXIT_LABEL":
-        a.exit_label = value
-    else:
-        a.settings[key] = value
-
-
-@dataclass
-class Ctx:
-    """Everything a command works with."""
-
-    args: Args
-    paths: Paths
-    runner: Runner
-    files: Files
-    facts: host.Facts
-    cfg: Config
-    snap: store.Snapshot
-    lock_fd: Optional[int] = None
-
-    @property
-    def out(self) -> Out:
-        return self.runner.out
-
-    @property
-    def pub_if(self) -> str:
-        return host.pub_if(self.snap.state, self.facts)
-
-    def reload(self) -> None:
-        """Re-read the server's files (after a write; a dry run's would-be
-        writes included)."""
-        self.snap = store.load(self.paths, self.files.read)
-
-
-def load(args: Args, paths: Optional[Paths] = None, runner: Optional[Runner] = None,
-         env: Optional[Dict[str, str]] = None, facts: Optional[host.Facts] = None) -> Ctx:
-    """Build the Ctx: read the server's files, gather host facts, resolve the
-    settings (flag > env > saved > default). Tests pass fakes for the rest."""
-    paths = paths or Paths()
-    runner = runner or Runner(dry_run=args.dry_run)
-    runner.dry_run = runner.dry_run or args.dry_run
-    facts = facts or host.gather(runner)
-    snap = store.load(paths)
-    saved = store.saved_settings(snap.state, list(CONFIG_KEYS) + ["ENDPOINT"])
-    cfg = resolve(args.settings, os.environ if env is None else env, saved,
-                  hostname=facts.hostname, routes=facts.routes4, paths=paths)
-    cfg.finalize(kernel_ipv6=facts.kernel_ipv6)
-    return Ctx(args, paths, runner, Files(paths, runner), facts, cfg, snap)
-
-
 # --- commands defined here (the rest live in their modules; see COMMANDS) ---
 
 def cmd_debug(ctx: Ctx, what: List[str]) -> None:
@@ -179,7 +60,8 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
             pieces.append((f"wx-{e.code}", render.render_warp_conf(
                 ctx.cfg, prof, ctx.facts.has_ipv6, host.resolve4, table=rules.exit_wtable(e), mark=rules.exit_mark(e))))
     if target in ("all", "hooks"):
-        pieces.append(("hooks-down", "".join(x + "\n" for x in rules.hook_cmds(ctx.cfg, ctx.snap, ctx.pub_if, "down"))))
+        down = rules.hook_cmds(ctx.cfg, ctx.snap, ctx.pub_if, up=False)
+        pieces.append(("hooks-down", "".join(x + "\n" for x in down)))
         ipt = rules.ipt_rules(ctx.cfg, ctx.pub_if, ctx.snap.exits)
         pieces.append(("ipt", "".join("|".join(r) + "\n" for r in ipt)))
     for name, text in pieces:
@@ -214,8 +96,8 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
 # command -> (module, function); a module is only imported when its command runs
 # (the watchdogs run every 10s and need little).
 COMMANDS = {
-    "setup": ("server", "cmd_setup"), "warp": ("server", "cmd_warp"), "backup": ("server", "cmd_backup"),
-    "restore": ("server", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
+    "setup": ("server", "cmd_setup"), "warp": ("server", "cmd_warp"), "backup": ("backup", "cmd_backup"),
+    "restore": ("backup", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
     "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
     "client": ("clients", "cmd_client"), "exit": ("exits", "cmd_exit"),
     "watchdog": ("watchdog", "cmd_watchdog"), "debug": ("cli", "cmd_debug"),

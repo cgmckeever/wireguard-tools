@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from wgt import backup
 from wgt import server as srv
 from wgt.errors import WgtError
 
@@ -35,7 +36,7 @@ def test_restore_refuses_unsafe_archives(make_ctx, tmp_path):  # noqa: F811
         a = str(tmp_path / f"a{i}.tgz")
         _tar(a, members)
         with pytest.raises(WgtError, match="unsafe entry"):
-            srv.cmd_restore(ctx, [a])
+            backup.cmd_restore(ctx, [a])
 
 
 def test_restore_needs_a_backup(make_ctx, tmp_path):  # noqa: F811
@@ -43,7 +44,7 @@ def test_restore_needs_a_backup(make_ctx, tmp_path):  # noqa: F811
     a = str(tmp_path / "x.tgz")
     _tar(a, [("etc/other", "file")])
     with pytest.raises(WgtError, match="not a wireguard-tools backup"):
-        srv.cmd_restore(ctx, [a])
+        backup.cmd_restore(ctx, [a])
 
 
 def test_comment_only_change_needs_no_restart(make_ctx):  # noqa: F811

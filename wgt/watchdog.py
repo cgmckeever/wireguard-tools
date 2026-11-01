@@ -7,18 +7,19 @@ from __future__ import annotations
 import contextlib
 import os
 import time
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
+from . import exits as exit_cities
 from . import live, ops
 from .const import EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 from .system import journal
 
 if TYPE_CHECKING:
-    from .cli import Ctx
+    from .ctx import Ctx
 
 
-def logger(ctx: Ctx, tag: str, msg: str) -> None:
+def log_event(ctx: Ctx, tag: str, msg: str) -> None:
     """Log a watchdog's action to the journal under its own tag."""
     journal(ctx.runner, tag, msg)
 
@@ -34,6 +35,7 @@ def _num(path: str) -> int:
 
 
 def _touch(path: str, value: str = "") -> None:
+    """Write a marker file in /run (directly: markers aren't backed up or dry-run)."""
     with open(path, "w") as f:
         f.write(value)
 
@@ -64,7 +66,7 @@ def warp(ctx: Ctx) -> None:
     old = live.listen_port(r, ifc)
     _rm(mark)
     if r.ok(["wg", "set", ifc, "listen-port", "0"]):
-        logger(ctx, WATCHDOG, f"{ifc}: no handshake for over {WATCHDOG_STALE}s; moved from port {old} to "
+        log_event(ctx, WATCHDOG, f"{ifc}: no handshake for over {WATCHDOG_STALE}s; moved from port {old} to "
                               f"{live.listen_port(r, ifc)}")
 
 
@@ -83,58 +85,73 @@ def exits(ctx: Ctx) -> None:
         ops.release_lock(ctx)
 
 
+# What the exit watchdog does to one city on a run.
+UP, NEW_PORT, RESTART, DOWN = "up", "new port", "restart", "down"
+
+
+def decide(active: bool, px_up: bool, wx_up: bool, now: int, started_at: int, wx_last_hs: int,
+           port_tried: bool) -> Optional[str]:
+    """The exit watchdog's rule for one city, from what it sees (None: leave it).
+
+    - In use but not fully up: bring it up.
+    - In use, up for over WATCHDOG_STALE, and its WARP silent that long: first
+      a new source port (Cloudflare sometimes drops one flow), then a restart.
+    - Not in use but (partly) up: take it down."""
+    if active:
+        if not (px_up and wx_up):
+            return UP
+        if now - started_at > WATCHDOG_STALE and now - wx_last_hs > WATCHDOG_STALE:
+            return RESTART if port_tried else NEW_PORT
+        return None
+    return DOWN if px_up or wx_up else None
+
+
+def _held(ctx: Ctx, code: str, now: int) -> bool:
+    """`wgt exit add/test` is checking <code> (its hold file is under EXIT_HOLD old)."""
+    try:
+        return now - int(os.stat(ctx.paths.exit_hold(code)).st_mtime) < EXIT_HOLD
+    except OSError:
+        return False
+
+
 def _exits(ctx: Ctx) -> None:
-    """One pass over the exit cities: up when a client is active, down after
-    EXIT_IDLE with none, restarted when its tunnels stop handshaking."""
+    """One pass over the exit cities. Uses r.ok, not run: a timer job must get
+    through every city whatever fails, and logs what it did instead."""
     r = ctx.runner
     now = int(time.time())
     hs = live.handshakes(r, ctx.cfg.WG_IF)
-
-    def has(ifc: str) -> bool:
-        return live.if_exists(r, ifc)
-
     for e in ctx.snap.exits:
-        code = e.code
-        try:
-            if now - int(os.stat(ctx.paths.exit_hold(code)).st_mtime) < EXIT_HOLD:
-                continue
-        except OSError:
-            pass
-        active = any(hs.get(c.pub, 0) > 0 and now - hs[c.pub] <= EXIT_IDLE
-                     for c in ctx.snap.exit_clients(code) if not ctx.snap.is_disabled(c.name))
-        started = ctx.paths.exit_marker(code)
-        units: List[str] = [f"wg-quick@px-{code}", f"wg-quick@wx-{code}"]
-        if active:
-            if not (has(f"px-{code}") and has(f"wx-{code}")):
-                # restart, not start: a unit can be "active" with its link gone.
-                if r.ok(["systemctl", "restart"] + units):
-                    _touch(started, str(now))
-                    logger(ctx, EXIT_WATCHDOG, f"exit {code}: a client is active; brought up")
-                else:
-                    logger(ctx, EXIT_WATCHDOG, f"exit {code}: a client is active, but bringing it up failed")
-            elif now - _num(started) > WATCHDOG_STALE and now - live.newest_hs(r, f"wx-{code}") > WATCHDOG_STALE:
-                if os.path.exists(started + ".port"):
-                    _rm(started + ".port")
-                    if r.ok(["systemctl", "restart"] + units):
-                        _touch(started, str(now))
-                        logger(ctx, EXIT_WATCHDOG, f"exit {code}: no WARP handshake for over {WATCHDOG_STALE}s "
-                                                   "after a new port; restarted")
-                elif r.ok(["wg", "set", f"wx-{code}", "listen-port", "0"]):
-                    _touch(started, str(now))
-                    _touch(started + ".port")
-                    logger(ctx, EXIT_WATCHDOG, f"exit {code}: no WARP handshake for over {WATCHDOG_STALE}s; "
-                                               "new source port")
-        elif has(f"px-{code}") or has(f"wx-{code}"):
-            r.ok(["systemctl", "stop"] + list(reversed(units)))
-            for ifc in (f"wx-{code}", f"px-{code}"):
-                if has(ifc):
-                    r.ok(["ip", "link", "del", "dev", ifc])
-            _rm(started, started + ".port")
-            if has(f"px-{code}") or has(f"wx-{code}"):
-                logger(ctx, EXIT_WATCHDOG, f"exit {code}: no client handshake in the last {EXIT_IDLE}s, "
-                                           "but taking it down failed")
+        if _held(ctx, e.code, now):
+            continue
+        active = bool(exit_cities.active_clients(ctx.snap, e.code, hs, now))
+        px_up, wx_up = live.if_exists(r, e.px), live.if_exists(r, e.wx)
+        started, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
+        wx_last_hs = live.newest_hs(r, e.wx) if active and px_up and wx_up else 0
+        action = decide(active, px_up, wx_up, now, _num(started), wx_last_hs, os.path.exists(port_marker))
+        stale = f"no WARP handshake for over {WATCHDOG_STALE}s"
+        if action == UP:
+            # restart, not start: a unit can be "active" with its link gone.
+            if r.ok(["systemctl", "restart", *e.units]):
+                _touch(started, str(now))
+                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: a client is active; brought up")
             else:
-                logger(ctx, EXIT_WATCHDOG, f"exit {code}: no client handshake in the last {EXIT_IDLE}s; taken down")
+                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: a client is active, but bringing it up failed")
+        elif action == NEW_PORT:
+            if r.ok(["wg", "set", e.wx, "listen-port", "0"]):
+                _touch(started, str(now))
+                _touch(port_marker)
+                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {stale}; new source port")
+        elif action == RESTART:
+            _rm(port_marker)
+            if r.ok(["systemctl", "restart", *e.units]):
+                _touch(started, str(now))
+                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {stale} after a new port; restarted")
+        elif action == DOWN:
+            idle = f"no client handshake in the last {EXIT_IDLE}s"
+            if exit_cities.down(ctx, e, check=False):
+                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {idle}; taken down")
+            else:
+                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {idle}, but taking it down failed")
 
 
 def cmd_watchdog(ctx: Ctx, words: List[str]) -> None:

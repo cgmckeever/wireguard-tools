@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+import shutil
 from typing import TYPE_CHECKING, List, Optional
 
 from . import live, render, store
 from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE, Paths
 
 if TYPE_CHECKING:
-    from .cli import Ctx
+    from .ctx import Ctx
 
 
 def checkout_wgt() -> str:
@@ -84,6 +85,18 @@ def open_firewall(ctx: Ctx, outs: List[str]) -> None:
     for o in outs:
         ctx.runner.run(["ufw", "route", "allow", "in", "on", wg, "out", "on", o, "comment", "wireguard-tools"])
     if store.state_get(ctx.snap.state, "UFW") != "1":
-        from .ops import state_set
+        from .ops import state_set  # ops imports units' module-level helpers
         state_set(ctx, "UFW", "1")
+
+
+def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:
+    """Remove the ufw rules open_firewall added: routing wg0 -> each of <outs>,
+    and with <port> the WireGuard port too. Only if setup recorded opening
+    them (state UFW=1); a rule already gone is fine."""
+    if store.state_get(ctx.snap.state, "UFW") != "1" or not shutil.which("ufw"):
+        return
+    if port:
+        ctx.runner.run(["ufw", "delete", "allow", f"{ctx.cfg.WG_PORT}/udp"], check=False)
+    for o in outs:
+        ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", o], check=False)
 

@@ -3,15 +3,16 @@ the settings table setup's review also shows."""
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional
 
-from . import clients, exits, host, live, results, rules, store, ui
+from . import clients, exits, host, live, ops, results, rules, store, ui
 from .const import RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
 from .ops import require_setup
 
 if TYPE_CHECKING:
-    from .cli import Ctx
+    from .ctx import Ctx
 
 # --- settings table ---
 
@@ -104,8 +105,8 @@ class Tests:
 
     def __init__(self, ctx: Ctx, res: Optional[results.Results] = None):
         self.ctx = ctx
-        self.r = ctx.runner
-        self.c = ctx.cfg
+        self.runner = ctx.runner
+        self.cfg = ctx.cfg
         self.res = res or results.Results(out=ctx.out.line)
         self.scope = "all"
 
@@ -113,27 +114,27 @@ class Tests:
         """A WARP check: only a warning while WARP is switched off."""
         if ok:
             self.res.result("PASS", desc)
-        elif self.c.WARP == "on" or self.scope == "warp":
+        elif self.cfg.warp_on or self.scope == "warp":
             self.res.result("FAIL", desc)
         else:
             self.res.result("WARN", f"{desc} (WARP is off)")
 
     def warp_on(self) -> bool:
-        return live.trace_field(live.trace(self.r, "--interface", self.c.WARP_IF), "warp") in ("on", "plus")
+        return live.trace_field(live.trace(self.runner, "--interface", self.cfg.WARP_IF), "warp") in ("on", "plus")
 
     def warp6_on(self) -> bool:
         """warp has no IPv6 route in the main table (Table = off), so route WARP's
         own address through RT_TABLE for the length of the check."""
-        src = live.ipv6_global_addr(self.r, self.c.WARP_IF)
+        src = live.ipv6_global_addr(self.runner, self.cfg.WARP_IF)
         if not src:
             return False
-        rule = ["from", src, "lookup", self.c.RT_TABLE, "priority", str(RULE_PRIO - 1)]
-        self.r.ok(["ip", "-6", "rule", "add"] + rule)
+        rule = ["from", src, "lookup", self.cfg.RT_TABLE, "priority", str(RULE_PRIO - 1)]
+        self.runner.ok(["ip", "-6", "rule", "add"] + rule)
         try:
-            out = self.r.query(["curl", "-6", "-fsS", "--max-time", "10", "--interface", src,
+            out = self.runner.query(["curl", "-6", "-fsS", "--max-time", "10", "--interface", src,
                                 "https://[2606:4700:4700::1111]/cdn-cgi/trace"])
         finally:
-            self.r.ok(["ip", "-6", "rule", "del"] + rule)
+            self.runner.ok(["ip", "-6", "rule", "del"] + rule)
         return live.is_warp_trace(out)
 
     def default_route_kept(self) -> bool:
@@ -141,27 +142,26 @@ class Tests:
         return bool(rec) and host.route_key(self.ctx.facts.default_route) == host.route_key(rec)
 
     def ip_rule(self, family: str) -> bool:
-        want = 1 if self.c.WARP == "on" else 0
-        needle = f"from {self.c.family_net(family)} lookup {self.c.RT_TABLE}"
-        return sum(1 for line in live.rules(self.r, family).splitlines() if needle in line) == want
+        want = 1 if self.cfg.warp_on else 0
+        needle = f"from {self.cfg.family_net(family)} lookup {self.cfg.RT_TABLE}"
+        return sum(1 for line in live.rules(self.runner, family).splitlines() if needle in line) == want
 
     def table(self, family: str) -> bool:
-        import re
-        t = live.table(self.r, family, self.c.RT_TABLE)
-        net = re.escape(self.c.family_net(family))
-        return bool(re.search(rf"^default dev {re.escape(self.c.WARP_IF)}( |$)", t, re.M)
+        t = live.table(self.runner, family, self.cfg.RT_TABLE)
+        net = re.escape(self.cfg.family_net(family))
+        return bool(re.search(rf"^default dev {re.escape(self.cfg.WARP_IF)}( |$)", t, re.M)
                     and re.search(r"^blackhole default( |$)", t, re.M)
-                    and re.search(rf"^{net} dev {re.escape(self.c.WG_IF)}( |$)", t, re.M))
+                    and re.search(rf"^{net} dev {re.escape(self.cfg.WG_IF)}( |$)", t, re.M))
 
     def ordering(self) -> bool:
-        unit = f"wg-quick@{self.c.WG_IF}"
-        want = f" wg-quick@{self.c.WARP_IF}.service "
-        return (want in f" {live.unit_prop(self.r, unit, 'After')} "
-                and want in f" {live.unit_prop(self.r, unit, 'Wants')} ")
+        unit = f"wg-quick@{self.cfg.WG_IF}"
+        want = f" wg-quick@{self.cfg.WARP_IF}.service "
+        return (want in f" {live.unit_prop(self.runner, unit, 'After')} "
+                and want in f" {live.unit_prop(self.runner, unit, 'Wants')} ")
 
     def run(self, scope: str = "all") -> results.Results:
         """Run the checks ("warp": only those `wgt warp on` needs)."""
-        r, c, res = self.r, self.c, self.res
+        r, c, res = self.runner, self.cfg, self.res
         self.scope = scope
         self.check_warp(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_on())
         if c.ipv6:
@@ -183,7 +183,7 @@ class Tests:
             res.check("net.ipv6.conf.all.forwarding = 1", live.sysctl(r, "net.ipv6.conf.all.forwarding") == "1")
         for f in c.families():
             net = c.family_net(f)
-            if c.WARP == "on":
+            if c.warp_on:
                 res.check(f"{f} rule: from {net} lookup {c.RT_TABLE} (exactly once; WARP on)", self.ip_rule(f))
             else:
                 res.check(f"{f} rule: none from {net} (WARP off)", self.ip_rule(f))
@@ -225,7 +225,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
         ctx.out.line(line)
     if rep.pending:
         out.warn(f"{rep.pending} saved setting(s) pending (not running yet); apply with: wgt setup")
-    out.log(f"WARP {c.WARP} (client traffic leaves via {c.WARP_IF if c.WARP == 'on' else ctx.pub_if})")
+    out.log(f"WARP {c.WARP} (client traffic leaves via {ops.default_out_if(ctx)})")
     out.log("Interfaces")
     for ifc in (c.WARP_IF, c.WG_IF):
         active, enabled = live.unit_state(r, f"wg-quick@{ifc}")
