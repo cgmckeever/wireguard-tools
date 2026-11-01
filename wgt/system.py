@@ -238,6 +238,17 @@ class Files:
             if kept > KEEP_CHANGES:
                 os.remove(b)
 
+    def remove(self, *paths: str) -> None:
+        """Delete files (missing ones are fine); a dry run only says so."""
+        targets = [p for p in paths if os.path.lexists(p)]
+        if not targets:
+            return
+        if self.runner.dry_run:
+            self.out.info("[dry-run] rm -f " + " ".join(targets))
+            return
+        for p in targets:
+            os.remove(p)
+
     def forget(self, path: str) -> None:
         """Delete a file these tools created, its change copies and its backup
         record (the copies may hold keys; rollback has nothing to restore)."""
@@ -246,7 +257,7 @@ class Files:
         if os.path.isdir(d):
             base = os.path.basename(path)
             targets += [os.path.join(d, n) for n in os.listdir(d) if n.startswith(base + ".") and n.endswith(".bak")]
-        self.runner.run(["rm", "-f"] + targets)
+        self.remove(*targets)
         if not self.runner.dry_run:
             rec = store.read_text(self.paths.backup_map)
             if rec is not None:
@@ -259,12 +270,15 @@ class Files:
             return
         if orig == "NEW":
             if remove_new:
-                self.runner.run(["rm", "-f", path])
+                self.remove(path)
             elif os.path.exists(path):
                 self.out.info(f"kept {path} (created by wireguard-tools; --purge deletes it)")
         elif os.path.exists(orig):
-            self.runner.run(["cp", "-a", orig, path])
-            self.out.info(f"restored {path} from {orig}")
+            if self.runner.dry_run:
+                self.out.info(f"[dry-run] would restore {path} from {orig}")
+            else:
+                shutil.copy2(orig, path)
+                self.out.info(f"restored {path} from {orig}")
         else:
             self.out.warn(f"original backup {orig} is missing; left {path} as is")
 

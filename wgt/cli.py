@@ -132,6 +132,7 @@ def load(args: Args, paths: Optional[Paths] = None, runner: Optional[Runner] = N
          env: Optional[Dict[str, str]] = None, facts: Optional[host.Facts] = None) -> Ctx:
     paths = paths or Paths()
     runner = runner or Runner(dry_run=args.dry_run)
+    runner.dry_run = runner.dry_run or args.dry_run
     facts = facts or host.gather(runner)
     snap = store.load(paths)
     saved = store.saved_settings(snap.state, list(CONFIG_KEYS) + ["ENDPOINT"])

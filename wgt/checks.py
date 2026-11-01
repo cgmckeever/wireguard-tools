@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
 from . import exits, host, live, rules, store, ui
+from .ops import require_setup
 from .const import EXIT_WATCHDOG, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 
@@ -233,12 +234,6 @@ def cmd_test(ctx, words: List[str]) -> None:
     require_setup(ctx)
     ctx.out.log(f"Tests (WARP {ctx.cfg.WARP})")
     report(ctx, Tests(ctx).run("all"))
-
-
-def require_setup(ctx) -> None:
-    """The server must be set up; after rollback no WARP setting is saved."""
-    if not ctx.cfg.saved.get("WARP"):
-        raise WgtError("not set up; run 'wgt setup'")
 
 
 # --- status ---

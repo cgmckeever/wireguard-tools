@@ -52,7 +52,7 @@ def print_list(ctx) -> None:
 
 
 def cmd_exit(ctx, words: List[str]) -> None:
-    from .checks import require_setup
+    from .ops import require_setup
     require_setup(ctx)
     sub = words[0] if words else "list"
     if sub == "list":
