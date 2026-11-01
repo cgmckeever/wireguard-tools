@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import os
 import socket
+import subprocess
 from dataclasses import dataclass
 from typing import Optional
 
 from . import store
+from .errors import WgtError
 from .system import Runner
 
 
@@ -48,7 +50,9 @@ def route_key(route: str) -> str:
 
 
 def route_dev(route: str) -> str:
-    return route_key(route).split()[3] if len(route_key(route).split()) > 3 else ""
+    """The interface of a route line (also for one without "via", e.g. "default dev venet0")."""
+    f = route.split()
+    return next((f[i + 1] for i in range(len(f) - 1) if f[i] == "dev"), "")
 
 
 def pub_if(state_text: Optional[str], facts: Facts) -> str:
@@ -60,6 +64,31 @@ def resolve4(host: str) -> Optional[str]:
     """First IPv4 address of <host> (None if it doesn't resolve)."""
     try:
         infos = socket.getaddrinfo(host, None, socket.AF_INET)
-    except OSError:
+    except (OSError, UnicodeError):
         return None
     return infos[0][4][0] if infos else None
+
+
+def preflight() -> None:
+    """Root, OS and architecture checks; refuse anything unsupported."""
+    if os.geteuid() != 0:
+        raise WgtError("must run as root")
+    try:
+        with open("/etc/os-release") as f:
+            info = dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line)
+    except OSError:
+        raise WgtError("cannot read /etc/os-release; unsupported OS")
+    osid = info.get("ID", "").strip('"')
+    ver = info.get("VERSION_ID", "").strip('"')
+    major = ver.split(".")[0]
+    if not major.isdigit():
+        raise WgtError(f"unsupported OS: {osid} {ver or '<no version>'} (need Debian 11+ or Ubuntu 20.04+)")
+    if osid == "debian" and int(major) < 11:
+        raise WgtError(f"unsupported Debian {ver} (need 11+)")
+    if osid == "ubuntu" and int(major) < 20:
+        raise WgtError(f"unsupported Ubuntu {ver} (need 20.04+)")
+    if osid not in ("debian", "ubuntu"):
+        raise WgtError(f"unsupported OS: {osid} {ver} (need Debian 11+ or Ubuntu 20.04+)")
+    arch = subprocess.run(["dpkg", "--print-architecture"], stdout=subprocess.PIPE, text=True).stdout.strip()
+    if arch not in ("amd64", "arm64"):
+        raise WgtError(f"unsupported architecture: {arch} (need amd64 or arm64)")

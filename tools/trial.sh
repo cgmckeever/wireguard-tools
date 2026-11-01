@@ -7,6 +7,7 @@
 # -> device on-demand and fail-closed -> backup -> purge -> restore (same keys)
 # -> warp off/on -> purge -> diff with the snapshot.
 set -uo pipefail
+[ $# -eq 1 ] || { echo "usage: $0 <proton.conf>" >&2; exit 2; }
 cd "$(dirname "$0")/.."
 proton="$1"
 W() { bin/wgt "$@"; }

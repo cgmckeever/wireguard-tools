@@ -5,6 +5,7 @@ which records commands instead of running them."""
 from __future__ import annotations
 
 import difflib
+import fnmatch
 import os
 import re
 import shutil
@@ -19,6 +20,38 @@ from .const import KEEP_CHANGES, Paths
 from .errors import WgtError
 
 _SECRET = re.compile(r"^(\s*(PrivateKey|PresharedKey)\s*=\s*).*$", re.M)
+
+
+def atomic_write(path: str, content: str, mode: int) -> None:
+    """Write <path> atomically: a private temp file in the same directory
+    (created 0600, so a secret is never readable on the way), mode set, synced,
+    then renamed over the target."""
+    os.makedirs(os.path.dirname(path) or ".", mode=0o700, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path) or ".", prefix=".wg-tools.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape", newline="") as f:
+            f.write(content)
+            f.flush()
+            os.fchmod(f.fileno(), mode)
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def is_copy_of(name: str, base: str) -> bool:
+    """True for <base>.<anything>.bak (a change copy), as the shell glob
+    "<base>.*.bak" matched; a plain <base>.bak someone made by hand is not one."""
+    return fnmatch.fnmatchcase(name, base + ".*.bak") and not fnmatch.fnmatchcase(base, "*[*?[]*")
+
+
+def is_secret(path: str, paths: Paths) -> bool:
+    """Files whose whole content is a secret (dry-run diffs must not show them)."""
+    return path.startswith(paths.psk_dir + "/") or path.endswith(".key") or path.endswith(".psk")
 
 
 def redact(text: str) -> str:
@@ -76,24 +109,31 @@ class Runner:
     # --- queries ---
 
     def query(self, args: Sequence[str], input: Optional[str] = None) -> str:
-        """A read-only command's stdout ("" if it fails or doesn't exist)."""
+        """A read-only command's stdout ("" if it fails or can't run)."""
         try:
             return self._exec(args, check=False, input=input, capture=True)[1]
-        except FileNotFoundError:
+        except OSError:
             return ""
 
     def ok(self, args: Sequence[str]) -> bool:
+        """True if a command succeeds (False if it fails or can't run)."""
         try:
             return self._exec(args, check=False, capture=True)[0] == 0
-        except FileNotFoundError:
+        except OSError:
             return False
 
     def _exec(self, args, check, input=None, capture=False):
-        p = subprocess.run(list(args), input=input, text=True,
-                           stdout=subprocess.PIPE if capture else None,
-                           stderr=subprocess.DEVNULL if capture else None)
+        try:
+            p = subprocess.run(list(args), input=input, text=True, errors="replace",
+                               stdout=subprocess.PIPE if capture else None,
+                               stderr=subprocess.PIPE if capture else None)
+        except OSError as e:
+            if not check:
+                raise
+            raise WgtError(f"cannot run {args[0]}: {e.strerror}")
         if check and p.returncode != 0:
-            raise WgtError(f"command failed (exit {p.returncode}): {' '.join(args)}")
+            why = (p.stderr or "").strip().splitlines()[-1:] if capture else []
+            raise WgtError(f"command failed (exit {p.returncode}): {' '.join(args)}" + (f": {why[0]}" if why else ""))
         return p.returncode, p.stdout or ""
 
     # --- steps ---
@@ -109,8 +149,8 @@ class Runner:
 
 
 class FakeRunner(Runner):
-    """Records commands instead of running them. `answers` maps a command (as
-    a joined string, or a prefix ending in '*') to (returncode, stdout)."""
+    """For tests: records commands instead of running them. `answers` maps a
+    command (as a joined string, or a prefix ending in '*') to (returncode, stdout)."""
 
     def __init__(self, answers: Optional[Dict[str, Tuple[int, str]]] = None, dry_run: bool = False,
                  out: Optional[Out] = None):
@@ -148,25 +188,26 @@ class Files:
         self.paths = paths
         self.runner = runner
         self.clock = clock
-        self.wrote = False
 
     @property
     def out(self) -> Out:
         return self.runner.out
 
     def change_dir(self, path: str) -> str:
-        return self.paths.change_dir + os.path.dirname(path)
+        """Where <path>'s change copies go: files/ plus its own directory."""
+        return self.paths.change_dir + os.path.dirname(os.path.abspath(path))
 
     def write(self, path: str, mode: int, content: str) -> bool:
         """Write <content> to <path> if it differs (atomically, after a backup).
         Returns True if it changed; a dry run prints a redacted diff instead."""
         old = store.read_text(path)
-        self.wrote = False
         if old == content:
             self.out.info(f"unchanged: {path}")
             return False
-        self.wrote = True
         if self.runner.dry_run:
+            if is_secret(path, self.paths):
+                self.out.info(f"[dry-run] would write {path} (mode {mode:o}; secret, not shown)")
+                return True
             self.out.info(f"[dry-run] would write {path} (mode {mode:o}):")
             diff = difflib.unified_diff(redact(old or "").splitlines(True), redact(content).splitlines(True),
                                         fromfile=path, tofile=f"{path} (new)")
@@ -174,17 +215,16 @@ class Files:
                 self.out.info("  " + line.rstrip("\n"))
             return True
         self.backup(path)
-        os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
-        tmp = path + ".wg-tools.new"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.chmod(tmp, mode)
-        os.replace(tmp, path)
+        if not os.path.isdir(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+        atomic_write(path, content, mode)
         self.out.info(f"wrote: {path}")
         return True
 
     def backup(self, path: str) -> None:
+        """Copy <path> aside before it changes (a dry run copies nothing)."""
+        if self.runner.dry_run:
+            return
         orig = "NEW"
         if os.path.exists(path):
             d = self.change_dir(path)
@@ -217,7 +257,7 @@ class Files:
         if os.path.isdir(parent):
             for name in sorted(os.listdir(parent)):
                 b = os.path.join(parent, name)
-                if not (name.startswith(base + ".") and name.endswith(".bak") and os.path.isfile(b)):
+                if not (is_copy_of(name, base) and os.path.isfile(b)):
                     continue
                 if b == orig:
                     os.makedirs(d, exist_ok=True)
@@ -229,7 +269,7 @@ class Files:
                     os.remove(b)
         if not os.path.isdir(d):
             return
-        baks = sorted(os.path.join(d, n) for n in os.listdir(d) if n.startswith(base + ".") and n.endswith(".bak"))
+        baks = sorted(os.path.join(d, n) for n in os.listdir(d) if is_copy_of(n, base))
         kept = 0
         for b in reversed(baks):   # names end in a timestamp: newest last
             if b == orig:
@@ -240,7 +280,7 @@ class Files:
 
     def remove(self, *paths: str) -> None:
         """Delete files (missing ones are fine); a dry run only says so."""
-        targets = [p for p in paths if os.path.lexists(p)]
+        targets = [p for p in paths if os.path.lexists(p) and not os.path.isdir(p)]
         if not targets:
             return
         if self.runner.dry_run:
@@ -264,7 +304,7 @@ class Files:
         targets = [path]
         if os.path.isdir(d):
             base = os.path.basename(path)
-            targets += [os.path.join(d, n) for n in os.listdir(d) if n.startswith(base + ".") and n.endswith(".bak")]
+            targets += [os.path.join(d, n) for n in os.listdir(d) if is_copy_of(n, base)]
         self.remove(*targets)
         if not self.runner.dry_run:
             rec = store.read_text(self.paths.backup_map)
@@ -291,8 +331,4 @@ class Files:
             self.out.warn(f"original backup {orig} is missing; left {path} as is")
 
     def _write_private(self, path: str, content: str) -> None:
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(content)
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        atomic_write(path, content, 0o600)

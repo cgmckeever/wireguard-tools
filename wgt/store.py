@@ -14,21 +14,28 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
+
+from .const import EXIT_MAX
+from .errors import WgtError
 
 CLIENTS_HEADER = "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
 EXITS_HEADER = "# wireguard-tools exit cities: code idx label (wg-setup.sh exit add)"
 
-_EXIT_CODE = re.compile(r"^[a-z][a-z0-9-]{0,4}[a-z0-9]$")
-_CLIENT_BASE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+_EXIT_CODE = re.compile(r"[a-z][a-z0-9-]{0,4}[a-z0-9]")
+_CLIENT_BASE = re.compile(r"[A-Za-z0-9_-]{1,32}")
 
 
 def read_text(path: str) -> Optional[str]:
+    """A file's text (None if it doesn't exist). Line endings and any non-UTF-8
+    bytes are kept as they are, so comparing and rewriting is exact."""
     try:
-        with open(path, encoding="utf-8") as f:
+        with open(path, encoding="utf-8", errors="surrogateescape", newline="") as f:
             return f.read()
     except FileNotFoundError:
         return None
+    except OSError as e:
+        raise WgtError(f"cannot read {path}: {e.strerror}")
 
 
 def _entries(text: Optional[str]) -> List[str]:
@@ -59,7 +66,7 @@ def state_unset(text: Optional[str], key: str) -> str:
     return "\n".join(lines) + ("\n" if lines else "")
 
 
-def saved_settings(text: Optional[str], keys) -> Dict[str, str]:
+def saved_settings(text: Optional[str], keys: Iterable[str]) -> Dict[str, str]:
     """Saved values for <keys>; WARP falls back to older versions' EXIT=warp|direct."""
     saved = {k: state_get(text, k) for k in keys}
     if not saved.get("WARP"):
@@ -71,7 +78,7 @@ def saved_settings(text: Optional[str], keys) -> Dict[str, str]:
 
 def valid_exit_code(code: str) -> bool:
     """2-6 of a-z0-9 and -, starting with a letter, not ending in -, not "warp"."""
-    return bool(_EXIT_CODE.match(code)) and code != "warp"
+    return bool(_EXIT_CODE.fullmatch(code)) and code != "warp"
 
 
 def client_exit(name: str) -> str:
@@ -86,7 +93,7 @@ def valid_client_name(name: str) -> Optional[str]:
         code, base = name.split(".", 1)
         if not valid_exit_code(code):
             return f"bad exit code in client name '{name}' (see: wgt exit list)"
-    if not _CLIENT_BASE.match(base):
+    if not _CLIENT_BASE.fullmatch(base):
         return f"client name must be 1-32 of [A-Za-z0-9_-] (or <exit>.<name>): '{name}'"
     return None
 
@@ -110,9 +117,12 @@ class Client:
 
 
 def parse_clients(text: Optional[str]) -> List[Client]:
+    """clients.db entries; one without a valid IPv4 address is refused."""
     out = []
     for line in _entries(text):
         f = line.split() + ["", "", ""]
+        if not re.fullmatch(r"([0-9]{1,3}\.){3}[0-9]{1,3}", f[1]) or not f[2]:
+            raise WgtError(f"clients.db: bad line (want 'name ip public-key [allowed-ips]'): {line}")
         out.append(Client(f[0], f[1], f[2], f[3], raw=line))
     return out
 
@@ -151,9 +161,14 @@ class Exit:
 
 
 def parse_exits(text: Optional[str]) -> List[Exit]:
+    """exits.db entries. A bad index is refused: tables derive from it (an
+    out-of-range one could even name the main routing table)."""
     out = []
     for line in _entries(text):
         f = line.split()
+        if len(f) < 2 or not valid_exit_code(f[0]) or not re.fullmatch(r"[0-9]+", f[1]) \
+                or not 1 <= int(f[1]) <= EXIT_MAX:
+            raise WgtError(f"exits.db: bad line (want 'code index label', index 1-{EXIT_MAX}): {line}")
         out.append(Exit(f[0], int(f[1]), " ".join(f[2:]), raw=line))
     return out
 
@@ -180,7 +195,7 @@ def backup_orig(text: Optional[str], path: str) -> str:
 
 def backup_record(text: Optional[str], path: str, orig: str) -> str:
     """Add <path> -> <orig> unless the file is already recorded."""
-    if backup_orig(text, path):
+    if any(line.partition("\t")[0] == path for line in (text or "").splitlines()):
         return text or ""
     return (text or "") + f"{path}\t{orig}\n"
 

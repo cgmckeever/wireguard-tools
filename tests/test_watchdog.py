@@ -110,3 +110,19 @@ def test_warp_watchdog_acts_on_second_stale_run(make):
     assert os.path.exists(os.path.join(ctx.paths.run_dir, WATCHDOG))
     watchdog.warp(ctx)
     assert "wg set warp listen-port 0" in ctx.runner.calls
+
+
+def test_watchdog_error_is_logged_not_raised(make, monkeypatch):
+    from wgt import cli, watchdog as wd
+
+    def boom(ctx):
+        raise ValueError("bad wg output")
+    monkeypatch.setattr(wd, "exits", boom)
+    monkeypatch.setenv("WGT_SKIP_PREFLIGHT", "1")
+    ctx = make({})
+    monkeypatch.setattr(cli, "load", lambda args, facts=None: ctx)
+    logged = []
+    import subprocess
+    monkeypatch.setattr(subprocess, "run", lambda args, check=False: logged.append(args))
+    assert cli.main(["watchdog", "exits"]) == 1
+    assert any("bad wg output" in " ".join(a) for a in logged)

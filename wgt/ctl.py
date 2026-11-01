@@ -24,7 +24,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from . import render, store, ui
+from . import checks, render, store, ui
 from .errors import WgtError
 from .system import Out
 
@@ -34,9 +34,15 @@ LIST = os.path.join(LOCAL, "servers")
 LINKS = os.path.join(LOCAL, "exits", "details.tsv")   # server, local file, code, full name (tab-separated)
 DEF_DIR = "/opt/wireguard-tools"
 INBOX = "/etc/wireguard/exits/incoming"
-SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15"]
+# Host keys must already be known (whatever ~/.ssh/config says); only init's
+# first login asks, so you can check the key against your provider's console.
+SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "StrictHostKeyChecking=yes"]
 RESERVED = ("init", "clients", "all", "help", "list")
-CTL_COMMANDS = ("pull", "backup", "exit-add", "ssh", "branch", "forget")
+# The wgt commands (anything else after a server word is a mistake, not a command).
+WGT_COMMANDS = ("setup", "warp", "status", "test", "log", "backup", "restore", "rollback", "client", "exit")
+_TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:\[\]-]+$")
+_DIR = re.compile(r"^/[A-Za-z0-9._/-]+$")
+_BRANCH = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
 
 out = Out()
 
@@ -56,8 +62,7 @@ class Server:
 
 def ensure_local() -> None:
     for d in (LOCAL, os.path.join(LOCAL, "exits"), os.path.join(LOCAL, "backups")):
-        os.makedirs(d, exist_ok=True)
-        os.chmod(d, 0o700)
+        private_dir(d)
     if not os.path.exists(LIST):
         with open(LIST, "w") as f:
             f.write("# Servers this machine manages (untracked): name  ssh-target  [checkout]\n")
@@ -65,11 +70,17 @@ def ensure_local() -> None:
 
 
 def servers() -> List[Server]:
+    """local/servers, checked: its names become local paths and its targets and
+    directories go into ssh and remote commands."""
     out_: List[Server] = []
-    for line in (store.read_text(LIST) or "").splitlines():
+    for n, line in enumerate((store.read_text(LIST) or "").splitlines(), 1):
         f = line.split()
-        if f and not f[0].startswith("#"):
-            out_.append(Server(f[0], f[1], f[2] if len(f) > 2 else DEF_DIR))
+        if not f or f[0].startswith("#"):
+            continue
+        if len(f) < 2 or not valid_server(f[0]) or not _TARGET.match(f[1]) or (len(f) > 2 and not _DIR.match(f[2])):
+            raise WgtError(f"{LIST} line {n}: want 'name user@host [/checkout/dir]' "
+                           f"(name: a letter, then 1-31 of A-Za-z0-9_-): {line.strip()}")
+        out_.append(Server(f[0], f[1], f[2] if len(f) > 2 else DEF_DIR))
     return out_
 
 
@@ -93,7 +104,14 @@ def pick() -> Server:
 
 
 def valid_server(name: str) -> bool:
-    return bool(re.match(r"^[A-Za-z0-9_-]{1,32}$", name)) and name not in RESERVED
+    """A letter first (so it can't be mistaken for a list number), not a reserved word."""
+    return bool(re.match(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$", name)) and name not in RESERVED
+
+
+def private_dir(path: str) -> str:
+    os.makedirs(path, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
 
 
 # --- ssh ---
@@ -112,6 +130,8 @@ def ssh(target: str, command: str, tty: bool = False, batch: bool = False, captu
                        stdout=subprocess.PIPE if capture else None,
                        stderr=subprocess.DEVNULL if batch else None,
                        stdin=subprocess.DEVNULL if batch else None)
+    if p.returncode == 255 and not batch:
+        out.error(f"ssh to {target} failed (unreachable, or its host key isn't known/doesn't match)")
     return p.returncode, p.stdout or ""
 
 
@@ -142,8 +162,8 @@ def cmd_list(quick: bool = False) -> None:
         probe = ""
         if not quick:
             dq = shlex.quote(s.dir)
-            rc, o = ssh(s.target, f"printf '%s@%s' \"$(git -C {dq} rev-parse --abbrev-ref HEAD)\" "
-                                  f"\"$(git -C {dq} rev-parse --short HEAD)\"", batch=True, capture=True)
+            rc, o = ssh(s.target, f"cd {dq} && b=$(git rev-parse --abbrev-ref HEAD) && c=$(git rev-parse --short HEAD) "
+                                  "&& printf '%s@%s' \"$b\" \"$c\"", batch=True, capture=True)
             probe = o.strip() if rc == 0 else "unreachable"
         print(f"  {i:>2}) {s.name:<10} {s.target:<24} {probe:<22} {'exits staged: ' + staged if staged else ''}".rstrip())
     print("")
@@ -158,7 +178,9 @@ def cmd_init(argv: List[str]) -> None:
         if argv[i] == "--":
             setup_args = argv[i + 1:]
             break
-        if argv[i] in opts and i + 1 < len(argv):
+        if argv[i] in opts:
+            if i + 1 >= len(argv):
+                raise WgtError(f"init: {argv[i]} needs a value")
             opts[argv[i]] = argv[i + 1]
             i += 2
             continue
@@ -175,12 +197,17 @@ def cmd_init(argv: List[str]) -> None:
         raise WgtError(f"server name must be 1-32 of [A-Za-z0-9_-] (and not {', '.join(RESERVED)}): '{name}'")
     if any(s.name == name for s in servers()):
         raise WgtError(f"'{name}' is already in {LIST}")
+    if not _BRANCH.match(opts["--branch"]):
+        raise WgtError(f"bad branch name: {opts['--branch']}")
     target = f"{opts['--user']}@{address}"
+    if not _TARGET.match(target):
+        raise WgtError(f"bad --user or --address: {target}")
     out.log(f"Connecting to {target}")
     if not can_login(target):
         out.info("If ssh asks about the host key, compare the fingerprint with your provider's")
         out.info("console before answering yes.")
-        if subprocess.run(["ssh"] + SSH_OPTS + ["-o", "BatchMode=no", target, "true"]).returncode != 0:
+        first = [o for o in SSH_OPTS if o != "StrictHostKeyChecking=yes"] + ["-o", "StrictHostKeyChecking=ask"]
+        if subprocess.run(["ssh"] + first + ["-o", "BatchMode=no", target, "true"]).returncode != 0:
             raise WgtError(f"cannot log in to {target}")
         if not can_login(target):
             reply = ui.ask("    Log in with your SSH key from now on (ssh-copy-id)? [Y/n] ")
@@ -189,7 +216,7 @@ def cmd_init(argv: List[str]) -> None:
                     raise WgtError("ssh-copy-id failed")
     rc, probe = ssh(target, f"""echo "uid=$(id -u)"
         . /etc/os-release 2>/dev/null && echo "os=$ID $VERSION_ID"
-        [ -x {DEF_DIR}/bin/wgt ] && echo installed=1
+        [ -d {DEF_DIR}/.git ] && echo checkout=1
         sed -n "s/^SERVER_NAME=/saved=/p" /etc/wireguard/wg-tools.state 2>/dev/null | tail -n 1""", capture=True)
     if rc != 0:
         raise WgtError(f"cannot reach {target}")
@@ -201,7 +228,10 @@ def cmd_init(argv: List[str]) -> None:
     if not re.match(r"^(debian|ubuntu) ", osname):
         raise WgtError(f"unsupported OS '{osname}' (Debian 11+ or Ubuntu 20.04+)")
     saved = facts.get("saved", "")
-    if facts.get("installed") == "1" and saved:
+    if saved or facts.get("checkout") == "1":
+        # Already runs these tools (maybe an older version): adopt it, never re-install.
+        if not saved:
+            raise WgtError(f"{DEF_DIR} exists there but isn't set up; set it up there, or remove it and re-run init")
         if not valid_server(saved):
             raise WgtError(f"the server's saved name '{saved}' isn't a valid name")
         out.log(f"wireguard-tools is already set up there as '{saved}'")
@@ -211,6 +241,7 @@ def cmd_init(argv: List[str]) -> None:
             if any(s.name == name for s in servers()):
                 raise WgtError(f"'{name}' is already in {LIST}")
         record(name, target)
+        out.info(f"update it to this version with: wgt-ctl {name} pull")
         return
     url = repo_url()
     branch = opts["--branch"]
@@ -226,7 +257,8 @@ def cmd_init(argv: List[str]) -> None:
     out.log(f"Running wgt setup --name {name} on {address}")
     rc, _ = ssh(target, f"{DEF_DIR}/bin/wgt setup --name {q(name)} {q(*setup_args)}", tty=True)
     if rc != 0:
-        raise WgtError(f"setup did not finish; fix the cause and re-run: wgt-ctl init --address {address} --name {name}")
+        raise WgtError(f"setup did not finish; fix the cause and re-run: wgt-ctl init --address {address} "
+                       f"--name {name} --user {opts['--user']} --branch {branch}")
     record(name, target)
     out.info(f"next: wgt-ctl {name} client add <client>   (or add exit cities: wgt-ctl {name} exit-add)")
 
@@ -235,13 +267,12 @@ def record(name: str, target: str) -> None:
     ensure_local()
     with open(LIST, "a") as f:
         f.write(f"{name:<10} {target}\n")
-    d = os.path.join(LOCAL, "exits", name)
-    os.makedirs(d, exist_ok=True)
-    os.chmod(d, 0o700)
+    private_dir(os.path.join(LOCAL, "exits", name))
     out.log(f"Added '{name}' ({target}) to {LIST}")
 
 
 def repo_url() -> str:
+    """This checkout's origin, as an https URL (servers clone anonymously)."""
     p = subprocess.run(["git", "-C", ROOT, "remote", "get-url", "origin"], stdout=subprocess.PIPE, text=True)
     url = p.stdout.strip()
     if p.returncode != 0 or not url:
@@ -256,18 +287,17 @@ def cmd_clients() -> None:
     print("")
     print(fmt.format("SERVER", "NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS"))
     for s in servers():
-        rc, o = ssh(s.target, f"{s.wgt} client list --tsv", batch=True, capture=True)
+        rc, o = ssh(s.target, f"if [ -x {s.wgt} ]; then {s.wgt} client list --tsv; else exit 3; fi",
+                    batch=True, capture=True)
         if rc != 0:
-            note = "(its tools predate wgt; pull it)" if can_login(s.target) else "(unreachable)"
-            print(f"  {s.name:<10} {note}")
+            note = {3: "(runs the older bash tools; wgt-ctl " + s.name + " pull)", 255: "(unreachable)"}
+            print(f"  {s.name:<10} {note.get(rc, f'(client list failed: exit {rc})')}")
             continue
-        rows = [line.split("\t") for line in o.splitlines() if line]
+        rows = [(line.split("\t") + [""] * 6)[:6] for line in o.splitlines() if line]
         if not rows:
             print(f"  {s.name:<10} (no clients)")
-        rows = [(r + [""] * 6)[:6] for r in rows]
-        rows.sort(key=lambda r: (r[0].split(".", 1)[-1].lower(), "." in r[0], r[1]))
-        for r in rows:
-            print(fmt.format(s.name, r[0].split(".", 1)[-1], *r[1:]))
+        for r in checks.device_order(rows):
+            print(fmt.format(s.name, checks.device_of(r[0]), *r[1:]))
     print("")
 
 
@@ -276,18 +306,26 @@ def cmd_clients() -> None:
 def do_wgt(s: Server, args: List[str]) -> int:
     """Any wgt command, run there. Printed scp hints use this machine's login."""
     env = f"WGT_SSH_TARGET={shlex.quote(s.target)}"
-    missing = (f"echo 'ERROR: {s.name} has no {s.dir}/bin/wgt (it runs the older bash tools); "
-               f"update it: wgt-ctl {s.name} pull' >&2; exit 1")
+    msg = f"ERROR: {s.name} has no {s.dir}/bin/wgt (it runs the older bash tools); update it: wgt-ctl {s.name} pull"
+    missing = f"echo {shlex.quote(msg)} >&2; exit 1"
     return ssh(s.target, f"if [ -x {s.wgt} ]; then {env} {s.wgt} {q(*args)}; else {missing}; fi", tty=True)[0]
 
 
+def no_args(cmd: str, args: List[str]) -> None:
+    if args:
+        raise WgtError(f"wgt-ctl <server> {cmd} takes no arguments (got: {' '.join(args)})")
+
+
 def do_pull(s: Server, args: List[str]) -> int:
+    """git pull its checkout."""
+    no_args("pull", args)
     d = shlex.quote(s.dir)
     return ssh(s.target, f"git -C {d} pull -q && git -C {d} log --oneline -1 | sed 's/^/    /'")[0]
 
 
 def do_branch(s: Server, args: List[str]) -> int:
-    if not args:
+    """Switch its checkout to <branch>, then pull."""
+    if len(args) != 1 or not _BRANCH.match(args[0]):
         raise WgtError("usage: wgt-ctl <server> branch <branch>")
     d = shlex.quote(s.dir)
     return ssh(s.target, f"set -e; git -C {d} fetch -q; git -C {d} checkout -q {q(args[0])}; git -C {d} pull -q; "
@@ -295,11 +333,13 @@ def do_branch(s: Server, args: List[str]) -> int:
 
 
 def do_ssh(s: Server, args: List[str]) -> int:
-    return subprocess.run(["ssh"] + SSH_OPTS + [s.target]).returncode
+    """Log in (or run <args> there as a command)."""
+    return subprocess.run(["ssh"] + SSH_OPTS + [s.target] + ([q(*args)] if args else [])).returncode
 
 
 def do_backup(s: Server, args: List[str]) -> int:
     """wgt backup there, then fetch the archive into local/backups/<server>/."""
+    no_args("backup", args)
     rc, o = ssh(s.target, f"{s.wgt} backup --yes >/dev/null || exit 1; "
                           "ls -t /var/backups/wireguard-tools/wireguard-tools.*.tar.gz 2>/dev/null | head -n 1", capture=True)
     archive = o.strip()
@@ -307,9 +347,7 @@ def do_backup(s: Server, args: List[str]) -> int:
         out.error(f"{s.name}: backup failed")
         return 1
     ensure_local()
-    d = os.path.join(LOCAL, "backups", s.name)
-    os.makedirs(d, exist_ok=True)
-    os.chmod(d, 0o700)
+    d = private_dir(os.path.join(LOCAL, "backups", s.name))
     if not scp(f"{s.target}:{archive}", d + "/"):
         out.error(f"{s.name}: fetching {archive} failed")
         return 1
@@ -320,7 +358,12 @@ def do_backup(s: Server, args: List[str]) -> int:
 
 
 def do_forget(s: Server, args: List[str]) -> int:
+    """Drop it from local/servers; nothing on the server changes."""
+    if set(args) - {"--yes", "-y"}:
+        raise WgtError("usage: wgt-ctl <server> forget [--yes]")
     if "--yes" not in args and "-y" not in args:
+        if not ui.have_tty():
+            raise WgtError("forget needs --yes without a terminal")
         reply = ui.ask(f"    Remove '{s.name}' from {LIST}? (nothing on the server changes) [y/N] ")
         if not reply.lower().startswith("y"):
             out.info("kept")
@@ -360,7 +403,10 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
     taken = {f.split("\t")[2] for f in (store.read_text(LINKS) or "").splitlines()
              if len(f.split("\t")) >= 4 and f.split("\t")[0] == server}
     while True:
-        code = ui.ask(f"Short code on the server [{code}]: ") or code
+        reply = ui.ask(f"Short code on the server [{code}]: ")
+        if not reply and not store.valid_exit_code(code):
+            raise WgtError("no code given")
+        code = reply or code
         if not store.valid_exit_code(code):
             print("  2-6 of a-z0-9 and -, starting with a letter (e.g. par-fr)")
         elif code in taken:
@@ -435,7 +481,7 @@ def do_exit_add(s: Server, args: List[str]) -> int:
         picked = files
     elif sel.isdigit() and 1 <= int(sel) <= len(files):
         picked = [files[int(sel) - 1]]
-    elif os.path.isfile(os.path.join(src, sel if sel.endswith(".conf") else sel + ".conf")):
+    elif os.path.basename(sel) == sel and os.path.isfile(os.path.join(src, sel if sel.endswith(".conf") else sel + ".conf")):
         picked = [os.path.join(src, sel if sel.endswith(".conf") else sel + ".conf")]
     else:
         raise WgtError(f"no config '{sel}' in {src}")
@@ -454,15 +500,21 @@ def on(sel: str, cmd: str, args: List[str]) -> int:
     """Run a command on one server, or (with "all") on each in turn: one failing
     doesn't stop the rest; the result is 1 if any failed."""
     fn = CTL.get(cmd)
+    if fn is None and cmd not in WGT_COMMANDS:
+        raise WgtError(f"unknown command: {cmd} (see: wgt-ctl help)")
     if sel == "all":
         if fn and cmd not in ALL_OK:
             raise WgtError(f"'{cmd}' takes one server, not all")
+        if not servers():
+            raise WgtError("no servers yet (add one: wgt-ctl init)")
+        if cmd == "log" and "--no-follow" not in args:
+            args = args + ["--no-follow"]   # following one server would block the rest
         rc = 0
         for s in servers():
             out.log(s.name)
             try:
                 r = fn(s, args) if fn else do_wgt(s, [cmd] + args)
-            except WgtError as e:
+            except (WgtError, OSError) as e:
                 out.error(str(e))
                 r = 1
             rc = rc or r
@@ -488,15 +540,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         if first == "clients":
             cmd_clients()
             return 0
-        if first == "all" or any(s.name == first for s in servers()) or first.isdigit():
+        if first == "all" or first.isdigit() or any(s.name == first for s in servers()):
             if not rest:
                 raise WgtError(f"usage: wgt-ctl {first} <command> (see: wgt-ctl help)")
             return on(first, rest[0], rest[1:])
-        if first in CTL or not first.startswith("-"):
+        if first == "" and rest:
+            return on("", rest[0], rest[1:])
+        if first in CTL or first in WGT_COMMANDS:
             # No server given: pick one, then run the command.
             return on("", first, rest)
-        raise WgtError(f"unknown: {first} (see: wgt-ctl help)")
-    except WgtError as e:
+        raise WgtError(f"no server or command '{first}' (servers: {', '.join(s.name for s in servers()) or 'none'}; "
+                       "see: wgt-ctl help)")
+    except (WgtError, OSError) as e:
         out.error(str(e))
         return 1
     except KeyboardInterrupt:

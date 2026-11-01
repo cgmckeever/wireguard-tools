@@ -1,5 +1,10 @@
 # Python port: plan
 
+**Status:** steps 1-7 and the clean-up are done on branch `python`; the bash
+version is removed from the branch (git tag `bash-final` keeps it). boba runs
+the Python version; ig88 and dengar switch after the merge. This document is
+the plan as agreed; README.md describes the tool as it is.
+
 Branch `python`. The goal is the same tool, with the same behaviour and the same
 files on the servers, rewritten in Python so it can be unit-tested and so the
 bash pitfalls go away. Bash stays the live tool on each server until the
@@ -16,7 +21,7 @@ Python version has proved it produces identical results there.
 | Python | 3.8+, standard library only (servers need nothing installed) |
 | Server files | unchanged formats: `wg-tools.state`, `clients.db`, `exits.db`, `clients.disabled`, the backup record, configs, units |
 | Proof | byte-identical rendered configs from each live server's state; full trial on bossk |
-| Tests | pytest on the Mac; GitHub Actions on every push |
+| Tests | pytest on your machine (`./test.sh`); GitHub Actions on every push |
 | Scope | same features and safety first (dry-run, backups, rollback, keys never printed); improvements after parity |
 
 ## Commands
@@ -25,7 +30,7 @@ Python version has proved it produces identical results there.
 
 ```
 wgt setup [--name N --subnet ... --port ...]   install or update everything
-wgt status | test | log [N] [-f]
+wgt status | test | log [N] [--no-follow]     (log follows like tail -f)
 wgt warp [on|off]
 wgt backup [dir] | restore <archive> | rollback [--purge]
 
@@ -50,7 +55,7 @@ wgt-ctl init                     new server (asks address and name) or adopt one
 wgt-ctl clients                  every client on every server
 wgt-ctl <server|all> <wgt command ...>    e.g. wgt-ctl boba client add phone --exit par-fr
 wgt-ctl <server|all> pull | backup        (backup fetched to local/backups/<server>/)
-wgt-ctl <server> exit-add [file|all] | ssh | branch <b> | forget
+wgt-ctl <server> exit-add [n|file|all] | ssh | branch <b> | forget [--yes]
 ```
 
 The first word is a server from `local/servers`, `all`, or one of `init` and
@@ -62,34 +67,31 @@ that need one show the numbered server list. `local/` keeps its layout:
 
 ```
 wgt/                      the package (stdlib only)
-  cli.py                  wgt argument parsing and dispatch
-  ctl.py                  wgt-ctl
-  config.py               settings: keys, flag > env > saved > default, validation
+  cli.py                  wgt: argument parsing, dispatch, log, debug render
+  ctl.py                  wgt-ctl (ssh/scp to the servers)
+  const.py, errors.py     paths and constants; WgtError
+  config.py               settings: flag > env > saved > default, validation
   store.py                the server files: state, clients.db, exits.db, disabled, backup record
-  net.py                  subnet maths, IPv6 addresses, address families
+  net.py, host.py         address maths; host facts and preflight
   rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP switch, exits)
-  render.py               wg0.conf, warp.conf, px/wx, client configs, systemd units
-  system.py               Runner (commands, dry-run, journal log), file writes with backups
-  warp.py                 wgcf install, registration, WARP tunnel
-  server.py               setup, backup, restore, rollback
-  clients.py              client commands
+  render.py               wg0.conf, warp.conf, px/wx, client configs, templates
+  system.py               Runner (commands, dry-run, journal), FakeRunner, Files (writes with backups)
+  live.py                 read-only queries: handshakes, rules, tables, units, Cloudflare's trace
+  ops.py                  shared operations: lock, confirm, state, endpoint, wg0.conf, peers
+  warp.py, units.py       wgcf and WARP profiles; systemd units, watchdog timers, ufw
+  server.py               setup, warp on|off, backup, restore, rollback
+  clients.py              client commands (and QR, share)
   exits.py                exit commands
-  checks.py               test and status
+  checks.py               test, status, the clients table
   watchdog.py             both watchdogs
-  ui.py                   tables, numbered menus, prompts, QR
-  remote.py               ssh/scp helpers for wgt-ctl
-bin/wgt, bin/wgt-ctl      launchers (python3 -m wgt / wgt.ctl)
-templates/                kept: client config and systemd unit templates
-tests/                    pytest: unit, golden files, fake runner
-tools/parity              compares bash and Python output on a server
+  ui.py                   ages, numbered menus, prompts
+bin/wgt, bin/wgt-ctl      launchers (put the checkout on sys.path and call main)
+templates/                client config and systemd unit templates
+tests/                    pytest: unit, golden files, FakeRunner
+tools/                    parity.sh + parity-remote.sh (live render comparison),
+                          golden-bash.sh (goldens from bash-final), trial.sh (full cycle)
+test.sh                   runs the tests (sets up .venv on first use)
 ```
-
-`setup` links `/usr/local/sbin/wgt` to the checkout. On the Mac, put `bin/` on
-your PATH or alias `wgt-ctl`.
-
-Most of the logic is pure: state goes in, text or a list of commands comes
-out. `system.py` is the only module that touches the machine, through a
-`Runner` that tests replace with a fake that records commands.
 
 ## How each step is proved
 
@@ -111,7 +113,7 @@ out. `system.py` is the only module that touches the machine, through a
    add`, `remove` and `rollback`, the recorded commands are compared with what
    the bash version prints under `--dry-run`. Tests also check that rollback
    undoes exactly what setup did.
-4. **Live render parity, read-only, on dengar, ig88 and boba.** `tools/parity`
+4. **Live render parity, read-only, on dengar, ig88 and boba.** `tools/parity.sh`
    renders every config and rule list with both versions from the server's
    real state and diffs them, with keys redacted. This is the same check used
    during the review, made repeatable.

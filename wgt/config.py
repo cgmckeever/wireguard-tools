@@ -5,19 +5,20 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Mapping, Optional
+from typing import Dict, List, Mapping, Optional
 
 from . import net
 from .const import (CONFIG_KEYS, DEFAULTS, EXIT_MAX, EXIT_PTABLE_BASE, EXIT_TABLE_BASE, Paths)
 from .errors import WgtError
 
-_IFNAME = re.compile(r"^[A-Za-z0-9_-]{1,15}$")
-_SERVER_NAME = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
-_SUBNET4 = re.compile(r"^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})$")
+_IFNAME = re.compile(r"[A-Za-z0-9_-]{1,15}")
+_SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,32}")
+_SUBNET4 = re.compile(r"([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})")
 
 
 def _in_range(value: str, lo: int, hi: int) -> bool:
-    return value.isdigit() and lo <= int(value) <= hi
+    """An integer of ASCII digits in [lo, hi] (as the bash [0-9]+ check)."""
+    return bool(re.fullmatch(r"[0-9]+", value)) and lo <= int(value) <= hi
 
 
 def short_hostname_name(hostname: str) -> str:
@@ -52,11 +53,6 @@ class Config:
             return values[name]
         raise AttributeError(name)
 
-    def set(self, key: str, value: str, source: Optional[str] = None) -> None:
-        self.values[key] = value
-        if source:
-            self.sources[key] = source
-
     @property
     def warp_conf(self) -> str:
         return self.paths.wg(f"{self.WARP_IF}.conf")
@@ -78,10 +74,10 @@ class Config:
         v = self.values
         if v["WARP"] not in ("on", "off"):
             raise WgtError(f"bad WARP setting: {v['WARP']} (expected on or off)")
-        if not _SERVER_NAME.match(v["SERVER_NAME"]):
+        if not _SERVER_NAME.fullmatch(v["SERVER_NAME"]):
             raise WgtError(f"server name must be 1-32 of [A-Za-z0-9_-]: '{v['SERVER_NAME']}'")
         for k in ("WG_IF", "WARP_IF"):
-            if not _IFNAME.match(v[k]):
+            if not _IFNAME.fullmatch(v[k]):
                 raise WgtError(f"bad interface name: {v[k]}")
         if v["WG_IF"] == v["WARP_IF"]:
             raise WgtError("WG_IF and WARP_IF must differ")
@@ -100,7 +96,7 @@ class Config:
             raise WgtError(f"table {table} is reserved for exit cities "
                            f"({EXIT_TABLE_BASE + 1}-{EXIT_PTABLE_BASE + EXIT_MAX})")
         subnet = v["WG_SUBNET"]
-        if not _SUBNET4.match(subnet):
+        if not _SUBNET4.fullmatch(subnet):
             raise WgtError(f"bad subnet: {subnet}")
         base, pfx = subnet.split("/")
         if any(int(o) > 255 for o in base.split(".")):
@@ -134,7 +130,10 @@ class Config:
 
     def ip6_of(self, ip: str) -> str:
         """The client IPv6 matching an IPv4 address: same host number in WG_SUBNET6."""
-        return f"{self.p6}::{format(net.ip2int(ip) - self.net_int, 'x')}"
+        host = net.ip2int(ip) - self.net_int
+        if not 0 <= host <= self.last_host - self.net_int:
+            raise WgtError(f"{ip} is not in {self.WG_SUBNET}")
+        return f"{self.p6}::{format(host, 'x')}"
 
     def client_addrs(self, ip: str) -> str:
         """A client's addresses as "ip/32" or "ip/32,ip6/128" (comma list, no spaces)."""
@@ -142,7 +141,7 @@ class Config:
             return f"{ip}/32,{self.ip6_of(ip)}/128"
         return f"{ip}/32"
 
-    def families(self):
+    def families(self) -> List[str]:
         """"ip", plus "ip -6" when IPv6 is on."""
         return ["ip", "ip -6"] if self.ipv6 else ["ip"]
 

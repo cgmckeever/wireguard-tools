@@ -66,6 +66,3 @@ def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[i
     n = pick_number(f"  {prompt} [1-{len(items)}, Enter exits]: ", len(items))
     return None if n is None else n - 1
 
-
-def stdout_is_tty() -> bool:
-    return os.isatty(1)

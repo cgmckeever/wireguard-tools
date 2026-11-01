@@ -116,6 +116,7 @@ class Ctx:
     facts: host.Facts
     cfg: Config
     snap: store.Snapshot
+    lock_fd: Optional[int] = None
 
     @property
     def out(self) -> Out:
@@ -180,7 +181,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     from .const import EXIT_WATCHDOG, WATCHDOG
     count = words[0] if words else "40"
     if not count.isdigit():
-        raise WgtError("usage: wgt log [lines] [--follow]")
+        raise WgtError("usage: wgt log [lines] [--no-follow]")
     matches: List[str] = []
     for tag in ("wg-tools", WATCHDOG, EXIT_WATCHDOG):
         matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
@@ -191,56 +192,77 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
         matches += [f"_SYSTEMD_UNIT=wg-quick@{ifc}.service", "+", f"UNIT=wg-quick@{ifc}.service", "+"]
     follow = ctx.args.follow or (sys.stdout.isatty() and not ctx.args.no_follow)
     cmd = ["journalctl", "--no-pager", "-o", "short-iso", "-n", count] + (["-f"] if follow else []) + matches[:-1]
-    os.execvp(cmd[0], cmd)
+    try:
+        os.execvp(cmd[0], cmd)
+    except OSError as e:
+        raise WgtError(f"cannot run journalctl: {e.strerror}")
 
 
-def _commands():
-    from . import checks, clients, exits, server, watchdog
-    return {
-        "setup": server.cmd_setup,
-        "warp": server.cmd_warp,
-        "backup": server.cmd_backup,
-        "restore": server.cmd_restore,
-        "rollback": server.cmd_rollback,
-        "watchdog": watchdog.cmd_watchdog,
-        "debug": cmd_debug,
-        "status": checks.cmd_status,
-        "test": checks.cmd_test,
-        "log": cmd_log,
-        "client": clients.cmd_client,
-        "exit": exits.cmd_exit,
-    }
+# command -> (module, function); a module is only imported when its command runs
+# (the watchdogs run every 10s and need little).
+COMMANDS = {
+    "setup": ("server", "cmd_setup"), "warp": ("server", "cmd_warp"), "backup": ("server", "cmd_backup"),
+    "restore": ("server", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
+    "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
+    "client": ("clients", "cmd_client"), "exit": ("exits", "cmd_exit"),
+    "watchdog": ("watchdog", "cmd_watchdog"), "debug": ("cli", "cmd_debug"),
+}
+
+
+def command(name: str):
+    import importlib
+    mod, fn = COMMANDS[name]
+    return getattr(importlib.import_module(f"wgt.{mod}"), fn)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """Parse, check the host, load the server's state and run the command; its
+    return value (None = 0) is the exit status."""
     out = Out()
+    os.umask(0o077)   # keys and configs are private unless a file sets its own mode
     try:
         args = parse(sys.argv[1:] if argv is None else argv)
         if args.help or not args.words:
             sys.stdout.write(USAGE)
             return 0 if args.help else 1
         cmd, rest = args.words[0], args.words[1:]
-        fn = _commands().get(cmd)
-        if fn is None:
+        if cmd not in COMMANDS:
             raise WgtError(f"unknown command: {cmd} (see: wgt help)")
-        if os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
-            from .server import preflight
-            preflight(None)
         if cmd == "watchdog":
-            quick = host.Facts(kernel_ipv6=os.path.exists("/proc/net/if_inet6"), has_ipv6=False,
-                               hostname="", routes4="", default_route="")
-            fn(load(args, facts=quick), rest)
-        else:
-            fn(load(args), rest)
-        return 0
-    except SystemExit as e:
-        return int(e.code or 0)
+            return run_watchdog(args, rest, out)
+        if os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
+            host.preflight()
+        ctx = load(args)
+        if args.dry_run:
+            out.log("DRY RUN: nothing will be changed")
+        return command(cmd)(ctx, rest) or 0
     except WgtError as e:
         out.error(str(e))
         return 1
     except KeyboardInterrupt:
         out.error("interrupted")
         return 130
+
+
+def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
+    """A watchdog run (every 10-30s from a timer): no host checks beyond root,
+    no fact gathering, and any error is logged to the journal, not a traceback."""
+    from .const import EXIT_WATCHDOG, WATCHDOG
+    tag = WATCHDOG if rest[:1] == ["warp"] else EXIT_WATCHDOG
+    if os.geteuid() != 0 and os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
+        raise WgtError("must run as root")
+    quick = host.Facts(kernel_ipv6=os.path.exists("/proc/net/if_inet6"), has_ipv6=False,
+                       hostname="", routes4="", default_route="")
+    try:
+        ctx = load(args, facts=quick)
+        return command("watchdog")(ctx, rest) or 0
+    except WgtError:
+        raise
+    except Exception as e:   # a timer job must log, not crash
+        import subprocess
+        subprocess.run(["logger", "-t", tag, f"error: {type(e).__name__}: {e}"], check=False)
+        out.error(f"{type(e).__name__}: {e}")
+        return 1
 
 
 if __name__ == "__main__":

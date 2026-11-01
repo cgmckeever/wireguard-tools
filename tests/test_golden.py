@@ -71,8 +71,11 @@ def test_every_golden_file_is_checked(server):
     """A new golden file must come with a test."""
     known = {"wg0.conf", "warp.conf", "hooks-up.txt", "hooks-down.txt", "ipt-rules.txt",
              "warp-on.txt", "warp-off.txt", "dropin.conf"}
+    for e in server.snap.exits:
+        known |= {f"px-{e.code}.conf", f"wx-{e.code}.conf", f"exit-{e.code}-up.txt",
+                  f"exit-{e.code}-down.txt", f"exit-{e.code}-ipt.txt"}
     for n in golden_names(server.case):
-        if n in known or n.startswith(("client-", "px-", "wx-", "exit-")):
+        if n in known or n.startswith("client-"):
             continue
-        raise AssertionError(f"unchecked golden file {server.case}/{n}")
+        raise AssertionError(f"golden file {server.case}/{n} is checked by no test (stale?)")
     assert os.path.isdir(server.wg_dir)

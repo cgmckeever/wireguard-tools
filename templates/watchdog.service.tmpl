@@ -5,3 +5,5 @@ Description=wireguard-tools {{WHAT}}
 [Service]
 Type=oneshot
 ExecStart={{COMMAND}}
+# A stuck run must not block the timer forever.
+TimeoutStartSec={{TIMEOUT}}

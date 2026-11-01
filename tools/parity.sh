@@ -14,8 +14,11 @@ rc=0
 for target in "$@"; do
     echo "==> $target"
     tmp=$(ssh -n "$target" 'mktemp -d') || { echo "    unreachable"; rc=1; continue; }
-    (cd "$here" && COPYFILE_DISABLE=1 tar --no-xattrs -cf - wgt bin templates tools/parity-remote.sh 2>/dev/null) | ssh "$target" "tar -xf - -C $tmp"
-    git -C "$here" archive --prefix=bash/ bash-final | ssh "$target" "tar -xf - -C $tmp"
+    if ! (cd "$here" && COPYFILE_DISABLE=1 tar --no-xattrs -cf - wgt bin templates tools/parity-remote.sh 2>/dev/null) \
+            | ssh "$target" "tar -xf - -C $tmp" \
+        || ! git -C "$here" archive --prefix=bash/ bash-final | ssh "$target" "tar -xf - -C $tmp"; then
+        echo "    upload failed"; rc=1; ssh -n "$target" "rm -rf $tmp"; continue
+    fi
     ssh -n "$target" "bash $tmp/tools/parity-remote.sh $tmp" || rc=1
     ssh -n "$target" "rm -rf $tmp"
 done

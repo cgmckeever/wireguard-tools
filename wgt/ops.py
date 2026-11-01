@@ -12,35 +12,59 @@ from . import live, render, store, ui
 from .const import MARKER
 from .errors import WgtError
 
-_lock_fd: Optional[int] = None
+def _open_lock(ctx) -> Optional[int]:
+    try:
+        return os.open(ctx.paths.lock_file, os.O_WRONLY | os.O_CREAT, 0o644)
+    except OSError:
+        if ctx.runner.dry_run:
+            return None    # a dry run as a non-root user: nothing to serialize
+        raise
 
 
 def take_lock(ctx) -> None:
-    """Serialize changing commands (and the exit watchdog). Waits up to 15s:
-    the exit watchdog holds it for a moment every 10s."""
-    global _lock_fd
-    if _lock_fd is not None or ctx.runner.dry_run and not os.access(os.path.dirname(ctx.paths.lock_file), os.W_OK):
+    """Serialize changing commands (and the exit watchdog), then re-read the
+    server's files: decisions must use what's there once we hold the lock.
+    Waits up to 15s (the exit watchdog holds it for a moment every 10s)."""
+    if ctx.lock_fd is not None:
         return
-    fd = os.open(ctx.paths.lock_file, os.O_WRONLY | os.O_CREAT, 0o644)
+    fd = _open_lock(ctx)
+    if fd is None:
+        return
     deadline = time.time() + 15
     while True:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            _lock_fd = fd
-            return
+            break
         except BlockingIOError:
             if time.time() > deadline:
                 os.close(fd)
                 raise WgtError("another wireguard-tools command is running")
             time.sleep(0.2)
+    ctx.lock_fd = fd
+    ctx.reload()
 
 
-def release_lock() -> None:
-    global _lock_fd
-    if _lock_fd is not None:
-        fcntl.flock(_lock_fd, fcntl.LOCK_UN)
-        os.close(_lock_fd)
-        _lock_fd = None
+def try_lock(ctx) -> bool:
+    """Take the lock only if it's free right now (the watchdogs skip a run
+    rather than wait), then re-read the server's files."""
+    fd = _open_lock(ctx)
+    if fd is None:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return False
+    ctx.lock_fd = fd
+    ctx.reload()
+    return True
+
+
+def release_lock(ctx) -> None:
+    if ctx.lock_fd is not None:
+        fcntl.flock(ctx.lock_fd, fcntl.LOCK_UN)
+        os.close(ctx.lock_fd)
+        ctx.lock_fd = None
 
 
 def confirm(ctx, question: str, default_yes: bool = False) -> None:
@@ -95,13 +119,8 @@ def state_unset(ctx, key: str) -> None:
 
 
 def _write_private(path: str, content: str) -> None:
-    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
-    tmp = path + ".wg-tools.new"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(content)
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, path)
+    from .system import atomic_write
+    atomic_write(path, content, 0o600)
 
 
 # --- endpoint ---

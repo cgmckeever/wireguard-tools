@@ -23,6 +23,7 @@ for dir in "$fixtures"/*/wg; do
     code="$work/code-$case"
     rm -rf "$code" && cp -r "$src" "$code"
     sed -i "s|^WG_DIR=/etc/wireguard|WG_DIR=$wg|" "$code/lib/common.sh"
+    grep -q "^WG_DIR=$wg\$" "$code/lib/common.sh" || { echo "could not point the bash tools at $wg" >&2; exit 1; }
     sed '$d' "$code/wg-setup.sh" >"$code/ws.sh"
     sed '$d' "$code/wg-client.sh" | sed '1,/^\. "\$(dirname/d' >"$code/wc.sh"
     mkdir -p "$out/$case"

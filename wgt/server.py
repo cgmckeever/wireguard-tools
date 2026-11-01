@@ -11,7 +11,7 @@ import copy
 import glob
 import os
 import re
-import subprocess
+import shutil
 import tarfile
 import time
 from typing import List
@@ -85,7 +85,7 @@ def start_unit(ctx, ifc: str, changed: bool) -> None:
 def link_wgt(ctx) -> None:
     """/usr/local/sbin/wgt -> this checkout's bin/wgt, so it runs from anywhere."""
     link = os.path.join(ctx.paths.sbin_dir, "wgt")
-    target = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "wgt")
+    target = units.checkout_wgt()
     if os.path.islink(link) and os.readlink(link) == target:
         return
     ctx.runner.step(f"Link {link} -> {target}", f"rm {link}")
@@ -290,13 +290,12 @@ def ensure_server_keys(ctx) -> bool:
     return True
 
 
-def sync_client_configs(ctx) -> None:
+def sync_client_configs(ctx, old_name: str) -> None:
     """Keep every client config named <server>.<client>.conf (renaming ones from
     an older server name or from before server names), pointed at the current
     endpoint, port, DNS and MTU, with its current addresses and allowed IPs.
     Keys are unchanged, so only the configs need re-sending."""
     want = f"{ctx.cfg.values['ENDPOINT']}:{ctx.cfg.WG_PORT}"
-    old_name = ctx.cfg.saved.get("SERVER_NAME", "")
     stale: List[str] = []
     for c in ctx.snap.clients:
         conf = os.path.join(ctx.paths.client_dir, f"{ctx.cfg.SERVER_NAME}.{c.name}.conf")
@@ -381,6 +380,8 @@ def stop_before_rewrite(ctx) -> bool:
 
 def cmd_setup(ctx, words: List[str]) -> None:
     ops.take_lock(ctx)
+    first = not ctx.cfg.saved.get("WARP")              # before save_config records it
+    old_name = ctx.cfg.saved.get("SERVER_NAME", "")
     asked = ask_subnet(ctx)
     ensure_subnet6(ctx)
     review_settings(ctx, asked)
@@ -393,7 +394,6 @@ def cmd_setup(ctx, words: List[str]) -> None:
     record_baseline(ctx)
     install_packages(ctx)
     link_wgt(ctx)
-    first = not ctx.cfg.saved.get("WARP")
     if not provision_warp(ctx):
         if first and ctx.cfg.WARP == "on":
             ctx.out.warn("WARP isn't usable here; finishing with WARP off (clients exit via this server's IP). "
@@ -406,7 +406,7 @@ def cmd_setup(ctx, words: List[str]) -> None:
     ctx.out.log(f"WireGuard server (WARP {ctx.cfg.WARP}: client traffic leaves via {out_if})")
     keys_changed = ensure_server_keys(ctx)
     ops.resolve_endpoint(ctx, save=True)
-    sync_client_configs(ctx)
+    sync_client_configs(ctx, old_name)
     write_sysctl(ctx)
     write_dropin(ctx)
     stopped = stop_before_rewrite(ctx)
@@ -417,9 +417,12 @@ def cmd_setup(ctx, words: List[str]) -> None:
     else:
         try:
             start_unit(ctx, ctx.cfg.WG_IF, changed)
-        except Exception:
-            ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
-            run_hooks(ctx, "down")
+        except BaseException:
+            # Only if wg0 didn't come up: answering no to a restart leaves a
+            # running wg0 (and its rules) alone.
+            if not ops.wg_up(ctx):
+                ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
+                run_hooks(ctx, "down")
             raise
     guard_default_route(ctx)
     units.write_watchdog(ctx)
@@ -488,8 +491,8 @@ def cmd_backup(ctx, words: List[str]) -> None:
             ctx.files.prune(line.split("\t")[0])
     ctx.out.warn("the archive contains private keys; keep it somewhere safe")
     ctx.out.info("restore on a fresh server: wgt restore <archive>")
-    ep = store.state_get(ctx.snap.state, "ENDPOINT").strip("[]")
-    ctx.out.info(f"fetch it with: scp root@{ep or '<server>'}:{out} .")
+    from .clients import fetch_hint
+    fetch_hint(ctx, out)
 
 
 def cmd_restore(ctx, words: List[str]) -> None:
@@ -503,9 +506,15 @@ def cmd_restore(ctx, words: List[str]) -> None:
         raise WgtError(f"no such file: {words[0]}")
     try:
         with tarfile.open(archive, "r:gz") as t:
-            members = [m.name if m.name.startswith("/") else "/" + m.name for m in t.getmembers()]
+            infos = t.getmembers()
     except (tarfile.TarError, OSError):
         raise WgtError(f"{archive} is not a readable .tar.gz")
+    members = [m.name if m.name.startswith("/") else "/" + m.name for m in infos]
+    # It is extracted as root with absolute paths: refuse anything that could
+    # land outside the WireGuard directory.
+    for m, name in zip(infos, members):
+        if ".." in name.split("/") or m.issym() or m.islnk() or not (m.isfile() or m.isdir()):
+            raise WgtError(f"{archive}: refusing an unsafe entry: {m.name}")
     if ctx.paths.state not in members:
         raise WgtError(f"{archive} is not a wireguard-tools backup (no {ctx.paths.state} inside)")
     if ctx.cfg.saved.get("WARP"):
@@ -543,7 +552,7 @@ def cmd_restore(ctx, words: List[str]) -> None:
         ctx.out.warn("the WARP account is now on this server too; don't keep running it on the old one")
     if has_exits:
         ctx.out.warn("the exit cities' Proton keys and WARP accounts are now here too; remove them from the old server")
-    ops.release_lock()
+    ops.release_lock(ctx)
     ctx.out.log("Setting up")
     ctx.out.info("if setup stops, fix the cause and run 'wgt setup' (the restored files stay in place)")
     cmd = [units.wgt_command()] + (["--yes"] if ctx.args.yes else []) + ["setup"]
@@ -573,7 +582,7 @@ def cmd_rollback(ctx, words: List[str]) -> None:
         if live.if_exists(r, ifc):
             r.run(["ip", "link", "del", "dev", ifc])
     run_hooks(ctx, "down")
-    if store.state_get(st, "UFW") == "1" and r.ok(["sh", "-c", "command -v ufw"]):
+    if store.state_get(st, "UFW") == "1" and shutil.which("ufw"):
         r.run(["ufw", "delete", "allow", f"{c.WG_PORT}/udp"], check=False)
         for o in rules.out_ifs(c, pub, ctx.snap.exits):
             r.run(["ufw", "route", "delete", "allow", "in", "on", c.WG_IF, "out", "on", o], check=False)
@@ -626,27 +635,3 @@ def cmd_rollback(ctx, words: List[str]) -> None:
             kept += f", exit cities ({p.exit_dir})"
         ctx.out.info(f"kept: {kept} (rollback --purge removes them)")
     ctx.out.log("Rollback done; the main routing table was never changed")
-
-
-def preflight(runner) -> None:
-    """Root, OS and architecture checks; refuse anything unsupported."""
-    if os.geteuid() != 0:
-        raise WgtError("must run as root")
-    try:
-        info = dict(line.split("=", 1) for line in open("/etc/os-release").read().splitlines() if "=" in line)
-    except OSError:
-        raise WgtError("cannot read /etc/os-release; unsupported OS")
-    osid = info.get("ID", "").strip('"')
-    ver = info.get("VERSION_ID", "").strip('"')
-    major = ver.split(".")[0]
-    if not major.isdigit():
-        raise WgtError(f"unsupported OS: {osid} {ver or '<no version>'} (need Debian 11+ or Ubuntu 20.04+)")
-    if osid == "debian" and int(major) < 11:
-        raise WgtError(f"unsupported Debian {ver} (need 11+)")
-    if osid == "ubuntu" and int(major) < 20:
-        raise WgtError(f"unsupported Ubuntu {ver} (need 20.04+)")
-    if osid not in ("debian", "ubuntu"):
-        raise WgtError(f"unsupported OS: {osid} {ver} (need Debian 11+ or Ubuntu 20.04+)")
-    arch = subprocess.run(["dpkg", "--print-architecture"], stdout=subprocess.PIPE, text=True).stdout.strip()
-    if arch not in ("amd64", "arm64"):
-        raise WgtError(f"unsupported architecture: {arch} (need amd64 or arm64)")

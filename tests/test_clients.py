@@ -123,3 +123,77 @@ def test_list_shows_device_first(server, capsys):
     # grouped by device, default exit first; the full names come back for the menu
     assert shown == [["mbp-1", "warp"], ["mbp-1", "par-fr"], ["phone", "nyc-us"], ["tv", "par-fr"]]
     assert names == ["mbp-1", "par-fr.mbp-1", "nyc-us.phone", "par-fr.tv"]
+
+
+def _conf(ctx, name):
+    os.makedirs(ctx.paths.client_dir, exist_ok=True)
+    with open(clients.client_conf(ctx, name), "w") as f:
+        f.write(f"# wireguard-tools client: {name} on boba\n# exit: x\n[Interface]\nPrivateKey = K\n")
+
+
+def test_rename_dry_run_with_wg0_up(server):
+    ctx = server(argv=["--dry-run"])
+    _conf(ctx, "mbp-1")
+    before = store.read_text(ctx.paths.client_db)
+    clients.cmd_rename(ctx, ["mbp-1", "par-fr.x"])
+    assert store.read_text(ctx.paths.client_db) == before
+
+
+def test_rename_between_exits_adds_before_removing(server):
+    ctx = server()
+    _conf(ctx, "par-fr.mbp-1")
+    clients.cmd_rename(ctx, ["par-fr.mbp-1", "nyc-us.mbp-1"])
+    calls = ctx.runner.changes()
+    add_new = next(i for i, c in enumerate(calls) if "rule add from 10.2.10.3/32 lookup 203" in c)
+    del_old = next(i for i, c in enumerate(calls) if "rule del from 10.2.10.3/32 lookup 201" in c)
+    assert add_new < del_old
+
+
+def test_rename_same_exit_leaves_rules(server):
+    ctx = server()
+    _conf(ctx, "par-fr.mbp-1")
+    clients.cmd_rename(ctx, ["par-fr.mbp-1", "par-fr.laptop"])
+    assert not [c for c in ctx.runner.changes() if " rule " in c]
+
+
+def test_rename_without_psk_refused(server):
+    ctx = server()
+    _conf(ctx, "mbp-1")
+    os.remove(os.path.join(ctx.paths.psk_dir, "mbp-1.psk"))
+    with pytest.raises(WgtError, match="no preshared key"):
+        clients.cmd_rename(ctx, ["mbp-1", "laptop"])
+    assert ctx.snap.client("mbp-1") is not None
+
+
+def test_add_rereads_files_after_lock(server):
+    ctx = server()
+    with open(ctx.paths.client_db, "a") as f:   # another command added a client meanwhile
+        f.write("late 10.2.10.6 LATEKEY 0.0.0.0/0,::/0\n")
+    clients.cmd_add(ctx, ["new"])
+    assert ctx.snap.client("new").ip != "10.2.10.6"
+
+
+def test_exit_remove_refused_while_used_and_ordered(server):
+    from wgt import exits
+    ctx = server()
+    with pytest.raises(WgtError, match="clients use exit 'par-fr'"):
+        exits.cmd_remove(ctx, ["par-fr"])
+    clients.cmd_remove(ctx, ["nyc-us.phone"])
+    ctx.runner.calls.clear()
+    exits.cmd_remove(ctx, ["nyc-us"])
+    calls = ctx.runner.changes()
+    stop = next(i for i, c in enumerate(calls) if c.startswith("systemctl stop wg-quick@wx-nyc-us"))
+    flush = next(i for i, c in enumerate(calls) if "route flush table 203" in c)
+    assert stop < flush
+    assert ctx.snap.exit("nyc-us") is None and ctx.snap.exit("par-fr") is not None
+
+
+def test_warp_switch_is_live_without_restart(server):
+    from wgt import server as srv
+    ctx = server()
+    open(ctx.cfg.wg_conf, "w").write("# Managed by wireguard-tools (WARP on)\n")
+    srv.cmd_warp(ctx, ["off"])
+    calls = ctx.runner.changes()
+    assert any("rule del from 10.2.10.0/24 lookup 100 priority 10000" in c for c in calls)
+    assert not any("restart wg-quick@wg0" in c for c in calls)
+    assert store.state_get(store.read_text(ctx.paths.state), "WARP") == "off"

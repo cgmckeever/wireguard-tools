@@ -32,14 +32,14 @@ def transfers(r: Runner, ifc: str) -> Dict[str, Tuple[int, int]]:
     out: Dict[str, Tuple[int, int]] = {}
     for line in r.query(["wg", "show", ifc, "transfer"]).splitlines():
         f = line.split()
-        if len(f) >= 3:
+        if len(f) >= 3 and f[1].isdigit() and f[2].isdigit():
             out[f[0]] = (int(f[1]), int(f[2]))
     return out
 
 
 def newest_hs(r: Runner, ifc: str) -> int:
     """Unix time of an interface's newest handshake (0 if none)."""
-    return max(handshakes(r, ifc).values() or [0])
+    return max(handshakes(r, ifc).values(), default=0)
 
 
 def hs_recent(r: Runner, ifc: str, within: int, now: Optional[float] = None) -> bool:
@@ -55,8 +55,8 @@ def rules(r: Runner, family: str = "ip") -> str:
     return r.query(family.split() + ["rule", "show"])
 
 
-def table(r: Runner, family: str, table: object) -> str:
-    return r.query(family.split() + ["route", "show", "table", str(table)])
+def table(r: Runner, family: str, tbl: object) -> str:
+    return r.query(family.split() + ["route", "show", "table", str(tbl)])
 
 
 def sysctl(r: Runner, key: str) -> str:
@@ -148,9 +148,3 @@ def mtu(ifc: str) -> str:
         return ""
 
 
-def proc_exists(path: str) -> bool:
-    return os.path.exists(path)
-
-
-def lines(text: str) -> List[str]:
-    return text.splitlines()

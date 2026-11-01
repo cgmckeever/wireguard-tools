@@ -26,7 +26,8 @@ Two commands:
   plus setting up new servers, pulling updates, exit cities from local files
   and fetching backups ([Managing servers from your machine](#managing-servers-from-your-machine)).
 
-Both are safe to re-run, support `--dry-run`, back up every file they change,
+Both are safe to re-run, back up every file they change, take `--dry-run` for
+anything that changes a server (with `wgt-ctl`, pass it to the `wgt` command),
 and never print private keys except inside a client's QR code (shown by
 `client add` and `rotate`, or `client show --qr`). They're Python 3.8+ with
 only the standard library, so a server needs nothing extra.
@@ -403,8 +404,8 @@ login, and optionally the checkout directory (default `/opt/wireguard-tools`).
 Like everything under `local/`, it is untracked:
 
 ```
-dengar  root@192.3.63.161
-boba    root@23.94.74.221
+dengar  root@203.0.113.10
+boba    root@198.51.100.20
 ```
 
 The server comes first, then the command:
@@ -427,7 +428,8 @@ wgt-ctl init --address 1.2.3.4 --name lando --branch main -- --port 51821
 ```
 
 A server is its name or list number, or `all`; leave it out (`wgt-ctl status`)
-to pick from the list. Servers can't be named `init`, `clients` or `all`.
+to pick from the list. A server name starts with a letter and can't be
+`init`, `clients`, `all`, `help` or `list`.
 Printed `scp` hints use your machine's login for that server.
 
 `init` logs in as root and, on first contact, shows the server's host key for

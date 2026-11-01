@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 import os
 import re
+import shutil
+import subprocess
 import sys
 from typing import List
 
@@ -54,9 +56,11 @@ def pick_client(ctx, verb: str) -> str:
         raise WgtError(f"usage: wgt client {verb} <name>")
     try:
         i = ui.menu("", [f"{checks.device_of(c.name):<20} {checks.exit_label(ctx, c.name):<6} {c.ip}" for c in clients],
-                    f"{verb.capitalize()} which client?")
+                    f"{verb.capitalize()} which client? (number or name)")
     except ValueError as e:
-        raise WgtError(f"no client number '{e}'")
+        if ctx.snap.client(str(e)):
+            return str(e)
+        raise WgtError(f"no client '{e}'")
     if i is None:
         raise WgtError("no client chosen")
     return clients[i].name
@@ -79,6 +83,8 @@ def pick_exits(ctx, name: str) -> List[str]:
             out.append("warp" if int(part) == 1 else codes[int(part) - 2])
         else:
             raise WgtError(f"no exit number {part}")
+    if not out:
+        raise WgtError("no exit chosen")
     return out
 
 
@@ -106,7 +112,7 @@ def show_qr(ctx, conf: str) -> None:
     WezTerm it is drawn as a QR_WIDTH-cell-wide image, streamed so the key
     never touches disk; QR_WIDTH=0 forces text."""
     width = os.environ.get("QR_WIDTH", "32")
-    if not ctx.runner.ok(["sh", "-c", "command -v qrencode"]):
+    if not shutil.which("qrencode"):
         raise WgtError("qrencode not installed")
     if not width.isdigit():
         raise WgtError(f"QR_WIDTH must be a number of terminal columns: '{width}'")
@@ -114,9 +120,11 @@ def show_qr(ctx, conf: str) -> None:
     data = qr_data(store.read_text(conf) or "")
     term = f"{os.environ.get('LC_TERMINAL', '')} {os.environ.get('TERM_PROGRAM', '')}"
     if int(width) > 0 and sys.stdout.isatty() and not os.environ.get("TMUX") and re.search(r"iTerm2|iTerm\.app|WezTerm", term):
-        import subprocess
-        png = subprocess.run(["qrencode", "-t", "PNG", "-s", "4", "-m", "2", "-o", "-"], input=data.encode(),
-                             stdout=subprocess.PIPE, check=True).stdout
+        p = subprocess.run(["qrencode", "-t", "PNG", "-s", "4", "-m", "2", "-o", "-"], input=data.encode(),
+                           stdout=subprocess.PIPE)
+        if p.returncode != 0:
+            raise WgtError("qrencode failed")
+        png = p.stdout
         sys.stdout.write(f"\033]1337;File=inline=1;width={width};preserveAspectRatio=1:"
                          f"{base64.b64encode(png).decode()}\a\n")
         sys.stdout.flush()
@@ -165,7 +173,7 @@ def issue_client(ctx, name: str, ip: str, allowed: str, old_pub: str = "") -> No
         ctx.out.warn(f"{ctx.cfg.WG_IF} is not up; the peer is in {ctx.cfg.wg_conf} and loads when it starts")
     # QR by default when a person is watching; --qr forces it, --no-qr skips it.
     if ctx.args.qr == 1 or (ctx.args.qr == 0 and sys.stdout.isatty()):
-        if ctx.args.qr == 1 or ctx.runner.ok(["sh", "-c", "command -v qrencode"]):
+        if ctx.args.qr == 1 or shutil.which("qrencode"):
             show_qr(ctx, conf)
         else:
             ctx.out.warn("qrencode not installed; no QR code")
@@ -329,24 +337,28 @@ def cmd_rename(ctx, words: List[str]) -> None:
     text = store.read_text(conf)
     if text is None:
         raise WgtError(f"no config for '{old}' ({conf})")
+    psk = store.read_text(os.path.join(ctx.paths.psk_dir, f"{old}.psk")) or ""
+    if not psk.strip():
+        raise WgtError(f"'{old}' has no preshared key ({ctx.paths.psk_dir}/{old}.psk); rotate it instead")
+    new_c = store.Client(new, c.ip, c.pub, c.allowed)
     ctx.runner.step(f"Rename client '{old}' to '{new}' (same keys and address; exit: {checks.exit_label(ctx, new)})",
                     f"wgt client rename {new} {old}")
-    up = ops.wg_up(ctx)
-    if up:
-        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, c, "down"))
     text = re.sub(r"(?m)^# wireguard-tools client: .*$", f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
     text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
     ctx.files.write(newconf, 0o600, text)
-    psk = store.read_text(os.path.join(ctx.paths.psk_dir, f"{old}.psk")) or ""
     ctx.files.write(os.path.join(ctx.paths.psk_dir, f"{new}.psk"), 0o600, psk)
+    was_disabled = ctx.snap.is_disabled(old)
     ops.put_client(ctx, old)
-    ops.put_client(ctx, new, store.Client(new, c.ip, c.pub, c.allowed))
-    if ctx.snap.is_disabled(old):
+    ops.put_client(ctx, new, new_c)
+    if was_disabled:
         ops.set_disabled(ctx, old, False)
         ops.set_disabled(ctx, new, True)
     ops.write_wg_conf(ctx)
-    if up:
-        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, ctx.snap.client(new), "up"))
+    # Moving between exits: the new exit's rules go in before the old ones come
+    # out, so the client never falls back to the default exit in between.
+    if ops.wg_up(ctx) and c.exit != new_c.exit:
+        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, new_c, "up"))
+        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, c, "down"))
     ctx.files.forget(conf)
     ctx.files.forget(os.path.join(ctx.paths.psk_dir, f"{old}.psk"))
     ctx.out.info(f"config now: {newconf} (same keys: the device's tunnel keeps working; rename it there if you like)")
@@ -382,6 +394,14 @@ def cmd_disable(ctx, words: List[str], disabling: bool) -> None:
         ops.add_live_peer(ctx, name, c.pub, c.ip)
 
 
+def cmd_disable_client(ctx, words: List[str]) -> None:
+    cmd_disable(ctx, words, True)
+
+
+def cmd_enable_client(ctx, words: List[str]) -> None:
+    cmd_disable(ctx, words, False)
+
+
 def cmd_show(ctx, words: List[str]) -> None:
     """A client's config with keys redacted (--qr adds the QR code), and how to fetch it."""
     from .system import redact
@@ -406,7 +426,7 @@ def cmd_share(ctx, words: List[str]) -> None:
     conf = client_conf(ctx, name)
     if not os.path.isfile(conf):
         raise WgtError(f"no config for '{name}' (see: wgt client list)")
-    if not ctx.runner.ok(["sh", "-c", "command -v wormhole"]):
+    if not shutil.which("wormhole"):
         raise WgtError("magic-wormhole not installed (apt-get install magic-wormhole)")
     if ctx.runner.dry_run:
         ctx.out.info(f"[dry-run] would run: wormhole send {conf}")
@@ -480,9 +500,9 @@ def cmd_client(ctx, words: List[str]) -> None:
     table = {
         "list": cmd_list, "add": cmd_add, "show": cmd_show, "share": cmd_share, "rotate": cmd_rotate,
         "rename": cmd_rename, "remove": cmd_remove,
-        "disable": lambda c, w: cmd_disable(c, w, True), "enable": lambda c, w: cmd_disable(c, w, False),
+        "disable": cmd_disable_client, "enable": cmd_enable_client,
     }
     fn = table.get(sub)
     if fn is None:
         raise WgtError(f"unknown client command: {sub} (list, add, show, share, rotate, rename, disable, enable, remove)")
-    fn(ctx, rest)
+    return fn(ctx, rest)

@@ -9,13 +9,16 @@ from . import live, render, store
 from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 
 
-def wgt_command() -> str:
-    """How systemd runs this tool: the /usr/local/sbin/wgt link setup makes, or
-    this checkout's bin/wgt."""
-    link = "/usr/local/sbin/wgt"
-    if os.path.exists(link):
-        return link
+def checkout_wgt() -> str:
+    """This checkout's bin/wgt."""
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "wgt")
+
+
+def wgt_command(ctx=None) -> str:
+    """How systemd runs this tool: the <sbin>/wgt link setup makes, or this
+    checkout's bin/wgt."""
+    link = os.path.join(ctx.paths.sbin_dir if ctx else "/usr/local/sbin", "wgt")
+    return link if os.path.exists(link) else checkout_wgt()
 
 
 def write_timer(ctx, name: str, what: str, service: str, timer: str) -> None:
@@ -47,7 +50,7 @@ def write_watchdog(ctx) -> None:
     """The WARP watchdog: every 30s, `wgt watchdog warp`."""
     svc = render.render_template("watchdog.service.tmpl", NAME=WATCHDOG,
                                  WHAT=f"WARP watchdog (new source port if {ctx.cfg.WARP_IF} stops handshaking)",
-                                 COMMAND=f"{wgt_command()} watchdog warp")
+                                 COMMAND=f"{wgt_command(ctx)} watchdog warp", TIMEOUT="60")
     timer = render.render_template("warp-watchdog.timer.tmpl")
     write_timer(ctx, WATCHDOG,
                 f"WARP watchdog ({WATCHDOG}.timer: new source port for {ctx.cfg.WARP_IF} after "
@@ -58,7 +61,7 @@ def write_exit_watchdog(ctx) -> None:
     """The exit watchdog: every 10s, `wgt watchdog exits`."""
     svc = render.render_template("watchdog.service.tmpl", NAME=EXIT_WATCHDOG,
                                  WHAT="exit-city watchdog (exits up while their clients are active)",
-                                 COMMAND=f"{wgt_command()} watchdog exits")
+                                 COMMAND=f"{wgt_command(ctx)} watchdog exits", TIMEOUT="30")
     timer = render.render_template("exit-watchdog.timer.tmpl")
     write_timer(ctx, EXIT_WATCHDOG,
                 f"exit watchdog ({EXIT_WATCHDOG}.timer: exits up while their clients are active, "

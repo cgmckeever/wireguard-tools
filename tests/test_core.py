@@ -158,5 +158,43 @@ def test_backup_record():
 
 
 def test_snapshot_exit_clients():
-    snap = store.Snapshot(None, store.parse_clients("a 1 k\npar-fr.a 2 k\npar-fr2.b 3 k\n"), [], [])
+    snap = store.Snapshot(None, store.parse_clients("a 10.0.0.2 k\npar-fr.a 10.0.0.3 k\npar-fr2.b 10.0.0.4 k\n"), [], [])
     assert [c.name for c in snap.exit_clients("par-fr")] == ["par-fr.a"]
+
+
+@pytest.mark.parametrize("name", ["bob\n", "wg0\n"])
+def test_trailing_newline_rejected(name):
+    assert store.valid_client_name(name) is not None
+    c = cfg(WG_IF=name)
+    with pytest.raises(WgtError):
+        c.finalize(kernel_ipv6=True)
+
+
+def test_non_ascii_digits_rejected():
+    with pytest.raises(WgtError, match="bad port"):
+        cfg(WG_PORT="٥١٨٢٠").finalize(kernel_ipv6=True)
+
+
+def test_ip6_of_outside_subnet():
+    c = cfg()
+    c.finalize(kernel_ipv6=True)
+    with pytest.raises(WgtError):
+        c.ip6_of("10.9.9.9")
+
+
+@pytest.mark.parametrize("route,dev", [
+    ("default via 1.2.3.1 dev eth0 proto static", "eth0"),
+    ("default dev venet0 scope link", "venet0"),
+    ("default via 1.2.3.1 dev ens3 metric 100", "ens3"),
+])
+def test_route_dev(route, dev):
+    from wgt import host
+    assert host.route_dev(route) == dev
+
+
+def test_ipt_count_matches_iptables_s():
+    from wgt import live
+    from wgt.system import FakeRunner
+    r = FakeRunner({"iptables -t filter -S INPUT": (0, "-A INPUT -p udp -m udp --dport 51820 -j ACCEPT\n"
+                                                         "-A INPUT -p udp -m udp --dport 51820 -j ACCEPT\n")})
+    assert live.ipt_count(r, "iptables", "filter", "INPUT", "-p udp --dport 51820 -j ACCEPT") == 2

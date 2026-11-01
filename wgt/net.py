@@ -8,7 +8,11 @@ import re
 
 
 def ip2int(ip: str) -> int:
-    a, b, c, d = (int(x) for x in ip.split("."))
+    from .errors import WgtError
+    m = re.fullmatch(r"([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})", ip)
+    if not m or any(int(x) > 255 for x in m.groups()):
+        raise WgtError(f"not an IPv4 address: '{ip}'")
+    a, b, c, d = (int(x) for x in m.groups())
     return (a << 24) | (b << 16) | (c << 8) | d
 
 
@@ -16,14 +20,14 @@ def int2ip(n: int) -> str:
     return f"{(n >> 24) & 255}.{(n >> 16) & 255}.{(n >> 8) & 255}.{n & 255}"
 
 
-_SUBNET6 = re.compile(r"^([0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4}::/64$")
+_SUBNET6 = re.compile(r"([0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4}::/64")
 
 
 def canon_subnet6(value: str) -> str | None:
     """Lowercase a "<groups>::/64" prefix and drop leading zeros, as ip(8)
     prints it; None if it isn't one."""
     p = value.lower()
-    if not _SUBNET6.match(p):
+    if not _SUBNET6.fullmatch(p):
         return None
     groups = p[: -len("::/64")].split(":")
     return ":".join(format(int(g, 16), "x") for g in groups) + "::/64"
@@ -32,7 +36,7 @@ def canon_subnet6(value: str) -> str | None:
 def random_subnet6() -> str:
     """A new random ULA /64 (RFC 4193): fdXX:XXXX:XXXX::/64."""
     h = os.urandom(5).hex()
-    return canon_subnet6(f"fd{h[0:2]}:{h[2:6]}:{h[6:10]}::/64") or ""
+    return str(canon_subnet6(f"fd{h[0:2]}:{h[2:6]}:{h[6:10]}::/64"))
 
 
 def random_subnet(routes: str, rng: random.Random | None = None) -> str:

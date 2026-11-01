@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from . import rules
 from .config import Config
@@ -25,7 +25,7 @@ def render_template(name: str, template_dir: str = TEMPLATE_DIR, **values: str) 
     path = os.path.join(template_dir, name)
     try:
         with open(path, encoding="utf-8") as f:
-            out = f.read()
+            out = f.read().rstrip("\n")
     except FileNotFoundError:
         raise WgtError(f"missing template: {path}")
     for k, v in values.items():
@@ -36,7 +36,7 @@ def render_template(name: str, template_dir: str = TEMPLATE_DIR, **values: str) 
     return out.rstrip("\n") + "\n"
 
 
-def _kv(line: str):
+def _kv(line: str) -> Tuple[str, str]:
     """(key, value) of a "Key = value" line, as the bash version's awk split it."""
     k = _KEY.sub("", line, count=1).lstrip()
     v = _VAL.sub("", line, count=1).rstrip()

@@ -4,12 +4,11 @@ what it must; what it does is logged to the journal (`wgt log`)."""
 
 from __future__ import annotations
 
-import fcntl
 import os
 import time
 from typing import List
 
-from . import live
+from . import live, ops
 from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 
@@ -72,21 +71,12 @@ def exits(ctx) -> None:
     new source port, then a restart. Skips the run while wireguard-tools is
     changing things (its lock), and an exit that is being checked (its hold
     file)."""
-    if not ctx.snap.exits:
-        return
-    try:
-        lock = os.open(ctx.paths.lock_file, os.O_WRONLY | os.O_CREAT, 0o644)
-    except OSError:
-        return
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        os.close(lock)
+    if not ctx.snap.exits or not ops.try_lock(ctx):
         return
     try:
         _exits(ctx)
     finally:
-        os.close(lock)
+        ops.release_lock(ctx)
 
 
 def _exits(ctx) -> None:

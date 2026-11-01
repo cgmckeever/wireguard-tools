@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import sys
 import time
 from typing import List, Tuple
@@ -126,15 +127,19 @@ def check(ctx, code: str) -> Tuple[bool, str]:
     """Bring an exit up if needed and see whether traffic passes through its
     WARP. It is left up only if it was up."""
     was_up = is_up(ctx, code)
-    if not was_up:
-        up(ctx, code)
     hold(ctx, code)
-    wait_hs(ctx, code)
-    t = trace(ctx, code)
-    if was_up:
-        unhold(ctx, code)
-    else:
-        down(ctx, code)
+    try:
+        if not was_up:
+            up(ctx, code)
+        wait_hs(ctx, code)
+        t = trace(ctx, code)
+    except WgtError as e:
+        t = f"could not bring it up: {e}"
+    finally:
+        if was_up:
+            unhold(ctx, code)
+        else:
+            down(ctx, code)
     return live.is_warp_trace(t), t or "no answer"
 
 
@@ -159,6 +164,10 @@ def free_idx(ctx) -> int:
 
 
 # --- commands ---
+
+def cmd_list(ctx, words: List[str]) -> None:
+    print_list(ctx)
+
 
 def cmd_add(ctx, words: List[str]) -> None:
     """exit add <code> <proton.conf|->: import (or replace) a Proton WireGuard
@@ -230,13 +239,13 @@ def cmd_remove(ctx, words: List[str]) -> None:
     routing, firewall rules, WARP account and Proton config (and their copies)."""
     from . import ops
     code = words[0] if words else ""
+    ops.take_lock(ctx)
     e = ctx.snap.exit(code) if code else None
     if e is None:
         raise WgtError(f"no exit city '{code}' (see: wgt exit list)")
     users = " ".join(c.name for c in ctx.snap.exit_clients(code))
     if users:
         raise WgtError(f"clients use exit '{code}': {users}; remove them first (wgt client remove <name>)")
-    ops.take_lock(ctx)
     ctx.runner.step(f"Remove exit city '{code}' ({e.label}): its tunnels, routing, WARP account and Proton config",
                     f"wgt exit add {code} <proton.conf>")
     ops.confirm(ctx, f"Remove exit {code}?")
@@ -244,7 +253,7 @@ def cmd_remove(ctx, words: List[str]) -> None:
     if ops.wg_up(ctx):
         ctx.runner.sh_lines(rules.ipt_cmds(list(reversed(rules.ipt_rules_out(ctx.cfg, f"wx-{code}"))), "down"))
         ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, "down"))
-    if store.state_get(ctx.snap.state, "UFW") == "1" and ctx.runner.ok(["sh", "-c", "command -v ufw"]):
+    if store.state_get(ctx.snap.state, "UFW") == "1" and shutil.which("ufw"):
         ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", f"wx-{code}"], check=False)
     ctx.files.write(ctx.paths.exit_db, 0o600, store.put_exit(store.read_text(ctx.paths.exit_db), code))
     ctx.reload()
@@ -263,18 +272,18 @@ def cmd_test(ctx, words: List[str]) -> None:
     ctx.out.log("Exit city tests")
     res = checks.Results()
     run_tests(ctx, res, bring_up=True)
-    checks.report(ctx, res)
+    return checks.report(ctx, res)
 
 
 def cmd_exit(ctx, words: List[str]) -> None:
     from .ops import require_setup
     require_setup(ctx)
     sub, rest = (words[0], words[1:]) if words else ("list", [])
-    table = {"list": lambda c, w: print_list(c), "add": cmd_add, "remove": cmd_remove, "rm": cmd_remove, "test": cmd_test}
+    table = {"list": cmd_list, "add": cmd_add, "remove": cmd_remove, "rm": cmd_remove, "test": cmd_test}
     fn = table.get(sub)
     if fn is None:
         raise WgtError("usage: wgt exit [list | add <code> <proton.conf|-> [--label NAME] | remove <code> | test]")
-    fn(ctx, rest)
+    return fn(ctx, rest)
 
 
 # --- checks ---
@@ -315,8 +324,13 @@ def run_tests(ctx, res, bring_up: bool = False) -> None:
         act = active(ctx, e.code)
         started = False
         if bring_up and not is_up(ctx, e.code):
-            up(ctx, e.code)
             started = True
+            try:
+                up(ctx, e.code)
+            except WgtError as err:
+                res.result("FAIL", f"exit {e.code}: could not bring it up ({err})")
+                down(ctx, e.code)
+                continue
         if is_up(ctx, e.code):
             hold(ctx, e.code)
             wait_hs(ctx, e.code)

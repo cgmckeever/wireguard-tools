@@ -7,8 +7,12 @@
 ctl="$(cd "$(dirname "$0")/.." && pwd)/bin/wgt-ctl"
 case "${1:-}" in
     ""|list|init|clients|help|-h|--help) set -- "$@" ;;
-    push-exits) shift; set -- "${1:-}" exit-add "${@:2}" ;;
-    *) cmd="$1"; shift; sel="${1:-}"; [ $# -eq 0 ] || shift; set -- "$sel" "$cmd" "$@" ;;
+    *)
+        cmd="$1"; shift
+        sel="${1:-}"; [ $# -eq 0 ] || shift
+        # No server given: wgt-ctl <cmd> picks one.
+        if [ -n "$sel" ]; then set -- "$sel" "$cmd" "$@"; else set -- "$cmd" "$@"; fi
+        ;;
 esac
 echo "note: scripts/servers.sh is now wgt-ctl (server first): wgt-ctl $*" >&2
 exec "$ctl" "$@"

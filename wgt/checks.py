@@ -9,8 +9,7 @@ from typing import Callable, List, Optional, Tuple
 
 from . import exits, host, live, rules, store, ui
 from .ops import require_setup
-from .const import EXIT_WATCHDOG, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
-from .errors import WgtError
+from .const import RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
 
 
 # --- settings table ---
@@ -146,12 +145,13 @@ class Tests:
         src = live.ipv6_global_addr(self.r, self.c.WARP_IF)
         if not src:
             return False
-        prio = str(9999)
-        rule = ["ip", "-6", "rule", "{}", "from", src, "lookup", self.c.RT_TABLE, "priority", prio]
-        self.r.ok([x if x != "{}" else "add" for x in rule])
-        out = self.r.query(["curl", "-6", "-fsS", "--max-time", "10", "--interface", src,
-                            "https://[2606:4700:4700::1111]/cdn-cgi/trace"])
-        self.r.ok([x if x != "{}" else "del" for x in rule])
+        rule = ["from", src, "lookup", self.c.RT_TABLE, "priority", str(RULE_PRIO - 1)]
+        self.r.ok(["ip", "-6", "rule", "add"] + rule)
+        try:
+            out = self.r.query(["curl", "-6", "-fsS", "--max-time", "10", "--interface", src,
+                                "https://[2606:4700:4700::1111]/cdn-cgi/trace"])
+        finally:
+            self.r.ok(["ip", "-6", "rule", "del"] + rule)
         return live.is_warp_trace(out)
 
     def default_route_kept(self) -> bool:
@@ -222,18 +222,18 @@ class Tests:
         return res
 
 
-def report(ctx, res: Results) -> None:
-    """Print the totals; raise (exit 1) on any FAIL."""
+def report(ctx, res: Results) -> int:
+    """Print the totals; the exit status is 1 on any FAIL."""
     print("")
     ctx.out.info(f"{res.passed} passed, {res.failed} failed, {res.warned} warnings")
-    if res.failed:
-        raise SystemExit(1)
+    return 1 if res.failed else 0
 
 
-def cmd_test(ctx, words: List[str]) -> None:
+def cmd_test(ctx, words: List[str]) -> int:
+    """All checks (WARP, wg0, rules, units, exit cities)."""
     require_setup(ctx)
     ctx.out.log(f"Tests (WARP {ctx.cfg.WARP})")
-    report(ctx, Tests(ctx).run("all"))
+    return report(ctx, Tests(ctx).run("all"))
 
 
 # --- status ---

@@ -5,7 +5,7 @@
 set -uo pipefail
 tmp="$1"
 red() { sed -E 's/^([[:space:]]*(PrivateKey|PresharedKey)[[:space:]]*=[[:space:]]*).*/\1<redacted>/'; }
-[ -d "$tmp/bash" ] || git -C "$(dirname "$0")/.." archive --prefix=bash/ bash-final | tar -xf - -C "$tmp"
+[ -d "$tmp/bash" ] || { echo "    no $tmp/bash (tools/parity.sh unpacks git tag bash-final there)"; exit 1; }
 sed '$d' "$tmp/bash/wg-setup.sh" >"$tmp/bash/ws.sh"
 (
     set -Eeuo pipefail
