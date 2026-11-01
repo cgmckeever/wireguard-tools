@@ -368,6 +368,9 @@ cmd_remove() {
             if [ -e "$f" ]; then run rm -f "$f"; fi
         done
     done
+    # Nothing left for rollback to restore: drop them from the backup record.
+    forget_file "$(client_conf "$name")"
+    forget_file "$PSK_DIR/$name.psk"
 }
 
 # Disable or enable a client: cmd_disable <name> 1 (disable) | 0 (enable).
