@@ -81,7 +81,9 @@ def make_ctx(tmp_path):
         run.mkdir(exist_ok=True)
         paths = Paths(wg_dir=str(wg), backup_dir=str(tmp_path / "bak"), lock_file=str(tmp_path / "lock"),
                       run_dir=str(run), hosts_file=str(tmp_path / "hosts"),
-                      cloud_cfg_dir=str(tmp_path / "cloud.cfg.d"))
+                      cloud_cfg_dir=str(tmp_path / "cloud.cfg.d"), systemd_dir=str(tmp_path / "systemd"),
+                      sbin_dir=str(tmp_path / "sbin"), sysctl_file=str(tmp_path / "99-wg.conf"),
+                      wgcf_bin=str(tmp_path / "wgcf"))
         base = {} if bare else KEYS
         runner = FakeRunner(dict(base, **(answers or {})), out=Out())
         facts = Facts(kernel_ipv6=True, has_ipv6=has_ipv6, hostname="boba", routes4="", default_route="")

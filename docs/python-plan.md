@@ -166,9 +166,19 @@ that ships before then changes a running server.
 - Errors raise one `WgtError`, which prints `ERROR: ...` and exits 1. A
   failure part-way through setup removes the wg0 rules it had applied, as the
   ERR trap does today.
-- Every change goes through `Runner` or `write_file`, so it is dry-run aware
+- Every change goes through `Runner` or `Files.write`, so it is dry-run aware
   and backed up first. Keys never reach a log line, a command line or a diff:
   diffs are redacted, and keys are passed through files or stdin.
-- Type hints throughout; `dataclasses` for clients, exits and settings.
+- Type hints throughout (`ctx: Ctx`, imported under `TYPE_CHECKING`);
+  `dataclasses` for clients, exits and settings. ruff and mypy stay clean.
+- Output goes through `Out`: `==> ` steps, 4-space info lines, `Out.line` for
+  tables, WARN/ERROR on stderr. Only raw payloads (a config, a QR code, the
+  debug render, the help text) are written straight to stdout.
+- Prompts: standalone questions are indented 4 spaces, a menu's prompt 2 (as
+  its title). Steps start with a verb and carry an accurate undo hint.
+- Errors: `usage: ...` for missing arguments; `unknown <x> command: ...
+  (see: wgt help)` for a wrong one.
+- Paths come from `Paths` helpers (const.py), never literals, so tests can
+  move every one of them into a temp dir.
 - Module and function docstrings say why, not what, matching the current
   comments.

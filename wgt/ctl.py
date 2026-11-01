@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
 from . import render, store, ui
+from .clients import CLIENT_FMT
 from .errors import WgtError
 from .system import Out
 
@@ -190,7 +191,7 @@ def cmd_init(argv: List[str]) -> None:
             opts[argv[i]] = argv[i + 1]
             i += 2
             continue
-        raise WgtError(f"init: unknown option {argv[i]}")
+        raise WgtError(f"unknown option: {argv[i]} (see: wgt-ctl help)")
     ensure_local()
     address, name = opts["--address"], opts["--name"]
     if (not address or not name) and not ui.have_tty():
@@ -291,7 +292,7 @@ def repo_url() -> str:
 
 def cmd_clients() -> None:
     """Every client on every server in one table."""
-    fmt = "  {:<10} {:<20} {:<16} {:<15} {:<14} {:<12} {}"
+    fmt = "  {:<10} " + CLIENT_FMT
     print("")
     print(fmt.format("SERVER", "NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS"))
     for s in servers():
@@ -418,9 +419,9 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
             raise WgtError("no code given")
         code = reply or code
         if not store.valid_exit_code(code):
-            print("  2-6 of a-z0-9 and -, starting with a letter (e.g. par-fr)")
+            out.info("2-6 of a-z0-9 and -, starting with a letter (e.g. par-fr)")
         elif code in taken:
-            print(f"  {server} already has an exit '{code}'; pick another")
+            out.info(f"{server} already has an exit '{code}'; pick another")
         else:
             break
     with open(LINKS, "a") as f:

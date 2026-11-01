@@ -106,7 +106,7 @@ class Tests:
         self.ctx = ctx
         self.r = ctx.runner
         self.c = ctx.cfg
-        self.res = res or results.Results()
+        self.res = res or results.Results(out=ctx.out.line)
         self.scope = "all"
 
     def check_warp(self, desc: str, ok: bool) -> None:

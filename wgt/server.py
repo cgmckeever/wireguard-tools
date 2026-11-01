@@ -17,7 +17,7 @@ import time
 from typing import TYPE_CHECKING, List
 
 from . import checks, exits, host, live, net, ops, render, rules, store, ui, units, warp
-from .const import CONFIG_KEYS, EXIT_WATCHDOG, KEEP_ARCHIVES, WATCHDOG
+from .const import CONFIG_KEYS, EXIT_WATCHDOG, KEEP_ARCHIVES, MARKER, WATCHDOG
 from .errors import WgtError
 from .system import settings_of, write_private
 
@@ -89,7 +89,7 @@ def start_unit(ctx: Ctx, ifc: str, changed: bool) -> None:
 
 def link_wgt(ctx: Ctx) -> None:
     """/usr/local/sbin/wgt -> this checkout's bin/wgt, so it runs from anywhere."""
-    link = os.path.join(ctx.paths.sbin_dir, "wgt")
+    link = ctx.paths.wgt_link
     target = units.checkout_wgt()
     if os.path.islink(link) and os.readlink(link) == target:
         return
@@ -207,8 +207,8 @@ def offer_hostname(ctx: Ctx) -> None:
         return
     new = want + (full[len(cur):] if "." in full else "")   # keep the domain part
     ctx.runner.step(f"Rename host {full} -> {new} (and in {ctx.paths.hosts_file})",
-                    f"hostnamectl set-hostname {full}; wgt rollback restores {ctx.paths.hosts_file} "
-                    "and removes the cloud-init setting")
+                    f"hostnamectl set-hostname {full}; put {cur} back in {ctx.paths.hosts_file}; "
+                    f"rm {os.path.join(ctx.paths.cloud_cfg_dir, '99-wg-tools-hostname.cfg')}")
     ctx.runner.run(["hostnamectl", "set-hostname", new])
     hosts = store.read_text(ctx.paths.hosts_file) or ""
     if re.search(rf"\b{re.escape(cur)}\b", hosts):
@@ -309,11 +309,10 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
     want = f"{ctx.cfg.values['ENDPOINT']}:{ctx.cfg.WG_PORT}"
     stale: List[str] = []
     for c in ctx.snap.clients:
-        conf = os.path.join(ctx.paths.client_dir, f"{ctx.cfg.SERVER_NAME}.{c.name}.conf")
+        conf = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
         src = conf
         if not os.path.isfile(conf):
-            olds = ([os.path.join(ctx.paths.client_dir, f"{old_name}.{c.name}.conf")] if old_name else []) + \
-                   [os.path.join(ctx.paths.client_dir, f"{c.name}.conf")]
+            olds = ([ctx.paths.client_conf(old_name, c.name)] if old_name else []) + [ctx.paths.client_conf("", c.name)]
             src = next((o for o in olds if os.path.isfile(o)), "")
             if not src:
                 continue
@@ -538,7 +537,7 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     if ctx.cfg.saved.get("WARP"):
         raise WgtError("this server is already set up; run 'wgt rollback' (or 'rollback --purge') first")
     ops.take_lock(ctx)
-    has_warp = os.path.join(ctx.paths.wgcf_dir, "wgcf-account.toml") in members
+    has_warp = ctx.paths.wgcf_account() in members
     has_exits = any(re.match(re.escape(ctx.paths.exit_dir) + r"/.*/wgcf-account\.toml$", m) for m in members)
     what = "keys, clients, settings"
     what += " and WARP account" if has_warp else ""
@@ -624,7 +623,7 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
         r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.all.forwarding={orig_fwd6}"])
     if orig_ra:
         r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.{pub}.accept_ra={orig_ra}"], check=False)
-    tunnels = [ctx.paths.wg(f"{k}-{e.code}.conf") for e in ctx.snap.exits for k in ("px", "wx")]
+    tunnels = [path for e in ctx.snap.exits for path in (ctx.paths.px_conf(e.code), ctx.paths.wx_conf(e.code))]
     for path in [c.wg_conf, c.warp_conf] + tunnels:
         f.restore_original(path, remove_new=ctx.args.purge)
     p = ctx.paths
@@ -638,12 +637,12 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
         # Configs carrying our marker are ours (a restored original never does).
         for path in (c.wg_conf, c.warp_conf):
             text = store.read_text(path)
-            if text is not None and "# Managed by wireguard-tools" in text:
+            if text is not None and MARKER in text:
                 f.remove(path)
         f.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.state, p.backup_map, p.exit_db)
         for d in (p.wgcf_dir, p.client_dir, p.psk_dir, p.exit_dir):
             f.remove_tree(d)
-        f.remove(os.path.join(p.sbin_dir, "wgt"))
+        f.remove(p.wgt_link)
         ctx.out.info(f"left installed: packages and {p.wgcf_bin}")
     else:
         # Not set up any more (wgt client and restore check this).

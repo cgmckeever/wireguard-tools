@@ -11,7 +11,6 @@ Reading is pure; writes return the new text, and system.Files writes it."""
 
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Sequence
@@ -277,5 +276,5 @@ def psk_reader(paths: Paths, read: Optional[Reader] = None) -> Callable[[str], s
     read = read or read_text
 
     def psk(name: str) -> str:
-        return (read(os.path.join(paths.psk_dir, f"{name}.psk")) or "").rstrip("\n")
+        return (read(paths.psk(name)) or "").rstrip("\n")
     return psk

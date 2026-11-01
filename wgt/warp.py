@@ -96,8 +96,8 @@ def register(ctx: Ctx, directory: Optional[str] = None) -> bool:
     log = os.path.join(d, "wgcf.log")
     if not ctx.runner.dry_run:
         os.makedirs(d, mode=0o700, exist_ok=True)
-    if os.path.isfile(os.path.join(d, "wgcf-account.toml")):
-        ctx.out.info(f"WARP account exists ({d}/wgcf-account.toml); not re-registering")
+    if os.path.isfile(ctx.paths.wgcf_account(d)):
+        ctx.out.info(f"WARP account exists ({ctx.paths.wgcf_account(d)}); not re-registering")
     else:
         ctx.runner.step(f"Register a free WARP account in {d} (accepts Cloudflare's WARP terms)", f"rm -rf {d}")
         if not ctx.runner.dry_run and not _wgcf(ctx, d, ["register", "--accept-tos"], log, append=False):
@@ -108,7 +108,7 @@ def register(ctx: Ctx, directory: Optional[str] = None) -> bool:
     if os.path.isfile(ctx.paths.wgcf_profile(d)) and not ctx.args.force:
         ctx.out.info("WARP profile exists")
         return True
-    ctx.runner.step("Generate WARP WireGuard profile", f"rm {d}/wgcf-profile.conf")
+    ctx.runner.step("Generate WARP WireGuard profile", f"rm {ctx.paths.wgcf_profile(d)}")
     if not ctx.runner.dry_run:
         if not _wgcf(ctx, d, ["generate"], log, append=True):
             ctx.out.warn(f"wgcf generate failed; see {log}")

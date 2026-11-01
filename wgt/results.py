@@ -16,7 +16,7 @@ class Results:
     passed: int = 0
     failed: int = 0
     warned: int = 0
-    out: Callable[[str], None] = print
+    out: Callable[[str], None] = print   # commands pass ctx.out.line
 
     def result(self, kind: str, desc: str) -> None:
         self.out(f"  {kind:<4} {desc}")

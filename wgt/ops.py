@@ -181,7 +181,7 @@ def set_disabled(ctx: Ctx, name: str, disabled: bool) -> None:
 
 def add_live_peer(ctx: Ctx, name: str, pub: str, ip: str) -> None:
     ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "preshared-key",
-                    os.path.join(ctx.paths.psk_dir, f"{name}.psk"), "allowed-ips", ctx.cfg.client_addrs(ip)])
+                    ctx.paths.psk(name), "allowed-ips", ctx.cfg.client_addrs(ip)])
     ctx.out.info(f"peer live on {ctx.cfg.WG_IF} (other clients unaffected)")
 
 

@@ -107,6 +107,23 @@ class Paths:
     def exit_db(self) -> str:
         return self.wg("exits.db")
 
+    def psk(self, name: str) -> str:
+        """Client <name>'s preshared key."""
+        return os.path.join(self.psk_dir, f"{name}.psk")
+
+    def client_conf(self, server: str, name: str) -> str:
+        """A client's config as handed out; <server> is "" for the oldest naming."""
+        return os.path.join(self.client_dir, f"{server}.{name}.conf" if server else f"{name}.conf")
+
+    @property
+    def wgt_link(self) -> str:
+        """The link setup makes so `wgt` runs from anywhere."""
+        return os.path.join(self.sbin_dir, "wgt")
+
+    def wgcf_account(self, directory: str = "") -> str:
+        """The WARP account wgcf registered, in <directory> (default the main one)."""
+        return os.path.join(directory or self.wgcf_dir, "wgcf-account.toml")
+
     def wgcf_profile(self, directory: str = "") -> str:
         """The WARP profile wgcf generated, in <directory> (default the main one)."""
         return os.path.join(directory or self.wgcf_dir, "wgcf-profile.conf")

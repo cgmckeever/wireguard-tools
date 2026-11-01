@@ -6,7 +6,7 @@ import os
 from typing import TYPE_CHECKING, List, Optional
 
 from . import live, render, store
-from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
+from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE, Paths
 
 if TYPE_CHECKING:
     from .cli import Ctx
@@ -20,7 +20,7 @@ def checkout_wgt() -> str:
 def wgt_command(ctx: Optional[Ctx] = None) -> str:
     """How systemd runs this tool: the <sbin>/wgt link setup makes, or this
     checkout's bin/wgt."""
-    link = os.path.join(ctx.paths.sbin_dir if ctx else "/usr/local/sbin", "wgt")
+    link = (ctx.paths if ctx else Paths()).wgt_link
     return link if os.path.exists(link) else checkout_wgt()
 
 

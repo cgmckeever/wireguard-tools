@@ -24,7 +24,8 @@ if TYPE_CHECKING:
 # --- helpers ---
 
 def client_conf(ctx: Ctx, name: str) -> str:
-    return os.path.join(ctx.paths.client_dir, f"{ctx.cfg.SERVER_NAME}.{name}.conf")
+    """Where client <name>'s config lives: <server>.<name>.conf."""
+    return ctx.paths.client_conf(ctx.cfg.SERVER_NAME, name)
 
 
 def valid_name(name: str) -> None:
@@ -74,8 +75,8 @@ def pick_exits(ctx: Ctx, name: str) -> List[str]:
     codes = [e.code for e in ctx.snap.exits]
     items = [f"{'warp':<6} Cloudflare WARP from {ctx.cfg.SERVER_NAME} (default)"]
     items += [f"{e.code:<6} {e.label}" for e in ctx.snap.exits]
-    ui.say("\n".join(["", f"    Exit for {name}:"] + [f"      {i + 1}) {it}" for i, it in enumerate(items)]) + "\n")
-    reply = ui.ask("    Exit [Enter = 1 (warp); several: 1,2]: ")
+    ui.say("\n".join(["", f"  Exit for {name}:"] + [f"    {i + 1}) {it}" for i, it in enumerate(items)]) + "\n")
+    reply = ui.ask("  Exit [Enter = 1 (warp); several: 1,2]: ")
     if not reply:
         return ["warp"]
     out = []
@@ -158,7 +159,7 @@ def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, old_pub: str = "") 
     # Render first: a template error must stop us before anything is written.
     content = render.render_client_conf(ctx.cfg, ctx.snap, name, ip, priv, server_pub, psk,
                                         ctx.cfg.values["ENDPOINT"], allowed)
-    ctx.files.write(os.path.join(ctx.paths.psk_dir, f"{name}.psk"), 0o600, psk + "\n")
+    ctx.files.write(ctx.paths.psk(name), 0o600, psk + "\n")
     ctx.files.write(conf, 0o600, content)
     entry = store.Client(name, ip, pub, allowed)
     ops.put_client(ctx, name, entry)
@@ -369,7 +370,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ctx.files.remove(*files)
     # Nothing left for rollback to restore: drop them from the backup record.
     ctx.files.forget(client_conf(ctx, name))
-    ctx.files.forget(os.path.join(ctx.paths.psk_dir, f"{name}.psk"))
+    ctx.files.forget(ctx.paths.psk(name))
 
 
 def cmd_rename(ctx: Ctx, words: List[str]) -> None:
@@ -395,9 +396,9 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     text = store.read_text(conf)
     if text is None:
         raise WgtError(f"no config for '{old}' ({conf})")
-    psk = store.read_text(os.path.join(ctx.paths.psk_dir, f"{old}.psk")) or ""
+    psk = store.read_text(ctx.paths.psk(old)) or ""
     if not psk.strip():
-        raise WgtError(f"'{old}' has no preshared key ({ctx.paths.psk_dir}/{old}.psk); rotate it instead")
+        raise WgtError(f"'{old}' has no preshared key ({ctx.paths.psk(old)}); rotate it instead")
     new_c = store.Client(new, c.ip, c.pub, c.allowed)
     ctx.runner.step(f"Rename client '{old}' to '{new}' (same keys and address; exit: {exit_short(ctx, new)})",
                     f"wgt client rename {new} {old}")
@@ -405,7 +406,7 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
                   f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
     text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
     ctx.files.write(newconf, 0o600, text)
-    ctx.files.write(os.path.join(ctx.paths.psk_dir, f"{new}.psk"), 0o600, psk)
+    ctx.files.write(ctx.paths.psk(new), 0o600, psk)
     was_disabled = ctx.snap.is_disabled(old)
     ops.put_client(ctx, old)
     ops.put_client(ctx, new, new_c)
@@ -419,7 +420,7 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
         ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, new_c, "up"))
         ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, c, "down"))
     ctx.files.forget(conf)
-    ctx.files.forget(os.path.join(ctx.paths.psk_dir, f"{old}.psk"))
+    ctx.files.forget(ctx.paths.psk(old))
     ctx.out.info(f"config now: {newconf} (same keys: the device's tunnel keeps working; rename it there if you like)")
 
 

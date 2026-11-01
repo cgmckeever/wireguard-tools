@@ -218,7 +218,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     ctx.files.write(ctx.paths.exit_db, 0o600, store.put_exit(store.read_text(ctx.paths.exit_db), code, e))
     ctx.reload()
     if ctx.runner.dry_run:
-        ctx.out.info(f"[dry-run] would write {ctx.paths.wg(f'px-{code}.conf')} and wx-{code}.conf, "
+        ctx.out.info(f"[dry-run] would write {ctx.paths.px_conf(code)} and {ctx.paths.wx_conf(code)}, "
                      f"add its routing to {ctx.cfg.wg_conf} and check it")
         return
     changed = write_confs(ctx, e)
@@ -278,7 +278,7 @@ def cmd_test(ctx: Ctx, words: List[str]) -> int:
     """wgt exit test: bring each city up and check it end to end."""
     ops.take_lock(ctx)
     ctx.out.log("Exit city tests")
-    res = results.Results()
+    res = results.Results(out=ctx.out.line)
     run_tests(ctx, res, bring_up=True)
     return results.report(ctx, res)
 
