@@ -249,6 +249,14 @@ class Files:
         for p in targets:
             os.remove(p)
 
+    def remove_tree(self, path: str) -> None:
+        if not os.path.isdir(path):
+            return
+        if self.runner.dry_run:
+            self.out.info(f"[dry-run] rm -rf {path}")
+            return
+        shutil.rmtree(path)
+
     def forget(self, path: str) -> None:
         """Delete a file these tools created, its change copies and its backup
         record (the copies may hold keys; rollback has nothing to restore)."""

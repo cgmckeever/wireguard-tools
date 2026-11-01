@@ -190,8 +190,9 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
 
 
 def _commands():
-    from . import checks, clients, exits
+    from . import checks, clients, exits, watchdog
     return {
+        "watchdog": watchdog.cmd_watchdog,
         "debug": cmd_debug,
         "status": checks.cmd_status,
         "test": checks.cmd_test,
@@ -212,7 +213,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         fn = _commands().get(cmd)
         if fn is None:
             raise WgtError(f"unknown command: {cmd} (see: wgt help)")
-        fn(load(args), rest)
+        if cmd == "watchdog":
+            quick = host.Facts(kernel_ipv6=os.path.exists("/proc/net/if_inet6"), has_ipv6=False,
+                               hostname="", routes4="", default_route="")
+            fn(load(args, facts=quick), rest)
+        else:
+            fn(load(args), rest)
         return 0
     except WgtError as e:
         out.error(str(e))
