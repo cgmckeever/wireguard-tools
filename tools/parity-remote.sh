@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # parity-remote.sh <dir> — the server side of tools/parity.sh: render with the
-# bash tools in /opt/wireguard-tools and with the Python copy in <dir>, then
-# diff (keys redacted). Read-only.
+# last bash version (<dir>/bash, from git tag bash-final) and with the Python
+# copy in <dir>, then diff (keys redacted). Read-only.
 set -uo pipefail
 tmp="$1"
 red() { sed -E 's/^([[:space:]]*(PrivateKey|PresharedKey)[[:space:]]*=[[:space:]]*).*/\1<redacted>/'; }
-cp -r /opt/wireguard-tools "$tmp/bash"
+[ -d "$tmp/bash" ] || git -C "$(dirname "$0")/.." archive --prefix=bash/ bash-final | tar -xf - -C "$tmp"
 sed '$d' "$tmp/bash/wg-setup.sh" >"$tmp/bash/ws.sh"
 (
     set -Eeuo pipefail

@@ -2,7 +2,8 @@
 # golden-bash.sh — Render the golden files from the bash version, so the Python
 # version's tests compare against what bash actually produced.
 #
-# Usage (on a Linux host, as root, with the bash tools checked out):
+# Usage (on a Linux host, as root, with the last bash version unpacked:
+# `git archive bash-final | tar -x -C <bash-checkout>`):
 #   tools/golden-bash.sh <bash-checkout> <fixtures-dir> <out-dir>
 #
 # For each fixture (<fixtures-dir>/<case>/wg = a WireGuard directory with

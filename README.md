@@ -4,7 +4,7 @@ Turn a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or arm64) into a WireGuard
 VPN server, and manage its clients. [Cloudflare WARP](https://1.1.1.1/) is
 installed alongside and works as a switch:
 
-| `wg-setup.sh warp …` | Clients' traffic leaves via | Sites see | Use it for |
+| `wgt warp …` | Clients' traffic leaves via | Sites see | Use it for |
 |------|----------------------------|-----------|------------|
 | `on` (default) | Cloudflare WARP, tunnelled from the server | a Cloudflare IP | hiding the VPS's IP, getting Cloudflare's network |
 | `off` | the server's own public interface | the VPS's IP | a plain, fast WireGuard VPN |
@@ -15,21 +15,21 @@ Switching is live: clients stay connected, only where their traffic exits change
 server in a city you pick, with WARP inside it, so sites see a Cloudflare IP in
 that city (see [Exit cities](#exit-cities)).
 
-Two commands run as root on the server:
+Two commands:
 
-- **`wg-setup.sh`** sets up the server (`setup`), switches WARP (`warp on|off`),
-  manages exit cities (`exit`), plus `test`, `status`, `log`, `backup`,
-  `restore`, `rollback`.
-- **`wg-client.sh`** manages clients: `add`, `rotate`, `remove`, `disable`, `enable`,
-  `list`, `show`, `share`.
+- **`wgt`** runs as root on the server: `setup`, `warp on|off`, `status`, `test`,
+  `log`, `backup`, `restore`, `rollback`, plus `wgt client …` (`add`, `list`,
+  `show`, `share`, `rotate`, `rename`, `disable`, `enable`, `remove`) and
+  `wgt exit …` for exit cities.
+- **`wgt-ctl`** runs on your own machine and drives your servers over SSH: the
+  server comes first, then any `wgt` command (`wgt-ctl boba client add phone`),
+  plus setting up new servers, pulling updates, exit cities from local files
+  and fetching backups ([Managing servers from your machine](#managing-servers-from-your-machine)).
 
 Both are safe to re-run, support `--dry-run`, back up every file they change,
-and never print private keys except inside a client's QR code (shown by `add`
-and `rotate`, or `show --qr`).
-
-A third, **`scripts/servers.sh`**, runs on your own machine: it sets up new
-servers over SSH and runs the two above on every server you manage
-([Managing servers from your machine](#managing-servers-from-your-machine)).
+and never print private keys except inside a client's QR code (shown by
+`client add` and `rotate`, or `client show --qr`). They're Python 3.8+ with
+only the standard library, so a server needs nothing extra.
 
 ## How it works
 
@@ -56,7 +56,7 @@ with WARP on clients are blocked). A new source port fixes it within seconds.
 `wg-tools-warp-watchdog.timer` checks every 30s; if `warp` has had no
 handshake for 180s on two checks in a row, it moves `warp` to a new source
 port (`wg set warp listen-port 0`, no restart) and logs it
-(`wg-setup.sh log`). `status` shows the last time it acted.
+(`wgt log`). `status` shows the last time it acted.
 
 **Exit cities.** Each city has an index *n* (in `exits.db`). Its client table
 `200+n` holds a default route through `wx-<code>` and a blackhole fallback;
@@ -81,7 +81,7 @@ same host number as its IPv4 address (`10.4.5.5` → `fd…::5`). Its IPv6 is
 NATed out the same way as IPv4: with WARP on through WARP's own IPv6, which
 works even on an IPv4-only server, with the same table 100 route and blackhole
 fallback; with WARP off out the public interface, if the server has IPv6
-(otherwise clients get IPv4 only). `wg-setup.sh status` shows which. Clients'
+(otherwise clients get IPv4 only). `wgt status` shows which. Clients'
 `AllowedIPs` include `::/0` either way, so their IPv6 can't bypass the tunnel.
 Turning IPv6 on for an existing server (re-run setup) adds the address to
 every client config; re-send them. `--subnet6 off` disables it.
@@ -101,11 +101,12 @@ every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/wg-tools.state` | saved settings (including `WARP=on|off`), recorded default route |
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1`, plus IPv6 forwarding (and `accept_ra = 2` on the public interface) when IPv6 is on |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
-| `/usr/local/sbin/wg-tools-warp-watchdog`, `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog |
+| `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog (runs `wgt watchdog warp` every 30s) |
 | `/etc/wireguard/exits.db` | exit cities: `code index label` |
 | `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a city's Proton config and its own WARP account |
 | `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a city's Proton tunnel and the WARP tunnel inside it |
-| `/usr/local/sbin/wg-tools-exit-watchdog`, `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | exit watchdog (cities up on demand) |
+| `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | exit watchdog (runs `wgt watchdog exits` every 10s: cities up on demand) |
+| `/usr/local/sbin/wgt` | link to the checkout's `bin/wgt` |
 
 On your machine, `local/` (untracked) holds `servers`, `exits/<server>/*.conf`,
 `exits/details.tsv` (which local file is which exit: server, file, code, full
@@ -115,7 +116,7 @@ Secrets are mode 600 in 700 directories. Before any file is changed, a
 timestamped copy goes to `/var/backups/wireguard-tools/files/<its path>` (e.g.
 `files/etc/wireguard/clients.db.<date>.bak`); `rollback` restores the
 originals. Each file keeps its original plus the 5 newest copies, and
-`wg-setup.sh backup` keeps the 10 newest archives.
+`wgt backup` keeps the 10 newest archives.
 
 ### Templates
 
@@ -125,41 +126,41 @@ These files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
 |----------|---------|
 | `client.conf.tmpl` | each `/etc/wireguard/clients/<server>.<name>.conf` |
 | `wg-quick-after-warp.conf.tmpl` | the systemd drop-in that starts `wg0` after `warp` |
-| `warp-watchdog.sh.tmpl`, `warp-watchdog.service.tmpl`, `warp-watchdog.timer.tmpl` | the WARP watchdog script and its systemd units |
-| `exit-watchdog.sh.tmpl`, `exit-watchdog.service.tmpl`, `exit-watchdog.timer.tmpl` | the exit watchdog script and its systemd units |
+| `watchdog.service.tmpl`, `warp-watchdog.timer.tmpl`, `exit-watchdog.timer.tmpl` | the watchdogs' systemd units |
 
 Edit them to change what every new client gets (e.g. `PersistentKeepalive`).
 Changes apply to clients added or rotated afterwards. Every placeholder must
-stay: a missing value stops the script before anything is written.
+stay: a missing value stops the command before anything is written.
 Your edits are local changes to this git checkout: commit them (or
 `git stash` around `git pull`) so updates don't stop on a conflict.
-`wg0.conf` and `warp.conf` are built in code, since their contents depend on
-the WARP setting, the routing rules and the client list.
+`wg0.conf`, `warp.conf` and the exit tunnels are built in code (`wgt/render.py`,
+`wgt/rules.py`), since their contents depend on the WARP setting, the routing
+rules and the client list.
 
 ## Set up the server
 
 ### Install
 
-Nothing else is needed on the server; `wg-setup.sh` installs its own packages
-(WireGuard, iptables, curl, ping, qrencode, magic-wormhole).
+Nothing else is needed on the server: `wgt setup` installs its own packages
+(WireGuard, iptables, curl, ping, qrencode, magic-wormhole) and links
+`/usr/local/sbin/wgt` to the checkout.
 
 ```bash
 sudo -i   # everything below runs as root
 apt-get update && apt-get install -y git
 git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
-cd /opt/wireguard-tools
+/opt/wireguard-tools/bin/wgt setup --name dengar      # from then on: wgt ...
 ```
 
-Optional, to run them from anywhere:
-`ln -s /opt/wireguard-tools/wg-setup.sh /opt/wireguard-tools/wg-client.sh /usr/local/sbin/`
-
-Update later with `git -C /opt/wireguard-tools pull`.
+Or from your own machine, `wgt-ctl init` does all of this over SSH
+([below](#managing-servers-from-your-machine)). Update later with
+`git -C /opt/wireguard-tools pull` (or `wgt-ctl <server> pull`).
 
 ### Setup
 
 ```bash
-./wg-setup.sh setup --name dengar              # typical: just name it
-./wg-setup.sh setup --name dengar --dry-run    # see exactly what it would change first
+wgt setup --name dengar              # typical: just name it
+wgt setup --name dengar --dry-run    # see exactly what it would change first
 ```
 
 The first setup asks for the client subnet, offering a random
@@ -182,7 +183,7 @@ without `--yes`; names with `_` aren't valid hostnames and are skipped.
 ### Flags
 
 All optional. Settings are saved in `/etc/wireguard/wg-tools.state`, so
-re-runs and `wg-client.sh` reuse them; pass a flag again to change it. Each can
+re-runs and `wgt client` commands reuse them; pass a flag again to change it. Each can
 also be set as an environment variable (flag > env > saved > default).
 
 | Flag | Env | Default | What it sets |
@@ -202,7 +203,7 @@ also be set as an environment variable (flag > env > saved > default).
 | | `WGCF_VERSION` | `latest` | wgcf release to install, e.g. `v2.2.22` |
 | | `WGCF_SHA256` | | pin the wgcf binary's checksum |
 
-Example: `./wg-setup.sh setup --name dengar --port 51821 --endpoint vpn.example.com`.
+Example: `wgt setup --name dengar --port 51821 --endpoint vpn.example.com`.
 
 Behaviour flags (not saved):
 
@@ -212,12 +213,12 @@ Behaviour flags (not saved):
 | `--yes`, `-y` | everything | skip the per-step prompts; `setup` still asks to confirm its settings (unless there's no terminal) |
 | `--force` | `setup` | regenerate server keys, reinstall wgcf, regenerate the WARP profile, take over configs these tools didn't create |
 | `--purge` | `rollback` | also delete keys, clients, the WARP accounts and exit cities |
-| `--qr` / `--no-qr` | `wg-client.sh add`, `rotate`, `show` | force or skip the QR code |
-| `--exit <code>[,…]` | `wg-client.sh add` | the client's exit(s); `warp` is the default exit |
-| `--label "<name>"` | `wg-setup.sh exit add` | the exit city's full name, e.g. `"Paris, France"` |
-| `--follow`, `-f` | `wg-setup.sh log` | keep printing new entries |
+| `--qr` / `--no-qr` | `wgt client add`, `rotate`, `show` | force or skip the QR code |
+| `--exit <code>[,…]` | `wgt client add` | the client's exit(s); `warp` is the default exit |
+| `--label "<name>"` | `wgt exit add` | the exit city's full name, e.g. `"Paris, France"` |
+| `--follow`, `-f` | `wgt log` | keep printing new entries |
 
-`help` on either command lists everything.
+`wgt help` and `wgt-ctl help` list everything.
 
 ### What setup does
 
@@ -232,14 +233,14 @@ Setup runs in two stages:
    configs refreshed.
 
 If WARP can't be set up on a first install, setup still finishes, with WARP
-off; fix it, then `./wg-setup.sh warp on`.
+off; fix it, then `wgt warp on`.
 
 **Open UDP 51820** (or your `--port`) in your VPS provider's firewall /
-security group. The script opens it on the server itself (ufw or iptables) but
+security group. Setup opens it on the server itself (ufw or iptables) but
 can't reach the provider's firewall.
 
 To change a setting, re-run setup with the new flag, e.g.
-`./wg-setup.sh setup --port 51821`. A change that affects clients (`--name`,
+`wgt setup --port 51821`. A change that affects clients (`--name`,
 `--endpoint`, `--port`, `--dns`, `--mtu`, `--subnet`, `--subnet6`) rewrites
 their configs (renames them for `--name`) and lists which to re-send; keys
 don't change.
@@ -253,9 +254,9 @@ as large as the old one.
 ### WARP on or off
 
 ```bash
-./wg-setup.sh warp off   # clients exit via this server's IP
-./wg-setup.sh warp on    # clients exit through WARP (tests WARP first)
-./wg-setup.sh warp       # show the current setting
+wgt warp off   # clients exit via this server's IP
+wgt warp on    # clients exit through WARP (tests WARP first)
+wgt warp       # show the current setting
 ```
 
 The setting is saved and survives reboots. Client configs are the same either
@@ -285,15 +286,17 @@ one key that can run on one server only, so download one per server per city.
 
 ```bash
 # your machine: save it as local/exits/<server>/<any name>.conf, then
-scripts/servers.sh exit-add boba             # pick it from the list (or: all)
+wgt-ctl boba exit-add                    # pick it from the list (or: all)
 
 # or on the server
-./wg-setup.sh exit add par-fr proton.conf --label "Paris, France"
+wgt exit add par-fr proton.conf --label "Paris, France"
 ```
 
 The first time `exit-add` sees a file it asks what it is ("Paris, France")
 and suggests a code from the city and Proton's country tag (`par-fr`); the
 answer is kept in `local/exits/details.tsv`, and the file keeps its own name.
+The copy on the server records both: it starts with `# exit par-fr: Paris,
+France` and `# local file: paris.france.conf`.
 A code is 2-6 of a-z, 0-9 and `-`, starting with a letter.
 
 `exit add` registers a separate WARP account for the city, wires its routing
@@ -302,9 +305,9 @@ into `wg0` live (clients stay connected), and checks the result:
 code again replaces its Proton config.
 
 ```bash
-./wg-setup.sh exit list              # cities: state (up/idle), clients, Proton server
-./wg-setup.sh exit test              # bring each one up and check it
-./wg-setup.sh exit remove par-fr     # refused while clients use it
+wgt exit list              # cities: state (up/idle), clients, Proton server
+wgt exit test              # bring each one up and check it
+wgt exit remove par-fr     # refused while clients use it
 ```
 
 **On demand.** A city is only up while one of its clients is connected: the
@@ -319,26 +322,27 @@ Clients choose a city when they're added: see [Exit-city clients](#exit-city-cli
 ## Manage clients
 
 ```bash
-./wg-client.sh add laptop                            # full tunnel (default); prints a QR code
-./wg-client.sh add printer --allowed-ips "10.4.5.0/24, fdXX:XXXX:XXXX::/64" # split tunnel: VPN network only (your subnets)
-./wg-client.sh list                                  # address, last seen, traffic, allowed IPs; then pick one to act on
-./wg-client.sh show laptop                           # config with keys redacted
-./wg-client.sh show laptop --qr                      # QR code again (phones: WireGuard app → scan)
-./wg-client.sh share laptop                          # send the config via magic-wormhole (one-time code)
-./wg-client.sh rotate laptop                         # new keys, same address; old config stops working
-./wg-client.sh disable laptop                        # cut it off now; keys, config and address kept
-./wg-client.sh enable laptop                         # let it back in with the same config
-./wg-client.sh rename laptop work-laptop             # same keys and address; its config keeps working
-./wg-client.sh remove laptop
+wgt client add laptop                            # full tunnel (default); prints a QR code
+wgt client add printer --allowed-ips "10.4.5.0/24, fdXX:XXXX:XXXX::/64" # split tunnel: VPN network only (your subnets)
+wgt client list                                  # address, last seen, traffic, allowed IPs; then pick one to act on
+wgt client show laptop                           # config with keys redacted
+wgt client show laptop --qr                      # QR code again (phones: WireGuard app → scan)
+wgt client share laptop                          # send the config via magic-wormhole (one-time code)
+wgt client rotate laptop                         # new keys, same address; old config stops working
+wgt client disable laptop                        # cut it off now; keys, config and address kept
+wgt client enable laptop                         # let it back in with the same config
+wgt client rename laptop work-laptop             # same keys and address; its config keeps working
+wgt client remove laptop
 ```
 
 Leave out the name on `rotate`, `remove`, `disable`, `enable`, `show` or
-`share` to pick from a numbered list. Changes apply live; other clients stay
+`share` to pick from a numbered list (`wgt client` alone is `list`). Changes apply live; other clients stay
 connected.
 
-In a terminal, `list` then asks for a client number and offers its actions
-(show, QR, share, rotate, disable/enable, remove). It runs the one you choose
-and exits; Enter at either prompt exits without doing anything. With `--yes`
+In a terminal, `list` then asks for a client number and shows its actions as a
+numbered menu (show, QR, share, rotate, disable/enable, rename, remove). It runs
+the one you choose and exits; Enter at either prompt exits without doing
+anything. With `--yes`
 or when piped, `list` only prints the table.
 
 `disable` removes the client's peer from the running `wg0` and leaves it out of
@@ -358,8 +362,8 @@ A client of a city is named `<code>.<name>`. `add` asks which
 exit(s) when cities exist, or take them with `--exit`:
 
 ```bash
-./wg-client.sh add laptop --exit warp,par-fr   # laptop (default exit) and par-fr.laptop
-./wg-client.sh add par-fr.tablet
+wgt client add laptop --exit warp,par-fr   # laptop (default exit) and par-fr.laptop
+wgt client add par-fr.tablet
 ```
 
 Each is a separate client with its own key, address and config
@@ -373,8 +377,8 @@ reminds you).
 
 | How | Command | Best for |
 |-----|---------|----------|
-| Magic Wormhole | `./wg-client.sh share laptop`; recipient runs `wormhole receive <code>` | sending it to someone else, no SSH needed |
-| QR code | printed by `add`/`rotate` in a terminal (`--no-qr` skips it); again any time with `./wg-client.sh show laptop --qr` | phones (WireGuard app → scan) |
+| Magic Wormhole | `wgt client share laptop`; recipient runs `wormhole receive <code>` | sending it to someone else, no SSH needed |
+| QR code | printed by `add`/`rotate` in a terminal (`--no-qr` skips it); again any time with `wgt client show laptop --qr` | phones (WireGuard app → scan) |
 | scp | `scp root@<server>:/etc/wireguard/clients/dengar.laptop.conf .` (`add` and `show` print the exact command) | your own machines |
 
 `share` prints a one-time code (like `7-guitar-revenge-tidy`) and waits up to 10
@@ -392,61 +396,62 @@ send them only to that client's owner.
 
 ## Managing servers from your machine
 
-`scripts/servers.sh` runs on your own machine (macOS or Linux, plain bash) and
-drives the servers over SSH. The servers it knows are listed in
-`local/servers`, one per line: name, SSH login, and optionally the checkout
-directory (default `/opt/wireguard-tools`). Like everything under `local/`, it
-is untracked:
+`wgt-ctl` runs on your own machine (macOS or Linux, Python 3.8+) and drives the
+servers over SSH. Put `bin/` on your PATH, or `alias wgt-ctl=~/…/wireguard-tools/bin/wgt-ctl`.
+The servers it knows are listed in `local/servers`, one per line: name, SSH
+login, and optionally the checkout directory (default `/opt/wireguard-tools`).
+Like everything under `local/`, it is untracked:
 
 ```
 dengar  root@192.3.63.161
 boba    root@23.94.74.221
 ```
 
+The server comes first, then the command:
+
 ```bash
-scripts/servers.sh                       # the servers, with branch@commit (or unreachable)
-scripts/servers.sh init                  # new server: asks address + name, installs, runs setup, adds it
-scripts/servers.sh init --branch exit-cities --address 1.2.3.4 --name lando -- --port 51821
-scripts/servers.sh pull all              # git pull everywhere
-scripts/servers.sh branch boba exit-cities
-scripts/servers.sh status boba           # also setup, warp, test, exit, log, rollback (wg-setup.sh)
-scripts/servers.sh log boba -f           # follow its log
-scripts/servers.sh client                # pick a server, then its client list and action menu
-scripts/servers.sh client boba add phone # any wg-client.sh command
-scripts/servers.sh clients               # every client on every server: exit, last seen, traffic
-scripts/servers.sh backup all            # wg-setup.sh backup, fetched to local/backups/<name>/
-scripts/servers.sh exit-add boba         # pick from local/exits/boba/*.conf (or: all) -> exit cities
-scripts/servers.sh ssh boba
-scripts/servers.sh forget boba           # drop from the list; the server is untouched
+wgt-ctl                                # the servers, with branch@commit (or unreachable)
+wgt-ctl boba status                    # any wgt command: setup, warp, test, log -f, exit list, ...
+wgt-ctl boba client add phone --exit par-fr
+wgt-ctl boba client                    # its client list and action menu
+wgt-ctl all test                       # each server in turn (one failing doesn't stop the rest)
+wgt-ctl clients                        # every client on every server: exit, last seen, traffic
+wgt-ctl boba exit-add                  # pick from local/exits/boba/*.conf (or: all) -> exit cities
+wgt-ctl all pull                       # git pull everywhere
+wgt-ctl all backup                     # wgt backup, fetched to local/backups/<server>/
+wgt-ctl boba branch some-branch        # switch its checkout
+wgt-ctl boba ssh
+wgt-ctl boba forget                    # drop from the list; the server is untouched
+wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
+wgt-ctl init --address 1.2.3.4 --name lando --branch main -- --port 51821
 ```
 
-A server is its list number or name, or `all` to run a command on each in
-turn; leave it out to pick from the list.
+A server is its name or list number, or `all`; leave it out (`wgt-ctl status`)
+to pick from the list. Servers can't be named `init`, `clients` or `all`.
+Printed `scp` hints use your machine's login for that server.
 
 `init` logs in as root and, on first contact, shows the server's host key for
 you to check against your provider's console. If only a password works it
 offers `ssh-copy-id`. It then installs git, clones this repo's `origin` and
-runs `wg-setup.sh setup --name <name>` with its usual prompts; anything after
-`--` is passed to setup. The server is added to the list only once setup
-finishes. A server already running wireguard-tools is adopted under its saved
-name instead.
+runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
+passed to setup. The server is added to the list only once setup finishes. A
+server already running these tools is adopted under its saved name instead.
 
 Private files stay on your machine under `local/`: Proton configs for exit
 cities in `exits/<server>/` (see [Exit cities](#exit-cities)), the table that
 names them in `exits/details.tsv`, and archives fetched by `backup` in
 `backups/<server>/` (they hold private keys).
 
-
 ## Check, back up, restore, clean up
 
 ```bash
-./wg-setup.sh test              # PASS/FAIL checks; non-zero exit on any FAIL
-./wg-setup.sh status            # settings (and any not running yet), interfaces, clients, routes, rules
-./wg-setup.sh log [lines] [-f]  # its changes, both watchdogs and the tunnels, in one log
-./wg-setup.sh backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
-./wg-setup.sh restore <archive> # set this server up from a backup
-./wg-setup.sh rollback          # stop everything, remove all rules, restore original files
-./wg-setup.sh rollback --purge  # ...and delete keys, clients, WARP accounts and exit cities
+wgt test              # PASS/FAIL checks; non-zero exit on any FAIL
+wgt status            # settings (and any not running yet), interfaces, clients, routes, rules
+wgt log [lines] [-f]  # its changes, both watchdogs and the tunnels, in one log
+wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
+wgt restore <archive> # set this server up from a backup
+wgt rollback          # stop everything, remove all rules, restore original files
+wgt rollback --purge  # ...and delete keys, clients, WARP accounts and exit cities
 ```
 
 `test` checks: WARP is up and handshaking, traffic through `warp` shows
@@ -463,11 +468,11 @@ is up, both its handshakes and a WARP trace through it.
 
 ```bash
 # old server
-./wg-setup.sh backup
+wgt backup
 scp root@old:/var/backups/wireguard-tools/wireguard-tools.*.tar.gz .   # or: wormhole send <archive>
 
 # new server (after Install)
-./wg-setup.sh restore wireguard-tools.<host>.<date>.tar.gz
+wgt restore wireguard-tools.<host>.<date>.tar.gz
 ```
 
 `restore` brings over the server keys, every client (same keys, addresses and
@@ -477,7 +482,7 @@ server that's already set up (`rollback` or `rollback --purge` first).
 
 The new server records its own default route and public interface, and an IP
 endpoint is re-detected. If the address changed, every client config's
-`Endpoint` is updated and the clients to re-send are listed (`wg-client.sh
+`Endpoint` is updated and the clients to re-send are listed (`wgt client
 share` or `show --qr`); their keys don't change. This also happens whenever a
 re-run changes `--endpoint` or `--port`. An endpoint set as a hostname
 (`--endpoint vpn.example.com`) is kept, so pointing that DNS name at the new
@@ -496,17 +501,17 @@ be using the same WARP devices and Proton keys.
 - **`wgcf register` fails:** WARP may refuse registrations from some server IPs.
   Retry later, or register on another machine and copy the account over
   ([below](#register-warp-on-another-machine)). If the WARP tests still fail
-  (no handshake), the provider is blocking WARP's traffic: `./wg-setup.sh warp off`.
+  (no handshake), the provider is blocking WARP's traffic: `wgt warp off`.
 - **Some sites hang with WARP on:** MTU is already 1280 (the lowest allowed)
-  and TCP MSS is clamped; try `./wg-setup.sh warp off` to see if it's WARP's path.
-- **A city's clients have no internet:** `./wg-setup.sh exit test` says which
+  and TCP MSS is clamped; try `wgt warp off` to see if it's WARP's path.
+- **A city's clients have no internet:** `wgt exit test` says which
   layer fails. No Proton handshake usually means the Proton server was retired
   or the key revoked: download a new config for that server and add it again
-  (same code). `./wg-setup.sh log` shows the watchdog bringing cities up and down.
+  (same code). `wgt log` shows the watchdog bringing cities up and down.
 - **Handshake works but nothing loads:** the device's config is out of date
   (e.g. after a `--subnet` change) or its `Address` is mistyped; re-send it.
-- **Anything else:** `./wg-setup.sh status` (marks saved settings still
-  pending, i.e. not running yet) and `./wg-setup.sh test`.
+- **Anything else:** `wgt status` (marks saved settings still
+  pending, i.e. not running yet) and `wgt test`.
 
 ### Register WARP on another machine
 
@@ -525,6 +530,26 @@ ssh root@vps 'chmod 600 /etc/wireguard/wgcf/*'
 cd ~ && rm -rf ~/wgcf-vps      # local copies hold the device's private key
 ```
 
-Then run `./wg-setup.sh warp on` on the server; it uses the copied account,
+Then run `wgt warp on` on the server; it uses the copied account,
 tests WARP and switches clients to it. Use these files on that server only:
 they are one WARP device.
+
+## Development
+
+The code is the `wgt/` package (standard library only); `bin/wgt` and
+`bin/wgt-ctl` run it from the checkout. `wg-setup.sh`, `wg-client.sh` and
+`scripts/servers.sh` are small wrappers for old habits; the last bash version
+is git tag `bash-final`.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install pytest
+.venv/bin/python -m pytest -q tests           # also runs on every push (GitHub Actions)
+tools/parity.sh root@server ...               # read-only: render a live server's configs with both versions
+tools/trial.sh <proton.conf>                  # on a throwaway server: the full cycle, back to clean
+```
+
+- `tests/golden/` holds what the bash version rendered from the fixture servers
+  in `tests/fixtures/` (`tools/golden-bash.sh`); the Python output must match it
+  byte for byte, so switching versions rewrites nothing on a live server.
+- Commands run through `wgt.system.Runner`; tests use `FakeRunner`, which records
+  them, so most of the logic is tested without root or a server.
