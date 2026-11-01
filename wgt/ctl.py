@@ -24,7 +24,7 @@ import tempfile
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-from . import checks, render, store, ui
+from . import render, store, ui
 from .errors import WgtError
 from .system import Out
 
@@ -49,6 +49,8 @@ out = Out()
 
 @dataclass
 class Server:
+    """One line of local/servers."""
+
     name: str
     target: str
     dir: str = DEF_DIR
@@ -61,6 +63,7 @@ class Server:
 # --- the server list ---
 
 def ensure_local() -> None:
+    """local/ and its private dirs (700), and an empty servers list (600)."""
     for d in (LOCAL, os.path.join(LOCAL, "exits"), os.path.join(LOCAL, "backups")):
         private_dir(d)
     if not os.path.exists(LIST):
@@ -79,12 +82,13 @@ def servers() -> List[Server]:
             continue
         if len(f) < 2 or not valid_server(f[0]) or not _TARGET.match(f[1]) or (len(f) > 2 and not _DIR.match(f[2])):
             raise WgtError(f"{LIST} line {n}: want 'name user@host [/checkout/dir]' "
-                           f"(name: a letter, then 1-31 of A-Za-z0-9_-): {line.strip()}")
+                           f"(name: a letter first, then up to 31 of A-Za-z0-9_-): {line.strip()}")
         out_.append(Server(f[0], f[1], f[2] if len(f) > 2 else DEF_DIR))
     return out_
 
 
 def find(sel: str) -> Server:
+    """A server by name or list number."""
     for i, s in enumerate(servers(), 1):
         if sel in (s.name, str(i)):
             return s
@@ -92,6 +96,7 @@ def find(sel: str) -> Server:
 
 
 def pick() -> Server:
+    """Ask which server, from the numbered list."""
     if not servers():
         raise WgtError("no servers yet (add one: wgt-ctl init)")
     if not ui.have_tty():
@@ -165,7 +170,8 @@ def cmd_list(quick: bool = False) -> None:
             rc, o = ssh(s.target, f"cd {dq} && b=$(git rev-parse --abbrev-ref HEAD) && c=$(git rev-parse --short HEAD) "
                                   "&& printf '%s@%s' \"$b\" \"$c\"", batch=True, capture=True)
             probe = o.strip() if rc == 0 else "unreachable"
-        print(f"  {i:>2}) {s.name:<10} {s.target:<24} {probe:<22} {'exits staged: ' + staged if staged else ''}".rstrip())
+        note = f"exits staged: {staged}" if staged else ""
+        print(f"  {i:>2}) {s.name:<10} {s.target:<24} {probe:<22} {note}".rstrip())
     print("")
 
 
@@ -211,9 +217,9 @@ def cmd_init(argv: List[str]) -> None:
             raise WgtError(f"cannot log in to {target}")
         if not can_login(target):
             reply = ui.ask("    Log in with your SSH key from now on (ssh-copy-id)? [Y/n] ")
-            if not reply or reply.lower().startswith("y"):
-                if subprocess.run(["ssh-copy-id", target]).returncode != 0:
-                    raise WgtError("ssh-copy-id failed")
+            wants_key = not reply or reply.lower().startswith("y")
+            if wants_key and subprocess.run(["ssh-copy-id", target]).returncode != 0:
+                raise WgtError("ssh-copy-id failed")
     rc, probe = ssh(target, f"""echo "uid=$(id -u)"
         . /etc/os-release 2>/dev/null && echo "os=$ID $VERSION_ID"
         [ -d {DEF_DIR}/.git ] && echo checkout=1
@@ -249,7 +255,8 @@ def cmd_init(argv: List[str]) -> None:
     rc, _ = ssh(target, f"""set -e
         export DEBIAN_FRONTEND=noninteractive
         command -v git >/dev/null || {{ apt-get update -qq && apt-get install -y -qq git >/dev/null; }}
-        if [ -d {DEF_DIR}/.git ]; then git -C {DEF_DIR} fetch -q && git -C {DEF_DIR} checkout -q {q(branch)} && git -C {DEF_DIR} pull -q
+        if [ -d {DEF_DIR}/.git ]; then
+            git -C {DEF_DIR} fetch -q && git -C {DEF_DIR} checkout -q {q(branch)} && git -C {DEF_DIR} pull -q
         else git clone -q -b {q(branch)} {q(url)} {DEF_DIR}; fi
         git -C {DEF_DIR} log --oneline -1""")
     if rc != 0:
@@ -264,6 +271,7 @@ def cmd_init(argv: List[str]) -> None:
 
 
 def record(name: str, target: str) -> None:
+    """Add a server to local/servers, with its exits dir."""
     ensure_local()
     with open(LIST, "a") as f:
         f.write(f"{name:<10} {target}\n")
@@ -296,8 +304,8 @@ def cmd_clients() -> None:
         rows = [(line.split("\t") + [""] * 7)[:7] for line in o.splitlines() if line]
         if not rows:
             print(f"  {s.name:<10} (no clients)")
-        for r in checks.device_order(rows):
-            print(fmt.format(s.name, checks.device_of(r[0]), r[6] or r[1], *r[2:6]))
+        for r in store.device_order(rows):
+            print(fmt.format(s.name, store.device_of(r[0]), r[6] or r[1], *r[2:6]))
     print("")
 
 
@@ -329,7 +337,8 @@ def do_branch(s: Server, args: List[str]) -> int:
         raise WgtError("usage: wgt-ctl <server> branch <branch>")
     d = shlex.quote(s.dir)
     return ssh(s.target, f"set -e; git -C {d} fetch -q; git -C {d} checkout -q {q(args[0])}; git -C {d} pull -q; "
-                         f"printf '    %s: ' \"$(git -C {d} rev-parse --abbrev-ref HEAD)\"; git -C {d} log --oneline -1")[0]
+                         f"printf '    %s: ' \"$(git -C {d} rev-parse --abbrev-ref HEAD)\"; "
+                         f"git -C {d} log --oneline -1")[0]
 
 
 def do_ssh(s: Server, args: List[str]) -> int:
@@ -341,7 +350,8 @@ def do_backup(s: Server, args: List[str]) -> int:
     """wgt backup there, then fetch the archive into local/backups/<server>/."""
     no_args("backup", args)
     rc, o = ssh(s.target, f"{s.wgt} backup --yes >/dev/null || exit 1; "
-                          "ls -t /var/backups/wireguard-tools/wireguard-tools.*.tar.gz 2>/dev/null | head -n 1", capture=True)
+                          "ls -t /var/backups/wireguard-tools/wireguard-tools.*.tar.gz 2>/dev/null | head -n 1",
+                capture=True)
     archive = o.strip()
     if rc != 0 or not archive:
         out.error(f"{s.name}: backup failed")
@@ -481,14 +491,19 @@ def do_exit_add(s: Server, args: List[str]) -> int:
         picked = files
     elif sel.isdigit() and 1 <= int(sel) <= len(files):
         picked = [files[int(sel) - 1]]
-    elif os.path.basename(sel) == sel and os.path.isfile(os.path.join(src, sel if sel.endswith(".conf") else sel + ".conf")):
-        picked = [os.path.join(src, sel if sel.endswith(".conf") else sel + ".conf")]
+    elif os.path.basename(sel) == sel and os.path.isfile(os.path.join(src, conf_name(sel))):
+        picked = [os.path.join(src, conf_name(sel))]
     else:
         raise WgtError(f"no config '{sel}' in {src}")
     for f in picked:
         add_one_exit(s, f)
     out.log(f"{s.name} exits")
     return do_wgt(s, ["exit", "list"])
+
+
+def conf_name(name: str) -> str:
+    """A local exit config's file name, with or without .conf given."""
+    return name if name.endswith(".conf") else name + ".conf"
 
 
 CTL = {"pull": do_pull, "backup": do_backup, "exit-add": do_exit_add, "ssh": do_ssh, "branch": do_branch,
@@ -525,6 +540,8 @@ def on(sel: str, cmd: str, args: List[str]) -> int:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """wgt-ctl: the first word is a server (or all), a local command, or a
+    command to run after picking a server. Returns the exit status."""
     argv = sys.argv[1:] if argv is None else argv
     try:
         if not argv or argv[0] == "list":

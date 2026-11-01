@@ -19,8 +19,15 @@ from __future__ import annotations
 from typing import Iterable, List, Sequence, Tuple
 
 from .config import Config
-from .const import (BLACKHOLE_METRIC, EXIT_MARK_BASE, EXIT_MARK_PRIO, EXIT_PTABLE_BASE,
-                    EXIT_RULE_PRIO, EXIT_TABLE_BASE, RULE_PRIO)
+from .const import (
+    BLACKHOLE_METRIC,
+    EXIT_MARK_BASE,
+    EXIT_MARK_PRIO,
+    EXIT_PTABLE_BASE,
+    EXIT_RULE_PRIO,
+    EXIT_TABLE_BASE,
+    RULE_PRIO,
+)
 from .store import Client, Exit, Snapshot
 
 IptRule = Tuple[str, str, str, str]   # command, table, chain, rule

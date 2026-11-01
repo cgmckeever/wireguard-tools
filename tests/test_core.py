@@ -10,7 +10,6 @@ from wgt import net, store
 from wgt.config import resolve, short_hostname_name
 from wgt.errors import WgtError
 
-
 # --- names ---
 
 @pytest.mark.parametrize("code,ok", [
@@ -158,7 +157,8 @@ def test_backup_record():
 
 
 def test_snapshot_exit_clients():
-    snap = store.Snapshot(None, store.parse_clients("a 10.0.0.2 k\npar-fr.a 10.0.0.3 k\npar-fr2.b 10.0.0.4 k\n"), [], [])
+    db = "a 10.0.0.2 k\npar-fr.a 10.0.0.3 k\npar-fr2.b 10.0.0.4 k\n"
+    snap = store.Snapshot(None, store.parse_clients(db), [], [])
     assert [c.name for c in snap.exit_clients("par-fr")] == ["par-fr.a"]
 
 

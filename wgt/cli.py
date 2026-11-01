@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from . import host, render, rules, store
 from .config import Config, resolve
@@ -56,6 +56,8 @@ Settings (saved by setup): --name --subnet --subnet6 --port --mtu --warp-mtu --d
 
 @dataclass
 class Args:
+    """The command line: the words, plus every flag's value."""
+
     words: List[str] = field(default_factory=list)
     settings: Dict[str, str] = field(default_factory=dict)
     exit_codes: str = ""
@@ -73,6 +75,7 @@ class Args:
 
 
 def parse(argv: List[str]) -> Args:
+    """Split argv into words and flags; flags may come anywhere."""
     a = Args()
     i = 0
     while i < len(argv):
@@ -101,6 +104,7 @@ def parse(argv: List[str]) -> Args:
 
 
 def _set(a: Args, flag: str, value: str) -> None:
+    """Store a value flag: --exit/--label on Args, the rest as settings."""
     key = VALUE_FLAGS[flag]
     if key == "EXIT_CODES":
         a.exit_codes = value
@@ -139,6 +143,8 @@ class Ctx:
 
 def load(args: Args, paths: Optional[Paths] = None, runner: Optional[Runner] = None,
          env: Optional[Dict[str, str]] = None, facts: Optional[host.Facts] = None) -> Ctx:
+    """Build the Ctx: read the server's files, gather host facts, resolve the
+    settings (flag > env > saved > default). Tests pass fakes for the rest."""
     paths = paths or Paths()
     runner = runner or Runner(dry_run=args.dry_run)
     runner.dry_run = runner.dry_run or args.dry_run
@@ -151,7 +157,7 @@ def load(args: Args, paths: Optional[Paths] = None, runner: Optional[Runner] = N
     return Ctx(args, paths, runner, Files(paths, runner), facts, cfg, snap)
 
 
-# --- commands that exist so far ---
+# --- commands defined here (the rest live in their modules; see COMMANDS) ---
 
 def cmd_debug(ctx: Ctx, what: List[str]) -> None:
     """Hidden: print what this version renders from the server's state, for
@@ -163,18 +169,19 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
     if target in ("all", "wg0"):
         pieces.append(("wg0", render.render_wg_conf(ctx.cfg, ctx.snap, ctx.pub_if, psk)))
     if target in ("all", "warp"):
-        profile = store.read_text(ctx.paths.wg("wgcf", "wgcf-profile.conf")) or ""
+        profile = store.read_text(ctx.paths.wgcf_profile()) or ""
         pieces.append(("warp", render.render_warp_conf(ctx.cfg, profile, ctx.facts.has_ipv6, host.resolve4)))
     if target in ("all", "exits"):
         for e in ctx.snap.exits:
-            raw = store.read_text(ctx.paths.wg("exits", f"{e.code}.proton.conf")) or ""
+            raw = store.read_text(ctx.paths.proton_conf(e.code)) or ""
             pieces.append((f"px-{e.code}", render.render_proton_conf(raw, e)))
-            prof = store.read_text(ctx.paths.wg("exits", e.code, "wgcf-profile.conf")) or ""
+            prof = store.read_text(ctx.paths.wgcf_profile(ctx.paths.exit_wgcf_dir(e.code))) or ""
             pieces.append((f"wx-{e.code}", render.render_warp_conf(
                 ctx.cfg, prof, ctx.facts.has_ipv6, host.resolve4, table=rules.exit_wtable(e), mark=rules.exit_mark(e))))
     if target in ("all", "hooks"):
         pieces.append(("hooks-down", "".join(x + "\n" for x in rules.hook_cmds(ctx.cfg, ctx.snap, ctx.pub_if, "down"))))
-        pieces.append(("ipt", "".join("|".join(r) + "\n" for r in rules.ipt_rules(ctx.cfg, ctx.pub_if, ctx.snap.exits))))
+        ipt = rules.ipt_rules(ctx.cfg, ctx.pub_if, ctx.snap.exits)
+        pieces.append(("ipt", "".join("|".join(r) + "\n" for r in ipt)))
     for name, text in pieces:
         sys.stdout.write(f"=== {name}\n{redact(text)}")
 
@@ -182,8 +189,8 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
 def cmd_log(ctx: Ctx, words: List[str]) -> None:
     """One time-ordered log: these tools' own steps, both watchdogs, and the
     wg-quick units (wg0, warp, each exit city's tunnels). Like tail -f: the
-    last [lines] (default 40), then new entries until Ctrl-C. Not following
-    with --no-follow, or when the output isn't a terminal."""
+    last [lines] (default 40), then new entries until Ctrl-C. With
+    --no-follow, or when the output isn't a terminal, it prints and stops."""
     from .const import EXIT_WATCHDOG, WATCHDOG
     count = words[0] if words else "40"
     if not count.isdigit():
@@ -201,7 +208,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     try:
         os.execvp(cmd[0], cmd)
     except OSError as e:
-        raise WgtError(f"cannot run journalctl: {e.strerror}")
+        raise WgtError(f"cannot run journalctl: {e.strerror}") from None
 
 
 # command -> (module, function); a module is only imported when its command runs
@@ -215,7 +222,8 @@ COMMANDS = {
 }
 
 
-def command(name: str):
+def command(name: str) -> Callable[[Ctx, List[str]], Optional[int]]:
+    """The function behind a command (its module is imported only when used)."""
     import importlib
     mod, fn = COMMANDS[name]
     return getattr(importlib.import_module(f"wgt.{mod}"), fn)

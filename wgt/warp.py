@@ -7,15 +7,19 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import tempfile
 import urllib.request
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
 from . import host, render, store
 from .errors import WgtError
 
+if TYPE_CHECKING:
+    from .cli import Ctx
 
-def install_wgcf(ctx) -> bool:
+
+def install_wgcf(ctx: Ctx) -> bool:
     """Download wgcf for this architecture from GitHub, check it, install it.
     False if it can't be fetched (setup can carry on without WARP); a checksum
     mismatch is fatal."""
@@ -65,8 +69,8 @@ def install_wgcf(ctx) -> bool:
     else:
         ctx.out.warn(f"release publishes no checksums; set WGCF_SHA256={got} to pin this binary")
     fd, tmp = tempfile.mkstemp()
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
+    with os.fdopen(fd, "wb") as out:
+        out.write(data)
     os.chmod(tmp, 0o755)
     if not ctx.runner.ok([tmp, "--help"]):
         os.remove(tmp)
@@ -84,7 +88,7 @@ def _fetch(url: str, timeout: int) -> bytes:
         return r.read()
 
 
-def register(ctx, directory: Optional[str] = None) -> bool:
+def register(ctx: Ctx, directory: Optional[str] = None) -> bool:
     """Register a WARP account and generate its WireGuard profile (once) in
     <directory> (default the main one; each exit city has its own). False if
     WARP refuses (setup can carry on without WARP)."""
@@ -101,7 +105,7 @@ def register(ctx, directory: Optional[str] = None) -> bool:
                          "       retry later ('wgt warp on'), or register on another machine and copy\n"
                          f"       wgcf-account.toml and wgcf-profile.conf into {d}/ (see README)")
             return False
-    if os.path.isfile(os.path.join(d, "wgcf-profile.conf")) and not ctx.args.force:
+    if os.path.isfile(ctx.paths.wgcf_profile(d)) and not ctx.args.force:
         ctx.out.info("WARP profile exists")
         return True
     ctx.runner.step("Generate WARP WireGuard profile", f"rm {d}/wgcf-profile.conf")
@@ -114,18 +118,17 @@ def register(ctx, directory: Optional[str] = None) -> bool:
     return True
 
 
-def _wgcf(ctx, d: str, args, log: str, append: bool) -> bool:
+def _wgcf(ctx: Ctx, d: str, args: List[str], log: str, append: bool) -> bool:
     """Run wgcf in <d> (umask 077), output to <log>."""
     old = os.umask(0o077)
     try:
-        import subprocess
         with open(log, "a" if append else "w") as f:
             return subprocess.run([ctx.paths.wgcf_bin] + list(args), cwd=d, stdout=f, stderr=f).returncode == 0
     finally:
         os.umask(old)
 
 
-def render_profile(ctx, profile_path: str, table=None, mark=None) -> str:
+def render_profile(ctx: Ctx, profile_path: str, table: Optional[int] = None, mark: Optional[int] = None) -> str:
     """warp.conf (or an exit city's wx-<code>.conf) from a wgcf profile."""
     profile = store.read_text(profile_path)
     if profile is None:

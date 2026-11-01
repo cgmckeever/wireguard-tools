@@ -3,18 +3,19 @@ the settings table setup's review also shows."""
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional
 
-from . import exits, host, live, rules, store, ui
-from .ops import require_setup
+from . import clients, exits, host, live, results, rules, store, ui
 from .const import RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
+from .ops import require_setup
 
+if TYPE_CHECKING:
+    from .cli import Ctx
 
 # --- settings table ---
 
-def setting_src(ctx, key: str, subnet_asked: bool = False) -> str:
+def setting_src(ctx: Ctx, key: str, subnet_asked: bool = False) -> str:
     """Where a setting's value comes from."""
     src = ctx.cfg.sources.get(key, "")
     if src in ("flag", "env"):
@@ -30,7 +31,7 @@ def setting_src(ctx, key: str, subnet_asked: bool = False) -> str:
     return "default"
 
 
-def running_value(ctx, key: str) -> str:
+def running_value(ctx: Ctx, key: str) -> str:
     """What wg0/warp are actually running for a setting ("" if it can't be read)."""
     r, c = ctx.runner, ctx.cfg
     if key == "WG_PORT":
@@ -48,7 +49,7 @@ def running_value(ctx, key: str) -> str:
     return ""
 
 
-def expected_running(ctx, key: str) -> str:
+def expected_running(ctx: Ctx, key: str) -> str:
     """The running value a setting should have (none for settings that only live
     in client configs: name, endpoint, DNS, allowed IPs)."""
     c = ctx.cfg
@@ -69,7 +70,7 @@ class SettingsReport:
     pending: int = 0                                   # saved but not running yet
 
 
-def settings_table(ctx, running: bool = False, subnet_asked: bool = False) -> SettingsReport:
+def settings_table(ctx: Ctx, running: bool = False, subnet_asked: bool = False) -> SettingsReport:
     """Each setting, its value and where it came from; with <running>, what
     wg0/warp run now (pending when it differs)."""
     rep = SettingsReport()
@@ -97,38 +98,19 @@ def settings_table(ctx, running: bool = False, subnet_asked: bool = False) -> Se
 
 # --- test ---
 
-@dataclass
-class Results:
-    passed: int = 0
-    failed: int = 0
-    warned: int = 0
-    out: Callable[[str], None] = print
-
-    def result(self, kind: str, desc: str) -> None:
-        self.out(f"  {kind:<4} {desc}")
-        if kind == "PASS":
-            self.passed += 1
-        elif kind == "FAIL":
-            self.failed += 1
-        elif kind == "WARN":
-            self.warned += 1
-
-    def check(self, desc: str, ok: bool) -> None:
-        self.result("PASS" if ok else "FAIL", desc)
-
-
 class Tests:
     """The checks. WARP checks only fail the run while WARP is on (or when
     testing WARP itself)."""
 
-    def __init__(self, ctx, results: Optional[Results] = None):
+    def __init__(self, ctx: Ctx, res: Optional[results.Results] = None):
         self.ctx = ctx
         self.r = ctx.runner
         self.c = ctx.cfg
-        self.res = results or Results()
+        self.res = res or results.Results()
         self.scope = "all"
 
     def check_warp(self, desc: str, ok: bool) -> None:
+        """A WARP check: only a warning while WARP is switched off."""
         if ok:
             self.res.result("PASS", desc)
         elif self.c.WARP == "on" or self.scope == "warp":
@@ -177,7 +159,8 @@ class Tests:
         return (want in f" {live.unit_prop(self.r, unit, 'After')} "
                 and want in f" {live.unit_prop(self.r, unit, 'Wants')} ")
 
-    def run(self, scope: str = "all") -> Results:
+    def run(self, scope: str = "all") -> results.Results:
+        """Run the checks ("warp": only those `wgt warp on` needs)."""
         r, c, res = self.r, self.c, self.res
         self.scope = scope
         self.check_warp(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_on())
@@ -222,23 +205,16 @@ class Tests:
         return res
 
 
-def report(ctx, res: Results) -> int:
-    """Print the totals; the exit status is 1 on any FAIL."""
-    print("")
-    ctx.out.info(f"{res.passed} passed, {res.failed} failed, {res.warned} warnings")
-    return 1 if res.failed else 0
-
-
-def cmd_test(ctx, words: List[str]) -> int:
+def cmd_test(ctx: Ctx, words: List[str]) -> int:
     """All checks (WARP, wg0, rules, units, exit cities)."""
     require_setup(ctx)
     ctx.out.log(f"Tests (WARP {ctx.cfg.WARP})")
-    return report(ctx, Tests(ctx).run("all"))
+    return results.report(ctx, Tests(ctx).run("all"))
 
 
 # --- status ---
 
-def cmd_status(ctx, words: List[str]) -> None:
+def cmd_status(ctx: Ctx, words: List[str]) -> None:
     """Settings (and whether they're running), interfaces, watchdogs, exit
     cities, clients, routes and rules."""
     require_setup(ctx)
@@ -254,11 +230,13 @@ def cmd_status(ctx, words: List[str]) -> None:
     for ifc in (c.WARP_IF, c.WG_IF):
         active, enabled = live.unit_state(r, f"wg-quick@{ifc}")
         if live.if_exists(r, ifc):
-            out.info(f"{r.query(['ip', '-br', 'addr', 'show', 'dev', ifc]).rstrip(chr(10))}  [{active}, {enabled or 'disabled'}]")
+            brief = r.query(["ip", "-br", "addr", "show", "dev", ifc]).rstrip("\n")
+            out.info(f"{brief}  [{active}, {enabled or 'disabled'}]")
         else:
             out.info(f"{ifc}: absent  [{enabled or 'disabled'}]")
     last = r.query(["journalctl", "-t", WATCHDOG, "-n", "1", "-o", "short-iso", "--no-pager", "-q"]).strip()[:25]
-    out.info(f"watchdog: {WATCHDOG}.timer {live.unit_state(r, WATCHDOG + '.timer')[0]}; last port change: {last or 'never'}")
+    timer = live.unit_state(r, f"{WATCHDOG}.timer")[0]
+    out.info(f"watchdog: {WATCHDOG}.timer {timer}; last port change: {last or 'never'}")
     out.log("WARP handshake")
     if live.if_exists(r, c.WARP_IF):
         out.info(f"{c.WARP_IF}: {ui.ago(live.newest_hs(r, c.WARP_IF))}")
@@ -266,7 +244,7 @@ def cmd_status(ctx, words: List[str]) -> None:
         out.log("Exit cities")
         exits.print_list(ctx)
     out.log("Clients")
-    print_clients(ctx, prefix="    ", numbered=False)
+    clients.print_clients(ctx, prefix="    ", numbered=False)
     if not ctx.snap.clients:
         out.info("none yet (add one: wgt client add <name>)")
     out.log("Routes")
@@ -290,65 +268,3 @@ def cmd_status(ctx, words: List[str]) -> None:
     else:
         why = "disabled" if c.WG_SUBNET6 == "off" else "kernel IPv6 disabled"
         out.info("IPv6: off" + (f" ({why})" if c.WG_SUBNET6 else ""))
-
-
-# --- the clients table (status, client list) ---
-
-CLIENT_FMT = "{:<20} {:<16} {:<15} {:<14} {:<12} {}"
-
-
-def client_rows(ctx) -> List[Tuple[str, str, str, str, str, str]]:
-    """(name, exit, address, last seen, rx/tx MiB, allowed IPs) per client, in
-    clients.db order (name is the full name, e.g. par-fr.mbp-1)."""
-    hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
-    tx = live.transfers(ctx.runner, ctx.cfg.WG_IF)
-    now = time.time()
-    rows = []
-    for cl in ctx.snap.clients:
-        seen = "disabled" if ctx.snap.is_disabled(cl.name) else ui.ago(hs.get(cl.pub, 0), now)
-        rx_b, tx_b = tx.get(cl.pub, (0, 0))
-        rows.append((cl.name, exit_label(ctx, cl.name), cl.ip, seen,
-                     f"{rx_b // 1048576}/{tx_b // 1048576}", cl.allowed.replace(",", ", ")))
-    return rows
-
-
-def device_of(name: str) -> str:
-    """The device part of a client name: par-fr.mbp-1 -> mbp-1."""
-    return name.split(".", 1)[1] if "." in name else name
-
-
-def device_order(rows):
-    """Rows grouped by device, its default exit first, then its exit cities."""
-    return sorted(rows, key=lambda r: (device_of(r[0]).lower(), "." in r[0], r[1]))
-
-
-def exit_label(ctx, name: str) -> str:
-    """Where a client exits, for tables: its exit code, or warp/direct (the default)."""
-    code = store.client_exit(name)
-    if code:
-        return code
-    return "warp" if ctx.cfg.WARP == "on" else "direct"
-
-
-def exit_name(ctx, name: str) -> str:
-    """Where a client exits, for people: its exit city's full name (the label
-    given at exit add, e.g. "Paris, France"), or warp/direct (the default)."""
-    code = store.client_exit(name)
-    e = ctx.snap.exit(code) if code else None
-    return (e.label or code) if e else exit_label(ctx, name)
-
-
-def print_clients(ctx, prefix: str = "", numbered: bool = True) -> List[str]:
-    """Print the clients table, device first (the exit is its own column);
-    returns the full client names in the order shown."""
-    head = ("NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
-    if numbered:
-        print(f"{prefix}{'#':>3} " + CLIENT_FMT.format(*head))
-    else:
-        print(prefix + CLIENT_FMT.format(*head))
-    names = []
-    for i, row in enumerate(device_order(client_rows(ctx)), 1):
-        names.append(row[0])
-        line = CLIENT_FMT.format(device_of(row[0]), exit_name(ctx, row[0]), *row[2:])
-        print(f"{prefix}{i:>3} {line}" if numbered else prefix + line)
-    return names

@@ -8,7 +8,14 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional
 
 from . import net
-from .const import (CONFIG_KEYS, DEFAULTS, EXIT_MAX, EXIT_PTABLE_BASE, EXIT_TABLE_BASE, Paths)
+from .const import (
+    CONFIG_KEYS,
+    DEFAULTS,
+    EXIT_MAX,
+    EXIT_PTABLE_BASE,
+    EXIT_TABLE_BASE,
+    Paths,
+)
 from .errors import WgtError
 
 _IFNAME = re.compile(r"[A-Za-z0-9_-]{1,15}")

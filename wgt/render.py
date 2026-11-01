@@ -27,7 +27,7 @@ def render_template(name: str, template_dir: str = TEMPLATE_DIR, **values: str) 
         with open(path, encoding="utf-8") as f:
             out = f.read().rstrip("\n")
     except FileNotFoundError:
-        raise WgtError(f"missing template: {path}")
+        raise WgtError(f"missing template: {path}") from None
     for k, v in values.items():
         out = out.replace("{{" + k + "}}", v)
     m = re.search(r"\{\{[A-Z_]+\}\}", out)

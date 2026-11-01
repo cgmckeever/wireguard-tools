@@ -6,13 +6,19 @@ from __future__ import annotations
 import fcntl
 import os
 import time
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from . import live, render, store, ui
 from .const import MARKER
 from .errors import WgtError
+from .system import write_private
 
-def _open_lock(ctx) -> Optional[int]:
+if TYPE_CHECKING:
+    from .cli import Ctx
+
+
+def _open_lock(ctx: Ctx) -> Optional[int]:
+    """The lock file's descriptor (None for a dry run that can't open it)."""
     try:
         return os.open(ctx.paths.lock_file, os.O_WRONLY | os.O_CREAT, 0o644)
     except OSError:
@@ -21,7 +27,7 @@ def _open_lock(ctx) -> Optional[int]:
         raise
 
 
-def take_lock(ctx) -> None:
+def take_lock(ctx: Ctx) -> None:
     """Serialize changing commands (and the exit watchdog), then re-read the
     server's files: decisions must use what's there once we hold the lock.
     Waits up to 15s (the exit watchdog holds it for a moment every 10s)."""
@@ -38,13 +44,13 @@ def take_lock(ctx) -> None:
         except BlockingIOError:
             if time.time() > deadline:
                 os.close(fd)
-                raise WgtError("another wireguard-tools command is running")
+                raise WgtError("another wireguard-tools command is running") from None
             time.sleep(0.2)
     ctx.lock_fd = fd
     ctx.reload()
 
 
-def try_lock(ctx) -> bool:
+def try_lock(ctx: Ctx) -> bool:
     """Take the lock only if it's free right now (the watchdogs skip a run
     rather than wait), then re-read the server's files."""
     fd = _open_lock(ctx)
@@ -60,14 +66,15 @@ def try_lock(ctx) -> bool:
     return True
 
 
-def release_lock(ctx) -> None:
+def release_lock(ctx: Ctx) -> None:
+    """Let other wgt runs (and the watchdogs) in again."""
     if ctx.lock_fd is not None:
         fcntl.flock(ctx.lock_fd, fcntl.LOCK_UN)
         os.close(ctx.lock_fd)
         ctx.lock_fd = None
 
 
-def confirm(ctx, question: str, default_yes: bool = False) -> None:
+def confirm(ctx: Ctx, question: str, default_yes: bool = False) -> None:
     """Ask before a change; --yes and --dry-run skip it. No means stop."""
     if ctx.runner.dry_run or ctx.args.yes:
         return
@@ -80,16 +87,17 @@ def confirm(ctx, question: str, default_yes: bool = False) -> None:
         raise WgtError(f"aborted at: {ctx.runner.current_step} (nothing further changed; --yes skips prompts)")
 
 
-def require_setup(ctx) -> None:
+def require_setup(ctx: Ctx) -> None:
     """The server must be set up; after rollback no WARP setting is saved."""
     if not ctx.cfg.saved.get("WARP"):
         raise WgtError("not set up; run 'wgt setup'")
 
 
-def require_server(ctx) -> None:
+def require_server(ctx: Ctx) -> None:
     """The WireGuard server must be set up (clients need its keys and wg0.conf)."""
     pub = ctx.paths.server_pub
-    if ctx.cfg.saved.get("WARP") and os.path.isfile(ctx.cfg.wg_conf) and os.path.isfile(pub) and os.path.getsize(pub) > 0:
+    have_pub = os.path.isfile(pub) and os.path.getsize(pub) > 0
+    if ctx.cfg.saved.get("WARP") and os.path.isfile(ctx.cfg.wg_conf) and have_pub:
         return
     if ctx.runner.dry_run:
         ctx.out.warn("server not set up yet; showing what would happen")
@@ -99,33 +107,30 @@ def require_server(ctx) -> None:
 
 # --- state file ---
 
-def state_set(ctx, key: str, value: str) -> None:
+def state_set(ctx: Ctx, key: str, value: str) -> None:
+    """Record <key>=<value> in wg-tools.state (dry-run aware)."""
     if ctx.runner.dry_run:
         ctx.out.info(f"[dry-run] would record {key}={value} in {ctx.paths.state}")
         return
-    _write_private(ctx.paths.state, store.state_set(store.read_text(ctx.paths.state), key, value))
+    write_private(ctx.paths.state, store.state_set(store.read_text(ctx.paths.state), key, value))
     ctx.reload()
 
 
-def state_unset(ctx, key: str) -> None:
+def state_unset(ctx: Ctx, key: str) -> None:
+    """Drop <key> from wg-tools.state (dry-run aware)."""
     text = store.read_text(ctx.paths.state)
     if text is None:
         return
     if ctx.runner.dry_run:
         ctx.out.info(f"[dry-run] would clear {key} in {ctx.paths.state}")
         return
-    _write_private(ctx.paths.state, store.state_unset(text, key))
+    write_private(ctx.paths.state, store.state_unset(text, key))
     ctx.reload()
-
-
-def _write_private(path: str, content: str) -> None:
-    from .system import atomic_write
-    atomic_write(path, content, 0o600)
 
 
 # --- endpoint ---
 
-def resolve_endpoint(ctx, save: bool) -> str:
+def resolve_endpoint(ctx: Ctx, save: bool) -> str:
     """Client endpoint: --endpoint / ENDPOINT, the saved value, or the detected
     public IPv4 (saved only when <save>, i.e. by setup)."""
     src = ctx.cfg.sources.get("ENDPOINT", "")
@@ -146,39 +151,39 @@ def resolve_endpoint(ctx, save: bool) -> str:
 
 # --- wg0.conf and peers ---
 
-def ensure_managed(ctx, path: str) -> None:
+def ensure_managed(ctx: Ctx, path: str) -> None:
     """Refuse to overwrite a config these tools didn't create, unless --force."""
     text = store.read_text(path)
     if text is not None and MARKER not in text and not ctx.args.force:
         raise WgtError(f"{path} exists and was not created by wireguard-tools; move it aside or use --force")
 
 
-def render_wg_conf(ctx) -> str:
+def render_wg_conf(ctx: Ctx) -> str:
     return render.render_wg_conf(ctx.cfg, ctx.snap, ctx.pub_if, store.psk_reader(ctx.paths, ctx.files.read))
 
 
-def write_wg_conf(ctx) -> bool:
+def write_wg_conf(ctx: Ctx) -> bool:
     """Write wg0.conf; True if its settings changed (not just comments)."""
     ensure_managed(ctx, ctx.cfg.wg_conf)
     return ctx.files.write_config(ctx.cfg.wg_conf, 0o600, render_wg_conf(ctx))
 
 
-def put_client(ctx, name: str, entry: Optional[store.Client] = None) -> None:
+def put_client(ctx: Ctx, name: str, entry: Optional[store.Client] = None) -> None:
     ctx.files.write(ctx.paths.client_db, 0o600, store.put_client(store.read_text(ctx.paths.client_db), name, entry))
     ctx.reload()
 
 
-def set_disabled(ctx, name: str, disabled: bool) -> None:
+def set_disabled(ctx: Ctx, name: str, disabled: bool) -> None:
     ctx.files.write(ctx.paths.disabled_db, 0o600,
                     store.set_disabled(store.read_text(ctx.paths.disabled_db), name, disabled))
     ctx.reload()
 
 
-def add_live_peer(ctx, name: str, pub: str, ip: str) -> None:
+def add_live_peer(ctx: Ctx, name: str, pub: str, ip: str) -> None:
     ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "preshared-key",
                     os.path.join(ctx.paths.psk_dir, f"{name}.psk"), "allowed-ips", ctx.cfg.client_addrs(ip)])
     ctx.out.info(f"peer live on {ctx.cfg.WG_IF} (other clients unaffected)")
 
 
-def wg_up(ctx) -> bool:
+def wg_up(ctx: Ctx) -> bool:
     return live.if_exists(ctx.runner, ctx.cfg.WG_IF)

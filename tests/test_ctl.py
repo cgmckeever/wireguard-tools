@@ -50,7 +50,8 @@ def test_all_refuses_single_server_commands(local):
         ctl.on("all", "ssh", [])
 
 
-@pytest.mark.parametrize("line", ["onlyname", "2bad root@h", "ok -oProxyCommand=x", "ok root@h relative/dir", "all root@h"])
+@pytest.mark.parametrize("line", ["onlyname", "2bad root@h", "ok -oProxyCommand=x", "ok root@h relative/dir",
+                                  "all root@h"])
 def test_bad_server_lines_refused(local, line):
     (local / "servers").write_text(line + "\n")
     with pytest.raises(WgtError, match="line 1"):

@@ -4,16 +4,20 @@ what it must; what it does is logged to the journal (`wgt log`)."""
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
-from typing import List
+from typing import TYPE_CHECKING, List
 
 from . import live, ops
-from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
+from .const import EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 
+if TYPE_CHECKING:
+    from .cli import Ctx
 
-def logger(ctx, tag: str, msg: str) -> None:
+
+def logger(ctx: Ctx, tag: str, msg: str) -> None:
     ctx.runner.ok(["logger", "-t", tag, msg])
 
 
@@ -34,19 +38,17 @@ def _touch(path: str, value: str = "") -> None:
 
 def _rm(*paths: str) -> None:
     for p in paths:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             os.remove(p)
-        except FileNotFoundError:
-            pass
 
 
-def warp(ctx) -> None:
+def warp(ctx: Ctx) -> None:
     """If the WARP tunnel has had no handshake for WATCHDOG_STALE seconds on two
     runs in a row, give it a new source port: Cloudflare sometimes stops
     answering one flow (seen after reboots), and a new port gets a handshake
     within seconds. Nothing restarts."""
     r, ifc = ctx.runner, ctx.cfg.WARP_IF
-    mark = os.path.join(ctx.paths.run_dir, WATCHDOG)
+    mark = ctx.paths.warp_marker
     if not live.if_exists(r, ifc):
         _rm(mark)
         return
@@ -64,7 +66,7 @@ def warp(ctx) -> None:
                               f"{live.listen_port(r, ifc)}")
 
 
-def exits(ctx) -> None:
+def exits(ctx: Ctx) -> None:
     """An exit city is up only while one of its clients has handshaked within
     EXIT_IDLE seconds: brought up when one does, taken down when none has. An
     up exit whose WARP has had no handshake for WATCHDOG_STALE seconds gets a
@@ -79,7 +81,9 @@ def exits(ctx) -> None:
         ops.release_lock(ctx)
 
 
-def _exits(ctx) -> None:
+def _exits(ctx: Ctx) -> None:
+    """One pass over the exit cities: up when a client is active, down after
+    EXIT_IDLE with none, restarted when its tunnels stop handshaking."""
     r = ctx.runner
     now = int(time.time())
     hs = live.handshakes(r, ctx.cfg.WG_IF)
@@ -88,16 +92,15 @@ def _exits(ctx) -> None:
         return live.if_exists(r, ifc)
 
     for e in ctx.snap.exits:
-        code, run = e.code, ctx.paths.run_dir
-        hold = os.path.join(run, f"{EXIT_WATCHDOG}.{code}.hold")
+        code = e.code
         try:
-            if now - int(os.stat(hold).st_mtime) < 60:
+            if now - int(os.stat(ctx.paths.exit_hold(code)).st_mtime) < EXIT_HOLD:
                 continue
         except OSError:
             pass
-        active = any(0 < hs.get(c.pub, 0) and now - hs[c.pub] <= EXIT_IDLE
+        active = any(hs.get(c.pub, 0) > 0 and now - hs[c.pub] <= EXIT_IDLE
                      for c in ctx.snap.exit_clients(code) if not ctx.snap.is_disabled(c.name))
-        started = os.path.join(run, f"{EXIT_WATCHDOG}.{code}")
+        started = ctx.paths.exit_marker(code)
         units: List[str] = [f"wg-quick@px-{code}", f"wg-quick@wx-{code}"]
         if active:
             if not (has(f"px-{code}") and has(f"wx-{code}")):
@@ -132,7 +135,8 @@ def _exits(ctx) -> None:
                 logger(ctx, EXIT_WATCHDOG, f"exit {code}: no client handshake in the last {EXIT_IDLE}s; taken down")
 
 
-def cmd_watchdog(ctx, words: List[str]) -> None:
+def cmd_watchdog(ctx: Ctx, words: List[str]) -> None:
+    """wgt watchdog warp|exits: one pass, run by the systemd timers."""
     which = words[0] if words else ""
     if which == "warp":
         warp(ctx)

@@ -4,6 +4,7 @@ which records commands instead of running them."""
 
 from __future__ import annotations
 
+import contextlib
 import difflib
 import fnmatch
 import os
@@ -13,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, TextIO, Tuple
 
 from . import store
 from .const import KEEP_CHANGES, Paths
@@ -36,16 +37,19 @@ def atomic_write(path: str, content: str, mode: int) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except BaseException:
-        try:
+        with contextlib.suppress(OSError):
             os.remove(tmp)
-        except OSError:
-            pass
         raise
 
 
 def settings_of(text: str) -> list:
     """A config's lines without comments and blank lines."""
     return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
+def write_private(path: str, content: str) -> None:
+    """A root-only file (mode 600), written atomically."""
+    atomic_write(path, content, 0o600)
 
 
 def is_copy_of(name: str, base: str) -> bool:
@@ -56,7 +60,7 @@ def is_copy_of(name: str, base: str) -> bool:
 
 def is_secret(path: str, paths: Paths) -> bool:
     """Files whose whole content is a secret (dry-run diffs must not show them)."""
-    return path.startswith(paths.psk_dir + "/") or path.endswith(".key") or path.endswith(".psk")
+    return path.startswith(paths.psk_dir + "/") or path.endswith((".key", ".psk"))
 
 
 def redact(text: str) -> str:
@@ -67,7 +71,7 @@ def redact(text: str) -> str:
 class Out:
     """Output in the tools' style: `==> step`, indented info, WARN/ERROR on stderr."""
 
-    def __init__(self, stream=None, err=None):
+    def __init__(self, stream: Optional[TextIO] = None, err: Optional[TextIO] = None) -> None:
         self.stream = stream or sys.stdout
         self.err = err or sys.stderr
 
@@ -127,7 +131,8 @@ class Runner:
         except OSError:
             return False
 
-    def _exec(self, args, check, input=None, capture=False):
+    def _exec(self, args: Sequence[str], check: bool, input: Optional[str] = None,
+              capture: bool = False) -> Tuple[int, str]:
         try:
             p = subprocess.run(list(args), input=input, text=True, errors="replace",
                                stdout=subprocess.PIPE if capture else None,
@@ -135,7 +140,7 @@ class Runner:
         except OSError as e:
             if not check:
                 raise
-            raise WgtError(f"cannot run {args[0]}: {e.strerror}")
+            raise WgtError(f"cannot run {args[0]}: {e.strerror}") from None
         if check and p.returncode != 0:
             why = (p.stderr or "").strip().splitlines()[-1:] if capture else []
             raise WgtError(f"command failed (exit {p.returncode}): {' '.join(args)}" + (f": {why[0]}" if why else ""))
@@ -163,7 +168,8 @@ class FakeRunner(Runner):
         self.answers = answers or {}
         self.calls: List[str] = []
 
-    def _exec(self, args, check, input=None, capture=False):
+    def _exec(self, args: Sequence[str], check: bool, input: Optional[str] = None,
+              capture: bool = False) -> Tuple[int, str]:
         cmd = " ".join(args)
         self.calls.append(cmd)
         rc, stdout = self.answers.get(cmd, (None, None))
@@ -176,7 +182,7 @@ class FakeRunner(Runner):
             rc, stdout = 0, ""
         if check and rc != 0:
             raise WgtError(f"command failed (exit {rc}): {cmd}")
-        return rc, stdout
+        return rc, stdout or ""
 
     def changes(self) -> List[str]:
         """The recorded commands, without logger lines."""
@@ -259,7 +265,7 @@ class Files:
         rec = store.read_text(self.paths.backup_map)
         new = store.backup_record(rec, path, orig)
         if new != (rec or ""):
-            self._write_private(self.paths.backup_map, new)
+            write_private(self.paths.backup_map, new)
         self.prune(path)
 
     def prune(self, path: str) -> None:
@@ -280,7 +286,7 @@ class Files:
                     os.makedirs(d, exist_ok=True)
                     shutil.move(b, os.path.join(d, name))
                     orig = os.path.join(d, name)
-                    self._write_private(self.paths.backup_map,
+                    write_private(self.paths.backup_map,
                                         store.backup_move(store.read_text(self.paths.backup_map), path, orig))
                 else:
                     os.remove(b)
@@ -336,7 +342,7 @@ class Files:
         if not self.runner.dry_run:
             rec = store.read_text(self.paths.backup_map)
             if rec is not None:
-                self._write_private(self.paths.backup_map, store.backup_forget(rec, path))
+                write_private(self.paths.backup_map, store.backup_forget(rec, path))
 
     def restore_original(self, path: str, remove_new: bool) -> None:
         """Restore a file's original copy; files we created are removed if <remove_new>."""
@@ -357,5 +363,3 @@ class Files:
         else:
             self.out.warn(f"original backup {orig} is missing; left {path} as is")
 
-    def _write_private(self, path: str, content: str) -> None:
-        atomic_write(path, content, 0o600)

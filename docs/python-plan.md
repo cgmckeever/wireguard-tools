@@ -69,7 +69,7 @@ that need one show the numbered server list. `local/` keeps its layout:
 wgt/                      the package (stdlib only)
   cli.py                  wgt: argument parsing, dispatch, log, debug render
   ctl.py                  wgt-ctl (ssh/scp to the servers)
-  const.py, errors.py     paths and constants; WgtError
+  const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError
   config.py               settings: flag > env > saved > default, validation
   store.py                the server files: state, clients.db, exits.db, disabled, backup record
   net.py, host.py         address maths; host facts and preflight
@@ -80,9 +80,10 @@ wgt/                      the package (stdlib only)
   ops.py                  shared operations: lock, confirm, state, endpoint, wg0.conf, peers
   warp.py, units.py       wgcf and WARP profiles; systemd units, watchdog timers, ufw
   server.py               setup, warp on|off, backup, restore, rollback
-  clients.py              client commands (and QR, share)
+  clients.py              client commands, the clients table (and QR, share)
   exits.py                exit commands
-  checks.py               test, status, the clients table
+  checks.py               test, status
+  results.py              PASS/FAIL counts shared by `test` and `exit test`
   watchdog.py             both watchdogs
   ui.py                   ages, numbered menus, prompts
 bin/wgt, bin/wgt-ctl      launchers (put the checkout on sys.path and call main)

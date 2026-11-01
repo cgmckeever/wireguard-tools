@@ -35,6 +35,7 @@ EXIT_IDLE = 300              # seconds without a client handshake before an exit
 
 WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
+EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a city
 WATCHDOG_STALE = 180         # seconds without a WARP handshake before it acts
 
 KEEP_CHANGES = 5             # newest copies kept per file (plus its original)
@@ -55,6 +56,8 @@ class Paths:
     wgcf_bin: str = "/usr/local/bin/wgcf"
     lock_file: str = "/run/wg-tools.lock"
     run_dir: str = "/run"
+    hosts_file: str = "/etc/hosts"
+    cloud_cfg_dir: str = "/etc/cloud/cloud.cfg.d"
 
     def wg(self, *parts: str) -> str:
         return os.path.join(self.wg_dir, *parts)
@@ -102,6 +105,37 @@ class Paths:
     @property
     def exit_db(self) -> str:
         return self.wg("exits.db")
+
+    def wgcf_profile(self, directory: str = "") -> str:
+        """The WARP profile wgcf generated, in <directory> (default the main one)."""
+        return os.path.join(directory or self.wgcf_dir, "wgcf-profile.conf")
+
+    def exit_wgcf_dir(self, code: str) -> str:
+        """Exit city <code>'s own WARP account."""
+        return self.wg("exits", code)
+
+    def proton_conf(self, code: str) -> str:
+        """Exit city <code>'s Proton config as given (with its label comment)."""
+        return self.wg("exits", f"{code}.proton.conf")
+
+    def px_conf(self, code: str) -> str:
+        return self.wg(f"px-{code}.conf")
+
+    def wx_conf(self, code: str) -> str:
+        return self.wg(f"wx-{code}.conf")
+
+    def exit_marker(self, code: str) -> str:
+        """The exit watchdog's record of when it brought <code> up."""
+        return os.path.join(self.run_dir, f"{EXIT_WATCHDOG}.{code}")
+
+    @property
+    def warp_marker(self) -> str:
+        """The WARP watchdog's note of an unhealthy run (it acts on the second)."""
+        return os.path.join(self.run_dir, WATCHDOG)
+
+    def exit_hold(self, code: str) -> str:
+        """While it exists, the exit watchdog leaves <code> up (exit test)."""
+        return os.path.join(self.run_dir, f"{EXIT_WATCHDOG}.{code}.hold")
 
     @property
     def change_dir(self) -> str:

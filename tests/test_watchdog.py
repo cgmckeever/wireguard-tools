@@ -4,32 +4,22 @@ wg, ip and systemctl."""
 from __future__ import annotations
 
 import os
-import shutil
 import time
+from pathlib import Path
 
 import pytest
-from conftest import FIXTURES
 
 from wgt import cli, watchdog
-from wgt.const import EXIT_WATCHDOG, WATCHDOG, Paths
-from wgt.host import Facts
-from wgt.system import FakeRunner, Out
+from wgt.const import EXIT_WATCHDOG, WATCHDOG
 
 NOW = int(time.time())
 
 
 @pytest.fixture
-def make(tmp_path):
+def make(make_ctx):
+    """A watchdog's Ctx: no command defaults, no IPv6; the runner answers <answers>."""
     def build(answers):
-        wg = tmp_path / "wg"
-        if not wg.exists():
-            shutil.copytree(os.path.join(FIXTURES, "exits", "wg"), wg)
-        run = tmp_path / "run"
-        run.mkdir(exist_ok=True)
-        paths = Paths(wg_dir=str(wg), lock_file=str(tmp_path / "lock"), run_dir=str(run))
-        r = FakeRunner(answers, out=Out())
-        facts = Facts(kernel_ipv6=True, has_ipv6=False, hostname="", routes4="", default_route="")
-        return cli.load(cli.parse([]), paths=paths, runner=r, env={}, facts=facts)
+        return make_ctx(bare=True, has_ipv6=False, answers=answers)
     return build
 
 
@@ -84,7 +74,7 @@ def test_stale_city_new_port_then_restart(make):
     watchdog.exits(ctx)
     assert "wg set wx-par-fr listen-port 0" in ctx.runner.calls
     started = os.path.join(ctx.paths.run_dir, f"{EXIT_WATCHDOG}.par-fr")
-    open(started, "w").write(str(NOW - 600))    # the new port didn't help for a while
+    Path(started).write_text(str(NOW - 600))    # the new port didn't help for a while
     watchdog.exits(ctx)
     assert "systemctl restart wg-quick@px-par-fr wg-quick@wx-par-fr" in ctx.runner.calls
 
@@ -113,7 +103,7 @@ def test_warp_watchdog_acts_on_second_stale_run(make):
 
 
 def test_watchdog_error_is_logged_not_raised(make, monkeypatch):
-    from wgt import cli, watchdog as wd
+    from wgt import watchdog as wd
 
     def boom(ctx):
         raise ValueError("bad wg output")

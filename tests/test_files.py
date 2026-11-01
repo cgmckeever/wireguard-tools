@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 
@@ -34,25 +35,25 @@ def test_write_unchanged_changed_and_mode(files):
 def test_hand_made_bak_survives(files):
     f = files()
     p = f.paths.wg("wg0.conf")
-    open(p, "w").write("old\n")
-    open(p + ".bak", "w").write("mine\n")
+    Path(p).write_text("old\n")
+    Path(p + ".bak").write_text("mine\n")
     f.write(p, 0o600, "new\n")
     f.write(p, 0o600, "newer\n")
-    assert open(p + ".bak").read() == "mine\n"
+    assert Path(p + ".bak").read_text() == "mine\n"
     assert not is_copy_of("wg0.conf.bak", "wg0.conf") and is_copy_of("wg0.conf.20260101-000000.bak", "wg0.conf")
 
 
 def test_prune_keeps_original_and_five_newest(files):
     f = files()
     p = f.paths.wg("c.conf")
-    open(p, "w").write("0\n")
+    Path(p).write_text("0\n")
     for i in range(1, 10):
         f.write(p, 0o600, f"{i}\n")
     d = f.change_dir(p)
     copies = sorted(n for n in os.listdir(d) if is_copy_of(n, "c.conf"))
     orig = store.backup_orig(store.read_text(f.paths.backup_map), p)
     assert os.path.basename(orig) in copies and len(copies) == 6
-    assert open(orig).read() == "0\n"
+    assert Path(orig).read_text() == "0\n"
 
 
 def test_dry_run_hides_secret_files(files, capsys):

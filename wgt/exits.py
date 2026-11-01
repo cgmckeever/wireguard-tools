@@ -10,23 +10,26 @@ import re
 import shutil
 import sys
 import time
-from typing import List, Tuple
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from . import live, render, rules, store, units, warp
+from . import live, ops, render, results, rules, store, units, warp
 from .const import EXIT_IDLE, EXIT_MAX, EXIT_WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 
+if TYPE_CHECKING:
+    from .cli import Ctx
 
-def is_up(ctx, code: str) -> bool:
+
+def is_up(ctx: Ctx, code: str) -> bool:
     """Both tunnels of an exit are up (any_up: either one)."""
     return live.if_exists(ctx.runner, f"px-{code}") and live.if_exists(ctx.runner, f"wx-{code}")
 
 
-def any_up(ctx, code: str) -> bool:
+def any_up(ctx: Ctx, code: str) -> bool:
     return live.if_exists(ctx.runner, f"px-{code}") or live.if_exists(ctx.runner, f"wx-{code}")
 
 
-def active(ctx, code: str) -> int:
+def active_count(ctx: Ctx, code: str) -> int:
     """Clients of <code> with a handshake within EXIT_IDLE (what keeps it up)."""
     hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
     now = time.time()
@@ -40,7 +43,7 @@ def active(ctx, code: str) -> int:
     return n
 
 
-def print_list(ctx) -> None:
+def print_list(ctx: Ctx) -> None:
     """The exit cities table: code, name, up (and active clients) or idle,
     clients, Proton server."""
     out = ctx.out
@@ -51,8 +54,8 @@ def print_list(ctx) -> None:
     out.info(fmt.format("CODE", "NAME", "STATE", "CLIENTS", "PROTON"))
     for e in ctx.snap.exits:
         n = len(ctx.snap.exit_clients(e.code))
-        state = f"up ({active(ctx, e.code)} active)" if is_up(ctx, e.code) else "idle"
-        px = store.read_text(ctx.paths.wg(f"px-{e.code}.conf")) or ""
+        state = f"up ({active_count(ctx, e.code)} active)" if is_up(ctx, e.code) else "idle"
+        px = store.read_text(ctx.paths.px_conf(e.code)) or ""
         ep = next((line[len("Endpoint = "):] for line in px.splitlines() if line.startswith("Endpoint = ")), "")
         out.info(fmt.format(e.code, e.label, state, n, ep or "?"))
 
@@ -69,49 +72,49 @@ def check_proton_conf(text: str) -> None:
         raise WgtError("the config has no IPv4 Address")
 
 
-def write_confs(ctx, e: store.Exit) -> bool:
+def write_confs(ctx: Ctx, e: store.Exit) -> bool:
     """Write an exit's two tunnel configs; True if either changed."""
     from .ops import ensure_managed
-    px, wx = ctx.paths.wg(f"px-{e.code}.conf"), ctx.paths.wg(f"wx-{e.code}.conf")
+    px, wx = ctx.paths.px_conf(e.code), ctx.paths.wx_conf(e.code)
     for f in (px, wx):
         ensure_managed(ctx, f)
-    raw = store.read_text(ctx.paths.wg("exits", f"{e.code}.proton.conf")) or ""
+    raw = store.read_text(ctx.paths.proton_conf(e.code)) or ""
     changed = ctx.files.write_config(px, 0o600, render.render_proton_conf(raw, e))
-    profile = ctx.paths.wg("exits", e.code, "wgcf-profile.conf")
+    profile = ctx.paths.wgcf_profile(ctx.paths.exit_wgcf_dir(e.code))
     if os.path.isfile(profile):
         changed |= ctx.files.write_config(wx, 0o600,
                                           warp.render_profile(ctx, profile, rules.exit_wtable(e), rules.exit_mark(e)))
     return changed
 
 
-def hold(ctx, code: str) -> None:
+def hold(ctx: Ctx, code: str) -> None:
     """Hold off the exit watchdog from <code> for a minute (while we check it)."""
     if not ctx.runner.dry_run:
-        with open(os.path.join(ctx.paths.run_dir, f"{EXIT_WATCHDOG}.{code}.hold"), "w"):
+        with open(ctx.paths.exit_hold(code), "w"):
             pass
 
 
-def unhold(ctx, code: str) -> None:
-    ctx.files.remove(os.path.join(ctx.paths.run_dir, f"{EXIT_WATCHDOG}.{code}.hold"))
+def unhold(ctx: Ctx, code: str) -> None:
+    ctx.files.remove(ctx.paths.exit_hold(code))
 
 
-def up(ctx, code: str) -> None:
+def up(ctx: Ctx, code: str) -> None:
     hold(ctx, code)
     ctx.runner.run(["systemctl", "start", f"wg-quick@px-{code}", f"wg-quick@wx-{code}"])
 
 
-def down(ctx, code: str) -> None:
+def down(ctx: Ctx, code: str) -> None:
     """Take an exit down completely (and forget the watchdog's markers)."""
     ctx.runner.run(["systemctl", "stop", f"wg-quick@wx-{code}", f"wg-quick@px-{code}"], check=False)
     for ifc in (f"wx-{code}", f"px-{code}"):
         if live.if_exists(ctx.runner, ifc):
             ctx.runner.run(["ip", "link", "del", "dev", ifc])
-    marker = os.path.join(ctx.paths.run_dir, f"{EXIT_WATCHDOG}.{code}")
+    marker = ctx.paths.exit_marker(code)
     ctx.files.remove(marker, marker + ".port")
     unhold(ctx, code)
 
 
-def wait_hs(ctx, code: str, seconds: int = 10) -> None:
+def wait_hs(ctx: Ctx, code: str, seconds: int = 10) -> None:
     """Give a just-started exit up to <seconds> for its WARP handshake."""
     for _ in range(seconds):
         if live.newest_hs(ctx.runner, f"wx-{code}") > 0:
@@ -119,12 +122,12 @@ def wait_hs(ctx, code: str, seconds: int = 10) -> None:
         time.sleep(1)
 
 
-def trace(ctx, code: str) -> str:
+def trace(ctx: Ctx, code: str) -> str:
     """"ip=... colo=... loc=... warp=..." through an exit's WARP ("" if no answer)."""
     return live.trace_summary(live.trace(ctx.runner, "--interface", f"wx-{code}"))
 
 
-def check(ctx, code: str) -> Tuple[bool, str]:
+def check(ctx: Ctx, code: str) -> Tuple[bool, str]:
     """Bring an exit up if needed and see whether traffic passes through its
     WARP. It is left up only if it was up."""
     was_up = is_up(ctx, code)
@@ -144,7 +147,7 @@ def check(ctx, code: str) -> Tuple[bool, str]:
     return live.is_warp_trace(t), t or "no answer"
 
 
-def sync(ctx) -> None:
+def sync(ctx: Ctx) -> None:
     """Setup re-run: re-render every exit's configs (MTU, IPv6 may have changed),
     restart the ones that are up and changed, and keep the watchdog on."""
     if not ctx.snap.exits:
@@ -156,7 +159,8 @@ def sync(ctx) -> None:
     units.write_exit_watchdog(ctx)
 
 
-def free_idx(ctx) -> int:
+def free_idx(ctx: Ctx) -> int:
+    """The lowest exit index not in use (it picks the city's tables and fwmark)."""
     used = {e.idx for e in ctx.snap.exits}
     for i in range(1, EXIT_MAX + 1):
         if i not in used:
@@ -166,20 +170,20 @@ def free_idx(ctx) -> int:
 
 # --- commands ---
 
-def cmd_list(ctx, words: List[str]) -> None:
+def cmd_list(ctx: Ctx, words: List[str]) -> None:
     print_list(ctx)
 
 
-def cmd_add(ctx, words: List[str]) -> None:
+def cmd_add(ctx: Ctx, words: List[str]) -> None:
     """exit add <code> <proton.conf|->: import (or replace) a Proton WireGuard
     config as exit city <code>, give it its own WARP registration, wire its
     routing into wg0 live, and check it end to end."""
-    from . import ops
     if len(words) < 2:
         raise WgtError('usage: wgt exit add <code> <proton.conf|-> [--label "Paris, France"]')
     code, src = words[0], words[1]
     if not store.valid_exit_code(code):
-        raise WgtError(f"exit code must be 2-6 of a-z0-9 and -, starting with a letter, not 'warp' (e.g. par-fr): '{code}'")
+        raise WgtError("exit code must be 2-6 of a-z0-9 and -, starting with a letter, not 'warp' "
+                       f"(e.g. par-fr): '{code}'")
     ops.take_lock(ctx)
     if src == "-":
         raw = sys.stdin.read()
@@ -193,7 +197,8 @@ def cmd_add(ctx, words: List[str]) -> None:
     label = label.replace("\n", "").replace("\t", "")
     if existing is None:
         idx = free_idx(ctx)
-        ep = next((re.sub(r"^\s*Endpoint\s*=\s*", "", l) for l in raw.splitlines() if re.match(r"^\s*Endpoint\s*=", l)), "")
+        ep = next((re.sub(r"^\s*Endpoint\s*=\s*", "", line) for line in raw.splitlines()
+                   if re.match(r"^\s*Endpoint\s*=", line)), "")
         ctx.runner.step(f"Add exit city '{code}' ({label}): Proton {ep} -> its own WARP", f"wgt exit remove {code}")
     else:
         idx = existing.idx
@@ -203,18 +208,17 @@ def cmd_add(ctx, words: List[str]) -> None:
         raise WgtError("wgcf is needed for the exit's WARP")
     if not ctx.runner.dry_run:
         os.makedirs(ctx.paths.exit_dir, mode=0o700, exist_ok=True)
-    if not warp.register(ctx, ctx.paths.wg("exits", code)):
+    if not warp.register(ctx, ctx.paths.exit_wgcf_dir(code)):
         raise WgtError(f"could not register a WARP account for exit '{code}'")
-    body = "".join(l + "\n" for l in raw.splitlines() if not l.startswith(f"# exit {code}: "))
-    ctx.files.write(ctx.paths.wg("exits", f"{code}.proton.conf"), 0o600, f"# exit {code}: {label}\n" + body)
-    ctx.files.write(ctx.paths.exit_db, 0o600,
-                    store.put_exit(store.read_text(ctx.paths.exit_db), code, store.Exit(code, idx, label)))
+    body = "".join(line + "\n" for line in raw.splitlines() if not line.startswith(f"# exit {code}: "))
+    ctx.files.write(ctx.paths.proton_conf(code), 0o600, f"# exit {code}: {label}\n" + body)
+    e = store.Exit(code, idx, label)
+    ctx.files.write(ctx.paths.exit_db, 0o600, store.put_exit(store.read_text(ctx.paths.exit_db), code, e))
     ctx.reload()
     if ctx.runner.dry_run:
         ctx.out.info(f"[dry-run] would write {ctx.paths.wg(f'px-{code}.conf')} and wx-{code}.conf, "
                      f"add its routing to {ctx.cfg.wg_conf} and check it")
         return
-    e = ctx.snap.exit(code)
     changed = write_confs(ctx, e)
     ops.write_wg_conf(ctx)
     if ops.wg_up(ctx):
@@ -235,10 +239,9 @@ def cmd_add(ctx, words: List[str]) -> None:
                  f"wgt client add <name> --exit {code}")
 
 
-def cmd_remove(ctx, words: List[str]) -> None:
+def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     """exit remove <code>: refused while clients use it; removes its tunnels,
     routing, firewall rules, WARP account and Proton config (and their copies)."""
-    from . import ops
     code = words[0] if words else ""
     ops.take_lock(ctx)
     e = ctx.snap.exit(code) if code else None
@@ -255,30 +258,33 @@ def cmd_remove(ctx, words: List[str]) -> None:
         ctx.runner.sh_lines(rules.ipt_cmds(list(reversed(rules.ipt_rules_out(ctx.cfg, f"wx-{code}"))), "down"))
         ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, "down"))
     if store.state_get(ctx.snap.state, "UFW") == "1" and shutil.which("ufw"):
-        ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", f"wx-{code}"], check=False)
+        ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", f"wx-{code}"],
+                       check=False)
     ctx.files.write(ctx.paths.exit_db, 0o600, store.put_exit(store.read_text(ctx.paths.exit_db), code))
     ctx.reload()
     ops.write_wg_conf(ctx)
-    for f in (ctx.paths.wg(f"px-{code}.conf"), ctx.paths.wg(f"wx-{code}.conf"), ctx.paths.wg("exits", f"{code}.proton.conf")):
+    for f in (ctx.paths.px_conf(code), ctx.paths.wx_conf(code),
+              ctx.paths.proton_conf(code)):
         ctx.files.forget(f)
-    ctx.files.remove_tree(ctx.paths.wg("exits", code))
+    ctx.files.remove_tree(ctx.paths.exit_wgcf_dir(code))
     if not ctx.snap.exits:
         units.remove_timer(ctx, EXIT_WATCHDOG)
         ctx.runner.run(["systemctl", "daemon-reload"])
 
 
-def cmd_test(ctx, words: List[str]) -> None:
-    from . import checks, ops
+def cmd_test(ctx: Ctx, words: List[str]) -> int:
+    """wgt exit test: bring each city up and check it end to end."""
     ops.take_lock(ctx)
     ctx.out.log("Exit city tests")
-    res = checks.Results()
+    res = results.Results()
     run_tests(ctx, res, bring_up=True)
-    return checks.report(ctx, res)
+    return results.report(ctx, res)
 
 
-def cmd_exit(ctx, words: List[str]) -> None:
-    from .ops import require_setup
-    require_setup(ctx)
+def cmd_exit(ctx: Ctx, words: List[str]) -> Optional[int]:
+    """wgt exit <command>: dispatch; no command means list ("rm" is kept as
+    an alias of remove)."""
+    ops.require_setup(ctx)
     sub, rest = (words[0], words[1:]) if words else ("list", [])
     table = {"list": cmd_list, "add": cmd_add, "remove": cmd_remove, "rm": cmd_remove, "test": cmd_test}
     fn = table.get(sub)
@@ -289,7 +295,7 @@ def cmd_exit(ctx, words: List[str]) -> None:
 
 # --- checks ---
 
-def tables_ok(ctx, e: store.Exit) -> bool:
+def tables_ok(ctx: Ctx, e: store.Exit) -> bool:
     """Its tables have blackhole fallbacks and the fwmark rule points at Proton."""
     r = ctx.runner
     w, p, m = rules.exit_wtable(e), rules.exit_ptable(e), rules.exit_mark(e)
@@ -300,7 +306,7 @@ def tables_ok(ctx, e: store.Exit) -> bool:
     return all("\nblackhole default" in "\n" + live.table(r, f, w) for f in ctx.cfg.families())
 
 
-def client_rules_ok(ctx, e: store.Exit) -> bool:
+def client_rules_ok(ctx: Ctx, e: store.Exit) -> bool:
     """One rule per client address."""
     w = rules.exit_wtable(e)
     n = len(ctx.snap.exit_clients(e.code))
@@ -311,7 +317,7 @@ def client_rules_ok(ctx, e: store.Exit) -> bool:
     return True
 
 
-def run_tests(ctx, res, bring_up: bool = False) -> None:
+def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
     """The exit-city checks; with <bring_up> (exit test) an idle exit is brought
     up for its tunnel checks and taken down again."""
     r = ctx.runner
@@ -322,7 +328,7 @@ def run_tests(ctx, res, bring_up: bool = False) -> None:
         res.check(f"exit {e.code}: tables with blackhole fallbacks, fwmark rule to Proton", tables_ok(ctx, e))
         res.check(f"exit {e.code}: one rule per address of its {len(ctx.snap.exit_clients(e.code))} client(s)",
                   client_rules_ok(ctx, e))
-        act = active(ctx, e.code)
+        act = active_count(ctx, e.code)
         started = False
         if bring_up and not is_up(ctx, e.code):
             started = True
@@ -349,7 +355,8 @@ def run_tests(ctx, res, bring_up: bool = False) -> None:
             else:
                 unhold(ctx, e.code)
         elif act > 0:
-            res.result("FAIL", f"exit {e.code}: down while {act} client(s) are active (the watchdog brings it up within 10s)")
+            res.result("FAIL", f"exit {e.code}: down while {act} client(s) are active "
+                               "(the watchdog brings it up within 10s)")
         else:
             res.result("PASS", f"exit {e.code}: idle, no active clients (comes up when one connects; "
                                f"'wgt exit test' checks it live)")

@@ -14,10 +14,15 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Sequence
 
 from .const import EXIT_MAX
 from .errors import WgtError
+
+if TYPE_CHECKING:
+    from .const import Paths
+
+Reader = Callable[[str], Optional[str]]
 
 CLIENTS_HEADER = "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
 EXITS_HEADER = "# wireguard-tools exit cities: code idx label (wgt exit add)"
@@ -35,7 +40,7 @@ def read_text(path: str) -> Optional[str]:
     except FileNotFoundError:
         return None
     except OSError as e:
-        raise WgtError(f"cannot read {path}: {e.strerror}")
+        raise WgtError(f"cannot read {path}: {e.strerror}") from None
 
 
 def _entries(text: Optional[str]) -> List[str]:
@@ -48,6 +53,7 @@ def _entries(text: Optional[str]) -> List[str]:
 # --- state ---
 
 def state_get(text: Optional[str], key: str) -> str:
+    """<key>'s value in wg-tools.state ("" if unset; the last line wins)."""
     value = ""
     for line in (text or "").splitlines():
         if line.startswith(key + "="):
@@ -100,8 +106,21 @@ def valid_client_name(name: str) -> Optional[str]:
 
 # --- clients ---
 
+def device_of(name: str) -> str:
+    """The device part of a client name: par-fr.mbp-1 -> mbp-1."""
+    return name.split(".", 1)[1] if "." in name else name
+
+
+def device_order(rows: Iterable[Sequence[str]]) -> List[Sequence[str]]:
+    """Rows (name, exit code, ...) grouped by device, its default exit first,
+    then its exit cities."""
+    return sorted(rows, key=lambda r: (device_of(r[0]).lower(), "." in r[0], r[1]))
+
+
 @dataclass
 class Client:
+    """A clients.db entry; the name is [<exit>.]<device>."""
+
     name: str
     ip: str
     pub: str
@@ -137,10 +156,12 @@ def put_client(text: Optional[str], name: str, entry: Optional[Client] = None) -
 
 
 def parse_disabled(text: Optional[str]) -> List[str]:
+    """clients.disabled: one name per line."""
     return [line for line in (text or "").splitlines() if line]
 
 
 def set_disabled(text: Optional[str], name: str, disabled: bool) -> str:
+    """clients.disabled with <name> added (disabled) or dropped."""
     names = [n for n in parse_disabled(text) if n != name]
     if disabled:
         names.append(name)
@@ -151,6 +172,8 @@ def set_disabled(text: Optional[str], name: str, disabled: bool) -> str:
 
 @dataclass
 class Exit:
+    """An exits.db entry: code, index (tables and fwmark), label."""
+
     code: str
     idx: int
     label: str
@@ -205,6 +228,7 @@ def backup_forget(text: Optional[str], path: str) -> str:
 
 
 def backup_move(text: Optional[str], path: str, new_orig: str) -> str:
+    """The backup record with <path>'s original pointed at <new_orig>."""
     out = []
     for line in (text or "").splitlines():
         f, _, orig = line.partition("\t")
@@ -236,7 +260,7 @@ class Snapshot:
         return name in self.disabled
 
 
-def load(paths, read=None) -> Snapshot:
+def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
     """Read the server's files (through <read>, default read_text)."""
     read = read or read_text
     return Snapshot(
@@ -247,7 +271,7 @@ def load(paths, read=None) -> Snapshot:
     )
 
 
-def psk_reader(paths, read=None):
+def psk_reader(paths: Paths, read: Optional[Reader] = None) -> Callable[[str], str]:
     """A function: client name -> its preshared key (trailing newlines removed),
     or "" if it has none (as `$(cat psk)` in the bash version)."""
     read = read or read_text

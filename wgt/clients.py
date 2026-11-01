@@ -12,15 +12,18 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import List
+import time
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from . import checks, net, ops, render, rules, store, ui
+from . import live, net, ops, render, rules, store, ui
 from .errors import WgtError
 
+if TYPE_CHECKING:
+    from .cli import Ctx
 
 # --- helpers ---
 
-def client_conf(ctx, name: str) -> str:
+def client_conf(ctx: Ctx, name: str) -> str:
     return os.path.join(ctx.paths.client_dir, f"{ctx.cfg.SERVER_NAME}.{name}.conf")
 
 
@@ -35,7 +38,7 @@ def allowed_list(value: str) -> str:
     return re.sub(r"\s", "", value)
 
 
-def next_free_ip(ctx, planned: List[str]) -> str:
+def next_free_ip(ctx: Ctx, planned: List[str]) -> str:
     """First unused host address (the server takes .1). Addresses handed out
     earlier in this run count as used (a dry run writes nothing)."""
     used = {ctx.cfg.server_ip, *(c.ip for c in ctx.snap.clients), *planned}
@@ -47,26 +50,26 @@ def next_free_ip(ctx, planned: List[str]) -> str:
     raise WgtError(f"no free addresses left in {ctx.cfg.WG_SUBNET}")
 
 
-def pick_client(ctx, verb: str) -> str:
+def pick_client(ctx: Ctx, verb: str) -> str:
     """No name given: a numbered list of clients to pick from (needs a terminal)."""
-    clients = sorted(ctx.snap.clients, key=lambda c: (checks.device_of(c.name).lower(), "." in c.name, c.exit))
+    clients = sorted(ctx.snap.clients, key=lambda c: (store.device_of(c.name).lower(), "." in c.name, c.exit))
     if not clients:
         raise WgtError("no clients yet (add one: wgt client add <name>)")
     if not ui.have_tty() or ctx.args.yes:
         raise WgtError(f"usage: wgt client {verb} <name>")
     try:
-        i = ui.menu("", [f"{checks.device_of(c.name):<20} {checks.exit_name(ctx, c.name):<16} {c.ip}" for c in clients],
+        i = ui.menu("", [f"{store.device_of(c.name):<20} {exit_label(ctx, c.name):<16} {c.ip}" for c in clients],
                     f"{verb.capitalize()} which client? (number or name)")
     except ValueError as e:
         if ctx.snap.client(str(e)):
             return str(e)
-        raise WgtError(f"no client '{e}'")
+        raise WgtError(f"no client '{e}'") from None
     if i is None:
         raise WgtError("no client chosen")
     return clients[i].name
 
 
-def pick_exits(ctx, name: str) -> List[str]:
+def pick_exits(ctx: Ctx, name: str) -> List[str]:
     """Ask which exit(s) a new client gets: codes, "warp" being the default."""
     codes = [e.code for e in ctx.snap.exits]
     items = [f"{'warp':<6} Cloudflare WARP from {ctx.cfg.SERVER_NAME} (default)"]
@@ -88,7 +91,7 @@ def pick_exits(ctx, name: str) -> List[str]:
     return out
 
 
-def fetch_hint(ctx, conf: str) -> None:
+def fetch_hint(ctx: Ctx, conf: str) -> None:
     """How to copy a config to your own machine (WGT_SSH_TARGET, set by wgt-ctl,
     is the login that machine uses for this server)."""
     ep = (ctx.cfg.values.get("ENDPOINT") or store.state_get(ctx.snap.state, "ENDPOINT")).strip("[]")
@@ -107,7 +110,7 @@ def qr_data(text: str) -> str:
     return "\n".join(out) + "\n"
 
 
-def show_qr(ctx, conf: str) -> None:
+def show_qr(ctx: Ctx, conf: str) -> None:
     """The config as a terminal QR code (it holds the private key). In iTerm2 or
     WezTerm it is drawn as a QR_WIDTH-cell-wide image, streamed so the key
     never touches disk; QR_WIDTH=0 forces text."""
@@ -119,7 +122,8 @@ def show_qr(ctx, conf: str) -> None:
     ctx.out.warn("this QR code contains the client's private key")
     data = qr_data(store.read_text(conf) or "")
     term = f"{os.environ.get('LC_TERMINAL', '')} {os.environ.get('TERM_PROGRAM', '')}"
-    if int(width) > 0 and sys.stdout.isatty() and not os.environ.get("TMUX") and re.search(r"iTerm2|iTerm\.app|WezTerm", term):
+    inline = re.search(r"iTerm2|iTerm\.app|WezTerm", term) and not os.environ.get("TMUX")
+    if int(width) > 0 and sys.stdout.isatty() and inline:
         p = subprocess.run(["qrencode", "-t", "PNG", "-s", "4", "-m", "2", "-o", "-"], input=data.encode(),
                            stdout=subprocess.PIPE)
         if p.returncode != 0:
@@ -132,7 +136,7 @@ def show_qr(ctx, conf: str) -> None:
         sys.stdout.write(ctx.runner.query(["qrencode", "-t", "ansiutf8", "-m", "1"], input=data))
 
 
-def issue_client(ctx, name: str, ip: str, allowed: str, old_pub: str = "") -> None:
+def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, old_pub: str = "") -> None:
     """Generate keys for <name> at <ip>, write its config, update clients.db,
     wg0.conf and the live interface (<old_pub> is replaced). An exit-city
     client's routing rules go in before its peer, so its first packets can't
@@ -156,11 +160,12 @@ def issue_client(ctx, name: str, ip: str, allowed: str, old_pub: str = "") -> No
                                         ctx.cfg.values["ENDPOINT"], allowed)
     ctx.files.write(os.path.join(ctx.paths.psk_dir, f"{name}.psk"), 0o600, psk + "\n")
     ctx.files.write(conf, 0o600, content)
-    ops.put_client(ctx, name, store.Client(name, ip, pub, allowed))
+    entry = store.Client(name, ip, pub, allowed)
+    ops.put_client(ctx, name, entry)
     ops.write_wg_conf(ctx)
     up = ops.wg_up(ctx)
     if up:
-        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, ctx.snap.client(name), "up"))
+        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, entry, "up"))
     if ctx.snap.is_disabled(name):
         if up and old_pub:
             ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", old_pub, "remove"])
@@ -182,9 +187,61 @@ def issue_client(ctx, name: str, ip: str, allowed: str, old_pub: str = "") -> No
     fetch_hint(ctx, conf)
 
 
+# --- the clients table (client list, status) ---
+
+CLIENT_FMT = "{:<20} {:<16} {:<15} {:<14} {:<12} {}"
+
+
+def client_rows(ctx: Ctx) -> List[Tuple[str, str, str, str, str, str]]:
+    """(name, exit, address, last seen, rx/tx MiB, allowed IPs) per client, in
+    clients.db order (name is the full name, e.g. par-fr.mbp-1)."""
+    hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
+    tx = live.transfers(ctx.runner, ctx.cfg.WG_IF)
+    now = time.time()
+    rows = []
+    for cl in ctx.snap.clients:
+        seen = "disabled" if ctx.snap.is_disabled(cl.name) else ui.ago(hs.get(cl.pub, 0), now)
+        rx_b, tx_b = tx.get(cl.pub, (0, 0))
+        rows.append((cl.name, exit_short(ctx, cl.name), cl.ip, seen,
+                     f"{rx_b // 1048576}/{tx_b // 1048576}", cl.allowed.replace(",", ", ")))
+    return rows
+
+
+def exit_short(ctx: Ctx, name: str) -> str:
+    """Where a client exits, as a code: its exit city's code, or warp/direct (the default)."""
+    code = store.client_exit(name)
+    if code:
+        return code
+    return "warp" if ctx.cfg.WARP == "on" else "direct"
+
+
+def exit_label(ctx: Ctx, name: str) -> str:
+    """Where a client exits, for people: its exit city's full name (the label
+    given at exit add, e.g. "Paris, France"), or warp/direct (the default)."""
+    code = store.client_exit(name)
+    e = ctx.snap.exit(code) if code else None
+    return (e.label or code) if e else exit_short(ctx, name)
+
+
+def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str]:
+    """Print the clients table, device first (the exit is its own column);
+    returns the full client names in the order shown."""
+    head = ("NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
+    if numbered:
+        print(f"{prefix}{'#':>3} " + CLIENT_FMT.format(*head))
+    else:
+        print(prefix + CLIENT_FMT.format(*head))
+    names = []
+    for i, row in enumerate(store.device_order(client_rows(ctx)), 1):
+        names.append(row[0])
+        line = CLIENT_FMT.format(store.device_of(row[0]), exit_label(ctx, row[0]), *row[2:])
+        print(f"{prefix}{i:>3} {line}" if numbered else prefix + line)
+    return names
+
+
 # --- commands ---
 
-def cmd_add(ctx, words: List[str]) -> None:
+def cmd_add(ctx: Ctx, words: List[str]) -> None:
     """add <name> [--exit <code>[,...]]: one client per exit (warp = the
     default), named <name> and <code>.<name>; asks when exit cities exist."""
     if not words:
@@ -217,7 +274,7 @@ def cmd_add(ctx, words: List[str]) -> None:
         add_one(ctx, base if code == "warp" else f"{code}.{base}", planned)
 
 
-def add_one(ctx, name: str, planned: List[str]) -> None:
+def add_one(ctx: Ctx, name: str, planned: List[str]) -> None:
     """Add one client (skipped if it exists)."""
     existing = ctx.snap.client(name)
     if existing:
@@ -225,7 +282,7 @@ def add_one(ctx, name: str, planned: List[str]) -> None:
         ctx.out.info(f"use 'wgt client rotate {name}' to issue new keys")
         return
     ip = next_free_ip(ctx, planned)
-    ctx.runner.step(f"Add client '{name}' at {ip} (exit: {checks.exit_label(ctx, name)})", f"wgt client remove {name}")
+    ctx.runner.step(f"Add client '{name}' at {ip} (exit: {exit_short(ctx, name)})", f"wgt client remove {name}")
     issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS))
     tunnel = f"{ctx.cfg.SERVER_NAME}.{name}"
     if len(tunnel) > 15:
@@ -233,13 +290,13 @@ def add_one(ctx, name: str, planned: List[str]) -> None:
                      f"{len(tunnel)}, so shorten it when importing there")
 
 
-def get_name(ctx, words: List[str], verb: str) -> str:
+def get_name(ctx: Ctx, words: List[str], verb: str) -> str:
     name = words[0] if words else pick_client(ctx, verb)
     valid_name(name)
     return name
 
 
-def cmd_rotate(ctx, words: List[str]) -> None:
+def cmd_rotate(ctx: Ctx, words: List[str]) -> None:
     """New keys for an existing client: same address and exit, old config stops working."""
     name = get_name(ctx, words, "rotate")
     ops.take_lock(ctx)
@@ -252,7 +309,8 @@ def cmd_rotate(ctx, words: List[str]) -> None:
     if ctx.cfg.sources.get("CLIENT_ALLOWED_IPS") not in ("flag", "env") and c.allowed:
         allowed = c.allowed
     ops.resolve_endpoint(ctx, save=False)
-    ctx.runner.step(f"Rotate keys for '{name}' ({c.ip}); its current config stops working", "none (old keys are discarded)")
+    ctx.runner.step(f"Rotate keys for '{name}' ({c.ip}); its current config stops working",
+                    "none (old keys are discarded)")
     ops.confirm(ctx, f"Rotate keys for {name}?")
     issue_client(ctx, name, c.ip, allowed, c.pub)
 
@@ -278,7 +336,7 @@ def removal_targets(name: str, directory: str) -> List[str]:
     return out
 
 
-def cmd_remove(ctx, words: List[str]) -> None:
+def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     """Remove a client: peer (live and wg0.conf), routing rules, keys and config."""
     name = get_name(ctx, words, "remove")
     ops.take_lock(ctx)
@@ -314,7 +372,7 @@ def cmd_remove(ctx, words: List[str]) -> None:
     ctx.files.forget(os.path.join(ctx.paths.psk_dir, f"{name}.psk"))
 
 
-def cmd_rename(ctx, words: List[str]) -> None:
+def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     """Rename a client, keeping its keys and address (the device's config keeps
     working; only its file name and comments change). A new <code>. prefix
     moves it to that exit."""
@@ -341,9 +399,10 @@ def cmd_rename(ctx, words: List[str]) -> None:
     if not psk.strip():
         raise WgtError(f"'{old}' has no preshared key ({ctx.paths.psk_dir}/{old}.psk); rotate it instead")
     new_c = store.Client(new, c.ip, c.pub, c.allowed)
-    ctx.runner.step(f"Rename client '{old}' to '{new}' (same keys and address; exit: {checks.exit_label(ctx, new)})",
+    ctx.runner.step(f"Rename client '{old}' to '{new}' (same keys and address; exit: {exit_short(ctx, new)})",
                     f"wgt client rename {new} {old}")
-    text = re.sub(r"(?m)^# wireguard-tools client: .*$", f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
+    text = re.sub(r"(?m)^# wireguard-tools client: .*$",
+                  f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
     text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
     ctx.files.write(newconf, 0o600, text)
     ctx.files.write(os.path.join(ctx.paths.psk_dir, f"{new}.psk"), 0o600, psk)
@@ -364,7 +423,7 @@ def cmd_rename(ctx, words: List[str]) -> None:
     ctx.out.info(f"config now: {newconf} (same keys: the device's tunnel keeps working; rename it there if you like)")
 
 
-def cmd_disable(ctx, words: List[str], disabling: bool) -> None:
+def _set_enabled(ctx: Ctx, words: List[str], disabling: bool) -> None:
     """Disable (cut off now) or enable a client. Keys, config and address stay;
     only its peer leaves (or rejoins) wg0, live and in wg0.conf."""
     verb = "disable" if disabling else "enable"
@@ -394,15 +453,17 @@ def cmd_disable(ctx, words: List[str], disabling: bool) -> None:
         ops.add_live_peer(ctx, name, c.pub, c.ip)
 
 
-def cmd_disable_client(ctx, words: List[str]) -> None:
-    cmd_disable(ctx, words, True)
+def cmd_disable(ctx: Ctx, words: List[str]) -> None:
+    """wgt client disable [name]"""
+    _set_enabled(ctx, words, True)
 
 
-def cmd_enable_client(ctx, words: List[str]) -> None:
-    cmd_disable(ctx, words, False)
+def cmd_enable(ctx: Ctx, words: List[str]) -> None:
+    """wgt client enable [name]"""
+    _set_enabled(ctx, words, False)
 
 
-def cmd_show(ctx, words: List[str]) -> None:
+def cmd_show(ctx: Ctx, words: List[str]) -> None:
     """A client's config with keys redacted (--qr adds the QR code), and how to fetch it."""
     from .system import redact
     name = get_name(ctx, words, "show")
@@ -420,7 +481,7 @@ def cmd_show(ctx, words: List[str]) -> None:
     fetch_hint(ctx, conf)
 
 
-def cmd_share(ctx, words: List[str]) -> None:
+def cmd_share(ctx: Ctx, words: List[str]) -> None:
     """Send a client's config with magic-wormhole (one-time code; 10 minutes)."""
     name = get_name(ctx, words, "share")
     conf = client_conf(ctx, name)
@@ -435,18 +496,19 @@ def cmd_share(ctx, words: List[str]) -> None:
     ctx.out.info(f"receiver runs:  wormhole receive <code>   (then imports {os.path.basename(conf)} into WireGuard)")
     ctx.out.info("waiting up to 10 minutes; Ctrl-C cancels")
     # --foreground keeps wormhole in the terminal's process group, so Ctrl-C reaches it.
-    rc, _ = ctx.runner.run(["timeout", "--foreground", "600", "wormhole", "send", "--code-length", "3", conf], check=False)
+    rc, _ = ctx.runner.run(["timeout", "--foreground", "600", "wormhole", "send", "--code-length", "3", conf],
+                           check=False)
     if rc != 0:
         raise WgtError("not received (cancelled or timed out); nothing was sent")
 
 
-def cmd_list(ctx, words: List[str]) -> None:
+def cmd_list(ctx: Ctx, words: List[str]) -> None:
     """The clients table (or --tsv rows), then in a terminal the action menu."""
     if ctx.args.tsv:
-        for row in checks.client_rows(ctx):   # 7th field: the exit's full name
-            print("\t".join(str(x) for x in row + (checks.exit_name(ctx, row[0]),)))
+        for row in client_rows(ctx):   # 7th field: the exit's full name
+            print("\t".join(str(x) for x in row + (exit_label(ctx, row[0]),)))
         return
-    names = checks.print_clients(ctx, numbered=True)
+    names = print_clients(ctx, numbered=True)
     if names and sys.stdout.isatty() and not ctx.args.yes and ui.have_tty():
         list_menu(ctx, names)
 
@@ -454,24 +516,25 @@ def cmd_list(ctx, words: List[str]) -> None:
 ACTIONS = ("show", "qr", "share", "rotate", "toggle", "rename", "remove")
 
 
-def list_menu(ctx, names: List[str]) -> None:
+def list_menu(ctx: Ctx, names: List[str]) -> None:
     """After list: pick a client by number, then an action by number; runs one."""
     try:
         n = ui.pick_number("\n  Client # (Enter to exit): ", len(names))
     except ValueError as e:
-        raise WgtError(f"no client number '{e}'")
+        raise WgtError(f"no client number '{e}'") from None
     if n is None:
         return
     name = names[n - 1]
     disabled = ctx.snap.is_disabled(name)
     items = ["show      config, keys redacted", "qr        config as a QR code", "share     send with magic-wormhole",
              "rotate    new keys; the current config stops working",
-             "enable    let back in with its existing config" if disabled else "disable   cut off now, keep keys and address",
+             ("enable    let back in with its existing config" if disabled
+              else "disable   cut off now, keep keys and address"),
              "rename    new name, same keys", "remove    delete the client, its keys and config"]
     try:
         i = ui.menu(f"{name}:", items, "Action")
     except ValueError as e:
-        raise WgtError(f"no action '{e}'")
+        raise WgtError(f"no action '{e}'") from None
     if i is None:
         return
     print("")
@@ -486,7 +549,7 @@ def list_menu(ctx, names: List[str]) -> None:
     elif action == "rotate":
         cmd_rotate(ctx, [name])
     elif action == "toggle":
-        cmd_disable(ctx, [name], not disabled)
+        _set_enabled(ctx, [name], not disabled)
     elif action == "rename":
         new = ui.ask("  New name: ")
         if new:
@@ -495,14 +558,16 @@ def list_menu(ctx, names: List[str]) -> None:
         cmd_remove(ctx, [name])
 
 
-def cmd_client(ctx, words: List[str]) -> None:
+def cmd_client(ctx: Ctx, words: List[str]) -> Optional[int]:
+    """wgt client <command>: dispatch; no command means list."""
     sub, rest = (words[0], words[1:]) if words else ("list", [])
     table = {
         "list": cmd_list, "add": cmd_add, "show": cmd_show, "share": cmd_share, "rotate": cmd_rotate,
         "rename": cmd_rename, "remove": cmd_remove,
-        "disable": cmd_disable_client, "enable": cmd_enable_client,
+        "disable": cmd_disable, "enable": cmd_enable,
     }
     fn = table.get(sub)
     if fn is None:
-        raise WgtError(f"unknown client command: {sub} (list, add, show, share, rotate, rename, disable, enable, remove)")
+        raise WgtError(f"unknown client command: {sub} "
+                       "(list, add, show, share, rotate, rename, disable, enable, remove)")
     return fn(ctx, rest)

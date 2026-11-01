@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
-from typing import List
+from typing import TYPE_CHECKING, List, Optional
 
 from . import live, render, store
 from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
+
+if TYPE_CHECKING:
+    from .cli import Ctx
 
 
 def checkout_wgt() -> str:
@@ -14,14 +17,14 @@ def checkout_wgt() -> str:
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "wgt")
 
 
-def wgt_command(ctx=None) -> str:
+def wgt_command(ctx: Optional[Ctx] = None) -> str:
     """How systemd runs this tool: the <sbin>/wgt link setup makes, or this
     checkout's bin/wgt."""
     link = os.path.join(ctx.paths.sbin_dir if ctx else "/usr/local/sbin", "wgt")
     return link if os.path.exists(link) else checkout_wgt()
 
 
-def write_timer(ctx, name: str, what: str, service: str, timer: str) -> None:
+def write_timer(ctx: Ctx, name: str, what: str, service: str, timer: str) -> None:
     """Install a watchdog's service and timer and keep the timer enabled and on.
     Any old standalone script of the same name (bash version) is removed."""
     changed = False
@@ -38,7 +41,7 @@ def write_timer(ctx, name: str, what: str, service: str, timer: str) -> None:
         ctx.runner.run(["systemctl", "enable", "--now", f"{name}.timer"])
 
 
-def remove_timer(ctx, name: str) -> None:
+def remove_timer(ctx: Ctx, name: str) -> None:
     """Stop a watchdog's timer and remove (or restore) its files."""
     ctx.runner.run(["systemctl", "disable", "--now", f"{name}.timer"], check=False)
     for path in (ctx.paths.unit_file(f"{name}.timer"), ctx.paths.unit_file(f"{name}.service"),
@@ -46,7 +49,7 @@ def remove_timer(ctx, name: str) -> None:
         ctx.files.restore_original(path, remove_new=True)
 
 
-def write_watchdog(ctx) -> None:
+def write_watchdog(ctx: Ctx) -> None:
     """The WARP watchdog: every 30s, `wgt watchdog warp`."""
     svc = render.render_template("watchdog.service.tmpl", NAME=WATCHDOG,
                                  WHAT=f"WARP watchdog (new source port if {ctx.cfg.WARP_IF} stops handshaking)",
@@ -57,7 +60,7 @@ def write_watchdog(ctx) -> None:
                 f"{WATCHDOG_STALE}s without a handshake)", svc, timer)
 
 
-def write_exit_watchdog(ctx) -> None:
+def write_exit_watchdog(ctx: Ctx) -> None:
     """The exit watchdog: every 10s, `wgt watchdog exits`."""
     svc = render.render_template("watchdog.service.tmpl", NAME=EXIT_WATCHDOG,
                                  WHAT="exit-city watchdog (exits up while their clients are active)",
@@ -68,7 +71,7 @@ def write_exit_watchdog(ctx) -> None:
                 f"down after {EXIT_IDLE}s idle)", svc, timer)
 
 
-def open_firewall(ctx, outs: List[str]) -> None:
+def open_firewall(ctx: Ctx, outs: List[str]) -> None:
     """ufw (if active): allow the WireGuard port and wg0 -> every way out."""
     st = ctx.runner.query(["ufw", "status"])
     if "Status: active" not in st:

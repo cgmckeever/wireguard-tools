@@ -15,6 +15,8 @@ from .system import Runner
 
 @dataclass
 class Facts:
+    """What setup and the checks need to know about this machine."""
+
     kernel_ipv6: bool
     has_ipv6: bool          # an IPv6 default route
     hostname: str
@@ -27,6 +29,7 @@ class Facts:
 
 
 def gather(runner: Runner) -> Facts:
+    """Read this machine's facts (read-only commands)."""
     disabled = runner.query(["sysctl", "-n", "net.ipv6.conf.all.disable_ipv6"]).strip()
     return Facts(
         kernel_ipv6=os.path.exists("/proc/net/if_inet6") and disabled == "0",
@@ -66,7 +69,7 @@ def resolve4(host: str) -> Optional[str]:
         infos = socket.getaddrinfo(host, None, socket.AF_INET)
     except (OSError, UnicodeError):
         return None
-    return infos[0][4][0] if infos else None
+    return str(infos[0][4][0]) if infos else None
 
 
 def preflight() -> None:
@@ -77,7 +80,7 @@ def preflight() -> None:
         with open("/etc/os-release") as f:
             info = dict(line.split("=", 1) for line in f.read().splitlines() if "=" in line)
     except OSError:
-        raise WgtError("cannot read /etc/os-release; unsupported OS")
+        raise WgtError("cannot read /etc/os-release; unsupported OS") from None
     osid = info.get("ID", "").strip('"')
     ver = info.get("VERSION_ID", "").strip('"')
     major = ver.split(".")[0]

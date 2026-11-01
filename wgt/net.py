@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import random
 import re
+from typing import Optional
 
 
 def ip2int(ip: str) -> int:
@@ -23,7 +24,7 @@ def int2ip(n: int) -> str:
 _SUBNET6 = re.compile(r"([0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4}::/64")
 
 
-def canon_subnet6(value: str) -> str | None:
+def canon_subnet6(value: str) -> Optional[str]:
     """Lowercase a "<groups>::/64" prefix and drop leading zeros, as ip(8)
     prints it; None if it isn't one."""
     p = value.lower()
@@ -39,7 +40,7 @@ def random_subnet6() -> str:
     return str(canon_subnet6(f"fd{h[0:2]}:{h[2:6]}:{h[6:10]}::/64"))
 
 
-def random_subnet(routes: str, rng: random.Random | None = None) -> str:
+def random_subnet(routes: str, rng: Optional[random.Random] = None) -> str:
     """A random 10.<1-10>.<1-10>.0/24 that no route in <routes> (the output of
     `ip -4 route show table all`) already points into."""
     rng = rng or random.Random()
