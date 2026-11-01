@@ -66,7 +66,9 @@ scripts/servers.sh pull all              # git pull everywhere
 scripts/servers.sh branch boba exit-cities
 scripts/servers.sh status boba           # also setup, warp, test, exit, log, rollback (wg-setup.sh)
 scripts/servers.sh log boba -f           # follow its log
+scripts/servers.sh client                # pick a server, then its client list and action menu
 scripts/servers.sh client boba add phone # any wg-client.sh command
+scripts/servers.sh clients               # every client on every server: exit, last seen, traffic
 scripts/servers.sh backup all            # wg-setup.sh backup, fetched to local/backups/<name>/
 scripts/servers.sh exit-add boba         # pick from local/exits/boba/*.conf (or: all) -> exit cities
 scripts/servers.sh ssh boba
@@ -227,7 +229,7 @@ Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 |-----|---------|----------|
 | Magic Wormhole | `./wg-client.sh share laptop`; recipient runs `wormhole receive <code>` | sending it to someone else, no SSH needed |
 | QR code | printed by `add`/`rotate` in a terminal (`--no-qr` skips it); again any time with `./wg-client.sh show laptop --qr` | phones (WireGuard app → scan) |
-| scp | `scp root@<server>:/etc/wireguard/clients/dengar.laptop.conf .` | your own machines |
+| scp | `scp root@<server>:/etc/wireguard/clients/dengar.laptop.conf .` (`add` and `show` print the exact command) | your own machines |
 
 `share` prints a one-time code (like `7-guitar-revenge-tidy`) and waits up to 10
 minutes. The file is encrypted end to end; a wrong guess at the code ends the

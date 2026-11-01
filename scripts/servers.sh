@@ -104,7 +104,7 @@ each() {
 rsh() {
     local target="$1"
     shift
-    if [ -t 0 ] && [ -t 1 ]; then ssh -t "${SSH_OPTS[@]}" "$target" "$@"; else ssh "${SSH_OPTS[@]}" "$target" "$@"; fi
+    if [ -t 0 ] && [ -t 1 ]; then ssh -t -q "${SSH_OPTS[@]}" "$target" "$@"; else ssh "${SSH_OPTS[@]}" "$target" "$@"; fi
 }
 
 # Quote arguments for the remote shell.
@@ -262,7 +262,7 @@ cmd_clients() {
     for line in ${old[@]+"${old[@]}"}; do
         read -r name target dir <<<"$line"
         echo ""
-        log "$name (older tools; update with: $0 pull $name)"
+        log "$name (its tools predate this table)"
         ssh -n "${SSH_OPTS[@]}" "$target" "$dir/wg-client.sh list --yes" 2>/dev/null | sed 's/^/  /'
     done
     echo ""
