@@ -20,7 +20,11 @@ to the running server immediately; other clients stay connected.
 
 Commands:
   add <name>      New client: keypair, preshared key, next free address,
-                  config at $CLIENT_DIR/$SERVER_NAME.<name>.conf
+                  config at $CLIENT_DIR/$SERVER_NAME.<name>.conf. With exit
+                  cities (wg-setup.sh exit add) it asks which exit(s): each
+                  gets its own client, <code>.<name>, config
+                  $SERVER_NAME.<code>.<name>.conf; switch exits on the device by
+                  switching tunnels
   rotate [name]   Issue new keys for an existing client (same address); the old
                   config stops working
   remove [name]   Remove the client, its keys and its config
@@ -40,6 +44,8 @@ Options:
   --allowed-ips <cidrs>  With add/rotate: what the client sends through the VPN.
                          Default (set at server setup): $CLIENT_ALLOWED_IPS
                          e.g. "$WG_SUBNET$( [ "$IPV6" -eq 1 ] && echo ", $WG_SUBNET6")" for VPN-network-only (split tunnel)
+  --exit <code>[,...]    With add: exit city/cities for the new client(s); warp
+                         is the default exit (e.g. --exit warp,par)
   --endpoint <host>      With add/rotate: override the server address in the config
   --qr / --no-qr         With add/rotate: QR code of the new config (default: on
                          when run in a terminal); with show: add one (to re-send).
@@ -50,12 +56,51 @@ Options:
   --yes, -y              Don't prompt
 
 Leave out [name] to pick from a numbered list.
-Names: 1-32 characters of A-Z a-z 0-9 _ -
+Names: 1-32 characters of A-Z a-z 0-9 _ -, or <exit>.<name> for an exit city
 EOF
 }
 
+# Names are <name>, or <code>.<name> for a client of exit city <code>.
 valid_name() {
-    [[ $1 =~ ^[A-Za-z0-9_-]{1,32}$ ]] || die "client name must be 1-32 of [A-Za-z0-9_-]: '$1'"
+    [[ $1 =~ ^([a-z][a-z0-9]{1,5}\.)?[A-Za-z0-9_-]{1,32}$ ]] \
+        || die "client name must be 1-32 of [A-Za-z0-9_-] (or <exit>.<name>): '$1'"
+}
+
+# The "# exit:" line of a client's config.
+exit_desc() {
+    local code
+    code=$(client_exit "$1")
+    if [ -n "$code" ]; then
+        echo "$code = $(exit_label "$code") (Proton -> Cloudflare WARP)"
+    else
+        echo "default (this server's WARP setting: wg-setup.sh warp on|off)"
+    fi
+}
+
+# Ask which exit(s) a new client gets: prints codes (warp = the default).
+pick_exits() {
+    local name="$1" codes=() code i reply part out=()
+    while read -r code; do codes+=("$code"); done < <(exit_codes)
+    {
+        echo ""
+        echo "    Exit for $name:"
+        printf '      %d) %-6s %s\n' 0 warp "Cloudflare WARP from $SERVER_NAME (default)"
+        for i in "${!codes[@]}"; do
+            printf '      %d) %-6s %s\n' $(( i + 1 )) "${codes[$i]}" "$(exit_label "${codes[$i]}")"
+        done
+    } >/dev/tty
+    read -r -p "    Exit [Enter = warp; several: 0,1]: " reply </dev/tty || true
+    [ -n "$reply" ] || { echo warp; return 0; }
+    for part in ${reply//,/ }; do
+        if [[ $part =~ ^[0-9]+$ ]]; then
+            if [ "$part" -eq 0 ]; then out+=(warp)
+            elif [ "$part" -le ${#codes[@]} ]; then out+=("${codes[$(( part - 1 ))]}")
+            else die "no exit number $part"; fi
+        else
+            out+=("$part")
+        fi
+    done
+    printf '%s\n' "${out[@]}"
 }
 
 # No name given: list clients and ask for a number or name (needs a terminal).
@@ -157,7 +202,7 @@ issue_client() {
     psk=$(wg genpsk)
     # Render first: a template error must stop us before anything is written.
     content=$(render_template client.conf.tmpl \
-        NAME="$name" SERVER_NAME="$SERVER_NAME" PRIVATE_KEY="$priv" ADDRESS="$(client_addrs "$ip" | sed 's/,/, /')" DNS="$WG_DNS" MTU="$WG_MTU" \
+        NAME="$name" SERVER_NAME="$SERVER_NAME" EXIT="$(exit_desc "$name")" PRIVATE_KEY="$priv" ADDRESS="$(client_addrs "$ip" | sed 's/,/, /')" DNS="$WG_DNS" MTU="$WG_MTU" \
         SERVER_PUBLIC_KEY="$(cat "$SERVER_PUB")" PRESHARED_KEY="$psk" \
         ENDPOINT="$ENDPOINT:$WG_PORT" ALLOWED_IPS="${allowed//,/, }")
     write_file "$PSK_DIR/$name.psk" 600 <<<"$psk"
@@ -196,12 +241,37 @@ add_live_peer() {
 # --allowed-ips as a comma list without spaces.
 allowed_list() { tr -d '[:space:]' <<<"$1"; }
 
+# add <name> [--exit <code>[,<code>...]]: one client per exit (warp = the
+# default), named <name> and <code>.<name>; asks when exit cities exist.
 cmd_add() {
-    local name="${1:-}" existing ip
-    [ -n "$name" ] || die "usage: $PROG add <name>"
+    local name="${1:-}" base code codes=()
+    [ -n "$name" ] || die "usage: $PROG add <name> [--exit <code>[,...]]"
     valid_name "$name"
+    base="${name#*.}"
+    if [[ $name == *.* ]]; then
+        [ -z "$EXIT_CODES" ] || die "give the exit either in the name ($name) or with --exit, not both"
+        EXIT_CODES=$(client_exit "$name")
+    fi
     take_lock
     require_server
+    if [ -n "$EXIT_CODES" ]; then
+        read -r -a codes <<<"${EXIT_CODES//,/ }"
+    elif [ -n "$(exit_codes)" ] && [ "$YES" -eq 0 ] && [ "$DRY_RUN" -eq 0 ] && have_tty; then
+        while read -r code; do codes+=("$code"); done < <(pick_exits "$base")
+    else
+        codes=(warp)
+    fi
+    [ ${#codes[@]} -gt 0 ] || die "no exit chosen"
+    for code in "${codes[@]}"; do
+        [ "$code" = warp ] || [ -n "$(exit_idx "$code")" ] || die "no exit city '$code' on this server (see: wg-setup.sh exit list)"
+    done
+    for code in "${codes[@]}"; do
+        if [ "$code" = warp ]; then add_one "$base"; else add_one "$code.$base"; fi
+    done
+}
+
+add_one() {
+    local name="$1" existing ip tunnel
     existing=$(db_get "$name")
     if [ -n "$existing" ]; then
         info "client '$name' already exists (${existing%% *}); config: $(client_conf "$name")"
@@ -210,8 +280,13 @@ cmd_add() {
     fi
     ip=$(next_free_ip)
     resolve_endpoint 0
-    step "Add client '$name' at $ip" "$PROG remove $name"
+    step "Add client '$name' at $ip (exit: $(client_exit_label "$name"))" "$PROG remove $name"
     issue_client "$name" "$ip" "$(allowed_list "$CLIENT_ALLOWED_IPS")"
+    if [ -n "$(client_exit "$name")" ] && if_exists "$WG_IF"; then exit_client_cmds "$name" up | run_lines; fi
+    tunnel="$SERVER_NAME.$name"
+    if [ ${#tunnel} -gt 15 ]; then
+        info "note: Android's WireGuard app takes tunnel names up to 15 characters; '$tunnel' is ${#tunnel}, so shorten it when importing there"
+    fi
 }
 
 cmd_rotate() {
@@ -247,6 +322,7 @@ cmd_remove() {
     pub=$(awk '{ print $2 }' <<<"$existing")
     step "Remove client '$name' (${existing%% *})" "$PROG add $name (issues new keys)"
     confirm "Remove $name?"
+    if [ -n "$(client_exit "$name")" ] && if_exists "$WG_IF"; then exit_client_cmds "$name" down | run_lines; fi
     if if_exists "$WG_IF"; then run wg set "$WG_IF" peer "$pub" remove; fi
     db_put "$name"
     if is_disabled "$name"; then set_disabled "$name" 0; fi
@@ -309,13 +385,13 @@ cmd_list() {
         while read -r k a; do hs[$k]="$a"; done < <(wg show "$WG_IF" latest-handshakes)
         while read -r k a b; do rx[$k]="$a"; tx[$k]="$b"; done < <(wg show "$WG_IF" transfer)
     fi
-    printf '%3s %-20s %-15s %-14s %-12s %s\n' "#" NAME ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
+    printf '%3s %-20s %-6s %-15s %-14s %-12s %s\n' "#" NAME EXIT ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
     while read -r name ip pub allowed; do
         local seen
         seen=$(ago "${hs[$pub]:-0}")
         if is_disabled "$name"; then seen=disabled; fi
         n=$(( n + 1 )); names+=("$name")
-        printf '%3s %-20s %-15s %-14s %-12s %s\n' "$n" "$name" "$ip" "$seen" \
+        printf '%3s %-20s %-6s %-15s %-14s %-12s %s\n' "$n" "$name" "$(client_exit_label "$name")" "$ip" "$seen" \
             "$(( ${rx[$pub]:-0} / 1048576 ))/$(( ${tx[$pub]:-0} / 1048576 ))" "${allowed//,/, }"
     done < <(db_entries)
     # In a terminal: pick a client, then an action on it (Enter at either prompt exits).

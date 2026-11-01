@@ -1,0 +1,45 @@
+#!/bin/bash
+# Managed by wireguard-tools
+# Exit-city watchdog, run every 10s by {{NAME}}.timer. An exit city (Proton
+# tunnel px-<code>, WARP inside it wx-<code>) is up only while one of its
+# clients (<code>.<name> in clients.db) has handshaked within {{IDLE}}s: it is
+# brought up when one does and taken down when none has. An up exit whose WARP
+# has had no handshake for {{STALE}}s is restarted. While an exit is down its
+# clients are blocked (blackhole in its table), never sent out another way.
+wg_if={{WG_IF}} db={{CLIENT_DB}} disabled={{DISABLED_DB}} exits={{EXIT_DB}}
+idle={{IDLE}} stale={{STALE}} tag={{NAME}}
+[ -f "$exits" ] || exit 0
+now=$(date +%s)
+declare -A hs=()
+while read -r k t; do hs[$k]=$t; done < <(wg show "$wg_if" latest-handshakes 2>/dev/null)
+newest() { wg show "$1" latest-handshakes 2>/dev/null | awk '$2 > m { m = $2 } END { print m + 0 }'; }
+is_up() { ip link show dev "px-$1" >/dev/null 2>&1 && ip link show dev "wx-$1" >/dev/null 2>&1; }
+any_up() { ip link show dev "px-$1" >/dev/null 2>&1 || ip link show dev "wx-$1" >/dev/null 2>&1; }
+while read -r code _; do
+    case "$code" in ""|\#*) continue ;; esac
+    # wg-setup.sh exit add/test holds an exit up while it checks it.
+    hold=/run/$tag.$code.hold
+    if [ -f "$hold" ] && [ $(( now - $(stat -c %Y "$hold") )) -lt 60 ]; then continue; fi
+    active=0
+    while read -r name _ pub _; do
+        [[ $name == "$code".* ]] || continue
+        if [ -f "$disabled" ] && grep -qxF "$name" "$disabled"; then continue; fi
+        t=${hs[$pub]:-0}
+        if [ "$t" -gt 0 ] && [ $(( now - t )) -le "$idle" ]; then active=1; fi
+    done < <(grep -vE '^[[:space:]]*(#|$)' "$db" 2>/dev/null)
+    started=/run/$tag.$code
+    if [ "$active" -eq 1 ]; then
+        if ! is_up "$code"; then
+            systemctl start "wg-quick@px-$code" "wg-quick@wx-$code" && echo "$now" >"$started"
+            logger -t "$tag" "exit $code: a client is active; brought up"
+        elif [ $(( now - $(cat "$started" 2>/dev/null || echo 0) )) -gt "$stale" ] \
+                && [ $(( now - $(newest "wx-$code") )) -gt "$stale" ]; then
+            systemctl restart "wg-quick@px-$code" "wg-quick@wx-$code" && echo "$now" >"$started"
+            logger -t "$tag" "exit $code: no WARP handshake for over ${stale}s; restarted"
+        fi
+    elif any_up "$code"; then
+        systemctl stop "wg-quick@wx-$code" "wg-quick@px-$code"
+        rm -f "$started"
+        logger -t "$tag" "exit $code: no active client for ${idle}s; taken down"
+    fi
+done <"$exits"

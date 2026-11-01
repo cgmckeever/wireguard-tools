@@ -13,6 +13,18 @@
 #   off  no rule: client traffic follows the main table out the public interface.
 # Switching only adds or removes that rule, so wg0 never restarts for it.
 #
+# Exit cities (wg-setup.sh exit add): a client named <code>.<name> leaves
+# through that exit instead: its traffic goes into a second WARP tunnel
+# (wx-<code>) whose own packets carry a fwmark that routes them through a
+# Proton VPN tunnel (px-<code>), so Cloudflare sees the Proton city and the
+# client exits as a Cloudflare IP there. Per exit: client table
+# EXIT_TABLE_BASE+idx (default dev wx-<code>, blackhole fallback) chosen by one
+# rule per client address, and Proton table EXIT_PTABLE_BASE+idx (default dev
+# px-<code>, blackhole fallback) chosen by the fwmark. The tables, rules and
+# blackholes live in wg0's hooks, so an exit that is down (idle, or broken)
+# blocks its clients instead of leaking them. The exit watchdog brings an exit
+# up when one of its clients is active and takes it down after EXIT_IDLE.
+#
 # IPv6: clients also get an address in WG_SUBNET6 (a ULA /64, random by
 # default), NATed out the same way: through WARP's own IPv6 when on (works on
 # IPv4-only hosts), or out the public interface when off (if the host has
@@ -75,6 +87,20 @@ WATCHDOG_BIN="/usr/local/sbin/$WATCHDOG"
 WATCHDOG_SERVICE="/etc/systemd/system/$WATCHDOG.service"
 WATCHDOG_TIMER="/etc/systemd/system/$WATCHDOG.timer"
 WATCHDOG_STALE=180   # seconds without a WARP handshake before it acts
+EXIT_DIR="$WG_DIR/exits"        # per exit: <code>.proton.conf and <code>/ (its WARP account)
+EXIT_DB="$WG_DIR/exits.db"      # "code idx label" per line
+EXIT_TABLE_BASE=200             # client table of exit idx: 200+idx
+EXIT_PTABLE_BASE=230            # Proton table of exit idx: 230+idx
+EXIT_MARK_BASE=22272            # fwmark of exit idx: 0x5700+idx
+EXIT_MAX=20
+EXIT_RULE_PRIO=9500             # per-client rules: before the WARP rule (RULE_PRIO)
+EXIT_MARK_PRIO=9400
+EXIT_PROTON_MTU=1420
+EXIT_IDLE=300                   # seconds without a client handshake before an exit goes down
+EXIT_WATCHDOG=wg-tools-exit-watchdog
+EXIT_WATCHDOG_BIN="/usr/local/sbin/$EXIT_WATCHDOG"
+EXIT_WATCHDOG_SERVICE="/etc/systemd/system/$EXIT_WATCHDOG.service"
+EXIT_WATCHDOG_TIMER="/etc/systemd/system/$EXIT_WATCHDOG.timer"
 LOCK_FILE=/run/wg-tools.lock
 TRACE_URL=https://www.cloudflare.com/cdn-cgi/trace
 BLACKHOLE_METRIC=4096
@@ -92,6 +118,8 @@ SUBNET_ASKED=0   # 1 once setup asked for the subnet
 FORCE=0
 PURGE=0
 QR=0     # 1 = --qr, -1 = --no-qr, 0 = add/rotate decide (on if a terminal)
+EXIT_CODES=""   # wg-client.sh add --exit <code>[,<code>...]
+EXIT_LABEL=""   # wg-setup.sh exit add --label "<full name>"
 ARGS=()
 
 # --- Runtime ---
@@ -168,6 +196,8 @@ set_opt() {
         --warp-if)     var=WARP_IF ;;
         --table)       var=RT_TABLE ;;
         --allowed-ips) var=CLIENT_ALLOWED_IPS; ALLOWED_IPS_GIVEN=1 ;;
+        --exit)        var=EXIT_CODES ;;
+        --label)       var=EXIT_LABEL ;;
         *) die "unknown option: $1 (see: $PROG help)" ;;
     esac
     printf -v "$var" '%s' "$2"
@@ -186,7 +216,7 @@ parse_args() {
             --no-qr)   QR=-1 ;;
             -h|--help) ARGS=(help); return 0 ;;
             --*=*)     set_opt "${1%%=*}" "${1#*=}" ;;
-            --name|--subnet|--subnet6|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips)
+            --name|--subnet|--subnet6|--port|--mtu|--warp-mtu|--dns|--endpoint|--wg-if|--warp-if|--table|--allowed-ips|--exit|--label)
                 [ $# -ge 2 ] || die "$1 needs a value"
                 set_opt "$1" "$2"
                 shift
@@ -311,6 +341,9 @@ finalize_config() {
         die "WG_MTU ($WG_MTU) must not exceed WARP_MTU ($WARP_MTU)"
     fi
     in_range "$RT_TABLE" 1 252 || die "bad table (1-252): $RT_TABLE"
+    if [ "$RT_TABLE" -gt "$EXIT_TABLE_BASE" ] && [ "$RT_TABLE" -le $(( EXIT_PTABLE_BASE + EXIT_MAX )) ]; then
+        die "table $RT_TABLE is reserved for exit cities ($(( EXIT_TABLE_BASE + 1 ))-$(( EXIT_PTABLE_BASE + EXIT_MAX )))"
+    fi
     [[ $WG_SUBNET =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})$ ]] || die "bad subnet: $WG_SUBNET"
 
     net="${WG_SUBNET%/*}"
@@ -602,7 +635,12 @@ pub_if() {
 out_if() {
     if [ "$WARP" = on ]; then echo "$WARP_IF"; else pub_if; fi
 }
-exit_ifs() { echo "$WARP_IF"; pub_if; }
+exit_ifs() {
+    local code
+    echo "$WARP_IF"
+    pub_if
+    for code in $(exit_codes); do echo "wx-$code"; done
+}
 
 # Abort (and stop warp) if the default route moved: SSH depends on it.
 guard_default_route() {
@@ -656,22 +694,39 @@ warp_route() {
 # the public interface: each matches only its own -o, so both can stay in
 # place). Inserted (-I) so ufw/Docker DROP policies can't shadow them.
 ipt_rules() {
-    local out cmd net
+    local out cmd
     for cmd in iptables ip6tables; do
-        net="$WG_SUBNET"
-        if [ "$cmd" = ip6tables ]; then
-            [ "$IPV6" -eq 1 ] || continue
-            net="$WG_SUBNET6"
-        fi
-        while IFS= read -r out; do
-            printf '%s\n' \
-                "$cmd|nat|POSTROUTING|-s $net -o $out -j MASQUERADE" \
-                "$cmd|filter|FORWARD|-i $WG_IF -o $out -j ACCEPT" \
-                "$cmd|filter|FORWARD|-i $out -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" \
-                "$cmd|mangle|FORWARD|-o $out -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
-        done < <(exit_ifs)
+        if [ "$cmd" = ip6tables ] && [ "$IPV6" -ne 1 ]; then continue; fi
+        while IFS= read -r out; do ipt_lines "$cmd" "$out"; done < <(exit_ifs)
     done
     echo "iptables|filter|INPUT|-p udp --dport $WG_PORT -j ACCEPT"
+}
+
+# The NAT/forwarding rules for one way out (both families).
+ipt_rules_out() {
+    ipt_lines iptables "$1"
+    if [ "$IPV6" -eq 1 ]; then ipt_lines ip6tables "$1"; fi
+}
+
+ipt_lines() {
+    local cmd="$1" out="$2" net="$WG_SUBNET"
+    if [ "$cmd" = ip6tables ]; then net="$WG_SUBNET6"; fi
+    printf '%s\n' \
+        "$cmd|nat|POSTROUTING|-s $net -o $out -j MASQUERADE" \
+        "$cmd|filter|FORWARD|-i $WG_IF -o $out -j ACCEPT" \
+        "$cmd|filter|FORWARD|-i $out -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT" \
+        "$cmd|mangle|FORWARD|-o $out -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"
+}
+
+# Firewall rule lines ("command|table|chain|rule" on stdin) as idempotent
+# shell lines that add (up) or remove (down) them.
+ipt_cmds() {
+    local x t c r
+    if [ "$1" = up ]; then
+        while IFS='|' read -r x t c r; do echo "$x -t $t -C $c $r 2>/dev/null || $x -t $t -I $c $r"; done
+    else
+        while IFS='|' read -r x t c r; do echo "while $x -t $t -C $c $r 2>/dev/null; do $x -t $t -D $c $r || break; done"; done
+    fi
 }
 
 # The WARP switch: shell lines that add (on) or remove (off) the policy rules
@@ -692,7 +747,7 @@ warp_rule_cmds() {
 # way; only the policy rule depends on WARP. warp's route is optional here
 # (warp may be down; its own PostUp adds it).
 hook_cmds() {
-    local x t c r f net
+    local f net code
     if [ "$1" = up ]; then
         while IFS= read -r f; do
             net="$WG_SUBNET"
@@ -702,13 +757,11 @@ hook_cmds() {
             echo "$f route replace blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE"
         done < <(ip_families)
         if [ "$WARP" = on ]; then warp_rule_cmds on; fi
-        while IFS='|' read -r x t c r; do
-            echo "$x -t $t -C $c $r 2>/dev/null || $x -t $t -I $c $r"
-        done < <(ipt_rules)
+        ipt_rules | ipt_cmds up
+        for code in $(exit_codes); do exit_hook_cmds "$code" up; done
     else
-        while IFS='|' read -r x t c r; do
-            echo "while $x -t $t -C $c $r 2>/dev/null; do $x -t $t -D $c $r || break; done"
-        done < <(ipt_rules | tac)
+        for code in $(exit_codes | tac); do exit_hook_cmds "$code" down; done
+        ipt_rules | tac | ipt_cmds down
         warp_rule_cmds off | tac
         while IFS= read -r f; do
             net="$WG_SUBNET"
@@ -763,6 +816,80 @@ db_put() {
         db_entries | awk -v n="$name" '$1 != n'
         if [ -n "$entry" ]; then echo "$name $entry"; fi
     )
+}
+
+# --- Exit cities ---
+
+exit_entries() {
+    [ -f "$EXIT_DB" ] || return 0
+    grep -vE '^[[:space:]]*(#|$)' "$EXIT_DB" || true
+}
+exit_codes() { exit_entries | awk '{ print $1 }'; }
+exit_idx() { exit_entries | awk -v c="$1" '$1 == c { print $2; exit }'; }
+exit_label() { exit_entries | awk -v c="$1" '$1 == c { $1 = ""; $2 = ""; sub(/^ +/, ""); print; exit }'; }
+exit_wtable() { echo $(( EXIT_TABLE_BASE + $(exit_idx "$1") )); }
+exit_ptable() { echo $(( EXIT_PTABLE_BASE + $(exit_idx "$1") )); }
+exit_mark() { echo $(( EXIT_MARK_BASE + $(exit_idx "$1") )); }
+valid_exit_code() { [[ $1 =~ ^[a-z][a-z0-9]{1,5}$ ]] && [ "$1" != warp ]; }
+
+# A client's exit code (from a <code>.<name> name), empty for the default.
+client_exit() { if [[ $1 == *.* ]]; then echo "${1%%.*}"; fi; }
+# Where a client exits, for tables: its exit code, or warp/direct (the default).
+client_exit_label() {
+    local c
+    c=$(client_exit "$1")
+    if [ -n "$c" ]; then echo "$c"; elif [ "$WARP" = on ]; then echo warp; else echo direct; fi
+}
+# Clients (names) of exit <code>.
+exit_clients() { db_entries | awk -v p="$1." 'index($1, p) == 1 { print $1 }'; }
+
+# Policy rules sending one client's addresses (ip, ip6) to its exit's table.
+exit_client_cmds() {
+    local name="$1" dir="$2" ip code table f a
+    code=$(client_exit "$name")
+    [ -n "$code" ] && [ -n "$(exit_idx "$code")" ] || return 0
+    ip=$(db_get "$name" | awk '{ print $1 }')
+    [ -n "$ip" ] || return 0
+    table=$(exit_wtable "$code")
+    while IFS= read -r f; do
+        a="$ip/32"
+        if [ "$f" = "ip -6" ]; then a="$(ip6_of "$ip")/128"; fi
+        echo "while $f rule del from $a lookup $table priority $EXIT_RULE_PRIO 2>/dev/null; do :; done"
+        if [ "$dir" = up ]; then echo "$f rule add from $a lookup $table priority $EXIT_RULE_PRIO"; fi
+    done < <(ip_families)
+}
+
+# Shell lines for one exit's part of wg0's hooks: its tables with blackhole
+# fallbacks (so clients are blocked while it is down), the fwmark rule that
+# sends its WARP tunnel's packets through Proton, and its clients' rules
+# (its firewall rules come with ipt_rules, via exit_ifs). down is the inverse.
+exit_hook_cmds() {
+    local code="$1" w p m f net name
+    w=$(exit_wtable "$code"); p=$(exit_ptable "$code"); m=$(exit_mark "$code")
+    if [ "$2" = up ]; then
+        echo "ip route replace default dev px-$code table $p 2>/dev/null || true"
+        echo "ip route replace blackhole default metric $BLACKHOLE_METRIC table $p"
+        echo "while ip rule del fwmark $m lookup $p priority $EXIT_MARK_PRIO 2>/dev/null; do :; done; ip rule add fwmark $m lookup $p priority $EXIT_MARK_PRIO"
+        while IFS= read -r f; do
+            net="$WG_SUBNET"
+            if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+            echo "$f route replace $net dev $WG_IF table $w"
+            echo "$f route replace default dev wx-$code table $w 2>/dev/null || true"
+            echo "$f route replace blackhole default metric $BLACKHOLE_METRIC table $w"
+        done < <(ip_families)
+        for name in $(exit_clients "$code"); do exit_client_cmds "$name" up; done
+    else
+        for name in $(exit_clients "$code"); do exit_client_cmds "$name" down; done
+        while IFS= read -r f; do echo "$f route flush table $w 2>/dev/null || true"; done < <(ip_families | tac)
+        echo "while ip rule del fwmark $m lookup $p priority $EXIT_MARK_PRIO 2>/dev/null; do :; done"
+        echo "ip route flush table $p 2>/dev/null || true"
+    fi
+}
+
+# Run shell lines from stdin (live changes outside a full wg0 restart).
+run_lines() {
+    local line
+    while IFS= read -r line; do run bash -c "$line"; done
 }
 
 # --- wg0.conf ---

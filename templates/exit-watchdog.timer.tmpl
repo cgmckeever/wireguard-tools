@@ -1,0 +1,11 @@
+# Managed by wireguard-tools
+[Unit]
+Description=Run the wireguard-tools exit-city watchdog every 10s
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=10s
+AccuracySec=2s
+
+[Install]
+WantedBy=timers.target

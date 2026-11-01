@@ -1,4 +1,5 @@
 
-# Proton exit configs (private keys) staged on the dev machine; never commit
-exit-configs/*
-!exit-configs/.gitkeep
+# This machine's private files: server list, Proton exit configs (private
+# keys). Never commit; see scripts/push-exits.sh.
+local/*
+!local/.gitkeep
