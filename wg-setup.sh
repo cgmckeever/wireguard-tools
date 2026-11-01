@@ -38,7 +38,7 @@ Commands:
               while one of their clients is connected
   exit add <code> <proton.conf|-> [--label "Paris, FR"]
               Import (or replace) a Proton WireGuard config as exit <code>
-              (2-6 of a-z0-9, e.g. par); registers its own WARP account and
+              (2-6 of a-z0-9 and -, e.g. par-fr); registers its own WARP account and
               checks it end to end
   exit remove <code>
               Remove an exit city (refused while clients use it)
@@ -731,8 +731,8 @@ check_proton_conf() {
 # Proton table's default route (goes when the tunnel does; the blackhole stays).
 render_proton_conf() {
     local raw="$1" code="$2"
-    awk -v marker="$MARKER" -v code="$code" -v mtu="$EXIT_PROTON_MTU" -v table="$(exit_ptable "$code")" '
-        BEGIN { print marker " exit " code ": Proton tunnel from exits/" code ".proton.conf; WARP inside it is wx-" code }
+    awk -v marker="$MARKER" -v code="$code" -v label="$(exit_label "$code")" -v mtu="$EXIT_PROTON_MTU" -v table="$(exit_ptable "$code")" '
+        BEGIN { print marker " exit " code " (" label "): Proton tunnel from exits/" code ".proton.conf; WARP inside it is wx-" code }
         /^[[:space:]]*\[Interface\]/ {
             print "[Interface]"; print "MTU = " mtu; print "Table = off"
             print "PostUp = sysctl -q -w net.ipv4.conf.%i.rp_filter=2"
@@ -857,7 +857,7 @@ sync_exits() {
 # routing into wg0 live, and check it end to end.
 exit_add() {
     local code="${1:-}" src="${2:-}" raw idx new=0 label hint t
-    valid_exit_code "$code" || die "exit code must be 2-6 of a-z0-9, starting with a letter, not 'warp' (e.g. par, nyc): '${code}'"
+    valid_exit_code "$code" || die "exit code must be 2-6 of a-z0-9 and -, starting with a letter, not 'warp' (e.g. par-fr): '${code}'"
     [ -n "$src" ] || die "usage: $PROG exit add <code> <proton.conf|-> [--label \"Paris, FR\"]"
     take_lock
     raw="$TMPD/proton.conf"
@@ -886,7 +886,7 @@ exit_add() {
     install_wgcf || die "wgcf is needed for the exit's WARP"
     run install -d -m 700 "$EXIT_DIR"
     register_warp "$EXIT_DIR/$code" || die "could not register a WARP account for exit '$code'"
-    write_file "$EXIT_DIR/$code.proton.conf" 600 <"$raw"
+    write_file "$EXIT_DIR/$code.proton.conf" 600 < <(echo "# exit $code: $label"; grep -v "^# exit $code: " "$raw")
     write_file "$EXIT_DB" 600 < <(
         echo "# wireguard-tools exit cities: code idx label (wg-setup.sh exit add)"
         exit_entries | awk -v c="$code" '$1 != c'
@@ -1055,17 +1055,17 @@ cmd_status() {
 # One time-ordered log: wireguard-tools' own steps, both watchdogs, and the
 # wg-quick units (wg0, warp, each exit city's tunnels). log [lines] [--follow].
 cmd_log() {
-    local lines="${1:-40}" ifc code matches=()
-    [[ $lines =~ ^[0-9]+$ ]] || die "usage: $PROG log [lines] [--follow]"
+    local count="${1:-40}" ifc code matches=()
+    [[ $count =~ ^[0-9]+$ ]] || die "usage: $PROG log [lines] [--follow]"
     for ifc in wg-tools "$WATCHDOG" "$EXIT_WATCHDOG"; do matches+=("SYSLOG_IDENTIFIER=$ifc" +); done
     for ifc in "$WG_IF" "$WARP_IF" $(for code in $(exit_codes); do echo "px-$code wx-$code"; done); do
         matches+=("_SYSTEMD_UNIT=wg-quick@$ifc.service" + "UNIT=wg-quick@$ifc.service" +)
     done
     unset 'matches[${#matches[@]}-1]'
     if [ "$FOLLOW" -eq 1 ]; then
-        exec journalctl --no-pager -o short-iso -n "$lines" -f "${matches[@]}"
+        exec journalctl --no-pager -o short-iso -n "$count" -f "${matches[@]}"
     fi
-    journalctl --no-pager -o short-iso -n "$lines" "${matches[@]}"
+    journalctl --no-pager -o short-iso -n "$count" "${matches[@]}"
 }
 
 # --- test ---

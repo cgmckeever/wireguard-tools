@@ -4,8 +4,9 @@
 #
 # The list lives in local/servers (untracked): "name  ssh-target  [checkout]"
 # per line. Private files for each server stay under local/ too:
-#   local/exits/<name>/<code>.conf   Proton configs for its exit cities
-#   local/exits/labels               "code<TAB>full name" (asked once per code)
+#   local/exits/<name>/*.conf        Proton configs for its exit cities (any name)
+#   local/exits/links                server, local file, code on the server and
+#                                    full name, tab-separated (asked at first push)
 #   local/backups/<name>/            backup archives fetched from it
 #
 # Usage: scripts/servers.sh [command] [server|all] [args...]
@@ -22,9 +23,10 @@
 #                         run wg-setup.sh <command> [args] there
 #                         (log [lines] [-f]: its changes, watchdogs and tunnels)
 #   client <s> [args]     run wg-client.sh [args] there (e.g. client boba list)
-#   push-exits <s> [code...]
+#   push-exits <s> [file...]
 #                         install local/exits/<s>/*.conf as its exit cities
-#                         (scp, wg-setup.sh exit add, delete the upload)
+#                         (scp, wg-setup.sh exit add, delete the upload); a new
+#                         file is named once: "Paris, France" -> code par-fr
 #   backup <s|all>        wg-setup.sh backup there, then fetch the archive to
 #                         local/backups/<s>/ (holds private keys; mode 600)
 #   forget <s> [--yes]    remove from the list (nothing on the server changes)
@@ -37,6 +39,7 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 LOCAL="$ROOT/local"
 LIST="$LOCAL/servers"
+LINKS="$LOCAL/exits/links"   # server  local-file  code  full name (tab-separated)
 DEF_DIR=/opt/wireguard-tools
 SSH_OPTS=(-o ConnectTimeout=10 -o ServerAliveInterval=15)
 
@@ -242,33 +245,51 @@ do_backup() {
     info "$name: $to/$(basename "$out") (private keys inside; restore with wg-setup.sh restore)"
 }
 
+# The link for a local exit config: "code<TAB>full name" (empty if none yet).
+link_of() { awk -F'\t' -v s="$1" -v f="$2" '$1 == s && $2 == f { print $3 "\t" $4; exit }' "$LINKS" 2>/dev/null; }
+
+# First push of a local config: ask what it is and pick its code on the
+# server (city's first 3 letters + Proton's country tag, e.g. par-fr).
+make_link() {
+    local server="$1" f="$2" file name hint cc city code reply
+    file=$(basename "$f")
+    hint=$(awk '/^[[:space:]]*\[Peer\]/ { p = 1; next } p && /^[[:space:]]*#/ { sub(/^[[:space:]]*#[[:space:]]*/, ""); print; exit }' "$f")
+    [ -t 0 ] || die "$file has no link yet; run push-exits in a terminal once to name it"
+    read -r -p "What is $file (Proton ${hint:-?})? e.g. Paris, France: " name </dev/tty || true
+    [ -n "$name" ] || die "no name for $file"
+    cc=$(sed -n 's/^\([A-Za-z][A-Za-z]\)#.*/\1/p' <<<"$hint" | tr 'A-Z' 'a-z')
+    city=$(tr 'A-Z' 'a-z' <<<"$name" | tr -cd 'a-z' | cut -c1-3)
+    code="$city${cc:+-$cc}"
+    while :; do
+        read -r -p "Short code on the server [$code]: " reply </dev/tty || true
+        code="${reply:-$code}"
+        if [[ $code =~ ^[a-z][a-z0-9-]{0,4}[a-z0-9]$ ]] && [ "$code" != warp ]; then break; fi
+        echo "  2-6 of a-z0-9 and -, starting with a letter (e.g. par-fr)"
+    done
+    printf '%s\t%s\t%s\t%s\n' "$server" "$file" "$code" "$name" >>"$LINKS"
+    chmod 600 "$LINKS"
+}
+
 do_push_exits() {
-    local name="$1" target="$2" dir="$3" src f code label hint files=() inbox=/etc/wireguard/exits/incoming
+    local name="$1" target="$2" dir="$3" src f file link code label files=() inbox=/etc/wireguard/exits/incoming reply
     shift 3
     src="$LOCAL/exits/$name"
     if [ $# -gt 0 ]; then
-        for code in "$@"; do files+=("$src/$code.conf"); done
+        for file in "$@"; do files+=("$src/${file%.conf}.conf"); done
     else
         for f in "$src"/*.conf; do [ -f "$f" ] && files+=("$f"); done
     fi
-    [ ${#files[@]} -gt 0 ] || die "no configs in $src (save Proton WireGuard configs there as <code>.conf, e.g. par.conf)"
+    [ ${#files[@]} -gt 0 ] || die "no configs in $src (save Proton WireGuard configs there, any name ending .conf)"
     ssh "${SSH_OPTS[@]}" "$target" "install -d -m 700 /etc/wireguard/exits $inbox" || die "cannot reach $target"
     for f in "${files[@]}"; do
         [ -f "$f" ] || die "missing $f"
         chmod 600 "$f"
-        code=$(basename "$f" .conf)
-        if ! [[ $code =~ ^[a-z][a-z0-9]{1,5}$ ]] || [ "$code" = warp ]; then
-            die "$f: name it <code>.conf, a 2-6 character code of a-z0-9 (e.g. par.conf)"
-        fi
-        label=$(awk -F'\t' -v c="$code" '$1 == c { print $2; exit }' "$LOCAL/exits/labels" 2>/dev/null)
-        if [ -z "$label" ]; then
-            hint=$(awk '/^[[:space:]]*\[Peer\]/ { p = 1; next } p && /^[[:space:]]*#/ { sub(/^[[:space:]]*#[[:space:]]*/, ""); print; exit }' "$f")
-            read -r -p "Full name for exit '$code' (e.g. Paris, FR) [${hint:-$code}]: " label </dev/tty || true
-            label="${label:-${hint:-$code}}"
-            printf '%s\t%s\n' "$code" "$label" >>"$LOCAL/exits/labels"
-            chmod 600 "$LOCAL/exits/labels"
-        fi
-        log "$name: exit $code ($label)"
+        file=$(basename "$f")
+        link=$(link_of "$name" "$file")
+        if [ -z "$link" ]; then make_link "$name" "$f"; link=$(link_of "$name" "$file"); fi
+        code="${link%%$'\t'*}"
+        label="${link#*$'\t'}"
+        log "$name: $file -> exit $code ($label)"
         scp -q -p "${SSH_OPTS[@]}" "$f" "$target:$inbox/$code.conf" || die "upload failed"
         ssh "${SSH_OPTS[@]}" "$target" "$dir/wg-setup.sh exit add $(q "$code" "$inbox/$code.conf" --label "$label" --yes); rc=\$?; rm -f $inbox/$code.conf; exit \$rc" \
             || die "exit add failed for $code (nothing left in $inbox)"

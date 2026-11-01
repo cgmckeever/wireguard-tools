@@ -834,7 +834,8 @@ exit_label() { exit_entries | awk -v c="$1" '$1 == c { $1 = ""; $2 = ""; sub(/^ 
 exit_wtable() { echo $(( EXIT_TABLE_BASE + $(exit_idx "$1") )); }
 exit_ptable() { echo $(( EXIT_PTABLE_BASE + $(exit_idx "$1") )); }
 exit_mark() { echo $(( EXIT_MARK_BASE + $(exit_idx "$1") )); }
-valid_exit_code() { [[ $1 =~ ^[a-z][a-z0-9]{1,5}$ ]] && [ "$1" != warp ]; }
+# 2-6 of a-z0-9 and -, starting with a letter, not ending in - (e.g. par-fr).
+valid_exit_code() { [[ $1 =~ ^[a-z][a-z0-9-]{0,4}[a-z0-9]$ ]] && [ "$1" != warp ]; }
 
 # A client's exit code (from a <code>.<name> name), empty for the default.
 client_exit() { if [[ $1 == *.* ]]; then echo "${1%%.*}"; fi; }

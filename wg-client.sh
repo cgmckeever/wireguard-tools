@@ -62,7 +62,7 @@ EOF
 
 # Names are <name>, or <code>.<name> for a client of exit city <code>.
 valid_name() {
-    [[ $1 =~ ^([a-z][a-z0-9]{1,5}\.)?[A-Za-z0-9_-]{1,32}$ ]] \
+    [[ $1 =~ ^([a-z][a-z0-9-]{0,4}[a-z0-9]\.)?[A-Za-z0-9_-]{1,32}$ ]] \
         || die "client name must be 1-32 of [A-Za-z0-9_-] (or <exit>.<name>): '$1'"
 }
 
