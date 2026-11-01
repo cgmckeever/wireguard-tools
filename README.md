@@ -328,6 +328,7 @@ Clients choose a city when they're added: see [Exit-city clients](#exit-city-cli
 ./wg-client.sh rotate laptop                         # new keys, same address; old config stops working
 ./wg-client.sh disable laptop                        # cut it off now; keys, config and address kept
 ./wg-client.sh enable laptop                         # let it back in with the same config
+./wg-client.sh rename laptop work-laptop             # same keys and address; its config keeps working
 ./wg-client.sh remove laptop
 ```
 

@@ -28,6 +28,9 @@ Commands:
   rotate [name]   Issue new keys for an existing client (same address); the old
                   config stops working
   remove [name]   Remove the client, its keys and its config
+  rename <name> <new-name>
+                  Rename a client, keeping its keys and address (its config
+                  still works); a new <code>. prefix moves it to that exit
   disable [name]  Cut the client off now, keeping its keys, config and address
                   (stays off across restarts)
   enable [name]   Let a disabled client back in with its existing config
@@ -373,6 +376,42 @@ cmd_remove() {
     forget_file "$PSK_DIR/$name.psk"
 }
 
+# Rename a client, keeping its keys and address (the device's config keeps
+# working; only its file name and comments change). A new <code>. prefix
+# moves it to that exit.
+cmd_rename() {
+    local old="${1:-}" new="${2:-}" entry conf newconf code
+    [ -n "$old" ] && [ -n "$new" ] || die "usage: $PROG rename <name> <new-name>"
+    valid_name "$old"
+    valid_name "$new"
+    take_lock
+    require_server
+    entry=$(db_get "$old")
+    [ -n "$entry" ] || die "no client '$old' (see: $PROG list)"
+    [ -z "$(db_get "$new")" ] || die "a client '$new' already exists"
+    code=$(client_exit "$new")
+    if [ -n "$code" ] && [ -z "$(exit_idx "$code")" ]; then die "no exit city '$code' on this server (see: wg-setup.sh exit list)"; fi
+    conf=$(client_conf "$old")
+    newconf=$(client_conf "$new")
+    [ -f "$conf" ] || die "no config for '$old' ($conf)"
+    step "Rename client '$old' to '$new' (same keys and address; exit: $(client_exit_label "$new"))" "$PROG rename $new $old"
+    if if_exists "$WG_IF"; then run_lines < <(exit_client_cmds "$old" down); fi
+    write_file "$newconf" 600 < <(sed -e "s|^# wireguard-tools client: .*|# wireguard-tools client: $new on $SERVER_NAME|" \
+        -e "s|^# exit: .*|# exit: $(exit_desc "$new")|" "$conf")
+    write_file "$PSK_DIR/$new.psk" 600 <"$PSK_DIR/$old.psk"
+    db_put "$old"
+    db_put "$new" "$entry"
+    if is_disabled "$old"; then
+        set_disabled "$old" 0
+        set_disabled "$new" 1
+    fi
+    write_wg_conf
+    if if_exists "$WG_IF"; then run_lines < <(exit_client_cmds "$new" up); fi
+    forget_file "$conf"
+    forget_file "$PSK_DIR/$old.psk"
+    info "config now: $newconf (same keys: the device's tunnel keeps working; rename it there if you like)"
+}
+
 # Disable or enable a client: cmd_disable <name> 1 (disable) | 0 (enable).
 # Keys, config and address stay; only its peer leaves (or rejoins) wg0, live
 # and in wg0.conf.
@@ -524,6 +563,7 @@ main() {
         add)     cmd_add "$@" ;;
         rotate)  cmd_rotate "$@" ;;
         remove)  cmd_remove "$@" ;;
+        rename)  cmd_rename "$@" ;;
         disable) cmd_disable "${1:-}" 1 ;;
         enable)  cmd_disable "${1:-}" 0 ;;
         list)    cmd_list ;;
