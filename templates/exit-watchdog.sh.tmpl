@@ -4,22 +4,26 @@
 # tunnel px-<code>, WARP inside it wx-<code>) is up only while one of its
 # clients (<code>.<name> in clients.db) has handshaked within {{IDLE}}s: it is
 # brought up when one does and taken down when none has. An up exit whose WARP
-# has had no handshake for {{STALE}}s is restarted. While an exit is down its
-# clients are blocked (blackhole in its table), never sent out another way.
+# has had no handshake for {{STALE}}s gets a new source port, then a restart.
+# While an exit is down its clients are blocked (blackhole in its table),
+# never sent out another way. Skips a run while wireguard-tools is changing
+# things (its lock), and an exit that wg-setup.sh is checking (its hold file).
 wg_if={{WG_IF}} db={{CLIENT_DB}} disabled={{DISABLED_DB}} exits={{EXIT_DB}}
 idle={{IDLE}} stale={{STALE}} tag={{NAME}}
 [ -f "$exits" ] || exit 0
+exec 9>{{LOCK}}
+flock -n 9 || exit 0
 now=$(date +%s)
 declare -A hs=()
 while read -r k t; do hs[$k]=$t; done < <(wg show "$wg_if" latest-handshakes 2>/dev/null)
 newest() { wg show "$1" latest-handshakes 2>/dev/null | awk '$2 > m { m = $2 } END { print m + 0 }'; }
-is_up() { ip link show dev "px-$1" >/dev/null 2>&1 && ip link show dev "wx-$1" >/dev/null 2>&1; }
-any_up() { ip link show dev "px-$1" >/dev/null 2>&1 || ip link show dev "wx-$1" >/dev/null 2>&1; }
+has() { ip link show dev "$1" >/dev/null 2>&1; }
+# A file's number (a timestamp), or 0 if it's missing or empty.
+num() { local v; v=$(cat "$1" 2>/dev/null); echo "${v:-0}"; }
 while read -r code _; do
     case "$code" in ""|\#*) continue ;; esac
-    # wg-setup.sh exit add/test holds an exit up while it checks it.
     hold=/run/$tag.$code.hold
-    if [ -f "$hold" ] && [ $(( now - $(stat -c %Y "$hold") )) -lt 60 ]; then continue; fi
+    if h=$(stat -c %Y "$hold" 2>/dev/null) && [ $(( now - h )) -lt 60 ]; then continue; fi
     active=0
     while read -r name _ pub _; do
         [[ $name == "$code".* ]] || continue
@@ -29,17 +33,36 @@ while read -r code _; do
     done < <(grep -vE '^[[:space:]]*(#|$)' "$db" 2>/dev/null)
     started=/run/$tag.$code
     if [ "$active" -eq 1 ]; then
-        if ! is_up "$code"; then
-            systemctl start "wg-quick@px-$code" "wg-quick@wx-$code" && echo "$now" >"$started"
-            logger -t "$tag" "exit $code: a client is active; brought up"
-        elif [ $(( now - $(cat "$started" 2>/dev/null || echo 0) )) -gt "$stale" ] \
-                && [ $(( now - $(newest "wx-$code") )) -gt "$stale" ]; then
-            systemctl restart "wg-quick@px-$code" "wg-quick@wx-$code" && echo "$now" >"$started"
-            logger -t "$tag" "exit $code: no WARP handshake for over ${stale}s; restarted"
+        if ! has "px-$code" || ! has "wx-$code"; then
+            # restart, not start: a unit can be "active" with its link gone.
+            if systemctl restart "wg-quick@px-$code" "wg-quick@wx-$code"; then
+                echo "$now" >"$started"
+                logger -t "$tag" "exit $code: a client is active; brought up"
+            else
+                logger -t "$tag" "exit $code: a client is active, but bringing it up failed"
+            fi
+        elif [ $(( now - $(num "$started") )) -gt "$stale" ] && [ $(( now - $(newest "wx-$code") )) -gt "$stale" ]; then
+            # Like the WARP watchdog: a new source port first, a restart if that didn't help.
+            if [ -f "$started.port" ]; then
+                rm -f "$started.port"
+                if systemctl restart "wg-quick@px-$code" "wg-quick@wx-$code"; then
+                    echo "$now" >"$started"
+                    logger -t "$tag" "exit $code: no WARP handshake for over ${stale}s after a new port; restarted"
+                fi
+            elif wg set "wx-$code" listen-port 0; then
+                echo "$now" >"$started"
+                : >"$started.port"
+                logger -t "$tag" "exit $code: no WARP handshake for over ${stale}s; new source port"
+            fi
         fi
-    elif any_up "$code"; then
+    elif has "px-$code" || has "wx-$code"; then
         systemctl stop "wg-quick@wx-$code" "wg-quick@px-$code"
-        rm -f "$started"
-        logger -t "$tag" "exit $code: no client handshake in the last ${idle}s; taken down"
+        for l in "wx-$code" "px-$code"; do if has "$l"; then ip link del dev "$l"; fi; done
+        rm -f "$started" "$started.port"
+        if has "px-$code" || has "wx-$code"; then
+            logger -t "$tag" "exit $code: no client handshake in the last ${idle}s, but taking it down failed"
+        else
+            logger -t "$tag" "exit $code: no client handshake in the last ${idle}s; taken down"
+        fi
     fi
 done <"$exits"

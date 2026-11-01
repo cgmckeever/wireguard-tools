@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # wg-setup.sh — Set up this Debian/Ubuntu server as a WireGuard VPN server,
 # with Cloudflare WARP as a switch: `warp on` sends client traffic out through
-# WARP, `warp off` out this server's own IP. Clients are managed with
-# wg-client.sh. See README.md.
+# WARP, `warp off` out this server's own IP. Exit cities (`exit add`) let
+# chosen clients leave through a Proton VPN city with WARP inside it. Clients
+# are managed with wg-client.sh. See README.md.
 
 set -Eeuo pipefail
 
@@ -17,7 +18,8 @@ usage() {
 Usage: $PROG [options] <command>
 
 Sets up this server as a WireGuard VPN server whose clients exit either
-through Cloudflare WARP or via this server's own IP, switchable at any time:
+through Cloudflare WARP or via this server's own IP, switchable at any time
+(and, per client, through an exit city):
 
   $PROG setup      Install or update everything (WARP on by default)
   $PROG warp off   Clients exit via this server's IP
@@ -28,32 +30,36 @@ Then add clients with wg-client.sh. Re-run setup to apply changes (e.g. --port).
 Commands:
   setup       Install packages and wgcf, register a free WARP account, bring up
               $WARP_IF (Table = off) and test it, then create $WG_IF: server
-              keys, NAT for both ways out, firewall, forwarding, systemd units.
+              keys, NAT for every way out, firewall, forwarding, systemd units.
               If WARP can't be set up on a first install, finishes with WARP off
   warp [on|off]
               Switch where clients exit (live: $WG_IF isn't restarted, clients
               stay connected); no argument shows the current setting
-  exit [list]  Exit cities: clients named <code>.<name> leave through a Proton VPN
-              city with WARP inside it (a Cloudflare IP in that city). Up only
-              while one of their clients is connected
-  exit add <code> <proton.conf|-> [--label "Paris, FR"]
+  exit [list]
+              Exit cities: clients named <code>.<name> leave through a Proton
+              VPN city with WARP inside it (a Cloudflare IP in that city); each
+              city is up only while one of its clients is connected
+  exit add <code> <proton.conf|-> [--label "Paris, France"]
               Import (or replace) a Proton WireGuard config as exit <code>
-              (2-6 of a-z0-9 and -, e.g. par-fr); registers its own WARP account and
-              checks it end to end
+              (2-6 of a-z0-9 and -, e.g. par-fr): registers its own WARP
+              account, wires its routing in live and checks it
   exit remove <code>
               Remove an exit city (refused while clients use it)
   exit test   Bring each exit city up and check it
-  log [lines] [--follow]
-              wireguard-tools' changes, the watchdogs and the tunnels (wg0,
-              warp, exit cities) in one log (default 40 lines; -f follows)
   test        All verification checks; exits non-zero on any FAIL
-  status      Settings (and whether wg0 runs them), interfaces, clients, routes, rules
-  backup [dir]  Archive keys, configs and clients (default dir $BACKUP_DIR)
+  status      Settings (and whether they're running), interfaces, exit cities,
+              clients, routes, rules
+  log [lines] [--follow]
+              Changes made by these tools, both watchdogs and the tunnels
+              ($WG_IF, $WARP_IF, exit cities) in one log (default 40 lines)
+  backup [dir]
+              Archive keys, configs, clients and exit cities (default dir
+              $BACKUP_DIR)
   restore <archive>
               Set this server up from a backup: same keys, clients, WARP
-              account and settings, then runs setup
+              accounts, exit cities and settings, then runs setup
   rollback    Stop/disable the interfaces, remove all rules, restore original
-              files; keeps keys and clients unless --purge
+              files; keeps keys, clients and exit cities unless --purge
   help        This text
 
 Options:
@@ -62,7 +68,10 @@ Options:
   --force               Regenerate existing keys, reinstall wgcf, regenerate the
                         WARP profile, or take over configs not made by
                         wireguard-tools
-  --purge               With rollback: also delete keys, clients, WARP account
+  --purge               With rollback: also delete keys, clients, WARP accounts
+                        and exit cities
+  --label "<name>"      With exit add: the city's full name
+  --follow, -f          With log: keep printing new entries
 
 Config (flag / environment variable; saved by setup for later runs):
   --name         SERVER_NAME          $SERVER_NAME  (client configs: <name>.<client>.conf)
@@ -255,7 +264,6 @@ write_warp_conf() {
 # WARP isn't usable (nothing on the client side depends on it yet).
 provision_warp() {
     log "WARP tunnel"
-    if [ "$DRY_RUN" -eq 0 ]; then install -d -m 700 "$WGCF_DIR"; fi
     install_wgcf || return 1
     register_warp || return 1
     write_warp_conf
@@ -356,24 +364,40 @@ write_dropin() {
     if [ "$WROTE" -eq 1 ]; then run systemctl daemon-reload; fi
 }
 
-# Install the WARP watchdog (script + service + timer) and keep its timer on.
-write_watchdog() {
-    local changed=0 content
-    content=$(render_template warp-watchdog.sh.tmpl WARP_IF="$WARP_IF" STALE="$WATCHDOG_STALE")
-    write_file "$WATCHDOG_BIN" 755 <<<"$content"
-    if [ "$WROTE" -eq 1 ]; then changed=1; fi
-    content=$(render_template warp-watchdog.service.tmpl WARP_IF="$WARP_IF" SCRIPT="$WATCHDOG_BIN")
-    write_file "$WATCHDOG_SERVICE" 644 <<<"$content"
-    if [ "$WROTE" -eq 1 ]; then changed=1; fi
-    content=$(render_template warp-watchdog.timer.tmpl)
-    write_file "$WATCHDOG_TIMER" 644 <<<"$content"
-    if [ "$WROTE" -eq 1 ]; then changed=1; fi
+# Install a watchdog and keep its timer enabled and on: write_timer <name>
+# <script> <service> <timer> <step text> <script content> <service content>
+# <timer content> (rendered by the caller, so a template error stops it first).
+write_timer() {
+    local name="$1" what="$5" changed=0 i
+    local files=("$2" "$3" "$4") modes=(755 644 644) contents=("$6" "$7" "$8")
+    for i in 0 1 2; do
+        write_file "${files[$i]}" "${modes[$i]}" <<<"${contents[$i]}"
+        if [ "$WROTE" -eq 1 ]; then changed=1; fi
+    done
     if [ "$changed" -eq 1 ]; then run systemctl daemon-reload; fi
-    if ! systemctl is-active -q "$WATCHDOG.timer" || ! systemctl is-enabled -q "$WATCHDOG.timer" 2>/dev/null; then
-        step "Start the WARP watchdog ($WATCHDOG.timer: new source port for $WARP_IF after ${WATCHDOG_STALE}s without a handshake)" \
-            "systemctl disable --now $WATCHDOG.timer"
-        run systemctl enable --now "$WATCHDOG.timer"
+    if ! systemctl is-active -q "$name.timer" || ! systemctl is-enabled -q "$name.timer" 2>/dev/null; then
+        step "Start the $what" "systemctl disable --now $name.timer"
+        run systemctl enable --now "$name.timer"
     fi
+}
+
+# Stop a watchdog's timer and remove (or restore) its files.
+remove_timer() {
+    local name="$1" f
+    shift
+    run systemctl disable --now "$name.timer" 2>/dev/null || true
+    for f in "$@"; do restore_original "$f" 1; done
+}
+
+# Install the WARP watchdog.
+write_watchdog() {
+    local sh svc timer
+    sh=$(render_template warp-watchdog.sh.tmpl NAME="$WATCHDOG" WARP_IF="$WARP_IF" STALE="$WATCHDOG_STALE")
+    svc=$(render_template warp-watchdog.service.tmpl WARP_IF="$WARP_IF" SCRIPT="$WATCHDOG_BIN")
+    timer=$(render_template warp-watchdog.timer.tmpl)
+    write_timer "$WATCHDOG" "$WATCHDOG_BIN" "$WATCHDOG_SERVICE" "$WATCHDOG_TIMER" \
+        "WARP watchdog ($WATCHDOG.timer: new source port for $WARP_IF after ${WATCHDOG_STALE}s without a handshake)" \
+        "$sh" "$svc" "$timer"
 }
 
 # Keep every client config named <server>.<client>.conf (renaming ones from an
@@ -418,22 +442,16 @@ open_firewall() {
     local st out
     st=$(ufw status 2>/dev/null || true)
     if [[ $st == *"Status: active"* ]]; then
-        step "ufw: allow $WG_PORT/udp and routing $WG_IF -> $(exit_ifs | paste -sd' ' -)" \
+        step "ufw: allow $WG_PORT/udp and routing $WG_IF -> $(out_ifs | paste -sd' ' -)" \
             "ufw delete allow $WG_PORT/udp; ufw route delete allow in on $WG_IF out on <each>"
         run ufw allow "$WG_PORT/udp" comment wireguard-tools
         while IFS= read -r out; do
             run ufw route allow in on "$WG_IF" out on "$out" comment wireguard-tools
-        done < <(exit_ifs)
+        done < <(out_ifs)
         if [ "$(state_get UFW)" != 1 ]; then state_set UFW 1; fi
     else
         info "ufw not active; $WG_IF's PostUp opens udp/$WG_PORT in iptables INPUT"
     fi
-}
-
-# Refuse to take over a wg0.conf we didn't create. Must run before
-# save_config records the new values.
-check_server_change() {
-    ensure_managed "$WG_CONF"
 }
 
 # A new --subnet with clients present: move each client to the same host
@@ -441,18 +459,18 @@ check_server_change() {
 # rewrite allowed-IPs entries that name the old subnet. sync_client_configs
 # then updates their configs (re-send them; keys are unchanged).
 renumber_clients() {
-    [ -n "$SAVED_SUBNET" ] && [ "$SAVED_SUBNET" != "$WG_SUBNET" ] || return 0
-    [ -n "$(db_entries)" ] || return 0
+    if [ -z "$SAVED_SUBNET" ] || [ "$SAVED_SUBNET" = "$WG_SUBNET" ] || [ -z "$(db_entries)" ]; then return 0; fi
     local old_net old_pfx old_int name ip pub allowed n new moves=() lines=()
     old_net="${SAVED_SUBNET%/*}"
     old_pfx="${SAVED_SUBNET#*/}"
     old_int=$(( $(ip2int "$old_net") & ((0xFFFFFFFF << (32 - old_pfx)) & 0xFFFFFFFF) ))
     while read -r name ip pub allowed; do
         n=$(( NET_INT + $(ip2int "$ip") - old_int ))
-        [ "$n" -ge "$FIRST_HOST" ] && [ "$n" -le "$LAST_HOST" ] \
-            || die "client '$name' ($ip) has no matching address in $WG_SUBNET; use a subnet at least as large as $SAVED_SUBNET"
+        if [ "$n" -lt "$FIRST_HOST" ] || [ "$n" -gt "$LAST_HOST" ]; then
+            die "client '$name' ($ip) has no matching address in $WG_SUBNET; use a subnet at least as large as $SAVED_SUBNET"
+        fi
         new=$(int2ip "$n")
-        allowed=$(tr ',' '\n' <<<"$allowed" | sed "s|^$SAVED_SUBNET\$|$WG_SUBNET|" | paste -sd, -)
+        allowed=$(tr ',' '\n' <<<"$allowed" | awk -v o="$SAVED_SUBNET" -v n="$WG_SUBNET" '$0 == o { $0 = n } { print }' | paste -sd, -)
         moves+=("$name $ip -> $new")
         lines+=("$name $new $pub $allowed")
     done < <(db_entries)
@@ -470,11 +488,9 @@ renumber_clients() {
 # its PostDown removes exactly the rules its PostUp added (old subnet, old
 # port); restarting after the rewrite would run the new PostDown instead and
 # leave the old rules behind. start_unit then brings it up with the new one.
-WG_STOPPED=0
 stop_before_rewrite() {
     local unit="wg-quick@$WG_IF"
-    if_exists "$WG_IF" && [ -f "$WG_CONF" ] || return 0
-    ! cmp -s <(render_wg_conf) "$WG_CONF" || return 0
+    if ! if_exists "$WG_IF" || [ ! -f "$WG_CONF" ] || cmp -s <(render_wg_conf) "$WG_CONF"; then return 0; fi
     step "Restart $WG_IF for its new config (clients reconnect in a few seconds)" "restore the .bak in $CHANGE_DIR, then systemctl restart $unit"
     confirm "Restart $WG_IF now?"
     if systemctl is-active -q "$unit"; then run systemctl stop "$unit"; else run wg-quick down "$WG_IF"; fi
@@ -486,10 +502,6 @@ require_setup() {
     [ -n "$SAVED_WARP" ] || die "not set up; run '$PROG setup'"
 }
 
-# Install or update everything: WARP tunnel, then wg0 with the saved WARP
-# setting (on for a new install). WARP failing on a first install leaves it
-# off; on an existing install with WARP on it stays on (fail closed: clients
-# are blocked, not leaked) until fixed or switched off.
 # First setup without --subnet: ask for the client subnet, Enter keeps the
 # default. --yes, --dry-run and no terminal take the default.
 ask_subnet() {
@@ -614,30 +626,39 @@ offer_hostname() {
     local cur full new want="${SERVER_NAME,,}" reply=""
     full=$(hostname)
     cur="${full%%.*}"
-    [ "${cur,,}" != "$want" ] || return 0
-    [[ $want =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || return 0   # not a valid hostname (e.g. has _)
-    [ "$DRY_RUN" -eq 0 ] && [ "$YES" -eq 0 ] && have_tty || return 0
+    if [ "${cur,,}" = "$want" ]; then return 0; fi
+    # Not a valid hostname (e.g. has _), or nobody to ask.
+    if ! [[ $want =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || [ "$DRY_RUN" -eq 1 ] || [ "$YES" -eq 1 ] || ! have_tty; then
+        return 0
+    fi
     read -r -p "    Update hostname $cur to $want? [Y/n] " reply </dev/tty || true
-    [[ -z $reply || $reply =~ ^[Yy] ]] || return 0
+    if ! [[ -z $reply || $reply =~ ^[Yy] ]]; then return 0; fi
     new="$want"
     if [[ $full == *.* ]]; then new="$want.${full#*.}"; fi   # keep the domain part
     step "Rename host $full -> $new" "hostnamectl set-hostname $full"
     run hostnamectl set-hostname "$new"
-    if grep -qw -- "$cur" /etc/hosts; then run sed -i "s/\\b$cur\\b/$want/g" /etc/hosts; fi
+    if grep -qw -- "$cur" /etc/hosts; then
+        write_file /etc/hosts 644 < <(sed "s/\\b$cur\\b/$want/g" /etc/hosts)
+    fi
     if [ -d /etc/cloud/cloud.cfg.d ]; then
-        run sh -c 'echo "preserve_hostname: true" >/etc/cloud/cloud.cfg.d/99-wg-tools-hostname.cfg'
+        write_file /etc/cloud/cloud.cfg.d/99-wg-tools-hostname.cfg 644 <<<"preserve_hostname: true"
     fi
 }
 
+# Install or update everything: WARP tunnel, then wg0 with the saved WARP
+# setting (on for a new install). WARP failing on a first install leaves it
+# off; on an existing install with WARP on it stays on (fail closed: clients
+# are blocked, not leaked) until fixed or switched off.
 cmd_setup() {
     take_lock
     ask_subnet
     ensure_subnet6
     review_settings
-    offer_hostname
-    # Refuse a breaking change before saving config or touching anything.
-    check_server_change
+    # Refuse to take over a wg0.conf we didn't create, before saving config or
+    # touching anything.
+    ensure_managed "$WG_CONF"
     renumber_clients
+    offer_hostname
     save_config
     state_unset EXIT   # older versions' mode key; WARP replaces it
     record_baseline
@@ -703,7 +724,9 @@ cmd_warp() {
         return 0
     fi
     WARP="$want"
-    step "WARP $want: client traffic leaves via $(out_if)" "$PROG warp $( [ "$want" = on ] && echo off || echo on)"
+    local undo=on
+    if [ "$want" = on ]; then undo=off; fi
+    step "WARP $want: client traffic leaves via $(out_if)" "$PROG warp $undo"
     save_config
     write_wg_conf
     if if_exists "$WG_IF"; then
@@ -731,8 +754,8 @@ check_proton_conf() {
 # Proton table's default route (goes when the tunnel does; the blackhole stays).
 render_proton_conf() {
     local raw="$1" code="$2"
-    awk -v marker="$MARKER" -v code="$code" -v label="$(exit_label "$code")" -v mtu="$EXIT_PROTON_MTU" -v table="$(exit_ptable "$code")" '
-        BEGIN { print marker " exit " code " (" label "): Proton tunnel from exits/" code ".proton.conf; WARP inside it is wx-" code }
+    awk -v marker="$MARKER" -v code="$code" -v mtu="$EXIT_PROTON_MTU" -v table="$(exit_ptable "$code")" '
+        BEGIN { print marker " exit " code ": Proton tunnel from exits/" code ".proton.conf; WARP inside it is wx-" code }
         /^[[:space:]]*\[Interface\]/ {
             print "[Interface]"; print "MTU = " mtu; print "Table = off"
             print "PostUp = sysctl -q -w net.ipv4.conf.%i.rp_filter=2"
@@ -769,138 +792,140 @@ write_exit_confs() {
     fi
 }
 
+# Both tunnels of an exit are up / either one is.
 exit_is_up() { if_exists "px-$1" && if_exists "wx-$1"; }
+exit_any_up() { if_exists "px-$1" || if_exists "wx-$1"; }
 
 # Give a just-started exit up to 10s for its WARP handshake.
 exit_wait_hs() {
     local i
     for i in 1 2 3 4 5 6 7 8 9 10; do
-        [ "$(wg show "wx-$1" latest-handshakes 2>/dev/null | awk '{ print $2 + 0 }')" -gt 0 ] && return 0
+        if [ "$(newest_hs "wx-$1")" -gt 0 ]; then return 0; fi
         sleep 1
     done
 }
 
 # Clients of <code> with a handshake within EXIT_IDLE (what keeps it up).
 exit_active() {
-    local code="$1" name ip pub _ n=0 now
+    local code="$1" name pub ts n=0 now
     local -A hs=()
     if if_exists "$WG_IF"; then
-        while read -r pub ip; do hs[$pub]="$ip"; done < <(wg show "$WG_IF" latest-handshakes)
+        while read -r pub ts; do hs[$pub]="$ts"; done < <(wg show "$WG_IF" latest-handshakes)
     fi
     now=$(date +%s)
-    while read -r name ip pub _; do
-        [[ $name == "$code".* ]] || continue
+    for name in $(exit_clients "$code"); do
         if is_disabled "$name"; then continue; fi
+        read -r _ pub _ <<<"$(db_get "$name")"
         if [ "${hs[$pub]:-0}" -gt 0 ] && [ $(( now - ${hs[$pub]} )) -le "$EXIT_IDLE" ]; then n=$(( n + 1 )); fi
-    done < <(db_entries)
+    done
     echo "$n"
 }
 
-# Bring an exit up (and hold off the watchdog for a minute) or take it down.
+# Hold off the exit watchdog from <code> for a minute (while we check it).
+exit_hold() { run touch "/run/$EXIT_WATCHDOG.$1.hold"; }
+exit_unhold() { run rm -f "/run/$EXIT_WATCHDOG.$1.hold"; }
+
+# Bring an exit up (held from the watchdog), or take it down completely.
 exit_up() {
-    run touch "/run/$EXIT_WATCHDOG.$1.hold"
+    exit_hold "$1"
     run systemctl start "wg-quick@px-$1" "wg-quick@wx-$1"
 }
 exit_down() {
     run systemctl stop "wg-quick@wx-$1" "wg-quick@px-$1" 2>/dev/null || true
     if if_exists "wx-$1"; then run ip link del dev "wx-$1"; fi
     if if_exists "px-$1"; then run ip link del dev "px-$1"; fi
-    run rm -f "/run/$EXIT_WATCHDOG.$1" "/run/$EXIT_WATCHDOG.$1.hold"
+    run rm -f "/run/$EXIT_WATCHDOG.$1" "/run/$EXIT_WATCHDOG.$1.port"
+    exit_unhold "$1"
 }
 
 # Trace through an exit's WARP: "ip=... colo=... loc=... warp=..." (empty if none).
 exit_trace() {
-    local i out=""
-    for i in 1 2 3; do
-        out=$(curl -fsS --max-time 8 --interface "wx-$1" "$TRACE_URL" 2>/dev/null) && break
-        sleep 2
-    done
-    grep -E '^(ip|colo|loc|warp)=' <<<"$out" | paste -sd' ' -
+    trace_body --interface "wx-$1" | grep -E '^(ip|colo|loc|warp)=' | paste -sd' ' - || true
 }
 
-# Install the exit watchdog (script + service + timer) and keep its timer on.
-write_exit_watchdog() {
-    local changed=0 content
-    content=$(render_template exit-watchdog.sh.tmpl NAME="$EXIT_WATCHDOG" WG_IF="$WG_IF" CLIENT_DB="$CLIENT_DB" \
-        DISABLED_DB="$DISABLED_DB" EXIT_DB="$EXIT_DB" IDLE="$EXIT_IDLE" STALE="$WATCHDOG_STALE")
-    write_file "$EXIT_WATCHDOG_BIN" 755 <<<"$content"
-    if [ "$WROTE" -eq 1 ]; then changed=1; fi
-    content=$(render_template exit-watchdog.service.tmpl SCRIPT="$EXIT_WATCHDOG_BIN")
-    write_file "$EXIT_WATCHDOG_SERVICE" 644 <<<"$content"
-    if [ "$WROTE" -eq 1 ]; then changed=1; fi
-    content=$(render_template exit-watchdog.timer.tmpl)
-    write_file "$EXIT_WATCHDOG_TIMER" 644 <<<"$content"
-    if [ "$WROTE" -eq 1 ]; then changed=1; fi
-    if [ "$changed" -eq 1 ]; then run systemctl daemon-reload; fi
-    if ! systemctl is-active -q "$EXIT_WATCHDOG.timer" || ! systemctl is-enabled -q "$EXIT_WATCHDOG.timer" 2>/dev/null; then
-        step "Start the exit watchdog ($EXIT_WATCHDOG.timer: exits up while their clients are active, down after ${EXIT_IDLE}s idle)" \
-            "systemctl disable --now $EXIT_WATCHDOG.timer"
-        run systemctl enable --now "$EXIT_WATCHDOG.timer"
+# Bring an exit up if needed and report whether traffic passes through its
+# WARP: "ok <trace>" or "fail <trace>". It is left up only if it was up.
+exit_check() {
+    local code="$1" was_up=1 t
+    if ! exit_is_up "$code"; then
+        was_up=0
+        exit_up "$code" >/dev/null
     fi
+    exit_hold "$code"
+    exit_wait_hs "$code"
+    t=$(exit_trace "$code")
+    if [ "$was_up" -eq 0 ]; then exit_down "$code" >/dev/null; else exit_unhold "$code"; fi
+    if is_warp_trace "$t"; then echo "ok $t"; else echo "fail ${t:-no answer}"; fi
 }
 
-remove_exit_watchdog() {
-    run systemctl disable --now "$EXIT_WATCHDOG.timer" 2>/dev/null || true
-    local f
-    for f in "$EXIT_WATCHDOG_TIMER" "$EXIT_WATCHDOG_SERVICE" "$EXIT_WATCHDOG_BIN"; do restore_original "$f" 1; done
-    run systemctl daemon-reload
+# Install the exit watchdog.
+write_exit_watchdog() {
+    local sh svc timer
+    sh=$(render_template exit-watchdog.sh.tmpl NAME="$EXIT_WATCHDOG" WG_IF="$WG_IF" CLIENT_DB="$CLIENT_DB" \
+        DISABLED_DB="$DISABLED_DB" EXIT_DB="$EXIT_DB" IDLE="$EXIT_IDLE" STALE="$WATCHDOG_STALE" LOCK="$LOCK_FILE")
+    svc=$(render_template exit-watchdog.service.tmpl SCRIPT="$EXIT_WATCHDOG_BIN")
+    timer=$(render_template exit-watchdog.timer.tmpl)
+    write_timer "$EXIT_WATCHDOG" "$EXIT_WATCHDOG_BIN" "$EXIT_WATCHDOG_SERVICE" "$EXIT_WATCHDOG_TIMER" \
+        "exit watchdog ($EXIT_WATCHDOG.timer: exits up while their clients are active, down after ${EXIT_IDLE}s idle)" \
+        "$sh" "$svc" "$timer"
 }
 
 # Setup re-run: re-render every exit's configs (MTU, IPv6 may have changed),
 # restart the ones that are up and changed, and keep the watchdog on.
 sync_exits() {
     local code
-    [ -n "$(exit_codes)" ] || return 0
+    if [ -z "$(exit_codes)" ]; then return 0; fi
     log "Exit cities: $(exit_codes | paste -sd' ' -)"
     for code in $(exit_codes); do
         write_exit_confs "$code"
-        if [ "$EXIT_CHANGED" -eq 1 ] && exit_is_up "$code"; then
+        if [ "$EXIT_CHANGED" -eq 1 ] && exit_any_up "$code"; then
             run systemctl restart "wg-quick@px-$code" "wg-quick@wx-$code"
         fi
     done
     write_exit_watchdog
 }
 
+# The first free exit index.
+exit_free_idx() {
+    local i
+    for (( i = 1; i <= EXIT_MAX; i++ )); do
+        if ! exit_entries | awk -v i="$i" '$2 == i { f = 1 } END { exit !f }'; then echo "$i"; return 0; fi
+    done
+    die "at most $EXIT_MAX exit cities"
+}
+
 # exit add <code> <proton.conf|->: import (or replace) a Proton WireGuard
 # config as exit city <code>, give it its own WARP registration, wire its
 # routing into wg0 live, and check it end to end.
 exit_add() {
-    local code="${1:-}" src="${2:-}" raw idx new=0 label hint t
+    local code="${1:-}" src="${2:-}" raw idx label hint result
     valid_exit_code "$code" || die "exit code must be 2-6 of a-z0-9 and -, starting with a letter, not 'warp' (e.g. par-fr): '${code}'"
-    [ -n "$src" ] || die "usage: $PROG exit add <code> <proton.conf|-> [--label \"Paris, FR\"]"
+    [ -n "$src" ] || die "usage: $PROG exit add <code> <proton.conf|-> [--label \"Paris, France\"]"
     take_lock
     raw="$TMPD/proton.conf"
-    if [ "$src" = - ]; then cat >"$raw"; else
+    if [ "$src" = - ]; then
+        cat >"$raw"
+    else
         [ -f "$src" ] || die "no such file: $src"
         cat "$src" >"$raw"
     fi
     check_proton_conf "$raw"
-    idx=$(exit_idx "$code")
-    if [ -z "$idx" ]; then
-        new=1
-        for (( idx = 1; idx <= EXIT_MAX; idx++ )); do
-            exit_entries | awk -v i="$idx" '$2 == i { f = 1 } END { exit !f }' || break
-        done
-        [ "$idx" -le "$EXIT_MAX" ] || die "at most $EXIT_MAX exit cities"
-    fi
     hint=$(awk '/^[[:space:]]*\[Peer\]/ { p = 1; next } p && /^[[:space:]]*#/ { sub(/^[[:space:]]*#[[:space:]]*/, ""); print; exit }' "$raw")
     label="${EXIT_LABEL:-$(exit_label "$code")}"
-    label="${label:-${hint:-$code}}"
-    label=$(tr -d '\n\t' <<<"$label")
-    if [ "$new" -eq 1 ]; then
+    label=$(tr -d '\n\t' <<<"${label:-${hint:-$code}}")
+    idx=$(exit_idx "$code")
+    if [ -z "$idx" ]; then
+        idx=$(exit_free_idx)
         step "Add exit city '$code' ($label): Proton $(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$raw") -> its own WARP" "$PROG exit remove $code"
     else
         step "Update exit city '$code' ($label)" "re-run exit add with the previous config"
     fi
+    confirm "Set up exit $code?" y
     install_wgcf || die "wgcf is needed for the exit's WARP"
     run install -d -m 700 "$EXIT_DIR"
     register_warp "$EXIT_DIR/$code" || die "could not register a WARP account for exit '$code'"
     write_file "$EXIT_DIR/$code.proton.conf" 600 < <(echo "# exit $code: $label"; grep -v "^# exit $code: " "$raw")
-    write_file "$EXIT_DB" 600 < <(
-        echo "# wireguard-tools exit cities: code idx label (wg-setup.sh exit add)"
-        exit_entries | awk -v c="$code" '$1 != c'
-        echo "$code $idx $label"
-    )
+    exit_db_put "$code" "$idx $label"
     if [ "$DRY_RUN" -eq 1 ]; then
         info "[dry-run] would write $WG_DIR/px-$code.conf and wx-$code.conf, add its routing to $WG_CONF and check it"
         return 0
@@ -908,27 +933,27 @@ exit_add() {
     write_exit_confs "$code"
     write_wg_conf
     if if_exists "$WG_IF"; then
-        exit_hook_cmds "$code" up | run_lines
-        ipt_rules_out "wx-$code" | ipt_cmds up | run_lines
+        run_lines < <(exit_hook_cmds "$code" up)
+        run_lines < <(ipt_rules_out "wx-$code" | ipt_cmds up)
     fi
     open_firewall
     write_exit_watchdog
-    if [ "$EXIT_CHANGED" -eq 1 ] && exit_is_up "$code"; then exit_down "$code"; fi
+    # A changed config (or a half-up exit) must restart to load it.
+    if [ "$EXIT_CHANGED" -eq 1 ] && exit_any_up "$code"; then exit_down "$code"; fi
     log "Checking exit '$code'"
-    exit_up "$code"
-    exit_wait_hs "$code"
-    t=$(exit_trace "$code")
-    if [[ " $t " == *" warp=on "* || " $t " == *" warp=plus "* ]]; then
-        info "exit '$code' works: $t"
+    result=$(exit_check "$code")
+    if [ "${result%% *}" = ok ]; then
+        info "exit '$code' works: ${result#ok }"
     else
-        warn "exit '$code' isn't passing traffic yet (${t:-no answer}); check: $PROG exit test"
+        warn "exit '$code' isn't passing traffic yet (${result#fail }); check: $PROG exit test"
     fi
-    run rm -f "/run/$EXIT_WATCHDOG.$code.hold"
     info "it goes down when idle and comes up when a client connects; add one: wg-client.sh add <name> --exit $code"
 }
 
+# exit remove <code>: refused while clients use it; removes its tunnels,
+# routing, firewall rules, WARP account and Proton config (and their copies).
 exit_remove() {
-    local code="${1:-}" users
+    local code="${1:-}" users f
     if [ -z "$code" ] || [ -z "$(exit_idx "$code")" ]; then die "no exit city '${code}' (see: $PROG exit list)"; fi
     users=$(exit_clients "$code" | paste -sd' ' -)
     [ -z "$users" ] || die "clients use exit '$code': $users; remove them first (wg-client.sh remove <name>)"
@@ -937,38 +962,41 @@ exit_remove() {
     confirm "Remove exit $code?"
     exit_down "$code"
     if if_exists "$WG_IF"; then
-        ipt_rules_out "wx-$code" | tac | ipt_cmds down | run_lines
-        exit_hook_cmds "$code" down | run_lines
+        run_lines < <(ipt_rules_out "wx-$code" | tac | ipt_cmds down)
+        run_lines < <(exit_hook_cmds "$code" down)
     fi
     if [ "$(state_get UFW)" = 1 ] && command -v ufw >/dev/null; then
         run ufw route delete allow in on "$WG_IF" out on "wx-$code" || true
     fi
-    write_file "$EXIT_DB" 600 < <(
-        echo "# wireguard-tools exit cities: code idx label (wg-setup.sh exit add)"
-        exit_entries | awk -v c="$code" '$1 != c'
-    )
+    exit_db_put "$code"
     write_wg_conf
-    run rm -f "$WG_DIR/px-$code.conf" "$WG_DIR/wx-$code.conf" "$EXIT_DIR/$code.proton.conf"
+    for f in "$WG_DIR/px-$code.conf" "$WG_DIR/wx-$code.conf" "$EXIT_DIR/$code.proton.conf"; do forget_file "$f"; done
     run rm -rf "${EXIT_DIR:?}/$code"
-    if [ -z "$(exit_codes)" ]; then remove_exit_watchdog; fi
+    if [ -z "$(exit_codes)" ]; then
+        remove_timer "$EXIT_WATCHDOG" "$EXIT_WATCHDOG_TIMER" "$EXIT_WATCHDOG_SERVICE" "$EXIT_WATCHDOG_BIN"
+        run systemctl daemon-reload
+    fi
 }
 
+# The exit cities table: code, name, up (and active clients) or idle, clients, Proton server.
 exit_list() {
-    local code idx label n act state ep
+    local code idx label n state ep fmt='%-7s %-22s %-18s %-8s %s'
     if [ -z "$(exit_codes)" ]; then
         info "no exit cities (add one: $PROG exit add <code> <proton.conf>)"
         return 0
     fi
-    info "$(printf '%-6s %-22s %-18s %-8s %s' CODE NAME STATE CLIENTS PROTON)"
+    # shellcheck disable=SC2059  # the shared format
+    info "$(printf "$fmt" CODE NAME STATE CLIENTS PROTON)"
     while read -r code idx label; do
         n=$(exit_clients "$code" | wc -l)
-        act=$(exit_active "$code")
-        if exit_is_up "$code"; then state="up ($act active)"; else state=idle; fi
-        ep=$(sed -n 's/^Endpoint = //p' "$WG_DIR/px-$code.conf" 2>/dev/null)
-        info "$(printf '%-6s %-22s %-18s %-8s %s' "$code" "$label" "$state" "$n" "${ep:-?}")"
+        if exit_is_up "$code"; then state="up ($(exit_active "$code") active)"; else state=idle; fi
+        ep=$(sed -n 's/^Endpoint = //p' "$WG_DIR/px-$code.conf" 2>/dev/null || true)
+        # shellcheck disable=SC2059
+        info "$(printf "$fmt" "$code" "$label" "$state" "$n" "${ep:-?}")"
     done < <(exit_entries)
 }
 
+# exit [list|add|remove|test].
 cmd_exit() {
     local sub="${1:-list}"
     shift || true
@@ -978,6 +1006,7 @@ cmd_exit() {
         remove|rm) exit_remove "$@" ;;
         list)      exit_list ;;
         test)
+            take_lock
             T_PASS=0 T_FAIL=0 T_WARN=0
             log "Exit city tests"
             run_exit_tests 1
@@ -989,8 +1018,11 @@ cmd_exit() {
 
 # --- status ---
 
+# Settings (and whether they're running), interfaces, watchdogs, exit cities,
+# clients, routes and rules.
 cmd_status() {
-    local ifc unit active enabled x t c r f
+    local ifc unit active enabled x t c r f wd_last
+    local fmt='%-20s %-6s %-15s %-14s %-12s %s'
     require_setup
     if [ -z "$ENDPOINT" ]; then ENDPOINT="${SAVED[ENDPOINT]}"; fi
     log "Settings (saved in $STATE)"
@@ -1010,30 +1042,31 @@ cmd_status() {
             info "$ifc: absent  [${enabled:-disabled}]"
         fi
     done
-    local wd_last
     wd_last=$(journalctl -t "$WATCHDOG" -n 1 -o short-iso --no-pager -q 2>/dev/null | cut -c1-25 || true)
     info "watchdog: $WATCHDOG.timer $(systemctl is-active "$WATCHDOG.timer" 2>/dev/null || true); last port change: ${wd_last:-never}"
     log "WARP handshake"
     if if_exists "$WARP_IF"; then
-        info "$WARP_IF: $(ago "$(wg show "$WARP_IF" latest-handshakes | awk '$2 > m { m = $2 } END { print m + 0 }')")"
+        info "$WARP_IF: $(ago "$(newest_hs "$WARP_IF")")"
     fi
     if [ -n "$(exit_codes)" ]; then
         log "Exit cities"
         exit_list
     fi
     local -A hs=() rx=() tx=()
-    local k ts b name ip pub allowed seen n=0
+    local k a b name ip pub allowed seen n=0
     if if_exists "$WG_IF"; then
-        while read -r k ts; do hs[$k]="$ts"; done < <(wg show "$WG_IF" latest-handshakes)
-        while read -r k ts b; do rx[$k]="$ts"; tx[$k]="$b"; done < <(wg show "$WG_IF" transfer)
+        while read -r k a; do hs[$k]="$a"; done < <(wg show "$WG_IF" latest-handshakes)
+        while read -r k a b; do rx[$k]="$a"; tx[$k]="$b"; done < <(wg show "$WG_IF" transfer)
     fi
     log "Clients"
-    info "$(printf '%-20s %-6s %-15s %-14s %-12s %s' NAME EXIT ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS")"
+    # shellcheck disable=SC2059  # the shared format
+    info "$(printf "$fmt" NAME EXIT ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS")"
     while read -r name ip pub allowed; do
         n=$(( n + 1 ))
         seen=$(ago "${hs[$pub]:-0}")
         if is_disabled "$name"; then seen=disabled; fi
-        info "$(printf '%-20s %-6s %-15s %-14s %-12s %s' "$name" "$(client_exit_label "$name")" "$ip" "$seen" \
+        # shellcheck disable=SC2059
+        info "$(printf "$fmt" "$name" "$(client_exit_label "$name")" "$ip" "$seen" \
             "$(( ${rx[$pub]:-0} / 1048576 ))/$(( ${tx[$pub]:-0} / 1048576 ))" "${allowed//,/, }")"
     done < <(db_entries)
     if [ "$n" -eq 0 ]; then info "none yet (add one: wg-client.sh add <name>)"; fi
@@ -1052,7 +1085,9 @@ cmd_status() {
     if [ "$IPV6" -eq 1 ]; then
         info "IPv6: clients in $WG_SUBNET6, ipv6 forwarding = $(sysctl -n net.ipv6.conf.all.forwarding)"
     else
-        info "IPv6: off${WG_SUBNET6:+ ($( [ "$WG_SUBNET6" = off ] && echo disabled || echo "kernel IPv6 disabled"))}"
+        local why="kernel IPv6 disabled"
+        if [ "$WG_SUBNET6" = off ]; then why=disabled; fi
+        info "IPv6: off${WG_SUBNET6:+ ($why)}"
     fi
 }
 
@@ -1061,9 +1096,9 @@ cmd_status() {
 # One time-ordered log: wireguard-tools' own steps, both watchdogs, and the
 # wg-quick units (wg0, warp, each exit city's tunnels). log [lines] [--follow].
 cmd_log() {
-    local count="${1:-40}" ifc code matches=()
+    local count="${1:-40}" tag ifc code matches=()
     [[ $count =~ ^[0-9]+$ ]] || die "usage: $PROG log [lines] [--follow]"
-    for ifc in wg-tools "$WATCHDOG" "$EXIT_WATCHDOG"; do matches+=("SYSLOG_IDENTIFIER=$ifc" +); done
+    for tag in wg-tools "$WATCHDOG" "$EXIT_WATCHDOG"; do matches+=("SYSLOG_IDENTIFIER=$tag" +); done
     for ifc in "$WG_IF" "$WARP_IF" $(for code in $(exit_codes); do echo "px-$code wx-$code"; done); do
         matches+=("_SYSTEMD_UNIT=wg-quick@$ifc.service" + "UNIT=wg-quick@$ifc.service" +)
     done
@@ -1075,8 +1110,6 @@ cmd_log() {
 }
 
 # --- test ---
-
-T_PASS=0 T_FAIL=0 T_WARN=0
 
 t_result() {
     printf '  %-4s %s\n' "$1" "$2"
@@ -1105,10 +1138,11 @@ t_warp_on() {
     w=$(trace_field warp --interface "$WARP_IF")
     [ "$w" = on ] || [ "$w" = plus ]
 }
-t_warp_handshake() {
+# <ifc> had a handshake within WATCHDOG_STALE seconds.
+t_hs_recent() {
     local newest
-    newest=$(wg show "$WARP_IF" latest-handshakes 2>/dev/null | awk '$2 > m { m = $2 } END { print m + 0 }')
-    [ "$newest" -gt 0 ] && [ $(( $(date +%s) - newest )) -le 180 ]
+    newest=$(newest_hs "$1")
+    [ "$newest" -gt 0 ] && [ $(( $(date +%s) - newest )) -le "$WATCHDOG_STALE" ]
 }
 t_untunneled() { [ "$(trace_field warp)" = off ]; }
 t_default_route() {
@@ -1129,7 +1163,7 @@ t_warp6_on() {
     ip -6 rule add from "$src" lookup "$RT_TABLE" priority "$prio" 2>/dev/null || true
     out=$(curl -6 -fsS --max-time 10 --interface "$src" "https://[2606:4700:4700::1111]/cdn-cgi/trace" 2>/dev/null || true)
     ip -6 rule del from "$src" lookup "$RT_TABLE" priority "$prio" 2>/dev/null || true
-    [[ $out == *$'\nwarp=on'* || $out == *$'\nwarp=plus'* ]]
+    is_warp_trace "$out"
 }
 # ip rule / table checks for family $1 ("ip" or "ip -6"). The rule is there
 # exactly once with WARP on, and absent with it off.
@@ -1182,14 +1216,14 @@ t_exit_rules() {
         [ "$($f rule show | grep -c "lookup $w\b")" -eq "$n" ] || return 1
     done < <(ip_families)
 }
-t_exit_hs() {
-    local newest
-    newest=$(wg show "$1" latest-handshakes 2>/dev/null | awk '$2 > m { m = $2 } END { print m + 0 }')
-    [ "$newest" -gt 0 ] && [ $(( $(date +%s) - newest )) -le 180 ]
-}
+# The exit-city checks; with <bring_up>=1 (exit test) an idle exit is brought
+# up for its tunnel checks and taken down again.
 run_exit_tests() {
     local bring_up="${1:-0}" code act tr started
-    [ -n "$(exit_codes)" ] || { t_result SKIP "exit cities (none)"; return 0; }
+    if [ -z "$(exit_codes)" ]; then
+        t_result SKIP "exit cities (none)"
+        return 0
+    fi
     for code in $(exit_codes); do
         check "exit $code: tables with blackhole fallbacks, fwmark rule to Proton" t_exit_tables "$code"
         check "exit $code: one rule per address of its $(exit_clients "$code" | wc -l) client(s)" t_exit_rules "$code"
@@ -1199,17 +1233,18 @@ run_exit_tests() {
             exit_up "$code" >/dev/null
             started=1
         fi
-        if exit_is_up "$code"; then exit_wait_hs "$code"; fi
         if exit_is_up "$code"; then
-            check "exit $code: Proton tunnel px-$code handshake within 3 minutes" t_exit_hs "px-$code"
-            check "exit $code: WARP tunnel wx-$code handshake within 3 minutes" t_exit_hs "wx-$code"
+            exit_hold "$code"
+            exit_wait_hs "$code"
+            check "exit $code: Proton tunnel px-$code handshake within ${WATCHDOG_STALE}s" t_hs_recent "px-$code"
+            check "exit $code: WARP tunnel wx-$code handshake within ${WATCHDOG_STALE}s" t_hs_recent "wx-$code"
             tr=$(exit_trace "$code")
-            if [[ " $tr " == *" warp=on "* || " $tr " == *" warp=plus "* ]]; then
+            if is_warp_trace "$tr"; then
                 t_result PASS "exit $code: traffic exits through WARP ($tr)"
             else
                 t_result FAIL "exit $code: no WARP trace through wx-$code (${tr:-no answer})"
             fi
-            if [ "$started" -eq 1 ]; then exit_down "$code" >/dev/null; fi
+            if [ "$started" -eq 1 ]; then exit_down "$code" >/dev/null; else exit_unhold "$code"; fi
         elif [ "$act" -gt 0 ]; then
             t_result FAIL "exit $code: down while $act client(s) are active (the watchdog brings it up within 10s)"
         else
@@ -1218,17 +1253,17 @@ run_exit_tests() {
     done
     check "exit watchdog timer enabled and running" t_exit_watchdog
 }
+# The exit watchdog's timer is enabled and running.
 t_exit_watchdog() { systemctl is-enabled -q "$EXIT_WATCHDOG.timer" && systemctl is-active -q "$EXIT_WATCHDOG.timer"; }
 
 # Run the checks; "warp" stops after the WARP checks. WARP checks only fail
 # the run while WARP is on.
-T_SCOPE=all
 run_tests() {
     local rule f net
     T_SCOPE="$1"
     check_warp "$WARP_IF: curl --interface $WARP_IF shows warp=on" t_warp_on
     if [ "$IPV6" -eq 1 ]; then check_warp "$WARP_IF: IPv6 through $WARP_IF shows warp=on" t_warp6_on; fi
-    check_warp "$WARP_IF: handshake within the last 3 minutes" t_warp_handshake
+    check_warp "$WARP_IF: handshake within the last 3 minutes" t_hs_recent "$WARP_IF"
     check "server's own traffic is not tunneled (plain curl shows warp=off)" t_untunneled
     check "default route unchanged since install ($(state_get DEFAULT_ROUTE))" t_default_route
     [ "$1" != warp ] || return 0
@@ -1264,12 +1299,14 @@ run_tests() {
     fi
 }
 
+# Print the totals; exit 1 on any FAIL.
 report_tests() {
     echo ""
     info "$T_PASS passed, $T_FAIL failed, $T_WARN warnings"
     [ "$T_FAIL" -eq 0 ] || exit 1
 }
 
+# All checks (WARP, wg0, rules, units, exit cities).
 cmd_test() {
     require_setup
     log "Tests (WARP $WARP)"
@@ -1311,7 +1348,9 @@ cmd_backup() {
     prune_all_changes
     warn "the archive contains private keys; keep it somewhere safe"
     info "restore on a fresh server: $PROG restore <archive>"
-    info "fetch it with: scp root@$(state_get ENDPOINT | tr -d '[]'):$out ."
+    local ep
+    ep=$(state_get ENDPOINT | tr -d '[]')
+    info "fetch it with: scp root@${ep:-<server>}:$out ."
 }
 
 # --- restore ---
@@ -1333,8 +1372,9 @@ cmd_restore() {
     fi
 
     take_lock
-    local what="keys, clients and settings" has_warp=0
+    local what="keys, clients and settings" has_warp=0 has_exits=0
     if grep -q "^$WGCF_DIR/wgcf-account.toml\$" <<<"$members"; then has_warp=1; what="keys, clients, settings and WARP account"; fi
+    if grep -q "^$EXIT_DIR/.*/wgcf-account.toml\$" <<<"$members"; then has_exits=1; what="$what, exit cities"; fi
     step "Restore $what from $archive" \
         "$PROG rollback --purge"
     confirm "Restore from this backup?"
@@ -1362,6 +1402,9 @@ cmd_restore() {
     info "restored; clients: $(db_entries | awk '{ printf "%s ", $1 }')"
     if [ "$has_warp" -eq 1 ]; then
         warn "the WARP account is now on this server too; don't keep running it on the old one"
+    fi
+    if [ "$has_exits" -eq 1 ]; then
+        warn "the exit cities' Proton keys and WARP accounts are now here too; remove them from the old server"
     fi
     flock -u 9
     local flags=()
@@ -1397,6 +1440,8 @@ restore_original() {
     esac
 }
 
+# Undo setup: stop everything, remove every rule, restore original files;
+# --purge also deletes keys, clients, WARP accounts and exit cities.
 cmd_rollback() {
     take_lock
     local orig_fwd orig_fwd6 orig_ra f out pub
@@ -1411,8 +1456,7 @@ cmd_rollback() {
     fi
     confirm "Proceed with rollback?"
 
-    run systemctl disable --now "$WATCHDOG.timer" 2>/dev/null || true
-    run systemctl disable --now "$EXIT_WATCHDOG.timer" 2>/dev/null || true
+    run systemctl disable --now "$WATCHDOG.timer" "$EXIT_WATCHDOG.timer" 2>/dev/null || true
     for f in $(exit_codes); do exit_down "$f"; done
     run systemctl disable --now "wg-quick@$WG_IF" 2>/dev/null || true
     run systemctl disable --now "wg-quick@$WARP_IF" 2>/dev/null || true
@@ -1424,7 +1468,7 @@ cmd_rollback() {
         run ufw delete allow "$WG_PORT/udp" || true
         while IFS= read -r out; do
             run ufw route delete allow in on "$WG_IF" out on "$out" || true
-        done < <(exit_ifs)
+        done < <(out_ifs)
         state_unset UFW
     fi
 
@@ -1433,8 +1477,8 @@ cmd_rollback() {
     if [ "$(backup_orig "$DROPIN")" = NEW ]; then run rm -f $DROPIN.*.bak; fi
     restore_original "$DROPIN" 1
     if [ -d "$DROPIN_DIR" ]; then run rmdir --ignore-fail-on-non-empty "$DROPIN_DIR"; fi
-    for f in "$WATCHDOG_TIMER" "$WATCHDOG_SERVICE" "$WATCHDOG_BIN" \
-             "$EXIT_WATCHDOG_TIMER" "$EXIT_WATCHDOG_SERVICE" "$EXIT_WATCHDOG_BIN"; do restore_original "$f" 1; done
+    remove_timer "$WATCHDOG" "$WATCHDOG_TIMER" "$WATCHDOG_SERVICE" "$WATCHDOG_BIN"
+    remove_timer "$EXIT_WATCHDOG" "$EXIT_WATCHDOG_TIMER" "$EXIT_WATCHDOG_SERVICE" "$EXIT_WATCHDOG_BIN"
     run rm -f /run/$WATCHDOG
     run systemctl daemon-reload
     restore_original "$SYSCTL_FILE" 1
@@ -1461,7 +1505,7 @@ cmd_rollback() {
         for f in "$WG_CONF" "$WARP_CONF"; do
             if [ -f "$f" ] && grep -qF "$MARKER" "$f"; then run rm -f "$f"; fi
         done
-        run rm -f "$SERVER_KEY" "$SERVER_PUB" "$CLIENT_DB" "$STATE" "$BACKUP_MAP"
+        run rm -f "$SERVER_KEY" "$SERVER_PUB" "$CLIENT_DB" "$DISABLED_DB" "$STATE" "$BACKUP_MAP"
         run rm -rf "$WGCF_DIR" "$CLIENT_DIR" "$PSK_DIR" "$EXIT_DIR"
         run rm -f "$EXIT_DB"
         info "left installed: packages and $WGCF_BIN"

@@ -114,18 +114,23 @@ KEEP_ARCHIVES=10                         # newest `backup` archives kept
 # --- Flags ---
 DRY_RUN=0
 YES=0
-SUBNET_ASKED=0   # 1 once setup asked for the subnet
 FORCE=0
 PURGE=0
-FOLLOW=0   # log --follow
-TSV=0      # list --tsv (for scripts/servers.sh)
-QR=0     # 1 = --qr, -1 = --no-qr, 0 = add/rotate decide (on if a terminal)
+QR=0            # 1 = --qr, -1 = --no-qr, 0 = add/rotate decide (on if a terminal)
+FOLLOW=0        # log --follow
+TSV=0           # list --tsv: tab-separated rows (for scripts/servers.sh)
 EXIT_CODES=""   # wg-client.sh add --exit <code>[,<code>...]
 EXIT_LABEL=""   # wg-setup.sh exit add --label "<full name>"
 ARGS=()
 
 # --- Runtime ---
 STEP="startup"
+IPV6=0                  # set by finalize_config
+SUBNET_ASKED=0          # 1 once setup asked for the subnet (and text was typed)
+SUBNET_DEFAULTED=0      # 1 if neither --subnet nor a saved subnet (set by load_config)
+WG_STOPPED=0            # 1 once setup stopped wg0 to rewrite its config
+T_PASS=0 T_FAIL=0 T_WARN=0   # test counters
+T_SCOPE=all             # tests: all, or warp (stop after the WARP checks)
 WROTE=0                 # set by write_file: 1 if the file changed
 CLEANUP_ON_ERR=0        # 1 while wg0's PostUp rules may be half-applied
 
@@ -143,6 +148,19 @@ step() {
     log "$1"
     if [ -n "${2:-}" ]; then info "undo: $2"; fi
     if [ "$DRY_RUN" -eq 0 ]; then logger -t wg-tools "$PROG: $1" 2>/dev/null || true; fi
+}
+
+# True if we can prompt on the terminal.
+have_tty() { { : </dev/tty; } 2>/dev/null; }
+
+# Human-readable age of a handshake timestamp.
+ago() {
+    local ts="$1" d
+    if [ "${ts:-0}" -eq 0 ]; then echo never; return 0; fi
+    d=$(( $(date +%s) - ts ))
+    if [ "$d" -lt 120 ]; then echo "${d}s ago"
+    elif [ "$d" -lt 7200 ]; then echo "$(( d / 60 ))m ago"
+    else echo "$(( d / 3600 ))h ago"; fi
 }
 
 # Run a command, or just print it under --dry-run.
@@ -299,9 +317,6 @@ int2ip() {
     echo "$(( (n >> 24) & 255 )).$(( (n >> 16) & 255 )).$(( (n >> 8) & 255 )).$(( n & 255 ))"
 }
 
-# True if we can prompt on the terminal.
-have_tty() { { : </dev/tty; } 2>/dev/null; }
-
 # Lowercase a "<groups>::/64" prefix and drop leading zeros, as ip(8) prints it.
 canon_subnet6() {
     local p="${1,,}" g out=""
@@ -431,13 +446,14 @@ init() {
     fi
 }
 
+# --- State, backups and file writes ---
+
 # Serialize mutating commands (shared by both scripts).
 take_lock() {
     exec 9>"$LOCK_FILE"
-    flock -n 9 || die "another wireguard-tools command is running"
+    # -w: the exit watchdog holds it for a moment every 10s.
+    flock -w 15 9 || die "another wireguard-tools command is running"
 }
-
-# --- State, backups and file writes ---
 
 # Read/write/remove KEY=value pairs in the state file.
 state_get() {
@@ -491,6 +507,19 @@ backup_file() {
         chmod 600 "$BACKUP_MAP"
     fi
     prune_changes "$f"
+}
+
+# Delete a file these tools created, with its change copies and its backup
+# record (the copies may hold keys; rollback has nothing to restore).
+forget_file() {
+    local f="$1" tmp
+    # shellcheck disable=SC2086  # glob on purpose
+    run rm -f "$f" "$(change_dir "$f")/$(basename "$f")".*.bak
+    if [ "$DRY_RUN" -eq 0 ] && [ -f "$BACKUP_MAP" ]; then
+        tmp=$(mktemp)
+        awk -F'\t' -v f="$f" '$1 != f' "$BACKUP_MAP" >"$tmp"
+        install -m 600 "$tmp" "$BACKUP_MAP"
+    fi
 }
 
 # Point the backup record's entry for <file> at <path>.
@@ -588,6 +617,7 @@ ensure_managed() {
 
 # --- Network facts ---
 
+# The main table's IPv4 default route (first one).
 default_route() { ip -4 route show default | awk 'NR == 1'; }
 
 # "via X dev Y" from a route line, ignoring volatile fields like metric/proto.
@@ -595,22 +625,40 @@ route_key() {
     awk '{ for (i = 1; i < NF; i++) { if ($i == "via") v = $(i + 1); if ($i == "dev") d = $(i + 1) } }
          END { print "via " v " dev " d }' <<<"$1"
 }
+# The interface of a route line.
 route_dev() { route_key "$1" | awk '{ print $4 }'; }
 
+# The host has an IPv6 default route / the kernel has IPv6 enabled / <ifc> exists.
 has_ipv6() { [ -n "$(ip -6 route show default 2>/dev/null)" ]; }
 kernel_ipv6() { [ -f /proc/net/if_inet6 ] && [ "$(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null)" = 0 ]; }
 if_exists() { ip link show dev "$1" >/dev/null 2>&1; }
 
 # Fetch one field (warp=, ip=) from Cloudflare's trace; extra args go to curl.
 trace_field() {
-    local field="$1" out="" try
+    local field="$1" out
     shift
-    for try in 1 2 3; do
-        out=$(curl -fsS --max-time 10 "$@" "$TRACE_URL" 2>/dev/null) && break
-        [ "$try" -lt 3 ] && sleep 2
-    done
+    out=$(trace_body "$@")
     sed -n "s/^$field=//p" <<<"$out"
 }
+
+# Cloudflare's trace (key=value lines), up to 3 tries; extra args go to curl.
+trace_body() {
+    local try
+    for try in 1 2 3; do
+        if curl -fsS --max-time 10 "$@" "$TRACE_URL" 2>/dev/null; then return 0; fi
+        if [ "$try" -lt 3 ]; then sleep 2; fi
+    done
+    return 0
+}
+
+# True if a trace (lines, or a one-line "key=value ..." summary) shows WARP.
+is_warp_trace() {
+    local t=" ${1//$'\n'/ } "
+    [[ $t == *" warp=on "* || $t == *" warp=plus "* ]]
+}
+
+# Unix time of an interface's newest handshake (0 if none).
+newest_hs() { wg show "$1" latest-handshakes 2>/dev/null | awk '$2 > m { m = $2 } END { print m + 0 }'; }
 
 # Record the pre-install default route, public interface and ip_forward once.
 record_baseline() {
@@ -637,11 +685,12 @@ pub_if() {
     echo "${p:-$(route_dev "$(default_route)")}"
 }
 
-# Interface client traffic leaves through now, and both ways out.
+# Interface client traffic leaves through now, and every way out: WARP, the
+# public interface, and each exit city's WARP tunnel.
 out_if() {
     if [ "$WARP" = on ]; then echo "$WARP_IF"; else pub_if; fi
 }
-exit_ifs() {
+out_ifs() {
     local code
     echo "$WARP_IF"
     pub_if
@@ -677,12 +726,16 @@ resolve_endpoint() {
 
 # --- Routing / NAT rules (single source for PostUp, PostDown, rollback, test) ---
 
-# Policy rule for "ip" (IPv4) or "ip -6" with that family's subnet.
-rule_spec() {
-    local net="$WG_SUBNET"
-    if [ "$1" = "ip -6" ]; then net="$WG_SUBNET6"; fi
-    echo "from $net lookup $RT_TABLE priority $RULE_PRIO"
+# The clients' subnet for a family: "ip"/iptables -> WG_SUBNET, "ip -6"/ip6tables -> WG_SUBNET6.
+family_net() {
+    case "$1" in
+        "ip -6"|ip6tables) echo "$WG_SUBNET6" ;;
+        *) echo "$WG_SUBNET" ;;
+    esac
 }
+
+# Policy rule for "ip" (IPv4) or "ip -6" with that family's subnet.
+rule_spec() { echo "from $(family_net "$1") lookup $RT_TABLE priority $RULE_PRIO"; }
 
 # "ip", plus "ip -6" when IPv6 is on.
 ip_families() {
@@ -696,14 +749,15 @@ warp_route() {
     while IFS= read -r f; do echo "$f route replace default dev $WARP_IF table $RT_TABLE"; done < <(ip_families)
 }
 
-# Firewall rules as "command|table|chain|rule", for both ways out (WARP and
-# the public interface: each matches only its own -o, so both can stay in
-# place). Inserted (-I) so ufw/Docker DROP policies can't shadow them.
+# Firewall rules as "command|table|chain|rule", for every way out (WARP, the
+# public interface, each exit city's wx-<code>: each matches only its own -o,
+# so all can stay in place). Inserted (-I) so ufw/Docker DROP policies can't
+# shadow them.
 ipt_rules() {
     local out cmd
     for cmd in iptables ip6tables; do
         if [ "$cmd" = ip6tables ] && [ "$IPV6" -ne 1 ]; then continue; fi
-        while IFS= read -r out; do ipt_lines "$cmd" "$out"; done < <(exit_ifs)
+        while IFS= read -r out; do ipt_lines "$cmd" "$out"; done < <(out_ifs)
     done
     echo "iptables|filter|INPUT|-p udp --dport $WG_PORT -j ACCEPT"
 }
@@ -714,9 +768,10 @@ ipt_rules_out() {
     if [ "$IPV6" -eq 1 ]; then ipt_lines ip6tables "$1"; fi
 }
 
+# The NAT/forwarding rules for one family (iptables|ip6tables) and way out.
 ipt_lines() {
-    local cmd="$1" out="$2" net="$WG_SUBNET"
-    if [ "$cmd" = ip6tables ]; then net="$WG_SUBNET6"; fi
+    local cmd="$1" out="$2" net
+    net=$(family_net "$cmd")
     printf '%s\n' \
         "$cmd|nat|POSTROUTING|-s $net -o $out -j MASQUERADE" \
         "$cmd|filter|FORWARD|-i $WG_IF -o $out -j ACCEPT" \
@@ -751,13 +806,13 @@ warp_rule_cmds() {
 # Shell lines for wg0's PostUp (up) or PostDown (down). Each is idempotent;
 # down is the exact inverse of up, in reverse order. RT_TABLE is filled either
 # way; only the policy rule depends on WARP. warp's route is optional here
-# (warp may be down; its own PostUp adds it).
+# (warp may be down; its own PostUp adds it). Each exit city adds its own
+# part (exit_hook_cmds).
 hook_cmds() {
     local f net code
     if [ "$1" = up ]; then
         while IFS= read -r f; do
-            net="$WG_SUBNET"
-            if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+            net=$(family_net "$f")
             echo "$f route replace $net dev $WG_IF table $RT_TABLE"
             echo "$f route replace default dev $WARP_IF table $RT_TABLE 2>/dev/null || true"
             echo "$f route replace blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE"
@@ -770,8 +825,7 @@ hook_cmds() {
         ipt_rules | tac | ipt_cmds down
         warp_rule_cmds off | tac
         while IFS= read -r f; do
-            net="$WG_SUBNET"
-            if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+            net=$(family_net "$f")
             echo "$f route del blackhole default metric $BLACKHOLE_METRIC table $RT_TABLE 2>/dev/null || true"
             echo "$f route del default dev $WARP_IF table $RT_TABLE 2>/dev/null || true"
             echo "$f route del $net dev $WG_IF table $RT_TABLE 2>/dev/null || true"
@@ -779,15 +833,18 @@ hook_cmds() {
     fi
 }
 
+# Run shell lines from stdin, through run (so --dry-run only prints them).
+# Feed it with < <(...), not a pipe: in a pipeline subshell a failing line
+# would fire the ERR trap twice.
+run_lines() {
+    local line
+    while IFS= read -r line; do run bash -c "$line"; done
+}
+
 # Run hook lines directly: run_hooks up|down (rollback, error cleanup), or
 # run_hooks warp on|off (the switch, live).
 run_hooks() {
-    local line
-    if [ "$1" = warp ]; then
-        while IFS= read -r line; do run bash -c "$line"; done < <(warp_rule_cmds "$2")
-    else
-        while IFS= read -r line; do run bash -c "$line"; done < <(hook_cmds "$1")
-    fi
+    if [ "$1" = warp ]; then run_lines < <(warp_rule_cmds "$2"); else run_lines < <(hook_cmds "$1"); fi
 }
 
 # --- Clients registry: "name ip public-key allowed-ips" per line ---
@@ -797,10 +854,12 @@ run_hooks() {
 # servers don't collide.
 client_conf() { echo "$CLIENT_DIR/$SERVER_NAME.$1.conf"; }
 
+# clients.db lines without comments and blanks.
 db_entries() {
     [ -f "$CLIENT_DB" ] || return 0
     grep -vE '^[[:space:]]*(#|$)' "$CLIENT_DB" || true
 }
+# "ip public-key allowed-ips" of client <name> (empty if none).
 db_get() { db_entries | awk -v n="$1" '$1 == n { print $2, $3, $4; exit }'; }
 
 # Disabled clients keep their keys, config and address, but aren't peers.
@@ -826,16 +885,36 @@ db_put() {
 
 # --- Exit cities ---
 
+# exits.db lines ("code idx label") without comments and blanks.
 exit_entries() {
     [ -f "$EXIT_DB" ] || return 0
     grep -vE '^[[:space:]]*(#|$)' "$EXIT_DB" || true
 }
+# Codes of all exit cities, in exits.db order.
 exit_codes() { exit_entries | awk '{ print $1 }'; }
+# An exit's index (its tables and fwmark derive from it) and full name.
 exit_idx() { exit_entries | awk -v c="$1" '$1 == c { print $2; exit }'; }
 exit_label() { exit_entries | awk -v c="$1" '$1 == c { $1 = ""; $2 = ""; sub(/^ +/, ""); print; exit }'; }
-exit_wtable() { echo $(( EXIT_TABLE_BASE + $(exit_idx "$1") )); }
-exit_ptable() { echo $(( EXIT_PTABLE_BASE + $(exit_idx "$1") )); }
-exit_mark() { echo $(( EXIT_MARK_BASE + $(exit_idx "$1") )); }
+# An exit's client table, Proton table and fwmark.
+exit_n() {
+    local i
+    i=$(exit_idx "$1")
+    [ -n "$i" ] || die "no exit city '$1'"
+    echo "$i"
+}
+exit_wtable() { echo $(( EXIT_TABLE_BASE + $(exit_n "$1") )); }
+exit_ptable() { echo $(( EXIT_PTABLE_BASE + $(exit_n "$1") )); }
+exit_mark() { echo $(( EXIT_MARK_BASE + $(exit_n "$1") )); }
+
+# Rewrite exits.db with <code> removed, optionally adding "<code> <idx> <label>".
+exit_db_put() {
+    local code="$1" entry="${2:-}"
+    write_file "$EXIT_DB" 600 < <(
+        echo "# wireguard-tools exit cities: code idx label (wg-setup.sh exit add)"
+        exit_entries | awk -v c="$code" '$1 != c'
+        if [ -n "$entry" ]; then echo "$code $entry"; fi
+    )
+}
 # 2-6 of a-z0-9 and -, starting with a letter, not ending in - (e.g. par-fr).
 valid_exit_code() { [[ $1 =~ ^[a-z][a-z0-9-]{0,4}[a-z0-9]$ ]] && [ "$1" != warp ]; }
 
@@ -847,16 +926,16 @@ client_exit_label() {
     c=$(client_exit "$1")
     if [ -n "$c" ]; then echo "$c"; elif [ "$WARP" = on ]; then echo warp; else echo direct; fi
 }
-# Clients (names) of exit <code>.
+# Clients (names) of exit <code>: "<code>.<name>" entries in clients.db.
 exit_clients() { db_entries | awk -v p="$1." 'index($1, p) == 1 { print $1 }'; }
 
 # Policy rules sending one client's addresses (ip, ip6) to its exit's table.
 exit_client_cmds() {
     local name="$1" dir="$2" ip code table f a
     code=$(client_exit "$name")
-    [ -n "$code" ] && [ -n "$(exit_idx "$code")" ] || return 0
+    if [ -z "$code" ] || [ -z "$(exit_idx "$code")" ]; then return 0; fi
     ip=$(db_get "$name" | awk '{ print $1 }')
-    [ -n "$ip" ] || return 0
+    if [ -z "$ip" ]; then return 0; fi
     table=$(exit_wtable "$code")
     while IFS= read -r f; do
         a="$ip/32"
@@ -869,7 +948,7 @@ exit_client_cmds() {
 # Shell lines for one exit's part of wg0's hooks: its tables with blackhole
 # fallbacks (so clients are blocked while it is down), the fwmark rule that
 # sends its WARP tunnel's packets through Proton, and its clients' rules
-# (its firewall rules come with ipt_rules, via exit_ifs). down is the inverse.
+# (its firewall rules come with ipt_rules, via out_ifs). down is the inverse.
 exit_hook_cmds() {
     local code="$1" w p m f net name
     w=$(exit_wtable "$code"); p=$(exit_ptable "$code"); m=$(exit_mark "$code")
@@ -878,8 +957,7 @@ exit_hook_cmds() {
         echo "ip route replace blackhole default metric $BLACKHOLE_METRIC table $p"
         echo "while ip rule del fwmark $m lookup $p priority $EXIT_MARK_PRIO 2>/dev/null; do :; done; ip rule add fwmark $m lookup $p priority $EXIT_MARK_PRIO"
         while IFS= read -r f; do
-            net="$WG_SUBNET"
-            if [ "$f" = "ip -6" ]; then net="$WG_SUBNET6"; fi
+            net=$(family_net "$f")
             echo "$f route replace $net dev $WG_IF table $w"
             echo "$f route replace default dev wx-$code table $w 2>/dev/null || true"
             echo "$f route replace blackhole default metric $BLACKHOLE_METRIC table $w"
@@ -891,12 +969,6 @@ exit_hook_cmds() {
         echo "while ip rule del fwmark $m lookup $p priority $EXIT_MARK_PRIO 2>/dev/null; do :; done"
         echo "ip route flush table $p 2>/dev/null || true"
     fi
-}
-
-# Run shell lines from stdin (live changes outside a full wg0 restart).
-run_lines() {
-    local line
-    while IFS= read -r line; do run bash -c "$line"; done
 }
 
 # --- wg0.conf ---
@@ -927,10 +999,13 @@ EOF
     done < <(db_entries)
 }
 
+# Write wg0.conf (refusing one these tools didn't create).
 write_wg_conf() {
     ensure_managed "$WG_CONF"
     write_file "$WG_CONF" 600 < <(render_wg_conf)
 }
+
+# --- Units ---
 
 # Enable an interface's wg-quick unit for boot and make it match its config.
 start_unit() {
@@ -955,14 +1030,4 @@ start_unit() {
         systemctl is-active -q "$unit" || warn "$ifc is up but not via $unit (started by hand?)"
     fi
     if [ "$enabled" -eq 0 ] && ! systemctl is-enabled -q "$unit" 2>/dev/null; then run systemctl enable "$unit"; fi
-}
-
-# Human-readable age of a handshake timestamp.
-ago() {
-    local ts="$1" d
-    if [ "${ts:-0}" -eq 0 ]; then echo never; return 0; fi
-    d=$(( $(date +%s) - ts ))
-    if [ "$d" -lt 120 ]; then echo "${d}s ago"
-    elif [ "$d" -lt 7200 ]; then echo "$(( d / 60 ))m ago"
-    else echo "$(( d / 3600 ))h ago"; fi
 }

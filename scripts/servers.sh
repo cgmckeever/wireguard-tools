@@ -10,15 +10,16 @@
 #   local/backups/<name>/            backup archives fetched from it
 #
 # Usage: scripts/servers.sh [command] [server|all] [args...]
-#   (no command)          list the servers, with branch and reachability
-#   init [--branch B] [--address A] [--name N] [-- setup flags]
+#   list (or no command)  the servers, with branch@commit (or unreachable)
+#   init [--address A] [--name N] [--user U] [--branch B] [-- setup flags]
 #                         set up a new server: install git, clone this repo,
 #                         run wg-setup.sh setup --name N, then add it to the
 #                         list. A server that already runs wireguard-tools is
 #                         adopted (recorded under its saved name) instead.
 #   ssh <s>               log in
 #   pull <s|all>          git pull its checkout
-#   branch <s> <branch>   switch its checkout to <branch> (then pull)
+#   branch <s|all> <branch>
+#                         switch its checkout to <branch> (then pull)
 #   setup|warp|status|test|exit|log|rollback <s|all> [args]
 #                         run wg-setup.sh <command> [args] there
 #                         (log [lines] [-f]: its changes, watchdogs and tunnels)
@@ -44,11 +45,43 @@ LOCAL="$ROOT/local"
 LIST="$LOCAL/servers"
 LINKS="$LOCAL/exits/details.tsv"   # server  local-file  code  full name (tab-separated)
 DEF_DIR=/opt/wireguard-tools
+INBOX=/etc/wireguard/exits/incoming
 SSH_OPTS=(-o ConnectTimeout=10 -o ServerAliveInterval=15)
 
 die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+err()  { printf 'ERROR: %s\n' "$*" >&2; return 1; }
 log()  { printf '==> %s\n' "$*"; }
 info() { printf '    %s\n' "$*"; }
+
+# True if we can prompt on the terminal (even with stdin redirected).
+have_tty() { { : </dev/tty; } 2>/dev/null; }
+
+# ssh with our options; bssh never prompts and never reads stdin (for probes
+# and loops); rsh gets a terminal when we have one (prompts, QR codes).
+rssh() { ssh "${SSH_OPTS[@]}" "$@"; }
+bssh() { ssh -n -o BatchMode=yes "${SSH_OPTS[@]}" "$@"; }
+rsh() {
+    local target="$1"
+    shift
+    if [ -t 0 ] && [ -t 1 ]; then ssh -t -q "${SSH_OPTS[@]}" "$target" "$@"; else rssh "$target" "$@"; fi
+}
+can_login() { bssh "$1" true 2>/dev/null; }
+
+# Quote arguments for the remote shell.
+q() {
+    local a out=""
+    for a in "$@"; do out="$out $(printf '%q' "$a")"; done
+    echo "${out# }"
+}
+
+# Valid server name / exit code (the code rule is valid_exit_code in lib/common.sh).
+valid_server() { [[ $1 =~ ^[A-Za-z0-9_-]{1,32}$ ]]; }
+valid_code() { [[ $1 =~ ^[a-z][a-z0-9-]{0,4}[a-z0-9]$ ]] && [ "$1" != warp ]; }
+
+# The comment Proton puts under [Peer], e.g. "FR#252" (empty if none).
+proton_hint() {
+    awk '/^[[:space:]]*\[Peer\]/ { p = 1; next } p && /^[[:space:]]*#/ { sub(/^[[:space:]]*#[[:space:]]*/, ""); print; exit }' "$1"
+}
 
 ensure_local() {
     mkdir -p "$LOCAL/exits" "$LOCAL/backups"
@@ -64,12 +97,14 @@ entries() {
     [ -f "$LIST" ] || return 0
     awk -v d="$DEF_DIR" '!/^[[:space:]]*(#|$)/ { print $1, $2, ($3 == "" ? d : $3) }' "$LIST"
 }
+known() { entries | awk -v n="$1" '$1 == n { f = 1 } END { exit !f }'; }
 
 # Resolve a number or name to "name target dir"; no argument: pick one.
 pick() {
     local want="${1:-}" n=0 line reply
     if [ -z "$want" ]; then
         [ -n "$(entries)" ] || die "no servers yet (add one: $0 init)"
+        have_tty || die "no server given (and no terminal to pick one)"
         cmd_list quick >&2
         read -r -p "  Which server? [number or name] " reply </dev/tty || true
         want="$reply"
@@ -82,36 +117,26 @@ pick() {
     die "no server '$want' in $LIST"
 }
 
-# Run a command for one server, or every server with "all".
+# each <all-ok> <fn> [server|all] [args]: run <fn> name target dir [args] for
+# one server, or (if <all-ok> is 1) for every server with "all". Each server
+# runs in a subshell, so one failing doesn't stop the rest; returns 1 if any did.
 each() {
-    local sel="$1" fn="$2" line
+    local all_ok="$1" fn="$2" sel="${3:-}" line rc=0
     shift 2
+    [ $# -eq 0 ] || shift
     if [ "$sel" = all ]; then
+        [ "$all_ok" -eq 1 ] || die "this command takes one server, not all"
         while read -r line; do
             log "${line%% *}"
             # shellcheck disable=SC2086  # line holds "name target dir"
-            "$fn" $line "$@" </dev/null || true
+            ( "$fn" $line "$@" ) </dev/null || rc=1
             echo ""
         done < <(entries)
-    else
-        line=$(pick "$sel") || exit 1
-        # shellcheck disable=SC2086
-        "$fn" $line "$@"
+        return "$rc"
     fi
-}
-
-# ssh with a terminal when we have one (prompts, QR codes, confirmations).
-rsh() {
-    local target="$1"
-    shift
-    if [ -t 0 ] && [ -t 1 ]; then ssh -t -q "${SSH_OPTS[@]}" "$target" "$@"; else ssh "${SSH_OPTS[@]}" "$target" "$@"; fi
-}
-
-# Quote arguments for the remote shell.
-q() {
-    local a out=""
-    for a in "$@"; do out="$out $(printf '%q' "$a")"; done
-    echo "${out# }"
+    line=$(pick "$sel") || exit 1
+    # shellcheck disable=SC2086
+    "$fn" $line "$@"
 }
 
 repo_url() {
@@ -124,6 +149,7 @@ repo_url() {
 
 # --- list ---
 
+# The numbered list; "quick" skips asking each server for its branch.
 cmd_list() {
     local mode="${1:-}" n=0 name target dir probe staged
     if [ -z "$(entries)" ]; then
@@ -136,8 +162,8 @@ cmd_list() {
         staged=$(cd "$LOCAL/exits/$name" 2>/dev/null && ls -- *.conf 2>/dev/null | sed 's/\.conf$//' | paste -sd, -)
         probe=""
         if [ "$mode" != quick ]; then
-            probe=$(ssh -n -o BatchMode=yes -o ConnectTimeout=5 "$target" \
-                "git -C $dir rev-parse --abbrev-ref HEAD 2>/dev/null | tr -d '\n'; printf '@'; git -C $dir rev-parse --short HEAD 2>/dev/null" \
+            probe=$(bssh -o ConnectTimeout=5 "$target" \
+                "d=$(q "$dir"); git -C \"\$d\" rev-parse --abbrev-ref HEAD 2>/dev/null | tr -d '\n'; printf '@'; git -C \"\$d\" rev-parse --short HEAD 2>/dev/null" \
                 2>/dev/null) || probe="unreachable"
         fi
         printf '  %2d) %-10s %-24s %-22s %s\n' "$n" "$name" "$target" "$probe" "${staged:+exits staged: $staged}"
@@ -147,39 +173,40 @@ cmd_list() {
 
 # --- init ---
 
+# Set up a new server (or adopt one already running wireguard-tools) and add it to the list.
 cmd_init() {
-    local address="" name="" user=root branch=main setup_args=() target url probe saved os
+    local address="" name="" user=root branch=main setup_args=() target url probe saved os reply=""
     while [ $# -gt 0 ]; do
         case "$1" in
-            --address) address="$2"; shift ;;
-            --name)    name="$2"; shift ;;
-            --user)    user="$2"; shift ;;
-            --branch)  branch="$2"; shift ;;
+            --address) address="${2:-}"; shift ;;
+            --name)    name="${2:-}"; shift ;;
+            --user)    user="${2:-}"; shift ;;
+            --branch)  branch="${2:-}"; shift ;;
             --) shift; setup_args=("$@"); break ;;
             *) die "init: unknown option $1" ;;
         esac
         shift
     done
     ensure_local
-    [ -n "$address" ] || read -r -p "Server address (IP or hostname): " address </dev/tty
+    if [ -z "$address" ] || [ -z "$name" ]; then have_tty || die "init needs --address and --name without a terminal"; fi
+    if [ -z "$address" ]; then read -r -p "Server address (IP or hostname): " address </dev/tty || true; fi
     [ -n "$address" ] || die "no address"
-    [ -n "$name" ] || read -r -p "Server name (e.g. boba): " name </dev/tty
-    [[ $name =~ ^[A-Za-z0-9_-]{1,32}$ ]] || die "server name must be 1-32 of [A-Za-z0-9_-]: '$name'"
-    if entries | awk -v n="$name" '$1 == n { f = 1 } END { exit !f }'; then die "'$name' is already in $LIST"; fi
+    if [ -z "$name" ]; then read -r -p "Server name (e.g. boba): " name </dev/tty || true; fi
+    valid_server "$name" || die "server name must be 1-32 of [A-Za-z0-9_-]: '$name'"
+    if known "$name"; then die "'$name' is already in $LIST"; fi
     target="$user@$address"
 
     log "Connecting to $target"
-    if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" true 2>/dev/null; then
+    if ! can_login "$target"; then
         info "If ssh asks about the host key, compare the fingerprint with your provider's"
         info "console before answering yes."
-        ssh "${SSH_OPTS[@]}" -o BatchMode=no "$target" true || die "cannot log in to $target"
-        if ! ssh -o BatchMode=yes -o ConnectTimeout=10 "$target" true 2>/dev/null; then
-            local reply=""
+        rssh -o BatchMode=no "$target" true || die "cannot log in to $target"
+        if ! can_login "$target"; then
             read -r -p "    Log in with your SSH key from now on (ssh-copy-id)? [Y/n] " reply </dev/tty || true
             if [[ -z $reply || $reply =~ ^[Yy] ]]; then ssh-copy-id "$target" || die "ssh-copy-id failed"; fi
         fi
     fi
-    probe=$(ssh "${SSH_OPTS[@]}" "$target" '
+    probe=$(rssh "$target" '
         echo "uid=$(id -u)"
         . /etc/os-release 2>/dev/null && echo "os=$ID $VERSION_ID"
         [ -x '"$DEF_DIR"'/wg-setup.sh ] && echo installed=1
@@ -191,11 +218,12 @@ cmd_init() {
 
     saved=$(sed -n 's/^saved=//p' <<<"$probe")
     if [[ $probe == *"installed=1"* ]] && [ -n "$saved" ]; then
+        valid_server "$saved" || die "the server's saved name '$saved' isn't a valid name"
         log "wireguard-tools is already set up there as '$saved'"
         if [ "$saved" != "$name" ]; then
             info "recording it as '$saved' (its saved name); rename it with: $0 setup $saved --name $name"
             name="$saved"
-            if entries | awk -v n="$name" '$1 == n { f = 1 } END { exit !f }'; then die "'$name' is already in $LIST"; fi
+            if known "$name"; then die "'$name' is already in $LIST"; fi
         fi
         record "$name" "$target"
         return 0
@@ -203,7 +231,7 @@ cmd_init() {
 
     url=$(repo_url)
     log "Installing git and cloning $url ($branch) to $DEF_DIR"
-    ssh "${SSH_OPTS[@]}" "$target" "set -e
+    rssh "$target" "set -e
         export DEBIAN_FRONTEND=noninteractive
         command -v git >/dev/null || { apt-get update -qq && apt-get install -y -qq git >/dev/null; }
         if [ -d $DEF_DIR/.git ]; then git -C $DEF_DIR fetch -q && git -C $DEF_DIR checkout -q $(q "$branch") && git -C $DEF_DIR pull -q
@@ -217,6 +245,7 @@ cmd_init() {
     info "next: $0 client $name add <client>   (or add exit cities: $0 exit-add $name)"
 }
 
+# Add a server to the list and make its local/exits/<name>/ folder.
 record() {
     ensure_local
     printf '%-10s %s\n' "$1" "$2" >>"$LIST"
@@ -227,69 +256,94 @@ record() {
 
 # --- per-server commands (called with: name target dir [args]) ---
 
-do_ssh()    { rsh "$2"; }
-do_pull()   { ssh "${SSH_OPTS[@]}" "$2" "git -C $3 pull -q && git -C $3 log --oneline -1 | sed 's/^/    /'"; }
-do_branch() {
-    [ -n "${4:-}" ] || die "usage: $0 branch <server> <branch>"
-    ssh "${SSH_OPTS[@]}" "$2" "set -e; git -C $3 fetch -q; git -C $3 checkout -q $(q "$4"); git -C $3 pull -q; printf '    %s: ' \"\$(git -C $3 rev-parse --abbrev-ref HEAD)\"; git -C $3 log --oneline -1"
+do_ssh() { rsh "$2"; }
+
+do_pull() {
+    local d
+    d=$(q "$3")
+    rssh "$2" "git -C $d pull -q && git -C $d log --oneline -1 | sed 's/^/    /'"
 }
-do_wgsetup() { local name="$1" target="$2" dir="$3"; shift 3; rsh "$target" "$dir/wg-setup.sh $(q "$@")"; }
+
+do_branch() {
+    local d
+    [ -n "${4:-}" ] || err "usage: $0 branch <server> <branch>" || return 1
+    d=$(q "$3")
+    rssh "$2" "set -e; git -C $d fetch -q; git -C $d checkout -q $(q "$4"); git -C $d pull -q
+        printf '    %s: ' \"\$(git -C $d rev-parse --abbrev-ref HEAD)\"; git -C $d log --oneline -1"
+}
+
+# wg-setup.sh <command> [args] there.
+do_wgsetup() {
+    local target="$2" dir="$3"
+    shift 3
+    rsh "$target" "$(q "$dir/wg-setup.sh") $(q "$@")"
+}
+
 # wg-client.sh there (no args: its client list and action menu). Printed scp
 # hints use this machine's login for the server.
 do_client() {
-    local name="$1" target="$2" dir="$3"
+    local target="$2" dir="$3"
     shift 3
     [ $# -gt 0 ] || set -- list
-    rsh "$target" "WGT_SSH_TARGET=$(q "$target") $dir/wg-client.sh $(q "$@")"
+    rsh "$target" "WGT_SSH_TARGET=$(q "$target") $(q "$dir/wg-client.sh") $(q "$@")"
+}
+
+# Run backup there and fetch the archive it made into local/backups/<name>/.
+do_backup() {
+    local name="$1" target="$2" dir="$3" out to
+    out=$(rssh "$target" "$(q "$dir/wg-setup.sh") backup --yes >/dev/null || exit 1
+        ls -t /var/backups/wireguard-tools/wireguard-tools.*.tar.gz 2>/dev/null | head -n 1") \
+        || err "$name: backup failed" || return 1
+    [ -n "$out" ] || err "$name: backup made no archive" || return 1
+    to="$LOCAL/backups/$name"
+    ensure_local
+    mkdir -p "$to" && chmod 700 "$to"
+    scp -q -p "${SSH_OPTS[@]}" "$target:$out" "$to/" || err "$name: fetching $out failed" || return 1
+    chmod 600 "$to/$(basename "$out")"
+    info "$name: $to/$(basename "$out") (private keys inside; restore with wg-setup.sh restore)"
 }
 
 # Every client on every server in one table (a server whose tools predate
 # list --tsv gets its own list instead).
 cmd_clients() {
-    local name target dir out old=()
+    local name target dir out line old=()
+    local fmt='  %-10s %-20s %-6s %-15s %-14s %-12s %s\n'
     echo ""
-    printf '  %-10s %-20s %-6s %-15s %-14s %-12s %s\n' SERVER NAME EXIT ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
+    # shellcheck disable=SC2059  # the shared format
+    printf "$fmt" SERVER NAME EXIT ADDRESS "LAST SEEN" "RX/TX MiB" "ALLOWED IPS"
     while read -r name target dir; do
-        if ! out=$(ssh -n -o BatchMode=yes "${SSH_OPTS[@]}" "$target" "$dir/wg-client.sh list --tsv" 2>/dev/null); then
-            if ssh -n -o BatchMode=yes "${SSH_OPTS[@]}" "$target" true 2>/dev/null; then old+=("$name $target $dir")
-            else printf '  %-10s (unreachable)\n' "$name"; fi
+        if ! out=$(bssh "$target" "$(q "$dir/wg-client.sh") list --tsv" 2>/dev/null); then
+            if can_login "$target"; then old+=("$name $target $dir"); else printf '  %-10s (unreachable)\n' "$name"; fi
             continue
         fi
-        [ -n "$out" ] || { printf '  %-10s (no clients)\n' "$name"; continue; }
-        awk -F'\t' -v s="$name" '{ printf "  %-10s %-20s %-6s %-15s %-14s %-12s %s\n", s, $1, $2, $3, $4, $5, $6 }' <<<"$out"
+        if [ -z "$out" ]; then
+            printf '  %-10s (no clients)\n' "$name"
+            continue
+        fi
+        awk -F'\t' -v s="$name" -v f="$fmt" '{ printf f, s, $1, $2, $3, $4, $5, $6 }' <<<"$out"
     done < <(entries)
-    local line
     for line in ${old[@]+"${old[@]}"}; do
         read -r name target dir <<<"$line"
         echo ""
         log "$name (its tools predate this table)"
-        ssh -n "${SSH_OPTS[@]}" "$target" "$dir/wg-client.sh list --yes" 2>/dev/null | sed 's/^/  /'
+        bssh "$target" "$(q "$dir/wg-client.sh") list --yes" 2>/dev/null | sed 's/^/  /'
     done
     echo ""
 }
 
-do_backup() {
-    local name="$1" target="$2" dir="$3" out to
-    out=$(ssh "${SSH_OPTS[@]}" "$target" "$dir/wg-setup.sh backup --yes >/dev/null 2>&1; ls -t /var/backups/wireguard-tools/wireguard-tools.*.tar.gz 2>/dev/null | head -n 1") || true
-    [ -n "$out" ] || { printf 'ERROR: %s: backup failed\n' "$name" >&2; return 1; }
-    to="$LOCAL/backups/$name"
-    ensure_local
-    mkdir -p "$to" && chmod 700 "$to"
-    scp -q -p "${SSH_OPTS[@]}" "$target:$out" "$to/" || return 1
-    chmod 600 "$to/$(basename "$out")"
-    info "$name: $to/$(basename "$out") (private keys inside; restore with wg-setup.sh restore)"
-}
+# --- exit cities ---
 
 # The link for a local exit config: "code<TAB>full name" (empty if none yet).
 link_of() { awk -F'\t' -v s="$1" -v f="$2" '$1 == s && $2 == f { print $3 "\t" $4; exit }' "$LINKS" 2>/dev/null; }
 
 # First push of a local config: ask what it is and pick its code on the
-# server (city's first 3 letters + Proton's country tag, e.g. par-fr).
+# server (city's first 3 letters + Proton's country tag, e.g. par-fr). A code
+# already used by another of this server's files is refused.
 make_link() {
     local server="$1" f="$2" file name hint cc city code reply
     file=$(basename "$f")
-    hint=$(awk '/^[[:space:]]*\[Peer\]/ { p = 1; next } p && /^[[:space:]]*#/ { sub(/^[[:space:]]*#[[:space:]]*/, ""); print; exit }' "$f")
-    [ -t 0 ] || die "$file has no link yet; run exit-add in a terminal once to name it"
+    hint=$(proton_hint "$f")
+    have_tty || die "$file isn't named yet; run exit-add in a terminal once to name it"
     read -r -p "What is $file (Proton ${hint:-?})? e.g. Paris, France: " name </dev/tty || true
     [ -n "$name" ] || die "no name for $file"
     cc=$(sed -n 's/^\([A-Za-z][A-Za-z]\)#.*/\1/p' <<<"$hint" | tr 'A-Z' 'a-z')
@@ -298,8 +352,13 @@ make_link() {
     while :; do
         read -r -p "Short code on the server [$code]: " reply </dev/tty || true
         code="${reply:-$code}"
-        if [[ $code =~ ^[a-z][a-z0-9-]{0,4}[a-z0-9]$ ]] && [ "$code" != warp ]; then break; fi
-        echo "  2-6 of a-z0-9 and -, starting with a letter (e.g. par-fr)"
+        if ! valid_code "$code"; then
+            echo "  2-6 of a-z0-9 and -, starting with a letter (e.g. par-fr)"
+        elif awk -F'\t' -v s="$server" -v c="$code" '$1 == s && $3 == c { f = 1 } END { exit !f }' "$LINKS" 2>/dev/null; then
+            echo "  $server already has an exit '$code'; pick another"
+        else
+            break
+        fi
     done
     printf '%s\t%s\t%s\t%s\n' "$server" "$file" "$code" "$name" >>"$LINKS"
     chmod 600 "$LINKS"
@@ -309,30 +368,36 @@ make_link() {
 # (named first if it has no entry in details.tsv yet). The uploaded copy is
 # deleted once exit add has imported it.
 add_one_exit() {
-    local name="$1" target="$2" dir="$3" f="$4" file link code label inbox=/etc/wireguard/exits/incoming
+    local name="$1" target="$2" dir="$3" f="$4" file link code label
     file=$(basename "$f")
-    chmod 600 "$f"
     link=$(link_of "$name" "$file")
-    if [ -z "$link" ]; then make_link "$name" "$f"; link=$(link_of "$name" "$file"); fi
+    if [ -z "$link" ]; then
+        make_link "$name" "$f"
+        link=$(link_of "$name" "$file")
+    fi
     code="${link%%$'\t'*}"
     label="${link#*$'\t'}"
+    valid_code "$code" || die "bad code '$code' for $file in $LINKS"
     log "$name: $file -> exit $code ($label)"
-    ssh "${SSH_OPTS[@]}" "$target" "install -d -m 700 /etc/wireguard/exits $inbox" || die "cannot reach $target"
-    scp -q -p "${SSH_OPTS[@]}" "$f" "$target:$inbox/$code.conf" || die "upload failed"
-    ssh "${SSH_OPTS[@]}" "$target" "$dir/wg-setup.sh exit add $(q "$code" "$inbox/$code.conf" --label "$label" --yes); rc=\$?; rm -f $inbox/$code.conf; exit \$rc" \
+    rssh "$target" "install -d -m 700 /etc/wireguard/exits $INBOX" || die "cannot reach $target"
+    scp -q -p "${SSH_OPTS[@]}" "$f" "$target:$INBOX/$code.conf" || die "upload failed"
+    rssh "$target" "$(q "$dir/wg-setup.sh") exit add $(q "$code" "$INBOX/$code.conf" --label "$label" --yes); rc=\$?; rm -f $INBOX/$code.conf; exit \$rc" \
         || die "exit add failed for $code"
 }
 
 # exit-add <server> [number|file|all]: pick from this server's local configs.
 do_exit_add() {
     local name="$1" target="$2" dir="$3" sel="${4:-}" src f files=() i link remote picked=()
+    local w=4 base code label onsrv
     src="$LOCAL/exits/$name"
-    for f in "$src"/*.conf; do [ -f "$f" ] && files+=("$f"); done
+    for f in "$src"/*.conf; do if [ -f "$f" ]; then files+=("$f"); fi; done
     [ ${#files[@]} -gt 0 ] || die "no configs in $src (save Proton WireGuard configs there, any name ending .conf)"
-    remote=$(ssh -n "${SSH_OPTS[@]}" "$target" "awk '!/^#/ { print \$1 }' /etc/wireguard/exits.db 2>/dev/null" || true)
+    chmod 700 "$src"
+    chmod 600 "${files[@]}"
     if [ -z "$sel" ]; then
-        local w=4 base code label onsrv
-        for f in "${files[@]}"; do base=$(basename "$f"); [ ${#base} -le $w ] || w=${#base}; done
+        have_tty || die "no config given (and no terminal to pick one): $0 exit-add $name <n|file|all>"
+        remote=$(bssh "$target" "awk '!/^#/ { print \$1 }' /etc/wireguard/exits.db 2>/dev/null" || true)
+        for f in "${files[@]}"; do base=$(basename "$f"); if [ ${#base} -gt $w ]; then w=${#base}; fi; done
         echo ""
         printf '  %3s  %-*s  %-7s %-20s %s\n' "#" "$w" FILE CODE NAME "ON SERVER"
         for i in "${!files[@]}"; do
@@ -342,7 +407,7 @@ do_exit_add() {
             if [ -n "$link" ]; then
                 code="${link%%$'\t'*}"
                 label="${link#*$'\t'}"
-                if grep -qx "$code" <<<"$remote"; then onsrv=yes; fi
+                if grep -qx -- "$code" <<<"$remote"; then onsrv=yes; fi
             fi
             printf '  %3d  %-*s  %-7s %-20s %s\n' $(( i + 1 )) "$w" "$base" "$code" "$label" "$onsrv"
         done
@@ -364,38 +429,49 @@ do_exit_add() {
     esac
     for f in "${picked[@]}"; do add_one_exit "$name" "$target" "$dir" "$f"; done
     log "$name exits"
-    ssh "${SSH_OPTS[@]}" "$target" "$dir/wg-setup.sh exit list"
+    rssh "$target" "$(q "$dir/wg-setup.sh") exit list"
 }
 
+# --- forget ---
+
 cmd_forget() {
-    local line name reply="" sel="${1:-}"
-    [ "$sel" != --yes ] || sel=""
+    local a sel="" yes=0 line name reply=""
+    for a in "$@"; do
+        if [ "$a" = --yes ] || [ "$a" = -y ]; then yes=1; else sel="$a"; fi
+    done
     line=$(pick "$sel") || exit 1
     name="${line%% *}"
-    if [[ " $* " == *" --yes "* ]]; then reply=y; else
+    if [ "$yes" -eq 1 ]; then
+        reply=y
+    else
         read -r -p "    Remove '$name' from $LIST? (nothing on the server changes) [y/N] " reply </dev/tty || true
     fi
-    [[ $reply =~ ^[Yy] ]] || { info "kept"; return 0; }
+    if ! [[ $reply =~ ^[Yy] ]]; then
+        info "kept"
+        return 0
+    fi
     awk -v n="$name" '$1 != n' "$LIST" >"$LIST.new" && mv "$LIST.new" "$LIST" && chmod 600 "$LIST"
     info "forgot '$name'; its local/exits/$name and local/backups/$name stay"
 }
 
 usage() { sed -n '/^# Usage:/,/^# macOS/p' "$0" | sed 's/^# \{0,1\}//'; }
 
+# --- main ---
+
 cmd="${1:-list}"
 [ $# -eq 0 ] || shift
 case "$cmd" in
     list)       cmd_list "$@" ;;
     init)       cmd_init "$@" ;;
-    ssh)        each "${1:-}" do_ssh ;;
-    pull)       each "${1:-}" do_pull ;;
-    branch)     sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_branch "$@" ;;
+    ssh)        each 0 do_ssh "$@" ;;
+    pull)       each 1 do_pull "$@" ;;
+    branch)     each 1 do_branch "$@" ;;
     setup|warp|status|test|exit|log|rollback)
-                sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_wgsetup "$cmd" "$@" ;;
-    client)     sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_client "$@" ;;
+                sel="${1:-}"; [ $# -eq 0 ] || shift; each 1 do_wgsetup "$sel" "$cmd" "$@" ;;
+    client)     each 0 do_client "$@" ;;
     clients)    cmd_clients ;;
-    exit-add)   sel="${1:-}"; [ $# -eq 0 ] || shift; each "$sel" do_exit_add "$@" ;;
-    backup)     each "${1:-}" do_backup ;;
+    exit-add)   each 0 do_exit_add "$@" ;;
+    backup)     each 1 do_backup "$@" ;;
     forget)     cmd_forget "$@" ;;
     help|-h|--help) usage ;;
     *) die "unknown command: $cmd (see: $0 help)" ;;
