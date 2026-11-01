@@ -43,6 +43,11 @@ def atomic_write(path: str, content: str, mode: int) -> None:
         raise
 
 
+def settings_of(text: str) -> list:
+    """A config's lines without comments and blank lines."""
+    return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
 def is_copy_of(name: str, base: str) -> bool:
     """True for <base>.<anything>.bak (a change copy), as the shell glob
     "<base>.*.bak" matched; a plain <base>.bak someone made by hand is not one."""
@@ -188,6 +193,16 @@ class Files:
         self.paths = paths
         self.runner = runner
         self.clock = clock
+        # A dry run writes nothing, but later steps should see what it would
+        # have written (so e.g. wg0.conf's diff after a client change shows):
+        # path -> content, or None for a file it would have removed.
+        self.pending: Dict[str, Optional[str]] = {}
+
+    def read(self, path: str) -> Optional[str]:
+        """A file's text as this run sees it (including a dry run's would-be writes)."""
+        if path in self.pending:
+            return self.pending[path]
+        return store.read_text(path)
 
     @property
     def out(self) -> Out:
@@ -200,19 +215,21 @@ class Files:
     def write(self, path: str, mode: int, content: str) -> bool:
         """Write <content> to <path> if it differs (atomically, after a backup).
         Returns True if it changed; a dry run prints a redacted diff instead."""
-        old = store.read_text(path)
+        old = self.read(path)
         if old == content:
             self.out.info(f"unchanged: {path}")
             return False
         if self.runner.dry_run:
             if is_secret(path, self.paths):
                 self.out.info(f"[dry-run] would write {path} (mode {mode:o}; secret, not shown)")
+                self.pending[path] = content
                 return True
             self.out.info(f"[dry-run] would write {path} (mode {mode:o}):")
             diff = difflib.unified_diff(redact(old or "").splitlines(True), redact(content).splitlines(True),
                                         fromfile=path, tofile=f"{path} (new)")
             for line in diff:
                 self.out.info("  " + line.rstrip("\n"))
+            self.pending[path] = content
             return True
         self.backup(path)
         if not os.path.isdir(os.path.dirname(path)):
@@ -278,6 +295,14 @@ class Files:
             if kept > KEEP_CHANGES:
                 os.remove(b)
 
+    def write_config(self, path: str, mode: int, content: str) -> bool:
+        """Write a tunnel config; True only if its settings changed. A change in
+        comments alone is written but needs no restart (wg-quick reads the file
+        only when it starts)."""
+        old = self.read(path)
+        self.write(path, mode, content)
+        return old is None or settings_of(old) != settings_of(content)
+
     def remove(self, *paths: str) -> None:
         """Delete files (missing ones are fine); a dry run only says so."""
         targets = [p for p in paths if os.path.lexists(p) and not os.path.isdir(p)]
@@ -285,6 +310,8 @@ class Files:
             return
         if self.runner.dry_run:
             self.out.info("[dry-run] rm -f " + " ".join(targets))
+            for p in targets:
+                self.pending[p] = None
             return
         for p in targets:
             os.remove(p)

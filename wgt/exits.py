@@ -76,10 +76,11 @@ def write_confs(ctx, e: store.Exit) -> bool:
     for f in (px, wx):
         ensure_managed(ctx, f)
     raw = store.read_text(ctx.paths.wg("exits", f"{e.code}.proton.conf")) or ""
-    changed = ctx.files.write(px, 0o600, render.render_proton_conf(raw, e))
+    changed = ctx.files.write_config(px, 0o600, render.render_proton_conf(raw, e))
     profile = ctx.paths.wg("exits", e.code, "wgcf-profile.conf")
     if os.path.isfile(profile):
-        changed |= ctx.files.write(wx, 0o600, warp.render_profile(ctx, profile, rules.exit_wtable(e), rules.exit_mark(e)))
+        changed |= ctx.files.write_config(wx, 0o600,
+                                          warp.render_profile(ctx, profile, rules.exit_wtable(e), rules.exit_mark(e)))
     return changed
 
 

@@ -212,7 +212,8 @@ Behaviour flags (not saved):
 |------|-----------|------|
 | `--dry-run` | everything | show what would change; change nothing |
 | `--yes`, `-y` | everything | skip the per-step prompts; `setup` still asks to confirm its settings (unless there's no terminal) |
-| `--force` | `setup` | regenerate server keys, reinstall wgcf, regenerate the WARP profile, take over configs these tools didn't create |
+| `--force` | `setup` | reinstall wgcf, regenerate the WARP profile, take over configs these tools didn't create |
+| `--new-server-keys` | `setup` | a new server keypair: every client stops working until rotated (`wgt client rotate`) |
 | `--purge` | `rollback` | also delete keys, clients, the WARP accounts and exit cities |
 | `--qr` / `--no-qr` | `wgt client add`, `rotate`, `show` | force or skip the QR code |
 | `--exit <code>[,…]` | `wgt client add` | the client's exit(s); `warp` is the default exit |

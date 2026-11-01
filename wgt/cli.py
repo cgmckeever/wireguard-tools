@@ -24,7 +24,8 @@ VALUE_FLAGS = {
     "--exit": "EXIT_CODES", "--label": "EXIT_LABEL",
 }
 BOOL_FLAGS = {
-    "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--purge": "purge",
+    "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--new-server-keys": "new_server_keys",
+    "--purge": "purge",
     "--follow": "follow", "-f": "follow", "--no-follow": "no_follow", "--tsv": "tsv",
 }
 
@@ -44,7 +45,10 @@ server's own IP (switchable), or per client through an exit city.
          rotate <name> | rename <old> <new> | disable <name> | enable <name> | remove <name>
   exit   list | add <code> <file|-> [--label NAME] | remove <code> | test
 
-Options: --dry-run, --yes/-y, --force, --purge, --qr/--no-qr
+Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
+  --force             setup: reinstall wgcf, regenerate the WARP profile, take over
+                      configs these tools didn't create
+  --new-server-keys   setup: new server keypair (every client must then be rotated)
 Settings (saved by setup): --name --subnet --subnet6 --port --mtu --warp-mtu --dns
   --endpoint --wg-if --warp-if --table --allowed-ips
 """
@@ -59,6 +63,7 @@ class Args:
     dry_run: bool = False
     yes: bool = False
     force: bool = False
+    new_server_keys: bool = False
     purge: bool = False
     follow: bool = False
     no_follow: bool = False
@@ -127,8 +132,9 @@ class Ctx:
         return host.pub_if(self.snap.state, self.facts)
 
     def reload(self) -> None:
-        """Re-read the server's files (after a write)."""
-        self.snap = store.load(self.paths)
+        """Re-read the server's files (after a write; a dry run's would-be
+        writes included)."""
+        self.snap = store.load(self.paths, self.files.read)
 
 
 def load(args: Args, paths: Optional[Paths] = None, runner: Optional[Runner] = None,

@@ -19,6 +19,7 @@ from typing import List
 from . import checks, exits, host, live, net, ops, render, rules, store, ui, units, warp
 from .const import CONFIG_KEYS, EXIT_WATCHDOG, KEEP_ARCHIVES, WATCHDOG
 from .errors import WgtError
+from .system import settings_of
 
 PACKAGES = ("wireguard", "wireguard-tools", "iptables", "curl", "ca-certificates", "iputils-ping",
             "qrencode", "magic-wormhole")
@@ -109,7 +110,7 @@ def provision_warp(ctx) -> bool:
                      f"(Table = off, MTU {ctx.cfg.WARP_MTU}, no DNS)")
     else:
         ops.ensure_managed(ctx, ctx.cfg.warp_conf)
-        changed = ctx.files.write(ctx.cfg.warp_conf, 0o600, warp.render_profile(ctx, profile))
+        changed = ctx.files.write_config(ctx.cfg.warp_conf, 0o600, warp.render_profile(ctx, profile))
     start_unit(ctx, ctx.cfg.WARP_IF, changed)
     guard_default_route(ctx)
     if ctx.runner.dry_run:
@@ -265,15 +266,17 @@ def record_baseline(ctx) -> None:
 
 
 def ensure_server_keys(ctx) -> bool:
-    """Create the server keypair unless it exists (--force regenerates). True if new."""
+    """Create the server keypair unless it exists (--new-server-keys regenerates
+    it: every client then has to be rotated). True if new."""
     p = ctx.paths
     have = all(os.path.isfile(f) and os.path.getsize(f) > 0 for f in (p.server_key, p.server_pub))
-    if have and not ctx.args.force:
+    if have and not ctx.args.new_server_keys:
         ctx.out.info("server keys present")
         return False
     if os.path.isfile(p.server_key) and os.path.getsize(p.server_key) > 0:
-        ctx.runner.step("Regenerate server keys (--force): every client must be re-issued (wgt client rotate)",
+        ctx.runner.step("Regenerate server keys (--new-server-keys): every client must be re-issued (wgt client rotate)",
                         f"restore {p.server_key} from its .bak")
+        ops.confirm(ctx, "Regenerate the server keys? Every client stops working until rotated")
         if not ctx.runner.dry_run:
             ctx.files.backup(p.server_key)
             ctx.files.backup(p.server_pub)
@@ -364,8 +367,9 @@ def stop_before_rewrite(ctx) -> bool:
     so its PostDown removes exactly the rules its PostUp added (old subnet, old
     port). True if it was stopped."""
     unit = f"wg-quick@{ctx.cfg.WG_IF}"
-    if not ops.wg_up(ctx) or store.read_text(ctx.cfg.wg_conf) in (None, ops.render_wg_conf(ctx)):
-        return False
+    current = ctx.files.read(ctx.cfg.wg_conf)
+    if not ops.wg_up(ctx) or current is None or settings_of(current) == settings_of(ops.render_wg_conf(ctx)):
+        return False   # down, new, or only comments differ: no restart needed
     ctx.runner.step(f"Restart {ctx.cfg.WG_IF} for its new config (clients reconnect in a few seconds)",
                     f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
     ops.confirm(ctx, f"Restart {ctx.cfg.WG_IF} now?")

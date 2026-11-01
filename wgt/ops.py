@@ -154,12 +154,13 @@ def ensure_managed(ctx, path: str) -> None:
 
 
 def render_wg_conf(ctx) -> str:
-    return render.render_wg_conf(ctx.cfg, ctx.snap, ctx.pub_if, store.psk_reader(ctx.paths))
+    return render.render_wg_conf(ctx.cfg, ctx.snap, ctx.pub_if, store.psk_reader(ctx.paths, ctx.files.read))
 
 
 def write_wg_conf(ctx) -> bool:
+    """Write wg0.conf; True if its settings changed (not just comments)."""
     ensure_managed(ctx, ctx.cfg.wg_conf)
-    return ctx.files.write(ctx.cfg.wg_conf, 0o600, render_wg_conf(ctx))
+    return ctx.files.write_config(ctx.cfg.wg_conf, 0o600, render_wg_conf(ctx))
 
 
 def put_client(ctx, name: str, entry: Optional[store.Client] = None) -> None:

@@ -20,7 +20,7 @@ from .const import EXIT_MAX
 from .errors import WgtError
 
 CLIENTS_HEADER = "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
-EXITS_HEADER = "# wireguard-tools exit cities: code idx label (wg-setup.sh exit add)"
+EXITS_HEADER = "# wireguard-tools exit cities: code idx label (wgt exit add)"
 
 _EXIT_CODE = re.compile(r"[a-z][a-z0-9-]{0,4}[a-z0-9]")
 _CLIENT_BASE = re.compile(r"[A-Za-z0-9_-]{1,32}")
@@ -236,21 +236,22 @@ class Snapshot:
         return name in self.disabled
 
 
-def load(paths) -> Snapshot:
+def load(paths, read=None) -> Snapshot:
+    """Read the server's files (through <read>, default read_text)."""
+    read = read or read_text
     return Snapshot(
-        state=read_text(paths.state),
-        clients=parse_clients(read_text(paths.client_db)),
-        disabled=parse_disabled(read_text(paths.disabled_db)),
-        exits=parse_exits(read_text(paths.exit_db)),
+        state=read(paths.state),
+        clients=parse_clients(read(paths.client_db)),
+        disabled=parse_disabled(read(paths.disabled_db)),
+        exits=parse_exits(read(paths.exit_db)),
     )
 
 
-def psk_reader(paths):
+def psk_reader(paths, read=None):
     """A function: client name -> its preshared key (trailing newlines removed),
     or "" if it has none (as `$(cat psk)` in the bash version)."""
-    def read(name: str) -> str:
-        p = os.path.join(paths.psk_dir, f"{name}.psk")
-        if not os.path.isfile(p) or os.path.getsize(p) == 0:
-            return ""
-        return (read_text(p) or "").rstrip("\n")
-    return read
+    read = read or read_text
+
+    def psk(name: str) -> str:
+        return (read(os.path.join(paths.psk_dir, f"{name}.psk")) or "").rstrip("\n")
+    return psk

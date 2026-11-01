@@ -51,7 +51,7 @@ def render_wg_conf(cfg: Config, snap: Snapshot, pub_if: str, psk: Callable[[str]
     p = cfg.paths
     addr = f"{cfg.server_ip}/{cfg.pfx}" + (f", {cfg.p6}::1/64" if cfg.ipv6 else "")
     out: List[str] = [
-        f"{MARKER} (WARP {cfg.WARP}); peers are rebuilt from {p.client_db} (use wg-client.sh)",
+        f"{MARKER} (WARP {cfg.WARP}); peers are rebuilt from {p.client_db} (use wgt client)",
         "[Interface]",
         f"Address = {addr}",
         f"ListenPort = {cfg.WG_PORT}",
@@ -63,7 +63,7 @@ def render_wg_conf(cfg: Config, snap: Snapshot, pub_if: str, psk: Callable[[str]
     text = "\n".join(out) + "\n"
     for c in snap.clients:
         if snap.is_disabled(c.name):
-            text += f"\n# {c.name} ({c.ip}): disabled (wg-client.sh enable {c.name})\n"
+            text += f"\n# {c.name} ({c.ip}): disabled (wgt client enable {c.name})\n"
             continue
         text += f"\n[Peer]\n# {c.name}\nPublicKey = {c.pub}\n"
         key = psk(c.name)
@@ -201,7 +201,7 @@ def exit_desc(snap: Snapshot, name: str) -> str:
     if code:
         e = snap.exit(code)
         return f"{code} = {e.label if e else ''} (Proton -> Cloudflare WARP)"
-    return "default (this server's WARP setting: wg-setup.sh warp on|off)"
+    return "default (this server's WARP setting: wgt warp on|off)"
 
 
 def render_client_conf(cfg: Config, snap: Snapshot, name: str, ip: str, private_key: str,

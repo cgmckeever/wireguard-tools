@@ -11,6 +11,10 @@
 # <out-dir>/<case>/*: wg0.conf, warp.conf, px-/wx-<code>.conf, the live rule
 # lists and a sample client config. The fixture's path is written as
 # /etc/wireguard, so the output doesn't depend on where it ran.
+# The Python version words three comments differently (it names wgt, not the
+# old scripts); bash's output is reworded the same way so the rest compares
+# byte for byte.
+wording() { sed -E 's/\(use wg-client\.sh\)/(use wgt client)/; s/disabled \(wg-client\.sh enable /disabled (wgt client enable /; s/WARP setting: wg-setup\.sh warp on\|off/WARP setting: wgt warp on|off/'; }
 set -euo pipefail
 src="$1" fixtures="$2" out="$3"
 work=$(mktemp -d)
@@ -58,6 +62,7 @@ for dir in "$fixtures"/*/wg; do
             SERVER_PUBLIC_KEY=SERVER-PUBLIC-KEY PRESHARED_KEY=CLIENT-PSK ENDPOINT="ENDPOINT:$WG_PORT" \
             ALLOWED_IPS="0.0.0.0/0, ::/0" >"$o/client-$name.conf"
     '
-    # Fixture path -> /etc/wireguard.
+    # Fixture path -> /etc/wireguard; the old scripts' names -> wgt.
     sed -i "s|$wg|/etc/wireguard|g" "$out/$case"/*
+    for f in "$out/$case"/*; do wording <"$f" >"$f.w" && mv "$f.w" "$f"; done
 done
