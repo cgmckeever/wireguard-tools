@@ -1,0 +1,241 @@
+"""The server's own files, in the formats the bash version wrote (so either
+can read what the other wrote):
+
+  wg-tools.state     KEY=value lines; the last one for a key wins
+  clients.db         "name ip public-key allowed-ips" (no private keys)
+  clients.disabled   one name per line
+  exits.db           "code idx label..."
+  wg-tools.backups   "path<TAB>original-copy|NEW"
+
+Reading is pure; writes return the new text, and system.Files writes it."""
+
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+
+CLIENTS_HEADER = "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
+EXITS_HEADER = "# wireguard-tools exit cities: code idx label (wg-setup.sh exit add)"
+
+_EXIT_CODE = re.compile(r"^[a-z][a-z0-9-]{0,4}[a-z0-9]$")
+_CLIENT_BASE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
+
+
+def read_text(path: str) -> Optional[str]:
+    try:
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return None
+
+
+def _entries(text: Optional[str]) -> List[str]:
+    """Lines that aren't blank or comments."""
+    if not text:
+        return []
+    return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+
+
+# --- state ---
+
+def state_get(text: Optional[str], key: str) -> str:
+    value = ""
+    for line in (text or "").splitlines():
+        if line.startswith(key + "="):
+            value = line[len(key) + 1:]
+    return value
+
+
+def state_set(text: Optional[str], key: str, value: str) -> str:
+    lines = [line for line in (text or "").splitlines() if not line.startswith(key + "=")]
+    lines.append(f"{key}={value}")
+    return "\n".join(lines) + "\n"
+
+
+def state_unset(text: Optional[str], key: str) -> str:
+    lines = [line for line in (text or "").splitlines() if not line.startswith(key + "=")]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
+def saved_settings(text: Optional[str], keys) -> Dict[str, str]:
+    """Saved values for <keys>; WARP falls back to older versions' EXIT=warp|direct."""
+    saved = {k: state_get(text, k) for k in keys}
+    if not saved.get("WARP"):
+        saved["WARP"] = {"warp": "on", "direct": "off"}.get(state_get(text, "EXIT"), "")
+    return saved
+
+
+# --- names ---
+
+def valid_exit_code(code: str) -> bool:
+    """2-6 of a-z0-9 and -, starting with a letter, not ending in -, not "warp"."""
+    return bool(_EXIT_CODE.match(code)) and code != "warp"
+
+
+def client_exit(name: str) -> str:
+    """A client's exit code (from a <code>.<name> name), empty for the default."""
+    return name.split(".", 1)[0] if "." in name else ""
+
+
+def valid_client_name(name: str) -> Optional[str]:
+    """None if <name> is a valid client name (<name> or <code>.<name>), else why not."""
+    base = name
+    if "." in name:
+        code, base = name.split(".", 1)
+        if not valid_exit_code(code):
+            return f"bad exit code in client name '{name}' (see: wgt exit list)"
+    if not _CLIENT_BASE.match(base):
+        return f"client name must be 1-32 of [A-Za-z0-9_-] (or <exit>.<name>): '{name}'"
+    return None
+
+
+# --- clients ---
+
+@dataclass
+class Client:
+    name: str
+    ip: str
+    pub: str
+    allowed: str = ""                                   # comma list, no spaces
+    raw: str = field(default="", compare=False, repr=False)   # the line as read
+
+    @property
+    def exit(self) -> str:
+        return client_exit(self.name)
+
+    def line(self) -> str:
+        return self.raw or " ".join(x for x in (self.name, self.ip, self.pub, self.allowed) if x)
+
+
+def parse_clients(text: Optional[str]) -> List[Client]:
+    out = []
+    for line in _entries(text):
+        f = line.split() + ["", "", ""]
+        out.append(Client(f[0], f[1], f[2], f[3], raw=line))
+    return out
+
+
+def put_client(text: Optional[str], name: str, entry: Optional[Client] = None) -> str:
+    """clients.db with <name> removed (other lines kept as they are),
+    optionally adding <entry> at the end."""
+    lines = [CLIENTS_HEADER] + [c.line() for c in parse_clients(text) if c.name != name]
+    if entry is not None:
+        lines.append(" ".join(x for x in (entry.name, entry.ip, entry.pub, entry.allowed) if x))
+    return "\n".join(lines) + "\n"
+
+
+def parse_disabled(text: Optional[str]) -> List[str]:
+    return [line for line in (text or "").splitlines() if line]
+
+
+def set_disabled(text: Optional[str], name: str, disabled: bool) -> str:
+    names = [n for n in parse_disabled(text) if n != name]
+    if disabled:
+        names.append(name)
+    return "".join(n + "\n" for n in names)
+
+
+# --- exits ---
+
+@dataclass
+class Exit:
+    code: str
+    idx: int
+    label: str
+    raw: str = field(default="", compare=False, repr=False)
+
+    def line(self) -> str:
+        return self.raw or f"{self.code} {self.idx} {self.label}"
+
+
+def parse_exits(text: Optional[str]) -> List[Exit]:
+    out = []
+    for line in _entries(text):
+        f = line.split()
+        out.append(Exit(f[0], int(f[1]), " ".join(f[2:]), raw=line))
+    return out
+
+
+def put_exit(text: Optional[str], code: str, entry: Optional[Exit] = None) -> str:
+    """exits.db with <code> removed (other lines kept as they are),
+    optionally adding <entry> at the end."""
+    lines = [EXITS_HEADER] + [e.line() for e in parse_exits(text) if e.code != code]
+    if entry is not None:
+        lines.append(f"{entry.code} {entry.idx} {entry.label}")
+    return "\n".join(lines) + "\n"
+
+
+# --- backup record ---
+
+def backup_orig(text: Optional[str], path: str) -> str:
+    """A file's original copy (what rollback restores), NEW if we created it, "" if unknown."""
+    for line in (text or "").splitlines():
+        f, _, orig = line.partition("\t")
+        if f == path:
+            return orig
+    return ""
+
+
+def backup_record(text: Optional[str], path: str, orig: str) -> str:
+    """Add <path> -> <orig> unless the file is already recorded."""
+    if backup_orig(text, path):
+        return text or ""
+    return (text or "") + f"{path}\t{orig}\n"
+
+
+def backup_forget(text: Optional[str], path: str) -> str:
+    return "".join(line + "\n" for line in (text or "").splitlines() if line.partition("\t")[0] != path)
+
+
+def backup_move(text: Optional[str], path: str, new_orig: str) -> str:
+    out = []
+    for line in (text or "").splitlines():
+        f, _, orig = line.partition("\t")
+        out.append(f"{f}\t{new_orig}" if f == path else line)
+    return "".join(line + "\n" for line in out)
+
+
+# --- the whole picture, read once ---
+
+@dataclass
+class Snapshot:
+    """What a command needs to know about the server's files."""
+
+    state: Optional[str]
+    clients: List[Client]
+    disabled: List[str]
+    exits: List[Exit]
+
+    def client(self, name: str) -> Optional[Client]:
+        return next((c for c in self.clients if c.name == name), None)
+
+    def exit(self, code: str) -> Optional[Exit]:
+        return next((e for e in self.exits if e.code == code), None)
+
+    def exit_clients(self, code: str) -> List[Client]:
+        return [c for c in self.clients if c.name.startswith(code + ".")]
+
+    def is_disabled(self, name: str) -> bool:
+        return name in self.disabled
+
+
+def load(paths) -> Snapshot:
+    return Snapshot(
+        state=read_text(paths.state),
+        clients=parse_clients(read_text(paths.client_db)),
+        disabled=parse_disabled(read_text(paths.disabled_db)),
+        exits=parse_exits(read_text(paths.exit_db)),
+    )
+
+
+def psk_reader(paths):
+    """A function: client name -> its preshared key (trailing newlines removed),
+    or "" if it has none (as `$(cat psk)` in the bash version)."""
+    def read(name: str) -> str:
+        p = os.path.join(paths.psk_dir, f"{name}.psk")
+        if not os.path.isfile(p) or os.path.getsize(p) == 0:
+            return ""
+        return (read_text(p) or "").rstrip("\n")
+    return read

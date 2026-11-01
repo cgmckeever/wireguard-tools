@@ -1,0 +1,1 @@
+while ip rule del from 10.8.0.0/24 lookup 101 priority 10000 2>/dev/null; do :; done; ip rule add from 10.8.0.0/24 lookup 101 priority 10000

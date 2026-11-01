@@ -1,0 +1,17 @@
+iptables|nat|POSTROUTING|-s 192.168.250.0/24 -o warp -j MASQUERADE
+iptables|filter|FORWARD|-i wg0 -o warp -j ACCEPT
+iptables|filter|FORWARD|-i warp -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables|mangle|FORWARD|-o warp -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables|nat|POSTROUTING|-s 192.168.250.0/24 -o eth0 -j MASQUERADE
+iptables|filter|FORWARD|-i wg0 -o eth0 -j ACCEPT
+iptables|filter|FORWARD|-i eth0 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables|mangle|FORWARD|-o eth0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+ip6tables|nat|POSTROUTING|-s fdaa:8f8:c196::/64 -o warp -j MASQUERADE
+ip6tables|filter|FORWARD|-i wg0 -o warp -j ACCEPT
+ip6tables|filter|FORWARD|-i warp -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+ip6tables|mangle|FORWARD|-o warp -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+ip6tables|nat|POSTROUTING|-s fdaa:8f8:c196::/64 -o eth0 -j MASQUERADE
+ip6tables|filter|FORWARD|-i wg0 -o eth0 -j ACCEPT
+ip6tables|filter|FORWARD|-i eth0 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+ip6tables|mangle|FORWARD|-o eth0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables|filter|INPUT|-p udp --dport 51820 -j ACCEPT

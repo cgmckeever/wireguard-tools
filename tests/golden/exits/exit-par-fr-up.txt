@@ -1,0 +1,17 @@
+ip route replace default dev px-par-fr table 231 2>/dev/null || true
+ip route replace blackhole default metric 4096 table 231
+while ip rule del fwmark 22273 lookup 231 priority 9400 2>/dev/null; do :; done; ip rule add fwmark 22273 lookup 231 priority 9400
+ip route replace 10.2.10.0/24 dev wg0 table 201
+ip route replace default dev wx-par-fr table 201 2>/dev/null || true
+ip route replace blackhole default metric 4096 table 201
+ip -6 route replace fdfc:cd08:368e::/64 dev wg0 table 201
+ip -6 route replace default dev wx-par-fr table 201 2>/dev/null || true
+ip -6 route replace blackhole default metric 4096 table 201
+while ip rule del from 10.2.10.3/32 lookup 201 priority 9500 2>/dev/null; do :; done
+ip rule add from 10.2.10.3/32 lookup 201 priority 9500
+while ip -6 rule del from fdfc:cd08:368e::3/128 lookup 201 priority 9500 2>/dev/null; do :; done
+ip -6 rule add from fdfc:cd08:368e::3/128 lookup 201 priority 9500
+while ip rule del from 10.2.10.5/32 lookup 201 priority 9500 2>/dev/null; do :; done
+ip rule add from 10.2.10.5/32 lookup 201 priority 9500
+while ip -6 rule del from fdfc:cd08:368e::5/128 lookup 201 priority 9500 2>/dev/null; do :; done
+ip -6 rule add from fdfc:cd08:368e::5/128 lookup 201 priority 9500

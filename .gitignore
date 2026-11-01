@@ -1,5 +1,10 @@
 
 # This machine's private files: server list, Proton exit configs (private
-# keys). Never commit; see scripts/push-exits.sh.
+# keys). Never commit; see scripts/servers.sh.
 local/*
 !local/.gitkeep
+
+# Python dev environment (pytest) on the dev machine
+.venv/
+__pycache__/
+.pytest_cache/

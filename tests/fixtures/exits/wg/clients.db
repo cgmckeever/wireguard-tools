@@ -1,0 +1,5 @@
+# wireguard-tools clients: name ip public-key allowed-ips (no private keys)
+mbp-1 10.2.10.2 DnbkAqi2v0XOuLA39voPJaitNjpUOPi4jMP/koEpt5s= 0.0.0.0/0,::/0
+par-fr.mbp-1 10.2.10.3 neViDD78fdt6h7fNrpeRXxJKxtvDfH9ZtgMm5BQToW4= 0.0.0.0/0,::/0
+nyc-us.phone 10.2.10.4 D3Vx+UHzENv7V4lVhst1DXE6BuEGzftIKBAHc3SHIfA= 0.0.0.0/0,::/0
+par-fr.tv 10.2.10.5 Nd/Asj6ObjB3AoIiaoLZCqotb7WOqfsc1qYYrK7OWEU= 0.0.0.0/0,::/0

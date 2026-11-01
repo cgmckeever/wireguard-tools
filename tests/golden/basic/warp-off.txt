@@ -1,0 +1,2 @@
+while ip rule del from 192.168.250.0/24 lookup 100 priority 10000 2>/dev/null; do :; done
+while ip -6 rule del from fdaa:8f8:c196::/64 lookup 100 priority 10000 2>/dev/null; do :; done

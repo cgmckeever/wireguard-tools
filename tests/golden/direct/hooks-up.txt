@@ -1,0 +1,12 @@
+ip route replace 10.8.0.0/24 dev wg1 table 101
+ip route replace default dev cf table 101 2>/dev/null || true
+ip route replace blackhole default metric 4096 table 101
+iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o cf -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING -s 10.8.0.0/24 -o cf -j MASQUERADE
+iptables -t filter -C FORWARD -i wg1 -o cf -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg1 -o cf -j ACCEPT
+iptables -t filter -C FORWARD -i cf -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i cf -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -t mangle -C FORWARD -o cf -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD -o cf -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o ens3 -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING -s 10.8.0.0/24 -o ens3 -j MASQUERADE
+iptables -t filter -C FORWARD -i wg1 -o ens3 -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg1 -o ens3 -j ACCEPT
+iptables -t filter -C FORWARD -i ens3 -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i ens3 -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -t mangle -C FORWARD -o ens3 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD -o ens3 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables -t filter -C INPUT -p udp --dport 51999 -j ACCEPT 2>/dev/null || iptables -t filter -I INPUT -p udp --dport 51999 -j ACCEPT

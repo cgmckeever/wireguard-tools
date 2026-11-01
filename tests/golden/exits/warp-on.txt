@@ -1,0 +1,2 @@
+while ip rule del from 10.2.10.0/24 lookup 100 priority 10000 2>/dev/null; do :; done; ip rule add from 10.2.10.0/24 lookup 100 priority 10000
+while ip -6 rule del from fdfc:cd08:368e::/64 lookup 100 priority 10000 2>/dev/null; do :; done; ip -6 rule add from fdfc:cd08:368e::/64 lookup 100 priority 10000

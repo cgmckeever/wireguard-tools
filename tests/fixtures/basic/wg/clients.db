@@ -1,0 +1,5 @@
+# wireguard-tools clients: name ip public-key allowed-ips (no private keys)
+laptop 192.168.250.2 3W+GgluAok8Y896+pLZ5hvu3ZSV5xnBD8cZm95ulSPs= 0.0.0.0/0,::/0
+phone 192.168.250.3 /Zq0pHwy2FBS/IDZz/o1aQ3+6Fu8kbRm5s33tGUv8XE= 0.0.0.0/0,::/0
+printer 192.168.250.7 CCc3db7lb/8RLVI9Z/k2Xq9CqysBNuyGu+LW9S9GBG4= 192.168.250.0/24,fdaa:8f8:c196::/64
+old 192.168.250.9 DBjCDAkzbjglQfL/Uq7Ur8YN57KQOZmymlviO/ZQbdQ= 0.0.0.0/0,::/0
