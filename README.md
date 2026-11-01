@@ -57,6 +57,12 @@ nothing did, and asks `Continue? [Y/n]` before changing anything. `--yes`
 skips the per-step questions but not this one; it only carries on past it when
 there's no terminal (a script). `--dry-run` shows it without asking.
 
+If the server name (`--name`) differs from the machine's hostname, setup then
+asks `Update hostname <current> to <name>? [Y/n]`. Yes sets it with
+`hostnamectl` (keeping any domain part), updates `/etc/hosts`, and stops
+cloud-init from restoring the old name at boot. It only asks in a terminal
+without `--yes`; names with `_` aren't valid hostnames and are skipped.
+
 ### Flags
 
 All optional. Settings are saved in `/etc/wireguard/wg-tools.state`, so

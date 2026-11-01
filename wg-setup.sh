@@ -583,11 +583,34 @@ review_settings() {
     [[ ${reply:-y} =~ ^[Yy] ]] || die "aborted at: review settings (nothing changed)"
 }
 
+# Offer to rename the host to the server name when they differ (terminal only;
+# --yes and no-terminal runs leave the hostname alone). Updates /etc/hosts and
+# keeps cloud-init from putting the old name back at boot.
+offer_hostname() {
+    local cur full new want="${SERVER_NAME,,}" reply=""
+    full=$(hostname)
+    cur="${full%%.*}"
+    [ "${cur,,}" != "$want" ] || return 0
+    [[ $want =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || return 0   # not a valid hostname (e.g. has _)
+    [ "$DRY_RUN" -eq 0 ] && [ "$YES" -eq 0 ] && have_tty || return 0
+    read -r -p "    Update hostname $cur to $want? [Y/n] " reply </dev/tty || true
+    [[ -z $reply || $reply =~ ^[Yy] ]] || return 0
+    new="$want"
+    if [[ $full == *.* ]]; then new="$want.${full#*.}"; fi   # keep the domain part
+    step "Rename host $full -> $new" "hostnamectl set-hostname $full"
+    run hostnamectl set-hostname "$new"
+    if grep -qw -- "$cur" /etc/hosts; then run sed -i "s/\\b$cur\\b/$want/g" /etc/hosts; fi
+    if [ -d /etc/cloud/cloud.cfg.d ]; then
+        run sh -c 'echo "preserve_hostname: true" >/etc/cloud/cloud.cfg.d/99-wg-tools-hostname.cfg'
+    fi
+}
+
 cmd_setup() {
     take_lock
     ask_subnet
     ensure_subnet6
     review_settings
+    offer_hostname
     # Refuse a breaking change before saving config or touching anything.
     check_server_change
     renumber_clients
