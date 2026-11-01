@@ -195,10 +195,10 @@ def cmd_init(argv: List[str]) -> None:
     address, name = opts["--address"], opts["--name"]
     if (not address or not name) and not ui.have_tty():
         raise WgtError("init needs --address and --name without a terminal")
-    address = address or ui.ask("Server address (IP or hostname): ")
+    address = address or ui.ask("    Server address (IP or hostname): ")
     if not address:
         raise WgtError("no address")
-    name = name or ui.ask("Server name (e.g. boba): ")
+    name = name or ui.ask("    Server name (e.g. boba): ")
     if not valid_server(name):
         raise WgtError(f"server name must be 1-32 of [A-Za-z0-9_-] (and not {', '.join(RESERVED)}): '{name}'")
     if any(s.name == name for s in servers()):
@@ -404,7 +404,7 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
     hint = render.proton_hint(store.read_text(path) or "")
     if not ui.have_tty():
         raise WgtError(f"{file} isn't named yet; run exit-add in a terminal once to name it")
-    name = ui.ask(f"What is {file} (Proton {hint or '?'})? e.g. Paris, France: ")
+    name = ui.ask(f"    What is {file} (Proton {hint or '?'})? e.g. Paris, France: ")
     if not name:
         raise WgtError(f"no name for {file}")
     m = re.match(r"^([A-Za-z]{2})#", hint)
@@ -413,7 +413,7 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
     taken = {f.split("\t")[2] for f in (store.read_text(LINKS) or "").splitlines()
              if len(f.split("\t")) >= 4 and f.split("\t")[0] == server}
     while True:
-        reply = ui.ask(f"Short code on the server [{code}]: ")
+        reply = ui.ask(f"    Short code on the server [{code}]: ")
         if not reply and not store.valid_exit_code(code):
             raise WgtError("no code given")
         code = reply or code

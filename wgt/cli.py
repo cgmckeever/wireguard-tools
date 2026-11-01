@@ -273,8 +273,8 @@ def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
     except WgtError:
         raise
     except Exception as e:   # a timer job must log, not crash
-        import subprocess
-        subprocess.run(["logger", "-t", tag, f"error: {type(e).__name__}: {e}"], check=False)
+        from .system import journal
+        journal(Runner(), tag, f"error: {type(e).__name__}: {e}")
         out.error(f"{type(e).__name__}: {e}")
         return 1
 

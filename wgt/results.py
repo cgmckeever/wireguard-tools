@@ -33,6 +33,6 @@ class Results:
 
 def report(ctx: Ctx, res: Results) -> int:
     """Print the totals; the exit status is 1 on any FAIL."""
-    print("")
+    ctx.out.line()
     ctx.out.info(f"{res.passed} passed, {res.failed} failed, {res.warned} warnings")
     return 1 if res.failed else 0

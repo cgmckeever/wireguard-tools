@@ -182,7 +182,7 @@ def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, old_pub: str = "") 
             show_qr(ctx, conf)
         else:
             ctx.out.warn("qrencode not installed; no QR code")
-    print("")
+    ctx.out.line()
     ctx.out.info(f"client config: {conf}")
     fetch_hint(ctx, conf)
 
@@ -228,14 +228,14 @@ def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str
     returns the full client names in the order shown."""
     head = ("NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
     if numbered:
-        print(f"{prefix}{'#':>3} " + CLIENT_FMT.format(*head))
+        ctx.out.line(f"{prefix}{'#':>3} " + CLIENT_FMT.format(*head))
     else:
-        print(prefix + CLIENT_FMT.format(*head))
+        ctx.out.line(prefix + CLIENT_FMT.format(*head))
     names = []
     for i, row in enumerate(store.device_order(client_rows(ctx)), 1):
         names.append(row[0])
         line = CLIENT_FMT.format(store.device_of(row[0]), exit_label(ctx, row[0]), *row[2:])
-        print(f"{prefix}{i:>3} {line}" if numbered else prefix + line)
+        ctx.out.line(f"{prefix}{i:>3} {line}" if numbered else prefix + line)
     return names
 
 
@@ -472,12 +472,12 @@ def cmd_show(ctx: Ctx, words: List[str]) -> None:
     if text is None:
         raise WgtError(f"no config for '{name}' (see: wgt client list)")
     ctx.out.info(conf)
-    print("")
+    ctx.out.line()
     sys.stdout.write(redact(text))
     if ctx.args.qr == 1:
-        print("")
+        ctx.out.line()
         show_qr(ctx, conf)
-    print("")
+    ctx.out.line()
     fetch_hint(ctx, conf)
 
 
@@ -506,7 +506,7 @@ def cmd_list(ctx: Ctx, words: List[str]) -> None:
     """The clients table (or --tsv rows), then in a terminal the action menu."""
     if ctx.args.tsv:
         for row in client_rows(ctx):   # 7th field: the exit's full name
-            print("\t".join(str(x) for x in row + (exit_label(ctx, row[0]),)))
+            ctx.out.line("\t".join(str(x) for x in row + (exit_label(ctx, row[0]),)))
         return
     names = print_clients(ctx, numbered=True)
     if names and sys.stdout.isatty() and not ctx.args.yes and ui.have_tty():
@@ -537,7 +537,7 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
         raise WgtError(f"no action '{e}'") from None
     if i is None:
         return
-    print("")
+    ctx.out.line()
     action = ACTIONS[i]
     if action == "show":
         cmd_show(ctx, [name])
@@ -551,7 +551,7 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
     elif action == "toggle":
         _set_enabled(ctx, [name], not disabled)
     elif action == "rename":
-        new = ui.ask("  New name: ")
+        new = ui.ask("    New name: ")
         if new:
             cmd_rename(ctx, [name, new])
     elif action == "remove":
@@ -569,5 +569,5 @@ def cmd_client(ctx: Ctx, words: List[str]) -> Optional[int]:
     fn = table.get(sub)
     if fn is None:
         raise WgtError(f"unknown client command: {sub} "
-                       "(list, add, show, share, rotate, rename, disable, enable, remove)")
+                       "(list, add, show, share, rotate, rename, disable, enable, remove; see: wgt help)")
     return fn(ctx, rest)

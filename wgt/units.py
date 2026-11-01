@@ -78,7 +78,7 @@ def open_firewall(ctx: Ctx, outs: List[str]) -> None:
         ctx.out.info(f"ufw not active; {ctx.cfg.WG_IF}'s PostUp opens udp/{ctx.cfg.WG_PORT} in iptables INPUT")
         return
     wg = ctx.cfg.WG_IF
-    ctx.runner.step(f"ufw: allow {ctx.cfg.WG_PORT}/udp and routing {wg} -> {' '.join(outs)}",
+    ctx.runner.step(f"Open ufw: allow {ctx.cfg.WG_PORT}/udp and routing {wg} -> {' '.join(outs)}",
                     f"ufw delete allow {ctx.cfg.WG_PORT}/udp; ufw route delete allow in on {wg} out on <each>")
     ctx.runner.run(["ufw", "allow", f"{ctx.cfg.WG_PORT}/udp", "comment", "wireguard-tools"])
     for o in outs:

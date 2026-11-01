@@ -169,7 +169,7 @@ def review_settings(ctx: Ctx, subnet_asked: bool) -> None:
     ctx.out.log("Settings (first setup)" if fresh else f"Settings (re-run; saved in {ctx.paths.state})")
     rep = checks.settings_table(ctx, running=False, subnet_asked=subnet_asked)
     for line in rep.lines:
-        print(line)
+        ctx.out.line(line)
     if fresh:
         ctx.out.info("Nothing is set up yet; these are saved for re-runs and wgt client.")
     elif not rep.changes:
@@ -206,7 +206,9 @@ def offer_hostname(ctx: Ctx) -> None:
     if reply and not reply.lower().startswith("y"):
         return
     new = want + (full[len(cur):] if "." in full else "")   # keep the domain part
-    ctx.runner.step(f"Rename host {full} -> {new}", f"hostnamectl set-hostname {full}")
+    ctx.runner.step(f"Rename host {full} -> {new} (and in {ctx.paths.hosts_file})",
+                    f"hostnamectl set-hostname {full}; wgt rollback restores {ctx.paths.hosts_file} "
+                    "and removes the cloud-init setting")
     ctx.runner.run(["hostnamectl", "set-hostname", new])
     hosts = store.read_text(ctx.paths.hosts_file) or ""
     if re.search(rf"\b{re.escape(cur)}\b", hosts):
@@ -439,7 +441,7 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     guard_default_route(ctx)
     units.write_watchdog(ctx)
     exits.sync(ctx)
-    print("")
+    ctx.out.line()
     ctx.out.info(f"WARP is {ctx.cfg.WARP}; switch with: wgt warp on|off")
     ctx.out.info(f"REMINDER: open UDP {ctx.cfg.WG_PORT} in your VPS provider's firewall / security group.")
     ctx.out.info("Next: wgt client add <name>")
@@ -470,7 +472,7 @@ def cmd_warp(ctx: Ctx, words: List[str]) -> None:
         return
     ctx.cfg.values["WARP"] = want
     other = "off" if want == "on" else "on"
-    ctx.runner.step(f"WARP {want}: client traffic leaves via {out_if(want)}", f"wgt warp {other}")
+    ctx.runner.step(f"Switch WARP {want}: client traffic leaves via {out_if(want)}", f"wgt warp {other}")
     save_config(ctx)
     ops.write_wg_conf(ctx)
     if ops.wg_up(ctx):

@@ -17,7 +17,7 @@ import time
 from typing import Callable, Dict, List, Optional, Sequence, TextIO, Tuple
 
 from . import store
-from .const import KEEP_CHANGES, Paths
+from .const import KEEP_CHANGES, LOG_TAG, Paths
 from .errors import WgtError
 
 _SECRET = re.compile(r"^(\s*(PrivateKey|PresharedKey)\s*=\s*).*$", re.M)
@@ -81,11 +81,20 @@ class Out:
     def info(self, msg: str) -> None:
         print(f"    {msg}", file=self.stream, flush=True)
 
+    def line(self, text: str = "") -> None:
+        """A line as is (tables, blank lines between sections)."""
+        print(text, file=self.stream, flush=True)
+
     def warn(self, msg: str) -> None:
         print(f"WARN: {msg}", file=self.err, flush=True)
 
     def error(self, msg: str) -> None:
         print(f"ERROR: {msg}", file=self.err, flush=True)
+
+
+def journal(runner: Runner, tag: str, msg: str) -> None:
+    """One line in the journal under <tag> (what `wgt log` shows)."""
+    runner.ok(["logger", "-t", tag, msg])
 
 
 class Runner:
@@ -155,7 +164,7 @@ class Runner:
         if undo:
             self.out.info(f"undo: {undo}")
         if not self.dry_run:
-            self.ok(["logger", "-t", "wg-tools", f"{self.prog}: {what}"])
+            journal(self, LOG_TAG, f"{self.prog}: {what}")
 
 
 class FakeRunner(Runner):

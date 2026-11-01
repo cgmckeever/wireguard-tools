@@ -33,6 +33,7 @@ EXIT_MARK_PRIO = 9400
 EXIT_PROTON_MTU = 1420
 EXIT_IDLE = 300              # seconds without a client handshake before an exit goes down
 
+LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes
 WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
 EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a city

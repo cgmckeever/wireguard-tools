@@ -112,7 +112,7 @@ def test_watchdog_error_is_logged_not_raised(make, monkeypatch):
     ctx = make({})
     monkeypatch.setattr(cli, "load", lambda args, facts=None: ctx)
     logged = []
-    import subprocess
-    monkeypatch.setattr(subprocess, "run", lambda args, check=False: logged.append(args))
+    from wgt import system
+    monkeypatch.setattr(system, "journal", lambda runner, tag, msg: logged.append((tag, msg)))
     assert cli.main(["watchdog", "exits"]) == 1
-    assert any("bad wg output" in " ".join(a) for a in logged)
+    assert ("wg-tools-exit-watchdog", "error: ValueError: bad wg output") in logged

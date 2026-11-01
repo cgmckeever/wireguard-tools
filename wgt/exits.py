@@ -202,7 +202,9 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         ctx.runner.step(f"Add exit city '{code}' ({label}): Proton {ep} -> its own WARP", f"wgt exit remove {code}")
     else:
         idx = existing.idx
-        ctx.runner.step(f"Update exit city '{code}' ({label})", "re-run exit add with the previous config")
+        ctx.runner.step(f"Update exit city '{code}' ({label})",
+                        f"wgt exit add {code} <the previous copy in "
+                        f"{ctx.files.change_dir(ctx.paths.proton_conf(code))}>")
     ops.confirm(ctx, f"Set up exit {code}?", default_yes=True)
     if not warp.install_wgcf(ctx):
         raise WgtError("wgcf is needed for the exit's WARP")
@@ -289,7 +291,7 @@ def cmd_exit(ctx: Ctx, words: List[str]) -> Optional[int]:
     table = {"list": cmd_list, "add": cmd_add, "remove": cmd_remove, "rm": cmd_remove, "test": cmd_test}
     fn = table.get(sub)
     if fn is None:
-        raise WgtError("usage: wgt exit [list | add <code> <proton.conf|-> [--label NAME] | remove <code> | test]")
+        raise WgtError(f"unknown exit command: {sub} (list, add, remove, test; see: wgt help)")
     return fn(ctx, rest)
 
 

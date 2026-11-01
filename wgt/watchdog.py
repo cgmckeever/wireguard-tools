@@ -12,13 +12,15 @@ from typing import TYPE_CHECKING, List
 from . import live, ops
 from .const import EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
+from .system import journal
 
 if TYPE_CHECKING:
     from .cli import Ctx
 
 
 def logger(ctx: Ctx, tag: str, msg: str) -> None:
-    ctx.runner.ok(["logger", "-t", tag, msg])
+    """Log a watchdog's action to the journal under its own tag."""
+    journal(ctx.runner, tag, msg)
 
 
 def _num(path: str) -> int:
