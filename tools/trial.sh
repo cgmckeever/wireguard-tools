@@ -11,7 +11,8 @@ cd "$(dirname "$0")/.."
 proton="$1"
 W() { bin/wgt "$@"; }
 pass=0 fail=0
-ok() { if "$@"; then echo "  PASS $DESC"; pass=$((pass + 1)); else echo "  FAIL $DESC"; fail=$((fail + 1)); fi; }
+exec 3>&1   # results go to fd 3, so a check's own output can be redirected to a log
+ok() { if "$@"; then echo "  PASS $DESC" >&3; pass=$((pass + 1)); else echo "  FAIL $DESC" >&3; fail=$((fail + 1)); fi; }
 snap() {
     mkdir -p "$1"
     iptables-save | grep -v '^#' | sed 's/\[[0-9:]*\]//' >"$1/iptables"
