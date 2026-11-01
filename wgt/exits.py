@@ -215,8 +215,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     body = "".join(line + "\n" for line in raw.splitlines() if not line.startswith(f"# exit {code}: "))
     ctx.files.write(ctx.paths.proton_conf(code), 0o600, f"# exit {code}: {label}\n" + body)
     e = store.Exit(code, idx, label)
-    ctx.files.write(ctx.paths.exit_db, 0o600, store.put_exit(store.read_text(ctx.paths.exit_db), code, e))
-    ctx.reload()
+    ops.put_exit(ctx, code, e)
     if ctx.runner.dry_run:
         ctx.out.info(f"[dry-run] would write {ctx.paths.px_conf(code)} and {ctx.paths.wx_conf(code)}, "
                      f"add its routing to {ctx.cfg.wg_conf} and check it")
@@ -262,8 +261,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     if store.state_get(ctx.snap.state, "UFW") == "1" and shutil.which("ufw"):
         ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", f"wx-{code}"],
                        check=False)
-    ctx.files.write(ctx.paths.exit_db, 0o600, store.put_exit(store.read_text(ctx.paths.exit_db), code))
-    ctx.reload()
+    ops.put_exit(ctx, code)
     ops.write_wg_conf(ctx)
     for f in (ctx.paths.px_conf(code), ctx.paths.wx_conf(code),
               ctx.paths.proton_conf(code)):

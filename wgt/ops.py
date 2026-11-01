@@ -168,14 +168,28 @@ def write_wg_conf(ctx: Ctx) -> bool:
     return ctx.files.write_config(ctx.cfg.wg_conf, 0o600, render_wg_conf(ctx))
 
 
+# The database writes below read through ctx.files, so a dry run's second
+# change to the same file builds on its first (rename = add new + drop old),
+# and each reloads ctx.snap: snapshot values read before them are stale after.
+
 def put_client(ctx: Ctx, name: str, entry: Optional[store.Client] = None) -> None:
-    ctx.files.write(ctx.paths.client_db, 0o600, store.put_client(store.read_text(ctx.paths.client_db), name, entry))
+    """clients.db with <name> dropped, then <entry> added if given; reloads ctx.snap."""
+    db = ctx.paths.client_db
+    ctx.files.write(db, 0o600, store.put_client(ctx.files.read(db), name, entry))
     ctx.reload()
 
 
 def set_disabled(ctx: Ctx, name: str, disabled: bool) -> None:
-    ctx.files.write(ctx.paths.disabled_db, 0o600,
-                    store.set_disabled(store.read_text(ctx.paths.disabled_db), name, disabled))
+    """Mark <name> disabled (or not) in clients.disabled; reloads ctx.snap."""
+    db = ctx.paths.disabled_db
+    ctx.files.write(db, 0o600, store.set_disabled(ctx.files.read(db), name, disabled))
+    ctx.reload()
+
+
+def put_exit(ctx: Ctx, code: str, entry: Optional[store.Exit] = None) -> None:
+    """exits.db with <code> dropped, then <entry> added if given; reloads ctx.snap."""
+    db = ctx.paths.exit_db
+    ctx.files.write(db, 0o600, store.put_exit(ctx.files.read(db), code, entry))
     ctx.reload()
 
 

@@ -137,11 +137,14 @@ def show_qr(ctx: Ctx, conf: str) -> None:
         sys.stdout.write(ctx.runner.query(["qrencode", "-t", "ansiutf8", "-m", "1"], input=data))
 
 
-def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, old_pub: str = "") -> None:
-    """Generate keys for <name> at <ip>, write its config, update clients.db,
-    wg0.conf and the live interface (<old_pub> is replaced). An exit-city
-    client's routing rules go in before its peer, so its first packets can't
-    leave through the default exit."""
+def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, endpoint: str, old_pub: str = "") -> None:
+    """Generate keys for <name> at <ip>, write its config (pointing at
+    <endpoint>, from ops.resolve_endpoint), update clients.db, wg0.conf and the
+    live interface (<old_pub> is replaced). An exit-city client's routing rules
+    go in before its peer, so its first packets can't leave through the
+    default exit."""
+    if not endpoint:
+        raise WgtError("no client endpoint (pass --endpoint <ip-or-host>)")
     conf = client_conf(ctx, name)
     if ctx.runner.dry_run:
         ctx.out.info(f"[dry-run] would generate a keypair + preshared key, write {conf} (mode 600),")
@@ -158,7 +161,7 @@ def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, old_pub: str = "") 
     server_pub = (store.read_text(ctx.paths.server_pub) or "").strip()
     # Render first: a template error must stop us before anything is written.
     content = render.render_client_conf(ctx.cfg, ctx.snap, name, ip, priv, server_pub, psk,
-                                        ctx.cfg.values["ENDPOINT"], allowed)
+                                        endpoint, allowed)
     ctx.files.write(ctx.paths.psk(name), 0o600, psk + "\n")
     ctx.files.write(conf, 0o600, content)
     entry = store.Client(name, ip, pub, allowed)
@@ -269,13 +272,13 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
             raise WgtError(f"no exit city '{code}' on this server (see: wgt exit list)")
         if code not in uniq:
             uniq.append(code)
-    ops.resolve_endpoint(ctx, save=False)
+    endpoint = ops.resolve_endpoint(ctx, save=False)
     planned: List[str] = []
     for code in uniq:
-        add_one(ctx, base if code == "warp" else f"{code}.{base}", planned)
+        add_one(ctx, base if code == "warp" else f"{code}.{base}", planned, endpoint)
 
 
-def add_one(ctx: Ctx, name: str, planned: List[str]) -> None:
+def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
     """Add one client (skipped if it exists)."""
     existing = ctx.snap.client(name)
     if existing:
@@ -284,7 +287,7 @@ def add_one(ctx: Ctx, name: str, planned: List[str]) -> None:
         return
     ip = next_free_ip(ctx, planned)
     ctx.runner.step(f"Add client '{name}' at {ip} (exit: {exit_short(ctx, name)})", f"wgt client remove {name}")
-    issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS))
+    issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS), endpoint)
     tunnel = f"{ctx.cfg.SERVER_NAME}.{name}"
     if len(tunnel) > 15:
         ctx.out.info(f"note: Android's WireGuard app takes tunnel names up to 15 characters; '{tunnel}' is "
@@ -309,11 +312,11 @@ def cmd_rotate(ctx: Ctx, words: List[str]) -> None:
     allowed = allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS)
     if ctx.cfg.sources.get("CLIENT_ALLOWED_IPS") not in ("flag", "env") and c.allowed:
         allowed = c.allowed
-    ops.resolve_endpoint(ctx, save=False)
+    endpoint = ops.resolve_endpoint(ctx, save=False)
     ctx.runner.step(f"Rotate keys for '{name}' ({c.ip}); its current config stops working",
                     "none (old keys are discarded)")
     ops.confirm(ctx, f"Rotate keys for {name}?")
-    issue_client(ctx, name, c.ip, allowed, c.pub)
+    issue_client(ctx, name, c.ip, allowed, endpoint, c.pub)
 
 
 def removal_targets(name: str, directory: str) -> List[str]:

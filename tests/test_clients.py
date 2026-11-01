@@ -169,3 +169,23 @@ def test_warp_switch_is_live_without_restart(make_ctx):
     assert any("rule del from 10.2.10.0/24 lookup 100 priority 10000" in c for c in calls)
     assert not any("restart wg-quick@wg0" in c for c in calls)
     assert store.state_get(store.read_text(ctx.paths.state), "WARP") == "off"
+
+
+def test_issue_client_refuses_an_empty_endpoint(make_ctx):
+    """A config with "Endpoint = :51820" would look fine and never connect."""
+    ctx = make_ctx()
+    with pytest.raises(WgtError, match="endpoint"):
+        clients.issue_client(ctx, "phone", "10.2.10.9", "0.0.0.0/0", endpoint="")
+    assert ctx.snap.client("phone") is None
+
+
+def test_rename_dry_run_shows_one_peer(make_ctx):
+    """A dry run's second write to clients.db must build on its first, or the
+    wg0.conf diff keeps the old peer next to the new one."""
+    ctx = make_ctx(argv=["--dry-run"])
+    conf = Path(clients.client_conf(ctx, "mbp-1"))
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    conf.write_text("[Interface]\nPrivateKey = x\n")
+    clients.cmd_rename(ctx, ["mbp-1", "zznew"])
+    names = [c.name for c in ctx.snap.clients]
+    assert "zznew" in names and "mbp-1" not in names
