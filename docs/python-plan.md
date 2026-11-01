@@ -55,7 +55,7 @@ wgt-ctl init                     new server (asks address and name) or adopt one
 wgt-ctl clients                  every client on every server
 wgt-ctl <server|all> <wgt command ...>    e.g. wgt-ctl boba client add phone --exit par-fr
 wgt-ctl <server|all> pull | backup        (backup fetched to local/backups/<server>/)
-wgt-ctl <server> exit-add [n|file|all] | ssh | branch <b> | forget [--yes]
+wgt-ctl <server> exit-add [n|all] | ssh | branch <b> | forget [--yes]
 ```
 
 The first word is a server from `local/servers`, `all`, or one of `init` and

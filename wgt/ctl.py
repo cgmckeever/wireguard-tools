@@ -7,7 +7,7 @@
   wgt-ctl clients                       every client on every server
   wgt-ctl <server|all> <wgt command>    run it there, e.g. wgt-ctl boba client add phone --exit par-fr
   wgt-ctl <server|all> pull | backup    git pull / back up and fetch the archive to local/backups/<server>/
-  wgt-ctl <server> exit-add [n|file|all] | ssh | branch <b> | forget [--yes]
+  wgt-ctl <server> exit-add [n|all] | ssh | branch <b> | forget [--yes]
 
 <server> is a name or list number; with none, pick from the list. Private
 files stay under local/ (untracked): servers, exits/<server>/*.conf (Proton
@@ -547,7 +547,7 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
 
 
 def do_exit_add(s: Server, args: List[str]) -> int:
-    """Pick from this server's local configs (number, file, or all)."""
+    """Push one of this server's local configs (by its number in the list) or all."""
     src = os.path.join(LOCAL, "exits", s.name)
     files = local_exit_files(s)
     if not files:
@@ -556,28 +556,21 @@ def do_exit_add(s: Server, args: List[str]) -> int:
     sel = args[0] if args else ""
     if not sel:
         if not ui.have_tty():
-            raise WgtError(f"no config given (and no terminal to pick one): wgt-ctl {s.name} exit-add <n|file|all>")
+            raise WgtError(f"no config given (and no terminal to pick one): wgt-ctl {s.name} exit-add <n|all>")
         print_exit_files(s, files, remote_exit_codes(s))
-        sel = ui.ask("  Add which? [number, file, or all]: ")
+        sel = ui.ask("  Add which? [number or all]: ")
     if not sel:
         raise WgtError("nothing chosen")
     if sel == "all":
         picked = files
     elif sel.isdigit() and 1 <= int(sel) <= len(files):
         picked = [files[int(sel) - 1]]
-    elif os.path.basename(sel) == sel and os.path.isfile(os.path.join(src, conf_name(sel))):
-        picked = [os.path.join(src, conf_name(sel))]
     else:
-        raise WgtError(f"no config '{sel}' in {src}")
+        raise WgtError(f"no config number '{sel}' (1-{len(files)}, or all)")
     for f in picked:
         add_one_exit(s, f)
     out.log(f"{s.name} exits")
     return do_wgt(s, ["exit", "list"])
-
-
-def conf_name(name: str) -> str:
-    """A local exit config's file name, with or without .conf given."""
-    return name if name.endswith(".conf") else name + ".conf"
 
 
 CTL = {"pull": do_pull, "backup": do_backup, "exit-add": do_exit_add, "ssh": do_ssh, "branch": do_branch,
