@@ -294,7 +294,7 @@ def cmd_status(ctx, words: List[str]) -> None:
 
 # --- the clients table (status, client list) ---
 
-CLIENT_FMT = "{:<20} {:<6} {:<15} {:<14} {:<12} {}"
+CLIENT_FMT = "{:<20} {:<16} {:<15} {:<14} {:<12} {}"
 
 
 def client_rows(ctx) -> List[Tuple[str, str, str, str, str, str]]:
@@ -330,6 +330,14 @@ def exit_label(ctx, name: str) -> str:
     return "warp" if ctx.cfg.WARP == "on" else "direct"
 
 
+def exit_name(ctx, name: str) -> str:
+    """Where a client exits, for people: its exit city's full name (the label
+    given at exit add, e.g. "Paris, France"), or warp/direct (the default)."""
+    code = store.client_exit(name)
+    e = ctx.snap.exit(code) if code else None
+    return (e.label or code) if e else exit_label(ctx, name)
+
+
 def print_clients(ctx, prefix: str = "", numbered: bool = True) -> List[str]:
     """Print the clients table, device first (the exit is its own column);
     returns the full client names in the order shown."""
@@ -341,6 +349,6 @@ def print_clients(ctx, prefix: str = "", numbered: bool = True) -> List[str]:
     names = []
     for i, row in enumerate(device_order(client_rows(ctx)), 1):
         names.append(row[0])
-        line = CLIENT_FMT.format(device_of(row[0]), *row[1:])
+        line = CLIENT_FMT.format(device_of(row[0]), exit_name(ctx, row[0]), *row[2:])
         print(f"{prefix}{i:>3} {line}" if numbered else prefix + line)
     return names

@@ -121,7 +121,7 @@ def test_list_shows_device_first(server, capsys):
     names = checks.print_clients(ctx, numbered=True)
     shown = [line.split()[1:3] for line in capsys.readouterr().out.splitlines()[1:]]
     # grouped by device, default exit first; the full names come back for the menu
-    assert shown == [["mbp-1", "warp"], ["mbp-1", "par-fr"], ["phone", "nyc-us"], ["tv", "par-fr"]]
+    assert shown == [["mbp-1", "warp"], ["mbp-1", "Paris,"], ["phone", "New"], ["tv", "Paris,"]]
     assert names == ["mbp-1", "par-fr.mbp-1", "nyc-us.phone", "par-fr.tv"]
 
 

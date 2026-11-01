@@ -55,7 +55,7 @@ def pick_client(ctx, verb: str) -> str:
     if not ui.have_tty() or ctx.args.yes:
         raise WgtError(f"usage: wgt client {verb} <name>")
     try:
-        i = ui.menu("", [f"{checks.device_of(c.name):<20} {checks.exit_label(ctx, c.name):<6} {c.ip}" for c in clients],
+        i = ui.menu("", [f"{checks.device_of(c.name):<20} {checks.exit_name(ctx, c.name):<16} {c.ip}" for c in clients],
                     f"{verb.capitalize()} which client? (number or name)")
     except ValueError as e:
         if ctx.snap.client(str(e)):
@@ -443,8 +443,8 @@ def cmd_share(ctx, words: List[str]) -> None:
 def cmd_list(ctx, words: List[str]) -> None:
     """The clients table (or --tsv rows), then in a terminal the action menu."""
     if ctx.args.tsv:
-        for row in checks.client_rows(ctx):
-            print("\t".join(str(x) for x in row))
+        for row in checks.client_rows(ctx):   # 7th field: the exit's full name
+            print("\t".join(str(x) for x in row + (checks.exit_name(ctx, row[0]),)))
         return
     names = checks.print_clients(ctx, numbered=True)
     if names and sys.stdout.isatty() and not ctx.args.yes and ui.have_tty():

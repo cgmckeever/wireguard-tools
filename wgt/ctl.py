@@ -283,7 +283,7 @@ def repo_url() -> str:
 
 def cmd_clients() -> None:
     """Every client on every server in one table."""
-    fmt = "  {:<10} {:<20} {:<6} {:<15} {:<14} {:<12} {}"
+    fmt = "  {:<10} {:<20} {:<16} {:<15} {:<14} {:<12} {}"
     print("")
     print(fmt.format("SERVER", "NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS"))
     for s in servers():
@@ -293,11 +293,11 @@ def cmd_clients() -> None:
             note = {3: "(runs the older bash tools; wgt-ctl " + s.name + " pull)", 255: "(unreachable)"}
             print(f"  {s.name:<10} {note.get(rc, f'(client list failed: exit {rc})')}")
             continue
-        rows = [(line.split("\t") + [""] * 6)[:6] for line in o.splitlines() if line]
+        rows = [(line.split("\t") + [""] * 7)[:7] for line in o.splitlines() if line]
         if not rows:
             print(f"  {s.name:<10} (no clients)")
         for r in checks.device_order(rows):
-            print(fmt.format(s.name, checks.device_of(r[0]), *r[1:]))
+            print(fmt.format(s.name, checks.device_of(r[0]), r[6] or r[1], *r[2:6]))
     print("")
 
 
