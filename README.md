@@ -6,10 +6,9 @@ wireguard-tools turns a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or
 arm64) into a WireGuard VPN server and manages its clients, on the server
 itself or, for several servers, from your own machine.
 
-What sets it apart is where your clients' traffic meets the internet.
-Alongside WireGuard, the server runs [Cloudflare WARP](https://1.1.1.1/)
-(Cloudflare's free VPN service; the server connects to it as one WARP
-"device"). Clients' traffic can leave three ways:
+The server also runs [Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free
+VPN service; the server connects to it as one WARP "device"), so clients'
+traffic can leave three ways:
 
 | Way out | Traffic leaves via | Sites see |
 |---------|--------------------|-----------|
