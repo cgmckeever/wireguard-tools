@@ -400,97 +400,6 @@ other terminals and tmux always get). The image is streamed, never written to di
 Both the QR code and the wormhole transfer carry the client's private key:
 send them only to that client's owner.
 
-## Managing servers from your machine
-
-`wgt-ctl` runs on your own machine (macOS or Linux, Python 3.8+) and drives the
-servers over SSH. Put `bin/` on your PATH, or `alias wgt-ctl=~/…/wireguard-tools/bin/wgt-ctl`.
-The servers it knows are listed in `local/servers`, one per line: name, SSH
-login, and optionally the checkout directory (default `/opt/wireguard-tools`).
-Like everything under `local/`, it is untracked:
-
-```
-dengar  root@203.0.113.10
-boba    root@198.51.100.20
-```
-
-Every command has the same shape: **`wgt-ctl SERVER COMMAND [arguments]`**.
-`SERVER` is a name from `local/servers`, its number in the list, or `all`.
-A few commands aren't about one server and take no `SERVER` (last group below).
-
-**One server: `wgt-ctl SERVER COMMAND`.** Any `wgt` command runs on that server,
-exactly as if you'd typed it there:
-
-```bash
-wgt-ctl boba summary                   # wgt summary on boba (likewise status, test, log, warp, setup, ...)
-wgt-ctl boba client add phone --exit par-fr
-wgt-ctl boba client                    # boba's client list and action menu
-wgt-ctl boba exit list
-```
-
-and these run from your machine, against that server:
-
-```bash
-wgt-ctl boba pull                      # git pull its checkout (fast-forward only)
-wgt-ctl boba backup                    # wgt backup there, fetched to local/backups/boba/
-wgt-ctl boba exit-add                  # push a Proton config from local/exits/boba/ as an exit city
-wgt-ctl boba ssh                       # log in (or: ssh <command>)
-wgt-ctl boba branch some-branch        # switch its checkout
-wgt-ctl boba forget                    # drop it from local/servers; the server is untouched
-wgt-ctl boba remove                    # tear it down: rollback --purge, delete its checkout,
-                                       #   wgcf and backup archives, then forget it (asks for its name)
-```
-
-**Every server: `wgt-ctl all COMMAND`.** Runs on each server in turn; one
-failing doesn't stop the rest. Takes any `wgt` command, plus `pull`, `backup`
-and `branch`:
-
-```bash
-wgt-ctl all test
-wgt-ctl all pull
-wgt-ctl all backup
-```
-
-**No server.** Overviews of every server, and adding a new one:
-
-```bash
-wgt-ctl                                # the servers: branch@commit (or unreachable), exit configs staged
-wgt-ctl summary                        # every server at a glance (wgt summary on each, side by side)
-wgt-ctl clients                        # every client on every server: exit, last seen, traffic
-wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
-wgt-ctl init --address 1.2.3.4 --name lando --branch main -- --port 51821
-```
-
-Leave `SERVER` out of a server command (`wgt-ctl status`) to pick one from the
-list. Because these words come first, a server can't be named `init`,
-`clients`, `summary`, `all`, `help` or `list`; a name starts with a letter.
-Printed `scp` hints use your machine's login for that server.
-
-`init` logs in as root and, on first contact, shows the server's host key for
-you to check against your provider's console. If only a password works it
-offers `ssh-copy-id`. It then installs git, clones this repo's `origin` and
-runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
-passed to setup. The server is added to the list only once setup finishes. A
-server already running these tools is adopted under its saved name instead.
-
-Private files stay on your machine under `local/`: Proton configs for exit
-cities in `exits/<server>/` (see [Exit cities](#exit-cities)), the table that
-names them in `exits/details.tsv`, and archives fetched by `backup` in
-`backups/<server>/` (they hold private keys).
-
-### Updating servers
-
-Servers run their checkout directly, and the watchdog timers run it every few
-seconds, so a pull takes effect at once. A pull changes no running config:
-
-1. Check what would render differently on each server (read-only):
-   `tools/render-diff.sh`. "identical" everywhere means a pull is all it takes.
-2. Try one server first: `wgt-ctl boba pull && wgt-ctl boba test`.
-3. Then the rest: `wgt-ctl all pull`.
-4. If step 1 showed differences (a template, `wgt/render.py` or `wgt/rules.py`
-   change, new packages or units), apply them with `wgt-ctl all setup --yes`.
-   Setup restarts `wg0` only if its settings changed, not for comment-only
-   changes.
-
 ## Check, back up, restore, clean up
 
 ```bash
@@ -583,6 +492,97 @@ cd ~ && rm -rf ~/wgcf-vps      # local copies hold the device's private key
 Then run `wgt warp on` on the server; it uses the copied account,
 tests WARP and switches clients to it. Use these files on that server only:
 they are one WARP device.
+
+## Managing servers from your machine
+
+`wgt-ctl` runs on your own machine (macOS or Linux, Python 3.8+) and drives the
+servers over SSH. Put `bin/` on your PATH, or `alias wgt-ctl=~/…/wireguard-tools/bin/wgt-ctl`.
+The servers it knows are listed in `local/servers`, one per line: name, SSH
+login, and optionally the checkout directory (default `/opt/wireguard-tools`).
+Like everything under `local/`, it is untracked:
+
+```
+dengar  root@203.0.113.10
+boba    root@198.51.100.20
+```
+
+Every command has the same shape: **`wgt-ctl SERVER COMMAND [arguments]`**.
+`SERVER` is a name from `local/servers`, its number in the list, or `all`.
+A few commands aren't about one server and take no `SERVER` (last group below).
+
+**One server: `wgt-ctl SERVER COMMAND`.** Any `wgt` command runs on that server,
+exactly as if you'd typed it there:
+
+```bash
+wgt-ctl boba summary                   # wgt summary on boba (likewise status, test, log, warp, setup, ...)
+wgt-ctl boba client add phone --exit par-fr
+wgt-ctl boba client                    # boba's client list and action menu
+wgt-ctl boba exit list
+```
+
+and these run from your machine, against that server:
+
+```bash
+wgt-ctl boba pull                      # git pull its checkout (fast-forward only)
+wgt-ctl boba backup                    # wgt backup there, fetched to local/backups/boba/
+wgt-ctl boba exit-add                  # push a Proton config from local/exits/boba/ as an exit city
+wgt-ctl boba ssh                       # log in (or: ssh <command>)
+wgt-ctl boba branch some-branch        # switch its checkout
+wgt-ctl boba forget                    # drop it from local/servers; the server is untouched
+wgt-ctl boba remove                    # tear it down: rollback --purge, delete its checkout,
+                                       #   wgcf and backup archives, then forget it (asks for its name)
+```
+
+**Every server: `wgt-ctl all COMMAND`.** Runs on each server in turn; one
+failing doesn't stop the rest. Takes any `wgt` command, plus `pull`, `backup`
+and `branch`:
+
+```bash
+wgt-ctl all test
+wgt-ctl all pull
+wgt-ctl all backup
+```
+
+**No server.** Overviews of every server, and adding a new one:
+
+```bash
+wgt-ctl                                # the servers: branch@commit (or unreachable), exit configs staged
+wgt-ctl summary                        # every server at a glance (wgt summary on each, side by side)
+wgt-ctl clients                        # every client on every server: exit, last seen, traffic
+wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
+wgt-ctl init --address 1.2.3.4 --name lando --branch main -- --port 51821
+```
+
+Leave `SERVER` out of a server command (`wgt-ctl status`) to pick one from the
+list. Because these words come first, a server can't be named `init`,
+`clients`, `summary`, `all`, `help` or `list`; a name starts with a letter.
+Printed `scp` hints use your machine's login for that server.
+
+`init` logs in as root and, on first contact, shows the server's host key for
+you to check against your provider's console. If only a password works it
+offers `ssh-copy-id`. It then installs git, clones this repo's `origin` and
+runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
+passed to setup. The server is added to the list only once setup finishes. A
+server already running these tools is adopted under its saved name instead.
+
+Private files stay on your machine under `local/`: Proton configs for exit
+cities in `exits/<server>/` (see [Exit cities](#exit-cities)), the table that
+names them in `exits/details.tsv`, and archives fetched by `backup` in
+`backups/<server>/` (they hold private keys).
+
+### Updating servers
+
+Servers run their checkout directly, and the watchdog timers run it every few
+seconds, so a pull takes effect at once. A pull changes no running config:
+
+1. Check what would render differently on each server (read-only):
+   `tools/render-diff.sh`. "identical" everywhere means a pull is all it takes.
+2. Try one server first: `wgt-ctl boba pull && wgt-ctl boba test`.
+3. Then the rest: `wgt-ctl all pull`.
+4. If step 1 showed differences (a template, `wgt/render.py` or `wgt/rules.py`
+   change, new packages or units), apply them with `wgt-ctl all setup --yes`.
+   Setup restarts `wg0` only if its settings changed, not for comment-only
+   changes.
 
 ## Development
 
