@@ -2,23 +2,31 @@
 
 ## Overview
 
-Turn a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or arm64) into a WireGuard
-VPN server, and manage its clients.
+wireguard-tools turns a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or
+arm64) into a WireGuard VPN server and manages its clients, on the server
+itself or, for several servers, from your own machine.
 
-[Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free VPN service; the server
-connects to it as one WARP "device") is installed alongside. Clients' traffic
-can leave three ways:
+What sets it apart is where your clients' traffic meets the internet.
+Alongside WireGuard, the server runs [Cloudflare WARP](https://1.1.1.1/)
+(Cloudflare's free VPN service; the server connects to it as one WARP
+"device"). Clients' traffic can leave three ways:
 
-| Way out | Set with | Traffic leaves via | Sites see |
-|---------|----------|--------------------|-----------|
-| **WARP** (default) | `wgt warp on` | Cloudflare WARP, tunnelled from the server | a Cloudflare IP near the server |
-| **The server's IP** | `wgt warp off` | the server's own public interface | the VPS's IP (a plain, fast WireGuard VPN) |
-| **An exit city** | per client: `wgt client add phone --exit par-fr` | a Proton VPN server in a city you pick, with WARP running inside that tunnel | a Cloudflare IP in that city |
+| Way out | Traffic leaves via | Sites see |
+|---------|--------------------|-----------|
+| **WARP** (the default) | Cloudflare WARP, tunnelled from the server | a Cloudflare IP near the server |
+| **The server's own IP** | the server's public interface | the VPS's IP: a plain, fast WireGuard VPN |
+| **An exit city** (per client) | a Proton VPN server in a city you pick, with WARP inside that tunnel | a Cloudflare IP in that city |
 
-`wgt warp on|off` sets the server-wide default and switches live: clients stay
-connected, only where their traffic exits changes. Exit cities are chosen per
-client and need your own Proton VPN account; a city's tunnels only run while
-one of its clients is connected (see [Exit cities](#exit-cities)).
+**WARP is a switch.** `wgt warp off` sends every client out through the
+server's own IP instead, and `wgt warp on` brings WARP back. Switching is
+live: clients stay connected, only where their traffic exits changes.
+
+**Exit cities** add a third way out, chosen per client: through a Proton VPN
+server in a city you pick (with your own Proton VPN account), with WARP
+running inside that Proton tunnel, so sites see a Cloudflare IP in that city.
+A client is added with its city (`wgt client add phone --exit par-fr`), and a
+city's tunnels only run while one of its clients is connected (see
+[Exit cities](#exit-cities)).
 
 ### Why route through Cloudflare?
 
