@@ -1,9 +1,13 @@
 # wireguard-tools
 
+## Overview
+
 Turn a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or arm64) into a WireGuard
-VPN server, and manage its clients. [Cloudflare WARP](https://1.1.1.1/)
-(Cloudflare's free VPN service; the server connects to it as one WARP
-"device") is installed alongside and works as a switch:
+VPN server, and manage its clients.
+
+[Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free VPN service; the server
+connects to it as one WARP "device") is installed alongside and works as a
+switch:
 
 | `wgt warp …` | Clients' traffic leaves via | Sites see | Use it for |
 |------|----------------------------|-----------|------------|
@@ -17,7 +21,9 @@ server in a city you pick (with your own Proton VPN account), with WARP running
 inside that Proton tunnel, so sites see a Cloudflare IP in that city (see
 [Exit cities](#exit-cities)).
 
-Two commands:
+## Basic commands
+
+There are two:
 
 - **`wgt`** runs as root on the server: `setup`, `warp on|off`, `summary`,
   `status`, `test`, `log`, `backup`, `restore`, `rollback`, plus `wgt client …` (`add`, `list`,
