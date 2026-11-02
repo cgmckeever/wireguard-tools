@@ -508,7 +508,10 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
 def _stop_everything(ctx: Ctx) -> None:
     """The watchdogs first (they'd bring things back), then exit cities, wg0, warp."""
     r, cfg = ctx.runner, ctx.cfg
-    r.run(["systemctl", "disable", "--now", f"{WATCHDOG}.timer", f"{EXIT_WATCHDOG}.timer"], check=False)
+    timers = [f"{name}.timer" for name in (WATCHDOG, EXIT_WATCHDOG)
+              if os.path.exists(ctx.paths.unit_file(f"{name}.timer"))]
+    if timers:
+        r.run(["systemctl", "disable", "--now", *timers], check=False)
     for e in ctx.snap.exits:
         exits.down(ctx, e)
     for ifc in (cfg.WG_IF, cfg.WARP_IF):

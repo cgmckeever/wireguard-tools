@@ -102,3 +102,26 @@ def test_servers_sh_wrapper_translates(tmp_path):
     assert run("client", "boba", "add", "x") == "boba|client|add|x|"
     assert run("status") == "status|"
     assert run("clients") == "clients|"
+
+
+def test_remove_tears_down_then_forgets(local, monkeypatch):
+    sent = []
+    monkeypatch.setattr(ctl, "ssh", lambda target, cmd, **kw: (sent.append((target, cmd)), (0, ""))[1])
+    assert ctl.do_remove(ctl.find("boba"), ["--yes"]) == 0
+    target, cmd = sent[0]
+    assert target == "root@5.6.7.8"
+    assert cmd.index("rollback --purge --yes") < cmd.index("rm -rf /srv/wgt")   # rollback first
+    assert "set -e" in cmd                                                       # a failed rollback deletes nothing
+    assert [s.name for s in ctl.servers()] == ["dengar"]
+
+
+def test_remove_failure_keeps_the_server_listed(local, monkeypatch):
+    monkeypatch.setattr(ctl, "ssh", lambda target, cmd, **kw: (1, ""))
+    with pytest.raises(WgtError, match="stays in"):
+        ctl.do_remove(ctl.find("boba"), ["--yes"])
+    assert [s.name for s in ctl.servers()] == ["dengar", "boba"]
+
+
+def test_remove_refuses_a_checkout_near_root(local):
+    with pytest.raises(WgtError, match="too close to /"):
+        ctl.do_remove(ctl.Server("x", "root@9.9.9.9", "/opt"), ["--yes"])

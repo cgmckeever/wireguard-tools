@@ -9,6 +9,8 @@
   wgt-ctl <server|all> <wgt command>    run it there, e.g. wgt-ctl boba client add phone --exit par-fr
   wgt-ctl <server|all> pull | backup    git pull / back up and fetch the archive to local/backups/<server>/
   wgt-ctl <server> exit-add [n|all] | ssh | branch <b> | forget [--yes]
+  wgt-ctl <server> remove [--yes]       tear wireguard-tools off the server (rollback --purge,
+                                        delete its checkout, wgcf and archives), then forget it
 
 <server> is a name or list number; with none, pick from the list. Private
 files stay under local/ (untracked): servers, exits/<server>/*.conf (Proton
@@ -125,8 +127,10 @@ def private_dir(path: str) -> str:
 
 def ssh(target: str, command: str, tty: bool = False, batch: bool = False, capture: bool = False,
         input: Optional[str] = None) -> Tuple[int, str]:
-    """Run <command> on <target>. tty: with a terminal when we have one
-    (prompts, QR codes); batch: never prompt, never read stdin (probes)."""
+    """Run <command> on <target>, under bash whatever root's login shell is
+    (a zsh login shell trips over unmatched globs). tty: with a terminal when
+    we have one (prompts, QR codes); batch: never prompt, never read stdin (probes)."""
+    command = "bash -c " + shlex.quote(command)
     args = ["ssh"] + SSH_OPTS
     if batch:
         args += ["-n", "-o", "BatchMode=yes"]
@@ -430,6 +434,38 @@ def do_backup(s: Server, args: List[str]) -> int:
     return 0
 
 
+def do_remove(s: Server, args: List[str]) -> int:
+    """Tear wireguard-tools off a server: rollback --purge (keys, clients,
+    WARP accounts, exit cities, rules, units; original files restored), then
+    its checkout, the wgt link, wgcf and the backup archives. Packages stay.
+    Only after all that succeeds is it forgotten here. Asks for the server's
+    name unless --yes."""
+    if set(args) - {"--yes", "-y"}:
+        raise WgtError("usage: wgt-ctl <server> remove [--yes]")
+    if s.dir.rstrip("/").count("/") < 2:
+        raise WgtError(f"refusing to delete checkout '{s.dir}' (too close to /)")
+    out.warn(f"this removes wireguard-tools from {s.name} ({s.target}): its keys, clients, WARP accounts, "
+             f"exit cities and backup archives, and {s.dir}. Its clients stop working. Irreversible "
+             f"(want a copy first? wgt-ctl {s.name} backup)")
+    if "--yes" not in args and "-y" not in args:
+        if not ui.have_tty():
+            raise WgtError("remove needs --yes without a terminal")
+        if ui.ask(f"    Type the server's name ({s.name}) to remove it: ") != s.name:
+            out.info("kept")
+            return 0
+    d = shlex.quote(s.dir)
+    # set -e: if rollback fails, nothing is deleted and the server stays listed.
+    rc, _ = ssh(s.target, f"""set -e
+        if [ -x {d}/bin/wgt ]; then {d}/bin/wgt rollback --purge --yes; fi
+        rm -rf {d} /var/backups/wireguard-tools
+        rm -f /usr/local/bin/wgcf /usr/local/sbin/wgt
+        echo "    removed {s.dir}, /usr/local/bin/wgcf and /var/backups/wireguard-tools (packages left installed)"
+        """, tty=True)
+    if rc != 0:
+        raise WgtError(f"teardown failed on {s.name} (exit {rc}); it stays in {LIST} - fix the cause and re-run")
+    return do_forget(s, ["--yes"])
+
+
 def do_forget(s: Server, args: List[str]) -> int:
     """Drop it from local/servers; nothing on the server changes."""
     if set(args) - {"--yes", "-y"}:
@@ -604,7 +640,7 @@ def do_exit_add(s: Server, args: List[str]) -> int:
 
 
 CTL = {"pull": do_pull, "backup": do_backup, "exit-add": do_exit_add, "ssh": do_ssh, "branch": do_branch,
-       "forget": do_forget}
+       "forget": do_forget, "remove": do_remove}
 ALL_OK = ("pull", "backup", "branch")   # ctl commands that take "all" (every wgt command does)
 
 
