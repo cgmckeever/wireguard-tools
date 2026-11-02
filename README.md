@@ -44,7 +44,27 @@ server in a city you pick (with your own Proton VPN account), with WARP running
 inside that Proton tunnel, so sites see a Cloudflare IP in that city (see
 [Exit cities](#exit-cities)).
 
-## Basic commands
+## Quick start
+
+On a fresh server, as root:
+
+```bash
+apt-get update && apt-get install -y git
+git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
+/opt/wireguard-tools/bin/wgt setup --name myvpn     # from then on, just: wgt ...
+```
+
+1. **Open UDP 51820** in your VPS provider's firewall or security group. Setup
+   opens it on the server itself but can't reach the provider's firewall; this
+   is the usual reason clients can't connect.
+2. **Add a client:** `wgt client add phone` prints a QR code; scan it in the
+   WireGuard app.
+3. **Check it:** `wgt summary` (or `wgt test`).
+
+To manage one or more servers from your own machine instead of logging in to
+each, see [Fleet management](#fleet-management).
+
+### Basic commands
 
 There are two:
 
@@ -67,26 +87,6 @@ only the standard library, so a server needs nothing extra.
 
 In this README, `dengar` and `boba` are example server names, and `<server>`
 stands for yours.
-
-## Quick start
-
-On a fresh server, as root:
-
-```bash
-apt-get update && apt-get install -y git
-git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
-/opt/wireguard-tools/bin/wgt setup --name myvpn     # from then on, just: wgt ...
-```
-
-1. **Open UDP 51820** in your VPS provider's firewall or security group. Setup
-   opens it on the server itself but can't reach the provider's firewall; this
-   is the usual reason clients can't connect.
-2. **Add a client:** `wgt client add phone` prints a QR code; scan it in the
-   WireGuard app.
-3. **Check it:** `wgt summary` (or `wgt test`).
-
-To manage one or more servers from your own machine instead of logging in to
-each, see [Fleet management](#fleet-management).
 
 ## How it works
 
