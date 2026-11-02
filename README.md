@@ -454,45 +454,6 @@ archives and file copies. A backup holds private keys (it's created mode 600);
 keep it somewhere safe. Stop the old server once the new one works: both would
 be using the same WARP devices and Proton keys.
 
-## Troubleshooting
-
-- **Clients can't connect:** the provider firewall usually still blocks UDP 51820.
-- **`wgcf register` fails:** WARP may refuse registrations from some server IPs.
-  Retry later, or register on another machine and copy the account over
-  ([below](#register-warp-on-another-machine)). If the WARP tests still fail
-  (no handshake), the provider is blocking WARP's traffic: `wgt warp off`.
-- **Some sites hang with WARP on:** MTU is already 1280 (the lowest allowed)
-  and TCP MSS is clamped; try `wgt warp off` to see if it's WARP's path.
-- **A city's clients have no internet:** `wgt exit test` says which
-  layer fails. No Proton handshake usually means the Proton server was retired
-  or the key revoked: download a new config for that server and add it again
-  (same code). `wgt log` shows the watchdog bringing cities up and down.
-- **Handshake works but nothing loads:** the device's config is out of date
-  (e.g. after a `--subnet` change) or its `Address` is mistyped; re-send it.
-- **Anything else:** `wgt status` (marks saved settings still
-  pending, i.e. not running yet) and `wgt test`.
-
-### Register WARP on another machine
-
-If setup reports `wgcf register failed` (it then finishes with WARP off),
-register the WARP account somewhere WARP accepts (your Mac: `brew install
-wgcf`) and copy it over. Registration happens once, and is skipped when the
-account file exists. The failed run already created `/etc/wireguard/wgcf/` for it.
-
-```bash
-# on your Mac
-mkdir -p ~/wgcf-vps && cd ~/wgcf-vps
-wgcf register --accept-tos     # a new WARP device, separate from your Mac's WARP app
-wgcf generate                  # uses the API too, so do it here as well
-scp wgcf-account.toml wgcf-profile.conf root@vps:/etc/wireguard/wgcf/
-ssh root@vps 'chmod 600 /etc/wireguard/wgcf/*'
-cd ~ && rm -rf ~/wgcf-vps      # local copies hold the device's private key
-```
-
-Then run `wgt warp on` on the server; it uses the copied account,
-tests WARP and switches clients to it. Use these files on that server only:
-they are one WARP device.
-
 ## Managing servers from your machine
 
 `wgt-ctl` runs on your own machine (macOS or Linux, Python 3.8+) and drives the
@@ -583,6 +544,45 @@ seconds, so a pull takes effect at once. A pull changes no running config:
    change, new packages or units), apply them with `wgt-ctl all setup --yes`.
    Setup restarts `wg0` only if its settings changed, not for comment-only
    changes.
+
+## Troubleshooting
+
+- **Clients can't connect:** the provider firewall usually still blocks UDP 51820.
+- **`wgcf register` fails:** WARP may refuse registrations from some server IPs.
+  Retry later, or register on another machine and copy the account over
+  ([below](#register-warp-on-another-machine)). If the WARP tests still fail
+  (no handshake), the provider is blocking WARP's traffic: `wgt warp off`.
+- **Some sites hang with WARP on:** MTU is already 1280 (the lowest allowed)
+  and TCP MSS is clamped; try `wgt warp off` to see if it's WARP's path.
+- **A city's clients have no internet:** `wgt exit test` says which
+  layer fails. No Proton handshake usually means the Proton server was retired
+  or the key revoked: download a new config for that server and add it again
+  (same code). `wgt log` shows the watchdog bringing cities up and down.
+- **Handshake works but nothing loads:** the device's config is out of date
+  (e.g. after a `--subnet` change) or its `Address` is mistyped; re-send it.
+- **Anything else:** `wgt status` (marks saved settings still
+  pending, i.e. not running yet) and `wgt test`.
+
+### Register WARP on another machine
+
+If setup reports `wgcf register failed` (it then finishes with WARP off),
+register the WARP account somewhere WARP accepts (your Mac: `brew install
+wgcf`) and copy it over. Registration happens once, and is skipped when the
+account file exists. The failed run already created `/etc/wireguard/wgcf/` for it.
+
+```bash
+# on your Mac
+mkdir -p ~/wgcf-vps && cd ~/wgcf-vps
+wgcf register --accept-tos     # a new WARP device, separate from your Mac's WARP app
+wgcf generate                  # uses the API too, so do it here as well
+scp wgcf-account.toml wgcf-profile.conf root@vps:/etc/wireguard/wgcf/
+ssh root@vps 'chmod 600 /etc/wireguard/wgcf/*'
+cd ~ && rm -rf ~/wgcf-vps      # local copies hold the device's private key
+```
+
+Then run `wgt warp on` on the server; it uses the copied account,
+tests WARP and switches clients to it. Use these files on that server only:
+they are one WARP device.
 
 ## Development
 
