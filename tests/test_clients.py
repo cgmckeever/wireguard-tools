@@ -34,11 +34,11 @@ def test_add_unknown_exit(make_ctx):
 
 
 def test_removal_targets_spare_exit_clients(tmp_path):
-    for f in ["boba.laptop.conf", "boba.par-fr.laptop.conf", "laptop.conf", "laptop.conf.2026.bak",
-              "old.laptop.conf.20260101-000000.bak", "boba.par-fr.laptop.conf.2026.bak", "boba.laptop2.conf"]:
+    for f in ["boba.laptop.conf", "boba.par-fr.laptop.conf", "old.laptop.conf.20260101-000000.bak",
+              "boba.par-fr.laptop.conf.2026.bak", "boba.laptop2.conf"]:
         (tmp_path / f).write_text("")
     got = sorted(os.path.basename(p) for p in clients.removal_targets("laptop", str(tmp_path)))
-    assert got == ["boba.laptop.conf", "laptop.conf", "laptop.conf.2026.bak", "old.laptop.conf.20260101-000000.bak"]
+    assert got == ["boba.laptop.conf", "old.laptop.conf.20260101-000000.bak"]   # any server name, and copies
     got = sorted(os.path.basename(p) for p in clients.removal_targets("par-fr.laptop", str(tmp_path)))
     assert got == ["boba.par-fr.laptop.conf", "boba.par-fr.laptop.conf.2026.bak"]
 

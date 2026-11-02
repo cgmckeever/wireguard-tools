@@ -329,12 +329,10 @@ class Files:
         self.prune(path)
 
     def prune(self, path: str) -> None:
-        """Keep <path>'s original copy and its KEEP_CHANGES newest change copies.
-        Copies the bash version left beside the file (<file>.*.bak) are first
-        moved into the change dir if one is the recorded original, else deleted."""
+        """Keep <path>'s original copy and its KEEP_CHANGES newest change copies."""
         if self.runner.dry_run:
             return
-        orig = self._adopt_stray_copies(path)
+        orig = store.backup_orig(store.read_text(self.paths.backup_map), path)
         copies_dir = self.change_dir(path)
         if not os.path.isdir(copies_dir):
             return
@@ -347,27 +345,6 @@ class Files:
             kept += 1
             if kept > KEEP_CHANGES:
                 os.remove(copy)
-
-    def _adopt_stray_copies(self, path: str) -> str:
-        """Move or delete the bash version's copies beside <path>; returns the
-        original's (possibly new) location."""
-        orig = store.backup_orig(store.read_text(self.paths.backup_map), path)
-        parent, base = os.path.split(path)
-        if not os.path.isdir(parent):
-            return orig
-        for name in sorted(os.listdir(parent)):
-            stray = os.path.join(parent, name)
-            if not (is_copy_of(name, base) and os.path.isfile(stray)):
-                continue
-            if stray != orig:
-                os.remove(stray)
-                continue
-            copies_dir = self.change_dir(path)
-            os.makedirs(copies_dir, exist_ok=True)
-            orig = os.path.join(copies_dir, name)
-            shutil.move(stray, orig)
-            write_private(self.paths.backup_map, store.backup_move(store.read_text(self.paths.backup_map), path, orig))
-        return orig
 
     def write_config(self, path: str, mode: int, content: str) -> bool:
         """Write a tunnel config; True only if its settings changed. A change in

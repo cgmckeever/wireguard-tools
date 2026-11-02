@@ -86,8 +86,7 @@ CLIENT_HEAD = ("NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS
 
 
 class ClientRow(NamedTuple):
-    """One client in the table; `wgt client list --tsv` prints these fields in
-    order (exit_label came last, so older servers send six)."""
+    """One client in the table; `wgt client list --tsv` prints these fields in order."""
 
     name: str          # full name, e.g. par-fr.mbp-1
     exit: str          # exit code, or warp/direct

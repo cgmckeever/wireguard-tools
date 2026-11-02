@@ -58,7 +58,7 @@ def test_comment_only_change_needs_no_restart(make_ctx):
     from wgt import ops
     ops.write_wg_conf(ctx)
     text = Path(ctx.cfg.wg_conf).read_text()
-    Path(ctx.cfg.wg_conf).write_text(text.replace("(use wgt client)", "(use wg-client.sh)"))
+    Path(ctx.cfg.wg_conf).write_text(text.replace("(use wgt client)", "(an edited comment)"))
     assert srv.stop_before_rewrite(ctx) is False            # wg0 is up, but only a comment differs
     assert ops.write_wg_conf(ctx) is False                  # rewritten, settings unchanged
     assert "(use wgt client)" in Path(ctx.cfg.wg_conf).read_text()

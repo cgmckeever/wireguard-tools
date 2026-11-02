@@ -82,7 +82,7 @@ NO_WGT = 3   # the remote exit status when a server has no bin/wgt
 
 def no_wgt(s: Server) -> str:
     """Why a server can't run wgt commands: its checkout predates wgt (or is missing)."""
-    return f"no {s.dir}/bin/wgt there (still the bash tools?); update it: wgt-ctl {s.name} pull"
+    return f"no {s.dir}/bin/wgt there; update it: wgt-ctl {s.name} pull"
 
 
 def servers() -> List[Server]:
@@ -287,7 +287,7 @@ def _probe(target: str, address: str) -> Dict[str, str]:
 
 
 def _adopt(name: str, saved: str, target: str) -> None:
-    """The server already runs these tools (maybe an older version): record
+    """The server already runs these tools (at any version): record
     it under its saved name; never re-install."""
     if not saved:
         raise WgtError(f"{DEF_DIR} exists there but isn't set up; set it up there, or remove it and re-run init")

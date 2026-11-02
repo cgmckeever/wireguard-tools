@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, List, Optional
 from . import live, net, ops, render, rules, store, system, ui
 from .const import MIB
 from .errors import WgtError
-from .system import is_copy_of
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -335,16 +334,14 @@ def cmd_rotate(ctx: Ctx, words: List[str]) -> None:
 
 
 def removal_targets(name: str, directory: str) -> List[str]:
-    """Which files in <directory> belong to client <name>: <server>.<name>.conf,
-    <name>.conf and their .bak copies. The part before ".<name>.conf" must be a
-    server name (no dot), so removing "laptop" leaves "<server>.par-fr.laptop.conf"."""
+    """Which files in <directory> belong to client <name>: <server>.<name>.conf
+    (under any server name: the server may have been renamed) and its change
+    copies. The part before ".<name>.conf" must be a server name (no dot), so
+    removing "laptop" leaves "<server>.par-fr.laptop.conf"."""
     if not os.path.isdir(directory):
         return []
     out = []
     for f in sorted(os.listdir(directory)):
-        if f == f"{name}.conf" or is_copy_of(f, f"{name}.conf"):
-            out.append(os.path.join(directory, f))
-            continue
         tail = f".{name}.conf"
         i = f.find(tail)
         if i <= 0:
@@ -382,9 +379,6 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     files = []
     for d in (ctx.paths.client_dir, ctx.files.copies_dir(ctx.paths.client_dir)):
         files += removal_targets(name, d)
-    psk_dir = ctx.paths.psk_dir
-    if os.path.isdir(psk_dir):   # copies older versions left beside the key
-        files += [os.path.join(psk_dir, f) for f in sorted(os.listdir(psk_dir)) if is_copy_of(f, f"{name}.psk")]
     ctx.files.remove(*files)
     # forget: the file, its change copies and its backup record (nothing for rollback to restore).
     ctx.files.forget(client_conf(ctx, name))

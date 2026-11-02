@@ -128,11 +128,6 @@ def test_state():
     assert store.state_unset("A=1\n", "A") == ""
 
 
-def test_saved_warp_from_old_exit_key():
-    assert store.saved_settings("EXIT=direct\n", ["WARP"])["WARP"] == "off"
-    assert store.saved_settings("WARP=on\nEXIT=direct\n", ["WARP"])["WARP"] == "on"
-
-
 def test_clients_db_keeps_other_lines():
     text = store.CLIENTS_HEADER + "\nb  10.0.0.3   KEYB  0.0.0.0/0\na 10.0.0.2 KEYA 0.0.0.0/0\n"
     out = store.put_client(text, "a", store.Client("c", "10.0.0.4", "KEYC", "0.0.0.0/0"))

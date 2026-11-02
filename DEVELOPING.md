@@ -86,6 +86,8 @@ test.sh, pyproject.toml   tests and lint (sets up .venv on first use); lint sett
   UPDATE_GOLDEN=1 ./test.sh -k golden && git diff tests/golden
   ```
 
+- **Fixture keys are fake** and look it (`FAKE0001xxx…FAKE=`), so nothing in
+  the repo can be mistaken for a real key. New fixtures should do the same.
 - **Commands on a fake server.** `make_ctx` (tests/conftest.py) builds the Ctx
   a command gets, on a copy of a fixture server in a temp dir, with every
   system path moved there and a `FakeRunner` that records commands instead of

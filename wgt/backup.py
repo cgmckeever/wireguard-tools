@@ -48,7 +48,7 @@ def rebuild_backup_map(ctx: Ctx, keep_map: Optional[str], members: List[str]) ->
         os.remove(ctx.paths.backup_map)
     backup_map = store.read_text(ctx.paths.backup_map) or ""
     for name in members:
-        if name.startswith(ctx.paths.wg_dir + "/") and not name.endswith(("/", ".bak")) \
+        if name.startswith(ctx.paths.wg_dir + "/") and not name.endswith("/") \
                 and name != ctx.paths.backup_map and os.path.isfile(name) and not store.backup_orig(backup_map, name):
             backup_map += f"{name}\tNEW\n"
     write_private(ctx.paths.backup_map, backup_map)

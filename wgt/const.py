@@ -116,8 +116,8 @@ class Paths:
         return os.path.join(self.psk_dir, f"{name}.psk")
 
     def client_conf(self, server: str, name: str) -> str:
-        """A client's config as handed out; <server> is "" for the oldest naming."""
-        return os.path.join(self.client_dir, f"{server}.{name}.conf" if server else f"{name}.conf")
+        """A client's config as handed out: <server>.<name>.conf."""
+        return os.path.join(self.client_dir, f"{server}.{name}.conf")
 
     @property
     def wgt_link(self) -> str:

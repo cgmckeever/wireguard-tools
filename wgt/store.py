@@ -72,11 +72,8 @@ def state_unset(text: Optional[str], key: str) -> str:
 
 
 def saved_settings(text: Optional[str], keys: Iterable[str]) -> Dict[str, str]:
-    """Saved values for <keys>; WARP falls back to older versions' EXIT=warp|direct."""
-    saved = {k: state_get(text, k) for k in keys}
-    if not saved.get("WARP"):
-        saved["WARP"] = {"warp": "on", "direct": "off"}.get(state_get(text, "EXIT"), "")
-    return saved
+    """Saved values for <keys>."""
+    return {k: state_get(text, k) for k in keys}
 
 
 # --- names ---

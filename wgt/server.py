@@ -9,7 +9,6 @@ clients are blocked, not leaked) until fixed or switched off."""
 from __future__ import annotations
 
 import copy
-import glob
 import os
 import re
 from typing import TYPE_CHECKING, List, Optional
@@ -259,9 +258,8 @@ def record_baseline(ctx: Ctx) -> None:
         ops.state_set(ctx, "DEFAULT_ROUTE", route)
         ops.state_set(ctx, "PUB_IF", host.route_dev(route))
         ops.state_set(ctx, "ORIG_IP_FORWARD", live.sysctl(ctx.runner, "net.ipv4.ip_forward"))
-    # Recorded separately: servers set up before IPv6 support lack it.
-    if not store.state_get(ctx.snap.state, "ORIG_IP6_FORWARD") and ctx.facts.kernel_ipv6:
-        ops.state_set(ctx, "ORIG_IP6_FORWARD", live.sysctl(ctx.runner, "net.ipv6.conf.all.forwarding"))
+        if ctx.facts.kernel_ipv6:
+            ops.state_set(ctx, "ORIG_IP6_FORWARD", live.sysctl(ctx.runner, "net.ipv6.conf.all.forwarding"))
     ctx.out.info(f"default route: {route} (public interface {host.route_dev(route)})")
 
 
@@ -295,8 +293,8 @@ def ensure_server_keys(ctx: Ctx) -> bool:
 
 
 def sync_client_configs(ctx: Ctx, old_name: str) -> None:
-    """Keep every client config named <server>.<client>.conf (renaming ones from
-    an older server name or from before server names), pointed at the current
+    """Keep every client config named <server>.<client>.conf (renaming ones
+    still under the server's previous name), pointed at the current
     endpoint, port, DNS and MTU, with its current addresses and allowed IPs.
     Keys are unchanged, so only the configs need re-sending."""
     # Patched line by line rather than re-rendered: re-rendering needs each
@@ -328,12 +326,11 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
 
 
 def _move_to_current_name(ctx: Ctx, name: str, conf: str, old_name: str) -> str:
-    """A client config under an older name (the server's old name, or none):
+    """A client config still under the server's previous name (setup --name):
     move it to <conf>. Returns where its text is now ("" if there is none; in
     a dry run it is still at the old name)."""
-    olds = ([ctx.paths.client_conf(old_name, name)] if old_name else []) + [ctx.paths.client_conf("", name)]
-    src = next((o for o in olds if os.path.isfile(o)), "")
-    if not src:
+    src = ctx.paths.client_conf(old_name, name) if old_name else ""
+    if not src or not os.path.isfile(src):
         return ""
     ctx.runner.step(f"Rename {src} to {os.path.basename(conf)}", f"mv {conf} {src}")
     if ctx.runner.dry_run:
@@ -405,7 +402,6 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     renumber_clients(ctx)
     offer_hostname(ctx)
     save_config(ctx)
-    ops.state_unset(ctx, "EXIT")   # older versions' mode key; WARP replaces it
     record_baseline(ctx)
     install_packages(ctx)
     link_wgt(ctx)
@@ -537,9 +533,6 @@ def _remove_rules(ctx: Ctx) -> None:
 def _remove_units(ctx: Ctx) -> None:
     """wg0's boot-order drop-in and both watchdog timers."""
     cfg, files = ctx.cfg, ctx.files
-    # Our own drop-in's copies would keep its directory from being removed.
-    if store.backup_orig(store.read_text(ctx.paths.backup_map), cfg.dropin) == "NEW":
-        files.remove(*glob.glob(cfg.dropin + ".*.bak"))
     files.restore_original(cfg.dropin, remove_new=True)
     files.remove_empty_dir(cfg.dropin_dir)
     units.remove_timer(ctx, WATCHDOG)
@@ -564,8 +557,6 @@ def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
 def _purge(ctx: Ctx) -> None:
     """--purge: delete everything setup made (originals were restored already)."""
     cfg, files, p = ctx.cfg, ctx.files, ctx.paths
-    for path in (cfg.wg_conf, cfg.warp_conf, p.server_key, p.server_pub, p.client_db, p.sysctl_file):
-        files.remove(*glob.glob(path + ".*.bak"))   # copies left by older versions
     # The change copies hold old keys.
     files.remove_tree(p.change_dir)
     files.remove_empty_dir(p.backup_dir)
@@ -586,7 +577,6 @@ def _keep(ctx: Ctx) -> None:
     p = ctx.paths
     # Not set up any more (wgt client and restore check this).
     ops.state_unset(ctx, "WARP")
-    ops.state_unset(ctx, "EXIT")
     kept = f"keys, clients ({p.client_db}, {p.client_dir})"
     if os.path.isdir(p.wgcf_dir):
         kept += f", WARP account ({p.wgcf_dir})"

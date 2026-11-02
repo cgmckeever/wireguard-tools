@@ -26,15 +26,11 @@ def wgt_command(ctx: Ctx) -> str:
 
 
 def write_timer(ctx: Ctx, name: str, what: str, service: str, timer: str) -> None:
-    """Install a watchdog's service and timer and keep the timer enabled and on.
-    Any old standalone script of the same name (bash version) is removed."""
+    """Install a watchdog's service and timer and keep the timer enabled and on."""
     changed = False
     for path, content in ((ctx.paths.unit_file(f"{name}.service"), service),
                           (ctx.paths.unit_file(f"{name}.timer"), timer)):
         changed |= ctx.files.write(path, 0o644, content)
-    old_script = os.path.join(ctx.paths.sbin_dir, name)
-    if os.path.exists(old_script):
-        ctx.files.forget(old_script)
     if changed:
         ctx.runner.run(["systemctl", "daemon-reload"])
     if not live.timer_on(ctx.runner, name):
@@ -45,8 +41,7 @@ def write_timer(ctx: Ctx, name: str, what: str, service: str, timer: str) -> Non
 def remove_timer(ctx: Ctx, name: str) -> None:
     """Stop a watchdog's timer and remove (or restore) its files."""
     ctx.runner.run(["systemctl", "disable", "--now", f"{name}.timer"], check=False)
-    for path in (ctx.paths.unit_file(f"{name}.timer"), ctx.paths.unit_file(f"{name}.service"),
-                 os.path.join(ctx.paths.sbin_dir, name)):
+    for path in (ctx.paths.unit_file(f"{name}.timer"), ctx.paths.unit_file(f"{name}.service")):
         ctx.files.restore_original(path, remove_new=True)
 
 
