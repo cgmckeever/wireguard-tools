@@ -141,3 +141,11 @@ def test_rollback_purge_undoes_a_fresh_setup(tmp_path, monkeypatch):
     assert ctx.cfg.values["ENDPOINT"] == "203.0.113.1"
     run("rollback", "--purge")
     assert tree(root) == before
+
+
+def test_summary_when_not_set_up(make_ctx, capsys):
+    from wgt import checks
+    ctx = make_ctx()
+    ctx.cfg.saved.pop("WARP", None)
+    checks.cmd_summary(ctx, [])
+    assert "not set up (wgt setup)" in capsys.readouterr().out

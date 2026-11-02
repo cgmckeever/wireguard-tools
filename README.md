@@ -450,6 +450,7 @@ names them in `exits/details.tsv`, and archives fetched by `backup` in
 
 ```bash
 wgt test              # PASS/FAIL checks; non-zero exit on any FAIL
+wgt summary           # at a glance: one line per fact, says what is wrong
 wgt status            # settings (and any not running yet), interfaces, clients, routes, rules
 wgt log [lines]       # its changes, both watchdogs and the tunnels: last lines, then follows (Ctrl-C stops)
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz

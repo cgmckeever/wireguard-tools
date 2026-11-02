@@ -280,7 +280,10 @@ def cmd_summary(ctx: Ctx, words: List[str]) -> None:
     tunnels, settings, route, firewall, watchdog, exit cities, clients.
     Each line says what is wrong when something is (details: wgt status)."""
     ops.no_more_words(words, "wgt summary")
-    require_setup(ctx)
+    if not ctx.cfg.saved.get("WARP"):
+        ctx.out.line(ctx.facts.hostname.split(".")[0])
+        ctx.out.line(SUMMARY_FMT.format("state", "not set up (wgt setup)"))
+        return
     ctx.out.line(f"{ctx.cfg.SERVER_NAME}  ({ctx.cfg.values.get('ENDPOINT') or 'no endpoint saved'})")
     for label, text in summary_lines(ctx):
         ctx.out.line(SUMMARY_FMT.format(label, text))
