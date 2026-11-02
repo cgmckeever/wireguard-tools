@@ -6,43 +6,45 @@ Turn a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or arm64) into a WireGuard
 VPN server, and manage its clients.
 
 [Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free VPN service; the server
-connects to it as one WARP "device") is installed alongside and works as a
-switch:
+connects to it as one WARP "device") is installed alongside. Clients' traffic
+can leave three ways:
 
-| `wgt warp …` | Clients' traffic leaves via | Sites see | Use it for |
-|------|----------------------------|-----------|------------|
-| `on` (default) | Cloudflare WARP, tunnelled from the server | a Cloudflare IP | hiding the VPS's IP; sites see Cloudflare, not your VPS |
-| `off` | the server's own public interface | the VPS's IP | a plain, fast WireGuard VPN |
+| Way out | Set with | Traffic leaves via | Sites see |
+|---------|----------|--------------------|-----------|
+| **WARP** (default) | `wgt warp on` | Cloudflare WARP, tunnelled from the server | a Cloudflare IP near the server |
+| **The server's IP** | `wgt warp off` | the server's own public interface | the VPS's IP (a plain, fast WireGuard VPN) |
+| **An exit city** | per client: `wgt client add phone --exit par-fr` | a Proton VPN server in a city you pick, with WARP running inside that tunnel | a Cloudflare IP in that city |
 
-Switching is live: clients stay connected, only where their traffic exits changes.
+`wgt warp on|off` sets the server-wide default and switches live: clients stay
+connected, only where their traffic exits changes. Exit cities are chosen per
+client and need your own Proton VPN account; a city's tunnels only run while
+one of its clients is connected (see [Exit cities](#exit-cities)).
 
 ### Why route through Cloudflare?
 
 A VPS's public IP is a datacenter address, and sites treat those with
 suspicion: more CAPTCHAs, "unusual traffic" pages and outright blocks, as
-they do with commercial VPN ranges. With WARP on, clients leave from
-Cloudflare's network instead:
+they do with commercial VPN ranges. With WARP, and with an exit city, clients
+leave from Cloudflare's network instead:
 
 - **Sites see a Cloudflare IP, not your VPS.** WARP addresses are shared by
   millions of ordinary WARP users, so they're rarely blocked, and your server's
   own IP (tied to your hosting account) never shows up in their logs.
-- **Your provider sees one encrypted tunnel to Cloudflare,** not which sites
-  your clients visit.
+- **Your provider sees one encrypted tunnel to Cloudflare** (or, for an exit
+  city, to Proton), not which sites your clients visit.
 - **IPv6 for clients even on an IPv4-only VPS**, through WARP's own IPv6.
-- **The location stays close to the server's:** WARP exits from a nearby
-  Cloudflare data centre, so sites still see roughly the right region.
-- **Fail closed:** if WARP goes down, clients are blocked rather than quietly
-  falling back to the VPS's IP.
+- **You pick the location.** Plain WARP exits near the server, so sites still
+  see roughly the right region; an exit city puts the client in another city
+  (sites see Paris, say) while still looking like an ordinary Cloudflare user
+  rather than a VPN, and Proton sees only encrypted WARP traffic.
+- **Fail closed:** if WARP or a city goes down, its clients are blocked rather
+  than quietly falling back to the VPS's IP.
 
-The trade-offs: one more hop (usually a few milliseconds, as Cloudflare is
-close to most datacenters), Cloudflare sees where traffic goes instead of
-your provider, and a few sites block WARP too; `wgt warp off` is one command
-away. It hides your server, not you: it isn't an anonymity tool.
-
-**Exit cities** add a third way out, chosen per client: through a Proton VPN
-server in a city you pick (with your own Proton VPN account), with WARP running
-inside that Proton tunnel, so sites see a Cloudflare IP in that city (see
-[Exit cities](#exit-cities)).
+The trade-offs: an extra hop (a few milliseconds for WARP, as Cloudflare is
+close to most datacenters; more for a distant city), Cloudflare sees where
+traffic goes instead of your provider, and a few sites block WARP too;
+`wgt warp off` is one command away. It hides your server, not you: it isn't
+an anonymity tool.
 
 ## Quick start
 
