@@ -21,10 +21,11 @@ Two commands:
   `status`, `test`, `log`, `backup`, `restore`, `rollback`, plus `wgt client …` (`add`, `list`,
   `show`, `share`, `rotate`, `rename`, `disable`, `enable`, `remove`) and
   `wgt exit …` for exit cities.
-- **`wgt-ctl`** runs on your own machine and drives your servers over SSH: the
-  server comes first, then any `wgt` command (`wgt-ctl boba client add phone`),
-  plus setting up new servers, pulling updates, exit cities from local files
-  and fetching backups ([Managing servers from your machine](#managing-servers-from-your-machine)).
+- **`wgt-ctl`** runs on your own machine and drives your servers over SSH as
+  `wgt-ctl SERVER COMMAND`: the server first, then any `wgt` command
+  (`wgt-ctl boba client add phone`). It also sets up new servers, pulls
+  updates, pushes exit cities from local files and fetches backups
+  ([Managing servers from your machine](#managing-servers-from-your-machine)).
 
 Both are safe to re-run, back up every file they change, take `--dry-run` for
 anything that changes a server (with `wgt-ctl`, pass it to the `wgt` command),
@@ -412,31 +413,56 @@ dengar  root@203.0.113.10
 boba    root@198.51.100.20
 ```
 
-The server comes first, then the command:
+Every command has the same shape: **`wgt-ctl SERVER COMMAND [arguments]`**.
+`SERVER` is a name from `local/servers`, its number in the list, or `all`.
+A few commands aren't about one server and take no `SERVER` (last group below).
+
+**One server: `wgt-ctl SERVER COMMAND`.** Any `wgt` command runs on that server,
+exactly as if you'd typed it there:
 
 ```bash
-wgt-ctl                                # the servers, with branch@commit (or unreachable)
-wgt-ctl boba status                    # any wgt command: setup, warp, test, log, exit list, ...
+wgt-ctl boba summary                   # wgt summary on boba (likewise status, test, log, warp, setup, ...)
 wgt-ctl boba client add phone --exit par-fr
-wgt-ctl boba client                    # its client list and action menu
-wgt-ctl all test                       # each server in turn (one failing doesn't stop the rest)
-wgt-ctl clients                        # every client on every server: exit, last seen, traffic
-wgt-ctl summary                        # every server at a glance: WARP, tunnels, rules, exits, clients
-wgt-ctl boba exit-add                  # pick from local/exits/boba/*.conf (or: all) -> exit cities
-wgt-ctl all pull                       # git pull everywhere (fast-forward only)
-wgt-ctl all backup                     # wgt backup, fetched to local/backups/<server>/
+wgt-ctl boba client                    # boba's client list and action menu
+wgt-ctl boba exit list
+```
+
+and these run from your machine, against that server:
+
+```bash
+wgt-ctl boba pull                      # git pull its checkout (fast-forward only)
+wgt-ctl boba backup                    # wgt backup there, fetched to local/backups/boba/
+wgt-ctl boba exit-add                  # push a Proton config from local/exits/boba/ as an exit city
+wgt-ctl boba ssh                       # log in (or: ssh <command>)
 wgt-ctl boba branch some-branch        # switch its checkout
-wgt-ctl boba ssh
-wgt-ctl boba forget                    # drop from the list; the server is untouched
+wgt-ctl boba forget                    # drop it from local/servers; the server is untouched
 wgt-ctl boba remove                    # tear it down: rollback --purge, delete its checkout,
                                        #   wgcf and backup archives, then forget it (asks for its name)
+```
+
+**Every server: `wgt-ctl all COMMAND`.** Runs on each server in turn; one
+failing doesn't stop the rest. Takes any `wgt` command, plus `pull`, `backup`
+and `branch`:
+
+```bash
+wgt-ctl all test
+wgt-ctl all pull
+wgt-ctl all backup
+```
+
+**No server.** Overviews of every server, and adding a new one:
+
+```bash
+wgt-ctl                                # the servers: branch@commit (or unreachable), exit configs staged
+wgt-ctl summary                        # every server at a glance (wgt summary on each, side by side)
+wgt-ctl clients                        # every client on every server: exit, last seen, traffic
 wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
 wgt-ctl init --address 1.2.3.4 --name lando --branch main -- --port 51821
 ```
 
-A server is its name or list number, or `all`; leave it out (`wgt-ctl status`)
-to pick from the list. A server name starts with a letter and can't be
-`init`, `clients`, `summary`, `all`, `help` or `list`.
+Leave `SERVER` out of a server command (`wgt-ctl status`) to pick one from the
+list. Because these words come first, a server can't be named `init`,
+`clients`, `summary`, `all`, `help` or `list`; a name starts with a letter.
 Printed `scp` hints use your machine's login for that server.
 
 `init` logs in as root and, on first contact, shows the server's host key for

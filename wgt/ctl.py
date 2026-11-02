@@ -1,19 +1,27 @@
 """`wgt-ctl`: drives the servers listed in local/servers from your own machine
-(macOS or Linux). The server is the first word:
+(macOS or Linux). Every command is  wgt-ctl SERVER COMMAND  where SERVER is a
+name, a list number, or all.
 
+One server:
+  wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
+  wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to local/backups/SERVER/
+  wgt-ctl SERVER exit-add [n|all]       push a Proton config from local/exits/SERVER/ as an exit city
+  wgt-ctl SERVER ssh [command] | branch <b>
+  wgt-ctl SERVER forget [--yes]         drop it from local/servers (the server is untouched)
+  wgt-ctl SERVER remove [--yes]         tear wireguard-tools off it (rollback --purge, delete its
+                                        checkout, wgcf and archives), then forget it
+
+Every server, in turn:
+  wgt-ctl all <wgt command> | pull | backup | branch <b>
+
+No server:
   wgt-ctl [list]                        the servers: branch@commit (or unreachable), exits staged
+  wgt-ctl summary                       every server at a glance (wgt summary on each)
+  wgt-ctl clients                       every client on every server
   wgt-ctl init [--address A] [--name N] [--user U] [--branch B] [-- setup flags]
                                         set up a new server (or adopt one already running these tools)
-  wgt-ctl clients                       every client on every server
-  wgt-ctl summary                       every server at a glance (wgt summary on each)
-  wgt-ctl <server|all> <wgt command>    run it there, e.g. wgt-ctl boba client add phone --exit par-fr
-  wgt-ctl <server|all> pull | backup    git pull / back up and fetch the archive to local/backups/<server>/
-  wgt-ctl <server> exit-add [n|all]     push a Proton config from local/exits/<server>/ (as an exit city)
-  wgt-ctl <server> ssh [command] | branch <b> | forget [--yes]
-  wgt-ctl <server> remove [--yes]       tear wireguard-tools off the server (rollback --purge,
-                                        delete its checkout, wgcf and archives), then forget it
 
-<server> is a name or list number; with none, pick from the list. Private
+Leave SERVER out of a server command to pick one from the list. Private
 files stay under local/ (untracked): servers, exits/<server>/*.conf (Proton
 configs, any name), exits/details.tsv (which file is which exit), backups/."""
 
