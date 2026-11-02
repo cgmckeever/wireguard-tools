@@ -25,7 +25,7 @@ Two commands:
   `wgt-ctl SERVER COMMAND`: the server first, then any `wgt` command
   (`wgt-ctl boba client add phone`). It also sets up new servers, pulls
   updates, pushes exit cities from local files and fetches backups
-  ([Managing servers from your machine](#managing-servers-from-your-machine)).
+  ([Fleet management](#fleet-management)).
 
 Both are safe to re-run, back up every file they change, take `--dry-run` for
 anything that changes a server (with `wgt-ctl`, pass it to the `wgt` command),
@@ -139,9 +139,15 @@ fast-forward-only pull, which stops (and changes nothing) on local edits.
 `wgt/rules.py`), since their contents depend on the WARP setting, the routing
 rules and the client list.
 
-## Set up the server
+## Server management
 
-### Install
+Everything in this part runs on a server, as root: `wgt …`. From your own
+machine, `wgt-ctl SERVER …` runs the same commands on any server (see
+[Fleet management](#fleet-management)).
+
+### Set up a server
+
+#### Install
 
 Nothing else is needed on the server: `wgt setup` installs its own packages
 (WireGuard, iptables, curl, ping, qrencode, magic-wormhole) and links
@@ -155,11 +161,11 @@ git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
 ```
 
 Or from your own machine, `wgt-ctl init` does all of this over SSH
-([below](#managing-servers-from-your-machine)). Update later with
+([below](#fleet-management)). Update later with
 `git -C /opt/wireguard-tools pull --ff-only` (or `wgt-ctl <server> pull`); see
 [Updating servers](#updating-servers) for when an update also needs `wgt setup`.
 
-### Setup
+#### Setup
 
 ```bash
 wgt setup --name dengar              # typical: just name it
@@ -183,7 +189,7 @@ asks `Update hostname <current> to <name>? [Y/n]`. Yes sets it with
 cloud-init from restoring the old name at boot. It only asks in a terminal
 without `--yes`; names with `_` aren't valid hostnames and are skipped.
 
-### Flags
+#### Flags
 
 All optional. Settings are saved in `/etc/wireguard/wg-tools.state`, so
 re-runs and `wgt client` commands reuse them; pass a flag again to change it. Each can
@@ -224,7 +230,7 @@ Behaviour flags (not saved):
 
 `wgt help` and `wgt-ctl help` list everything.
 
-### What setup does
+#### What setup does
 
 Setup runs in two stages:
 
@@ -255,7 +261,7 @@ number and keys (`--subnet 192.168.250.0/24` turns `10.4.5.5` into
 Their configs are rewritten, so re-send them. The new subnet must be at least
 as large as the old one.
 
-### WARP on or off
+#### WARP on or off
 
 ```bash
 wgt warp off   # clients exit via this server's IP
@@ -269,7 +275,7 @@ outage blocks clients rather than letting them leak out through the VPS's own
 IP. With it off, clients' IPv6 goes out the server's own IPv6; a server
 without public IPv6 gives clients IPv4 only while WARP is off.
 
-### Exit cities
+#### Exit cities
 
 A client can leave through a city of your choosing instead of the server's
 own location. Its traffic goes into a WARP tunnel that itself runs inside a
@@ -323,7 +329,7 @@ another way; an up city whose WARP stops handshaking is restarted.
 
 Clients choose a city when they're added: see [Exit-city clients](#exit-city-clients).
 
-## Manage clients
+### Manage clients
 
 ```bash
 wgt client add laptop                            # full tunnel (default); prints a QR code
@@ -360,7 +366,7 @@ Each client gets its own keypair, a preshared key and the next free address.
 Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 `dengar.laptop.conf`), so configs from different servers don't collide.
 
-### Exit-city clients
+#### Exit-city clients
 
 A client of a city is named `<code>.<name>`. `add` asks which
 exit(s) when cities exist, or take them with `--exit`. Through `wgt-ctl`, `add`
@@ -379,7 +385,7 @@ on the device and switch exits by switching tunnels in the WireGuard app.
 names up to 15 characters, so rename longer ones when importing there (`add`
 reminds you).
 
-### Getting a config onto a device
+#### Getting a config onto a device
 
 | How | Command | Best for |
 |-----|---------|----------|
@@ -400,7 +406,7 @@ other terminals and tmux always get). The image is streamed, never written to di
 Both the QR code and the wormhole transfer carry the client's private key:
 send them only to that client's owner.
 
-## Check, back up, restore, clean up
+### Check, back up, restore, clean up
 
 ```bash
 wgt test              # PASS/FAIL checks; non-zero exit on any FAIL
@@ -423,7 +429,7 @@ off, WARP problems are warnings. For each exit city: its routing (blackhole
 fallbacks, one rule per client address), the exit watchdog, and, if the city
 is up, both its handshakes and a WARP trace through it.
 
-### Moving to a new server (or rebuilding)
+#### Moving to a new server (or rebuilding)
 
 ```bash
 # old server
@@ -454,7 +460,9 @@ archives and file copies. A backup holds private keys (it's created mode 600);
 keep it somewhere safe. Stop the old server once the new one works: both would
 be using the same WARP devices and Proton keys.
 
-## Managing servers from your machine
+## Fleet management
+
+### Your servers
 
 `wgt-ctl` runs on your own machine (macOS or Linux, Python 3.8+) and drives the
 servers over SSH. Put `bin/` on your PATH, or `alias wgt-ctl=~/…/wireguard-tools/bin/wgt-ctl`.
@@ -466,6 +474,8 @@ Like everything under `local/`, it is untracked:
 dengar  root@203.0.113.10
 boba    root@198.51.100.20
 ```
+
+### Commands
 
 Every command has the same shape: **`wgt-ctl SERVER COMMAND [arguments]`**.
 `SERVER` is a name from `local/servers`, its number in the list, or `all`.
@@ -519,12 +529,16 @@ list. Because these words come first, a server can't be named `init`,
 `clients`, `summary`, `all`, `help` or `list`; a name starts with a letter.
 Printed `scp` hints use your machine's login for that server.
 
+### Adding a server
+
 `init` logs in as root and, on first contact, shows the server's host key for
 you to check against your provider's console. If only a password works it
 offers `ssh-copy-id`. It then installs git, clones this repo's `origin` and
 runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
 passed to setup. The server is added to the list only once setup finishes. A
 server already running these tools is adopted under its saved name instead.
+
+### Private files
 
 Private files stay on your machine under `local/`: Proton configs for exit
 cities in `exits/<server>/` (see [Exit cities](#exit-cities)), the table that
