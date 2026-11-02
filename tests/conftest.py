@@ -46,6 +46,17 @@ def golden(case: str, name: str) -> str:
         return f.read()
 
 
+def assert_golden(case: str, name: str, got: str) -> None:
+    """<got> must equal tests/golden/<case>/<name>. With UPDATE_GOLDEN=1 the
+    file is rewritten instead (for a deliberate rendering change: review the
+    git diff before committing)."""
+    if os.environ.get("UPDATE_GOLDEN") == "1":
+        with open(os.path.join(GOLDEN, case, name), "w", encoding="utf-8") as f:
+            f.write(got)
+        return
+    assert got == golden(case, name), f"{case}/{name} differs from the golden file"
+
+
 def golden_names(case: str):
     return sorted(os.listdir(os.path.join(GOLDEN, case)))
 

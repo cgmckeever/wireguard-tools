@@ -46,43 +46,44 @@ def rebuild_backup_map(ctx: Ctx, keep_map: Optional[str], members: List[str]) ->
         write_private(ctx.paths.backup_map, keep_map)
     elif os.path.exists(ctx.paths.backup_map):
         os.remove(ctx.paths.backup_map)
-    rec = store.read_text(ctx.paths.backup_map) or ""
+    backup_map = store.read_text(ctx.paths.backup_map) or ""
     for name in members:
         if name.startswith(ctx.paths.wg_dir + "/") and not name.endswith(("/", ".bak")) \
-                and name != ctx.paths.backup_map and os.path.isfile(name) and not store.backup_orig(rec, name):
-            rec += f"{name}\tNEW\n"
-    write_private(ctx.paths.backup_map, rec)
+                and name != ctx.paths.backup_map and os.path.isfile(name) and not store.backup_orig(backup_map, name):
+            backup_map += f"{name}\tNEW\n"
+    write_private(ctx.paths.backup_map, backup_map)
 
 
 def cmd_backup(ctx: Ctx, words: List[str]) -> None:
     """Archive keys, configs, clients, exit cities and state (mode 600: it holds
     private keys), then prune old archives and change copies."""
-    d = words[0] if words else ctx.paths.backup_dir
-    paths = [p for p in (ctx.paths.wg_dir, ctx.paths.sysctl_file, ctx.cfg.dropin_dir) if os.path.exists(p)]
-    if not paths:
+    ops.no_more_words(words[1:], "wgt backup [dir]")
+    dest_dir = words[0] if words else ctx.paths.backup_dir
+    sources = [p for p in (ctx.paths.wg_dir, ctx.paths.sysctl_file, ctx.cfg.dropin_dir) if os.path.exists(p)]
+    if not sources:
         raise WgtError("nothing to back up")
     ops.take_lock(ctx)   # don't archive mid-change
-    host = ctx.facts.hostname.split(".")[0]
-    out = os.path.join(d, f"wireguard-tools.{host}.{time.strftime('%Y%m%d-%H%M%S')}.tar.gz")
-    ctx.runner.step(f"Back up {' '.join(paths)} to {out}", f"rm {out}")
+    short_host = ctx.facts.hostname.split(".")[0]
+    archive = os.path.join(dest_dir, f"wireguard-tools.{short_host}.{time.strftime('%Y%m%d-%H%M%S')}.tar.gz")
+    ctx.runner.step(f"Back up {' '.join(sources)} to {archive}", f"rm {archive}")
     if not ctx.runner.dry_run:
-        os.makedirs(d, mode=0o700, exist_ok=True)
-        old = os.umask(0o077)
+        os.makedirs(dest_dir, mode=0o700, exist_ok=True)
+        old_umask = os.umask(0o077)
         try:
-            ctx.runner.run(["tar", "-czf", out, "-P"] + paths)
+            ctx.runner.run(["tar", "-czf", archive, "-P", *sources])
         finally:
-            os.umask(old)
-        os.chmod(out, 0o600)
-        archives = sorted(glob.glob(os.path.join(d, "wireguard-tools.*.tar.gz")))
-        for a in archives[: max(0, len(archives) - KEEP_ARCHIVES)]:
-            os.remove(a)
-            ctx.out.info(f"pruned old archive: {a}")
-        rec = store.read_text(ctx.paths.backup_map) or ""
-        for line in rec.splitlines():
+            os.umask(old_umask)
+        os.chmod(archive, 0o600)
+        archives = sorted(glob.glob(os.path.join(dest_dir, "wireguard-tools.*.tar.gz")))
+        for stale in archives[: max(0, len(archives) - KEEP_ARCHIVES)]:
+            os.remove(stale)
+            ctx.out.info(f"pruned old archive: {stale}")
+        # Archived, so each file's older change copies can go (originals stay).
+        for line in (store.read_text(ctx.paths.backup_map) or "").splitlines():
             ctx.files.prune(line.split("\t")[0])
     ctx.out.warn("the archive contains private keys; keep it somewhere safe")
     ctx.out.info("restore on a fresh server: wgt restore <archive>")
-    clients.fetch_hint(ctx, out)
+    clients.fetch_hint(ctx, archive)
 
 
 def cmd_restore(ctx: Ctx, words: List[str]) -> None:
@@ -96,7 +97,7 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     if not os.path.isfile(archive):
         raise WgtError(f"no such file: {words[0]}")
     members = check_archive(archive, ctx.paths)
-    if ctx.cfg.saved.get("WARP"):
+    if ops.is_set_up(ctx):
         raise WgtError("this server is already set up; run 'wgt rollback' (or 'rollback --purge') first")
     ops.take_lock(ctx)
     has_warp = ctx.paths.wgcf_account() in members
@@ -126,5 +127,5 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     ops.release_lock(ctx)
     ctx.out.log("Setting up")
     ctx.out.info("if setup stops, fix the cause and run 'wgt setup' (the restored files stay in place)")
-    cmd = [units.wgt_command()] + (["--yes"] if ctx.args.yes else []) + ["setup"]
+    cmd = [units.wgt_command(ctx)] + (["--yes"] if ctx.args.yes else []) + ["setup"]
     os.execv(cmd[0], cmd)

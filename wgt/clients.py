@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, List, Optional
 from . import live, net, ops, render, rules, store, system, ui
 from .const import MIB
 from .errors import WgtError
+from .system import is_copy_of
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -341,7 +342,7 @@ def removal_targets(name: str, directory: str) -> List[str]:
         return []
     out = []
     for f in sorted(os.listdir(directory)):
-        if f == f"{name}.conf" or (f.startswith(f"{name}.conf.") and f.endswith(".bak")):
+        if f == f"{name}.conf" or is_copy_of(f, f"{name}.conf"):
             out.append(os.path.join(directory, f))
             continue
         tail = f".{name}.conf"
@@ -372,20 +373,20 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     if ctx.snap.is_disabled(name):
         ops.set_disabled(ctx, name, False)
     # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
-    if ctx.cfg.saved.get("WARP"):
+    if ops.is_set_up(ctx):
         ops.write_wg_conf(ctx)
     else:
         ctx.out.info(f"server not set up; {ctx.cfg.wg_conf} is rebuilt at the next setup")
-    # The config, preshared key and their copies all hold this client's secrets.
+    # The config (under any of its names), its preshared key and every copy
+    # of them hold this client's secrets.
     files = []
-    for d in (ctx.paths.client_dir, ctx.files.change_dir(ctx.paths.client_dir + "/x")):
+    for d in (ctx.paths.client_dir, ctx.files.copies_dir(ctx.paths.client_dir)):
         files += removal_targets(name, d)
-    for d in (ctx.paths.psk_dir, ctx.files.change_dir(ctx.paths.psk_dir + "/x")):
-        if os.path.isdir(d):
-            files += [os.path.join(d, f) for f in sorted(os.listdir(d))
-                      if f == f"{name}.psk" or (f.startswith(f"{name}.psk.") and f.endswith(".bak"))]
+    psk_dir = ctx.paths.psk_dir
+    if os.path.isdir(psk_dir):   # copies older versions left beside the key
+        files += [os.path.join(psk_dir, f) for f in sorted(os.listdir(psk_dir)) if is_copy_of(f, f"{name}.psk")]
     ctx.files.remove(*files)
-    # Nothing left for rollback to restore: drop them from the backup record.
+    # forget: the file, its change copies and its backup record (nothing for rollback to restore).
     ctx.files.forget(client_conf(ctx, name))
     ctx.files.forget(ctx.paths.psk(name))
 
@@ -443,30 +444,30 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     ctx.out.info(f"config now: {newconf} (same keys: the device's tunnel keeps working; rename it there if you like)")
 
 
-def _set_enabled(ctx: Ctx, words: List[str], disabling: bool) -> None:
+def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     """Disable (cut off now) or enable a client. Keys, config and address stay;
     only its peer leaves (or rejoins) wg0, live and in wg0.conf."""
-    verb = "disable" if disabling else "enable"
+    verb = "disable" if disable else "enable"
     name = get_name(ctx, words, verb)
     ops.take_lock(ctx)
     ops.require_server(ctx)
     c = ctx.snap.client(name)
     if c is None:
         raise WgtError(f"no client '{name}' (see: wgt client list)")
-    if ctx.snap.is_disabled(name) == disabling:
+    if ctx.snap.is_disabled(name) == disable:
         ctx.out.info(f"'{name}' is already {verb}d")
         return
-    if disabling:
+    if disable:
         ctx.runner.step(f"Disable client '{name}' ({c.ip}): cut off now; keys, config and address kept",
                         f"wgt client enable {name}")
         ops.confirm(ctx, f"Disable {name}?")
     else:
         ctx.runner.step(f"Enable client '{name}' ({c.ip}) with its existing config", f"wgt client disable {name}")
-    ops.set_disabled(ctx, name, disabling)
+    ops.set_disabled(ctx, name, disable)
     ops.write_wg_conf(ctx)
     if not ops.wg_up(ctx):
         ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
-    elif disabling:
+    elif disable:
         ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", c.pub, "remove"])
         ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other clients unaffected)")
     else:
@@ -475,12 +476,12 @@ def _set_enabled(ctx: Ctx, words: List[str], disabling: bool) -> None:
 
 def cmd_disable(ctx: Ctx, words: List[str]) -> None:
     """wgt client disable [name]"""
-    _set_enabled(ctx, words, True)
+    _set_disabled(ctx, words, True)
 
 
 def cmd_enable(ctx: Ctx, words: List[str]) -> None:
     """wgt client enable [name]"""
-    _set_enabled(ctx, words, False)
+    _set_disabled(ctx, words, False)
 
 
 def cmd_show(ctx: Ctx, words: List[str]) -> None:
@@ -537,7 +538,17 @@ def cmd_list(ctx: Ctx, words: List[str]) -> None:
         list_menu(ctx, names)
 
 
-ACTIONS = ("show", "qr", "share", "rotate", "toggle", "rename", "remove")
+# The action menu after `client list`: (action, what it does). "toggle" shows
+# as enable or disable, depending on the client.
+ACTIONS = (
+    ("show", "config, keys redacted"),
+    ("qr", "config as a QR code"),
+    ("share", "send with magic-wormhole"),
+    ("rotate", "new keys; the current config stops working"),
+    ("toggle", ""),
+    ("rename", "new name, same keys"),
+    ("remove", "delete the client, its keys and config"),
+)
 
 
 def list_menu(ctx: Ctx, names: List[str]) -> None:
@@ -550,11 +561,10 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
         return
     name = names[n - 1]
     disabled = ctx.snap.is_disabled(name)
-    items = ["show      config, keys redacted", "qr        config as a QR code", "share     send with magic-wormhole",
-             "rotate    new keys; the current config stops working",
-             ("enable    let back in with its existing config" if disabled
-              else "disable   cut off now, keep keys and address"),
-             "rename    new name, same keys", "remove    delete the client, its keys and config"]
+    toggle = (("enable", "let back in with its existing config") if disabled
+              else ("disable", "cut off now, keep keys and address"))
+    items = [f"{label:<9} {what}" for label, what in
+             (toggle if action == "toggle" else (action, what) for action, what in ACTIONS)]
     try:
         i = ui.menu(f"{name}:", items, "Action")
     except ValueError as e:
@@ -562,7 +572,7 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
     if i is None:
         return
     ctx.out.line()
-    action = ACTIONS[i]
+    action = ACTIONS[i][0]
     if action in ("show", "qr"):
         show(ctx, name, qr=action == "qr")
     elif action == "share":
@@ -570,7 +580,7 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
     elif action == "rotate":
         cmd_rotate(ctx, [name])
     elif action == "toggle":
-        _set_enabled(ctx, [name], not disabled)
+        _set_disabled(ctx, [name], not disabled)
     elif action == "rename":
         new = ui.ask("    New name: ")
         if new:

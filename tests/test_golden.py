@@ -1,13 +1,14 @@
 """Everything wg0.conf, warp.conf and the exit tunnels are built from must match
-what the bash version rendered for the same server (tests/golden, made by
-tools/golden-bash.sh): switching tools must rewrite nothing on a live server."""
+tests/golden byte for byte. The files were first rendered by the bash version
+(tools/golden-bash.sh), so they pin compatibility with what servers run; after
+a deliberate change, regenerate them with UPDATE_GOLDEN=1 (see DEVELOPING.md)."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
-from conftest import golden, golden_names
+from conftest import assert_golden, golden_names
 
 from wgt import render, rules, store
 
@@ -18,48 +19,48 @@ def lines(xs):
 
 def test_wg0_conf(server):
     got = render.render_wg_conf(server.cfg, server.snap, server.pub_if, store.psk_reader(server.paths))
-    assert server.norm(got) == golden(server.case, "wg0.conf")
+    assert_golden(server.case, "wg0.conf", server.norm(got))
 
 
 def test_warp_conf(server):
     profile = Path(server.paths.wg("wgcf", "wgcf-profile.conf")).read_text()
     got = render.render_warp_conf(server.cfg, profile, has_ipv6=True, resolve4=lambda h: None)
-    assert got == golden(server.case, "warp.conf")
+    assert_golden(server.case, "warp.conf", got)
 
 
 def test_hooks(server):
     for direction in ("up", "down"):
         got = lines(rules.hook_cmds(server.cfg, server.snap, server.pub_if, up=direction == "up"))
-        assert server.norm(got) == golden(server.case, f"hooks-{direction}.txt")
+        assert_golden(server.case, f"hooks-{direction}.txt", server.norm(got))
 
 
 def test_ipt_rules(server):
     got = lines("|".join(r) for r in rules.ipt_rules(server.cfg, server.pub_if, server.snap.exits))
-    assert got == golden(server.case, "ipt-rules.txt")
+    assert_golden(server.case, "ipt-rules.txt", got)
 
 
 def test_warp_switch(server):
-    assert lines(rules.warp_rule_cmds(server.cfg, True)) == golden(server.case, "warp-on.txt")
-    assert lines(rules.warp_rule_cmds(server.cfg, False)) == golden(server.case, "warp-off.txt")
+    assert_golden(server.case, "warp-on.txt", lines(rules.warp_rule_cmds(server.cfg, True)))
+    assert_golden(server.case, "warp-off.txt", lines(rules.warp_rule_cmds(server.cfg, False)))
 
 
 def test_dropin(server):
-    assert render.render_dropin(server.cfg) == golden(server.case, "dropin.conf")
+    assert_golden(server.case, "dropin.conf", render.render_dropin(server.cfg))
 
 
 def test_exits(server):
     for e in server.snap.exits:
         raw = Path(server.paths.wg("exits", f"{e.code}.proton.conf")).read_text()
-        assert render.render_proton_conf(raw, e) == golden(server.case, f"px-{e.code}.conf")
+        assert_golden(server.case, f"px-{e.code}.conf", render.render_proton_conf(raw, e))
         profile = Path(server.paths.wg("exits", e.code, "wgcf-profile.conf")).read_text()
         wx = render.render_warp_conf(server.cfg, profile, has_ipv6=True, resolve4=lambda h: None,
                                      table=rules.exit_wtable(e), mark=rules.exit_mark(e))
-        assert wx == golden(server.case, f"wx-{e.code}.conf")
+        assert_golden(server.case, f"wx-{e.code}.conf", wx)
         for direction in ("up", "down"):
             got = lines(rules.exit_hook_cmds(server.cfg, server.snap, e, up=direction == "up"))
-            assert got == golden(server.case, f"exit-{e.code}-{direction}.txt")
-        got = lines("|".join(r) for r in rules.ipt_rules_out(server.cfg, f"wx-{e.code}"))
-        assert got == golden(server.case, f"exit-{e.code}-ipt.txt")
+            assert_golden(server.case, f"exit-{e.code}-{direction}.txt", got)
+        got = lines("|".join(r) for r in rules.ipt_rules_via(server.cfg, f"wx-{e.code}"))
+        assert_golden(server.case, f"exit-{e.code}-ipt.txt", got)
 
 
 def test_client_conf(server):
@@ -67,7 +68,7 @@ def test_client_conf(server):
     c = server.snap.client(name)
     got = render.render_client_conf(server.cfg, server.snap, name, c.ip, "CLIENT-PRIVATE-KEY",
                                     "SERVER-PUBLIC-KEY", "CLIENT-PSK", "ENDPOINT", "0.0.0.0/0,::/0")
-    assert got == golden(server.case, f"client-{name}.conf")
+    assert_golden(server.case, f"client-{name}.conf", got)
 
 
 def test_every_golden_file_is_checked(server):

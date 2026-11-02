@@ -17,8 +17,8 @@ that city (see [Exit cities](#exit-cities)).
 
 Two commands:
 
-- **`wgt`** runs as root on the server: `setup`, `warp on|off`, `status`, `test`,
-  `log`, `backup`, `restore`, `rollback`, plus `wgt client …` (`add`, `list`,
+- **`wgt`** runs as root on the server: `setup`, `warp on|off`, `summary`,
+  `status`, `test`, `log`, `backup`, `restore`, `rollback`, plus `wgt client …` (`add`, `list`,
   `show`, `share`, `rotate`, `rename`, `disable`, `enable`, `remove`) and
   `wgt exit …` for exit cities.
 - **`wgt-ctl`** runs on your own machine and drives your servers over SSH: the
@@ -132,8 +132,8 @@ These files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
 Edit them to change what every new client gets (e.g. `PersistentKeepalive`).
 Changes apply to clients added or rotated afterwards. Every placeholder must
 stay: a missing value stops the command before anything is written.
-Your edits are local changes to this git checkout: commit them (or
-`git stash` around `git pull`) so updates don't stop on a conflict.
+Edit them in the repository and push, not on a server: servers update with a
+fast-forward-only pull, which stops (and changes nothing) on local edits.
 `wg0.conf`, `warp.conf` and the exit tunnels are built in code (`wgt/render.py`,
 `wgt/rules.py`), since their contents depend on the WARP setting, the routing
 rules and the client list.
@@ -155,7 +155,8 @@ git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
 
 Or from your own machine, `wgt-ctl init` does all of this over SSH
 ([below](#managing-servers-from-your-machine)). Update later with
-`git -C /opt/wireguard-tools pull` (or `wgt-ctl <server> pull`).
+`git -C /opt/wireguard-tools pull --ff-only` (or `wgt-ctl <server> pull`); see
+[Updating servers](#updating-servers) for when an update also needs `wgt setup`.
 
 ### Setup
 
@@ -361,7 +362,9 @@ Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 ### Exit-city clients
 
 A client of a city is named `<code>.<name>`. `add` asks which
-exit(s) when cities exist, or take them with `--exit`:
+exit(s) when cities exist, or take them with `--exit`. Through `wgt-ctl`, `add`
+first offers to push exit configs you've staged in `local/exits/<server>/` but
+not yet added, so their cities show up in that menu:
 
 ```bash
 wgt client add laptop --exit warp,par-fr   # laptop (default exit) and par-fr.laptop
@@ -420,18 +423,20 @@ wgt-ctl all test                       # each server in turn (one failing doesn'
 wgt-ctl clients                        # every client on every server: exit, last seen, traffic
 wgt-ctl summary                        # every server at a glance: WARP, tunnels, rules, exits, clients
 wgt-ctl boba exit-add                  # pick from local/exits/boba/*.conf (or: all) -> exit cities
-wgt-ctl all pull                       # git pull everywhere
+wgt-ctl all pull                       # git pull everywhere (fast-forward only)
 wgt-ctl all backup                     # wgt backup, fetched to local/backups/<server>/
 wgt-ctl boba branch some-branch        # switch its checkout
 wgt-ctl boba ssh
 wgt-ctl boba forget                    # drop from the list; the server is untouched
+wgt-ctl boba remove                    # tear it down: rollback --purge, delete its checkout,
+                                       #   wgcf and backup archives, then forget it (asks for its name)
 wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
 wgt-ctl init --address 1.2.3.4 --name lando --branch main -- --port 51821
 ```
 
 A server is its name or list number, or `all`; leave it out (`wgt-ctl status`)
 to pick from the list. A server name starts with a letter and can't be
-`init`, `clients`, `all`, `help` or `list`.
+`init`, `clients`, `summary`, `all`, `help` or `list`.
 Printed `scp` hints use your machine's login for that server.
 
 `init` logs in as root and, on first contact, shows the server's host key for
@@ -445,6 +450,20 @@ Private files stay on your machine under `local/`: Proton configs for exit
 cities in `exits/<server>/` (see [Exit cities](#exit-cities)), the table that
 names them in `exits/details.tsv`, and archives fetched by `backup` in
 `backups/<server>/` (they hold private keys).
+
+### Updating servers
+
+Servers run their checkout directly, and the watchdog timers run it every few
+seconds, so a pull takes effect at once. A pull changes no running config:
+
+1. Check what would render differently on each server (read-only):
+   `tools/render-diff.sh`. "identical" everywhere means a pull is all it takes.
+2. Try one server first: `wgt-ctl boba pull && wgt-ctl boba test`.
+3. Then the rest: `wgt-ctl all pull`.
+4. If step 1 showed differences (a template, `wgt/render.py` or `wgt/rules.py`
+   change, new packages or units), apply them with `wgt-ctl all setup --yes`.
+   Setup restarts `wg0` only if its settings changed, not for comment-only
+   changes.
 
 ## Check, back up, restore, clean up
 
@@ -541,20 +560,17 @@ they are one WARP device.
 
 ## Development
 
-The code is the `wgt/` package (standard library only); `bin/wgt` and
-`bin/wgt-ctl` run it from the checkout. `wg-setup.sh`, `wg-client.sh` and
-`scripts/servers.sh` are small wrappers for old habits; the last bash version
-is git tag `bash-final`.
+The code is the `wgt/` package (Python 3.8+, standard library only); `bin/wgt`
+and `bin/wgt-ctl` run it from the checkout. The last bash version is git tag
+`bash-final`.
 
 ```bash
-./test.sh                                     # all tests (first run sets up .venv with pytest); also on every push
-./test.sh -k exit                             # just the tests matching "exit" (any pytest option works)
-tools/parity.sh root@server ...               # read-only: render a live server's configs with both versions
-tools/trial.sh <proton.conf>                  # on a throwaway server: the full cycle, back to clean
+./test.sh                  # all tests (first run sets up .venv with pytest, ruff, mypy); CI runs them on push
+./test.sh -k exit          # just the tests matching "exit" (any pytest option works)
+./test.sh lint             # ruff and mypy (settings in pyproject.toml)
+tools/render-diff.sh       # read-only: what this checkout would render differently on each server
+tools/trial.sh <proton.conf>   # on a throwaway server: the full cycle, back to clean
 ```
 
-- `tests/golden/` holds what the bash version rendered from the fixture servers
-  in `tests/fixtures/` (`tools/golden-bash.sh`); the Python output must match it
-  byte for byte, so switching versions rewrites nothing on a live server.
-- Commands run through `wgt.system.Runner`; tests use `FakeRunner`, which records
-  them, so most of the logic is tested without root or a server.
+[DEVELOPING.md](DEVELOPING.md) has the module map, the conventions and how the
+tests work.

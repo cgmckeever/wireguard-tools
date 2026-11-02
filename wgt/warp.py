@@ -55,35 +55,54 @@ def install_wgcf(ctx: Ctx, reinstall: bool = False, fetch: Optional[Fetch] = Non
     except OSError:
         ctx.out.warn(f"download failed: {url}")
         return False
-    got = hashlib.sha256(data).hexdigest()
-    want = os.environ.get("WGCF_SHA256", "")
-    if not want and sums_url:
-        try:
-            name = os.path.basename(url)
-            for line in fetch(sums_url, 30).decode().splitlines():
-                f = line.split()
-                if len(f) == 2 and f[1].lstrip("*") == name:
-                    want = f[0]
-        except OSError:
-            want = ""
-    if want:
-        if got != want:
-            raise WgtError(f"wgcf checksum mismatch (got {got}, want {want})")
-        ctx.out.info(f"sha256 verified: {got}")
-    else:
-        ctx.out.warn(f"release publishes no checksums; set WGCF_SHA256={got} to pin this binary")
-    fd, tmp = tempfile.mkstemp()
-    with os.fdopen(fd, "wb") as out:
-        out.write(data)
-    os.chmod(tmp, 0o755)
-    if not ctx.runner.ok([tmp, "--help"]):
-        os.remove(tmp)
-        ctx.out.warn("downloaded wgcf does not run")
+    _verify(ctx, data, _published_sha256(fetch, sums_url, os.path.basename(url)))
+    if not _install_binary(ctx, data):
         return False
-    ctx.runner.run(["install", "-m", "755", tmp, p.wgcf_bin])
-    os.remove(tmp)
     ctx.out.info(f"installed {os.path.basename(url)}")
     return True
+
+
+def _published_sha256(fetch: Fetch, sums_url: str, name: str) -> str:
+    """The sha256 to expect for <name>: WGCF_SHA256 if set (pinning), else the
+    release's checksums file; "" if neither exists."""
+    pinned = os.environ.get("WGCF_SHA256", "")
+    if pinned or not sums_url:
+        return pinned
+    try:
+        for line in fetch(sums_url, 30).decode().splitlines():
+            fields = line.split()
+            if len(fields) == 2 and fields[1].lstrip("*") == name:
+                return fields[0]
+    except OSError:
+        pass
+    return ""
+
+
+def _verify(ctx: Ctx, data: bytes, want: str) -> None:
+    """A checksum mismatch is fatal; none published is only a warning."""
+    got = hashlib.sha256(data).hexdigest()
+    if not want:
+        ctx.out.warn(f"release publishes no checksums; set WGCF_SHA256={got} to pin this binary")
+    elif got != want:
+        raise WgtError(f"wgcf checksum mismatch (got {got}, want {want})")
+    else:
+        ctx.out.info(f"sha256 verified: {got}")
+
+
+def _install_binary(ctx: Ctx, data: bytes) -> bool:
+    """Install the downloaded wgcf, if it runs here."""
+    fd, tmp = tempfile.mkstemp()
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o755)
+        if not ctx.runner.ok([tmp, "--help"]):
+            ctx.out.warn("downloaded wgcf does not run")
+            return False
+        ctx.runner.run(["install", "-m", "755", tmp, ctx.paths.wgcf_bin])
+        return True
+    finally:
+        os.remove(tmp)
 
 
 def _fetch(url: str, timeout: int) -> bytes:

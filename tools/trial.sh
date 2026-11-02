@@ -3,7 +3,7 @@
 # ending where it started. Run on the server, as root, from the checkout:
 #   tools/trial.sh <proton.conf>
 #
-# purge -> snapshot -> setup -> test -> parity with bash -> exit city + clients
+# purge -> snapshot -> setup -> test -> exit city + clients
 # -> device on-demand and fail-closed -> backup -> purge -> restore (same keys)
 # -> warp off/on -> purge -> diff with the snapshot.
 set -uo pipefail
@@ -48,9 +48,6 @@ echo "=== setup"
 DESC="setup succeeds"; ok W setup --name bossk --yes >/root/trial-setup.log 2>&1
 DESC="wgt test passes"; ok W test >/root/trial-test.log 2>&1
 DESC="watchdog units run wgt"; ok grep -q 'ExecStart=/usr/local/sbin/wgt watchdog warp' /etc/systemd/system/wg-tools-warp-watchdog.service
-tmp=$(mktemp -d); cp -r wgt bin templates "$tmp/"; mkdir "$tmp/tools"; cp tools/parity-remote.sh "$tmp/tools/"
-git archive --prefix=bash/ bash-final | tar -xf - -C "$tmp"
-DESC="the last bash version renders the same configs"; ok bash "$tmp/tools/parity-remote.sh" "$tmp" >/dev/null; rm -rf "$tmp"
 
 echo "=== exit city and clients"
 DESC="exit add par-fr"; ok W exit add par-fr "$proton" --label "Paris, France" --yes >/root/trial-exit.log 2>&1

@@ -1,0 +1,17 @@
+# Lint and type-check settings (./test.sh lint runs both). There is nothing to
+# install: servers run the checkout directly (bin/wgt), stdlib only.
+
+[tool.ruff]
+target-version = "py38"     # the oldest Python a server may have; keeps --fix from using 3.9+ syntax
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "RET", "PIE"]
+# typing.List/Optional stay: module-level aliases (store.Reader, ops.Command,
+# rules.IptRule, warp.Fetch) are evaluated at runtime, where 3.8 lacks list[...] and X | Y.
+ignore = ["UP006", "UP007", "UP035", "UP045"]
+
+[tool.mypy]
+files = ["wgt"]
+python_version = "3.10"     # mypy's oldest supported target; CI runs the tests on 3.8
+ignore_missing_imports = true

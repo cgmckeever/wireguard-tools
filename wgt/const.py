@@ -134,11 +134,11 @@ class Paths:
 
     def exit_wgcf_dir(self, code: str) -> str:
         """Exit city <code>'s own WARP account."""
-        return self.wg("exits", code)
+        return os.path.join(self.exit_dir, code)
 
     def proton_conf(self, code: str) -> str:
         """Exit city <code>'s Proton config as given (with its label comment)."""
-        return self.wg("exits", f"{code}.proton.conf")
+        return os.path.join(self.exit_dir, f"{code}.proton.conf")
 
     def px_conf(self, code: str) -> str:
         return self.wg(f"px-{code}.conf")
@@ -162,7 +162,7 @@ class Paths:
 
     def exit_hold(self, code: str) -> str:
         """While it exists, the exit watchdog leaves <code> up (exit test)."""
-        return os.path.join(self.run_dir, f"{EXIT_WATCHDOG}.{code}.hold")
+        return self.exit_marker(code) + ".hold"
 
     @property
     def change_dir(self) -> str:
@@ -178,6 +178,6 @@ SETTING_ROWS = (
     ("SERVER_NAME", "name", ""), ("ENDPOINT", "endpoint", ""), ("WG_PORT", "port", ""),
     ("WG_SUBNET", "subnet", ""), ("WG_SUBNET6", "subnet6", ""), ("WARP", "WARP", ""),
     ("WG_DNS", "DNS", ""), ("CLIENT_ALLOWED_IPS", "allowed IPs", ""), ("WG_MTU", "MTU", ""),
-    ("WARP_MTU", "WARP MTU", "1280"), ("WG_IF", "interface", "wg0"), ("WARP_IF", "WARP interface", "warp"),
-    ("RT_TABLE", "table", "100"),
+    ("WARP_MTU", "WARP MTU", DEFAULTS["WARP_MTU"]), ("WG_IF", "interface", DEFAULTS["WG_IF"]),
+    ("WARP_IF", "WARP interface", DEFAULTS["WARP_IF"]), ("RT_TABLE", "table", DEFAULTS["RT_TABLE"]),
 )

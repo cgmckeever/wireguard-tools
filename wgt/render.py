@@ -19,10 +19,10 @@ _VAL = re.compile(r"^[^=]*=\s*")
 _COMMENT_OR_BLANK = re.compile(r"^\s*(#|$)")
 
 
-def render_template(name: str, template_dir: str = TEMPLATE_DIR, **values: str) -> str:
+def render_template(name: str, **values: str) -> str:
     """templates/<name> with each {{KEY}} replaced; an unfilled {{KEY}} is an
     error. Ends with exactly one newline (as `printf '%s\\n' "$(<file)"`)."""
-    path = os.path.join(template_dir, name)
+    path = os.path.join(TEMPLATE_DIR, name)
     try:
         with open(path, encoding="utf-8") as f:
             out = f.read().rstrip("\n")
@@ -206,6 +206,7 @@ def exit_desc(snap: Snapshot, name: str) -> str:
 
 def render_client_conf(cfg: Config, snap: Snapshot, name: str, ip: str, private_key: str,
                        server_pub: str, psk: str, endpoint: str, allowed: str) -> str:
+    # Address as the bash version wrote it: "ip/32, ip6/128" (a space after the first comma only).
     return render_template(
         "client.conf.tmpl",
         NAME=name, SERVER_NAME=cfg.SERVER_NAME, EXIT=exit_desc(snap, name), PRIVATE_KEY=private_key,

@@ -1,9 +1,9 @@
 # Python port: plan
 
-**Status:** steps 1-7 and the clean-up are done on branch `python`; the bash
-version is removed from the branch (git tag `bash-final` keeps it). boba runs
-the Python version; ig88 and dengar switch after the merge. This document is
-the plan as agreed; README.md describes the tool as it is.
+> **Historical.** This was the plan for porting the bash tools to Python. It
+> was completed on 2026-11-01: every server runs `wgt` from `main`, and the
+> bash version is git tag `bash-final`. README.md describes the tool as it is
+> now, and DEVELOPING.md the layout, conventions and tests.
 
 Branch `python`. The goal is the same tool, with the same behaviour and the same
 files on the servers, rewritten in Python so it can be unit-tested and so the
@@ -65,37 +65,7 @@ that need one show the numbered server list. `local/` keeps its layout:
 
 ## Layout
 
-```
-wgt/                      the package (stdlib only)
-  cli.py                  wgt: usage, dispatch, log, debug render
-  ctx.py                  the command line (Args) and what every command gets (Ctx)
-  ctl.py                  wgt-ctl (ssh/scp to the servers)
-  const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError
-  config.py               settings: flag > env > saved > default, validation
-  store.py                the server files: state, clients.db, exits.db, disabled, backup record
-  net.py, host.py         address maths; host facts and preflight
-  rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP switch, exits)
-  render.py               wg0.conf, warp.conf, px/wx, client configs, templates
-  system.py               Runner (commands, dry-run, journal), FakeRunner, Files (writes with backups)
-  live.py                 read-only queries: handshakes, rules, tables, units, Cloudflare's trace
-  ops.py                  shared operations: lock, confirm, state, endpoint, wg0.conf, peers,
-                          the client/exit databases, subcommand dispatch
-  warp.py, units.py       wgcf and WARP profiles; systemd units, watchdog timers, ufw
-  server.py               setup, warp on|off, rollback (setup's inverse)
-  backup.py               backup, restore (archive checks)
-  clients.py              client commands, the clients table (and QR, share)
-  exits.py                exit commands
-  checks.py               test, status
-  results.py              PASS/FAIL counts shared by `test` and `exit test`
-  watchdog.py             both watchdogs
-  ui.py                   ages, numbered menus, prompts
-bin/wgt, bin/wgt-ctl      launchers (put the checkout on sys.path and call main)
-templates/                client config and systemd unit templates
-tests/                    pytest: unit, golden files, FakeRunner
-tools/                    parity.sh + parity-remote.sh (live render comparison),
-                          golden-bash.sh (goldens from bash-final), trial.sh (full cycle)
-test.sh                   runs the tests (sets up .venv on first use)
-```
+See DEVELOPING.md (kept current there).
 
 ## How each step is proved
 
@@ -166,30 +136,4 @@ that ships before then changes a running server.
 
 ## Conventions
 
-- Errors raise one `WgtError`, which prints `ERROR: ...` and exits 1. A
-  failure part-way through setup removes the wg0 rules it had applied, as the
-  ERR trap does today.
-- Every change goes through `Runner` or `Files.write`, so it is dry-run aware
-  and backed up first. Keys never reach a log line, a command line or a diff:
-  diffs are redacted, and keys are passed through files or stdin.
-  Two deliberate exceptions write directly: wg-tools.state and the server
-  keys (`system.write_private`: no change copies of keys, and rollback
-  reads the state rather than restoring it), and the watchdogs' marker
-  files in /run.
-- Things a test can't fake go through a seam: commands through the Runner
-  (wgcf too, via `run_logged`), downloads through `install_wgcf(fetch=)`,
-  "now" through `ctx.clock`. tests/test_server.py runs a whole setup and
-  `rollback --purge` on the FakeRunner.
-- Type hints throughout (`ctx: Ctx`, imported under `TYPE_CHECKING`);
-  `dataclasses` for clients, exits and settings. ruff and mypy stay clean.
-- Output goes through `Out`: `==> ` steps, 4-space info lines, `Out.line` for
-  tables, WARN/ERROR on stderr. Only raw payloads (a config, a QR code, the
-  debug render, the help text) are written straight to stdout.
-- Prompts: standalone questions are indented 4 spaces, a menu's prompt 2 (as
-  its title). Steps start with a verb and carry an accurate undo hint.
-- Errors: `usage: ...` for missing arguments; `unknown <x> command: ...
-  (see: wgt help)` for a wrong one.
-- Paths come from `Paths` helpers (const.py), never literals, so tests can
-  move every one of them into a temp dir.
-- Module and function docstrings say why, not what, matching the current
-  comments.
+See DEVELOPING.md (kept current there).

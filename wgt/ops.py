@@ -1,5 +1,6 @@
-"""Operations shared by the commands: the lock, confirmations, the state
-file, the endpoint, wg0.conf, and live peers."""
+"""Operations shared by the commands: the lock, confirmations, setup checks,
+the state file, the endpoint, wg0.conf, live peers, the client and exit
+databases, and subcommand dispatch (verbs, leftover words)."""
 
 from __future__ import annotations
 
@@ -80,17 +81,19 @@ def confirm(ctx: Ctx, question: str, default_yes: bool = False) -> None:
         return
     if not ui.have_tty():
         raise WgtError(f'no terminal to confirm "{question}"; re-run with --yes')
-    reply = ui.ask(f"    {question} {'[Y/n]' if default_yes else '[y/N]'} ")
-    if not reply and default_yes:
-        reply = "y"
-    if not reply.lower().startswith("y"):
+    if not ui.yes(question, default_yes):
         raise WgtError(f"aborted at: {ctx.runner.current_step} (nothing further changed; --yes skips prompts)")
+
+
+def is_set_up(ctx: Ctx) -> bool:
+    """`wgt setup` has run here (its settings are saved; rollback clears WARP)."""
+    return bool(ctx.cfg.saved.get("WARP"))
 
 
 def require_setup(ctx: Ctx) -> None:
     """For commands that need only `wgt setup` to have run (exit cities): its
     settings are saved (after rollback no WARP setting is)."""
-    if not ctx.cfg.saved.get("WARP"):
+    if not is_set_up(ctx):
         raise WgtError("not set up; run 'wgt setup'")
 
 
@@ -99,7 +102,7 @@ def require_server(ctx: Ctx) -> None:
     and wg0.conf exist. A dry run only warns, to show what would happen."""
     pub = ctx.paths.server_pub
     have_pub = os.path.isfile(pub) and os.path.getsize(pub) > 0
-    if ctx.cfg.saved.get("WARP") and os.path.isfile(ctx.cfg.wg_conf) and have_pub:
+    if is_set_up(ctx) and os.path.isfile(ctx.cfg.wg_conf) and have_pub:
         return
     if ctx.runner.dry_run:
         ctx.out.warn("server not set up yet; showing what would happen")

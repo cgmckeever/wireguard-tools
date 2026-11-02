@@ -22,10 +22,6 @@ class Facts:
     routes4: str            # `ip -4 route show table all`, for picking a free subnet
     default_route: str      # the main table's first IPv4 default route
 
-    def accept_ra(self, runner: Runner, ifc: str) -> Optional[str]:
-        out = runner.query(["sysctl", "-n", f"net.ipv6.conf.{ifc}.accept_ra"]).strip()
-        return out or None
-
 
 def gather(runner: Runner) -> Facts:
     """Read this machine's facts (read-only commands)."""

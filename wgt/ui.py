@@ -1,4 +1,6 @@
-"""Terminal helpers: ages, numbered menus, prompts."""
+"""Terminal helpers: ages, prompts (yes/no, numbers), numbered menus, and the
+clients table's columns (ClientRow; shared by `wgt client list` and
+`wgt-ctl clients`)."""
 
 from __future__ import annotations
 
@@ -49,6 +51,12 @@ def say(text: str) -> None:
             tty.write(text)
     except OSError:
         pass
+
+
+def yes(question: str, default: bool) -> bool:
+    """Ask a yes/no question ("    question [Y/n] "); Enter takes <default>."""
+    reply = ask(f"    {question} {'[Y/n]' if default else '[y/N]'} ").lower()
+    return default if not reply else reply.startswith("y")
 
 
 def pick_number(prompt: str, count: int) -> Optional[int]:

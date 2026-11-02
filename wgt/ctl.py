@@ -1,14 +1,15 @@
 """`wgt-ctl`: drives the servers listed in local/servers from your own machine
 (macOS or Linux). The server is the first word:
 
-  wgt-ctl                               the servers: branch@commit (or unreachable), exits staged
+  wgt-ctl [list]                        the servers: branch@commit (or unreachable), exits staged
   wgt-ctl init [--address A] [--name N] [--user U] [--branch B] [-- setup flags]
                                         set up a new server (or adopt one already running these tools)
   wgt-ctl clients                       every client on every server
   wgt-ctl summary                       every server at a glance (wgt summary on each)
   wgt-ctl <server|all> <wgt command>    run it there, e.g. wgt-ctl boba client add phone --exit par-fr
   wgt-ctl <server|all> pull | backup    git pull / back up and fetch the archive to local/backups/<server>/
-  wgt-ctl <server> exit-add [n|all] | ssh | branch <b> | forget [--yes]
+  wgt-ctl <server> exit-add [n|all]     push a Proton config from local/exits/<server>/ (as an exit city)
+  wgt-ctl <server> ssh [command] | branch <b> | forget [--yes]
   wgt-ctl <server> remove [--yes]       tear wireguard-tools off the server (rollback --purge,
                                         delete its checkout, wgcf and archives), then forget it
 
@@ -76,19 +77,29 @@ def ensure_local() -> None:
     os.chmod(LIST, 0o600)
 
 
+NO_WGT = 3   # the remote exit status when a server has no bin/wgt
+
+
+def no_wgt(s: Server) -> str:
+    """Why a server can't run wgt commands: its checkout predates wgt (or is missing)."""
+    return f"no {s.dir}/bin/wgt there (still the bash tools?); update it: wgt-ctl {s.name} pull"
+
+
 def servers() -> List[Server]:
     """local/servers, checked: its names become local paths and its targets and
     directories go into ssh and remote commands."""
-    out_: List[Server] = []
+    found: List[Server] = []
     for n, line in enumerate((store.read_text(LIST) or "").splitlines(), 1):
-        f = line.split()
-        if not f or f[0].startswith("#"):
+        fields = line.split()
+        if not fields or fields[0].startswith("#"):
             continue
-        if len(f) < 2 or not valid_server(f[0]) or not _TARGET.match(f[1]) or (len(f) > 2 and not _DIR.match(f[2])):
+        name, target = fields[0], fields[1] if len(fields) > 1 else ""
+        checkout = fields[2] if len(fields) > 2 else DEF_DIR
+        if len(fields) < 2 or not valid_server(name) or not _TARGET.match(target) or not _DIR.match(checkout):
             raise WgtError(f"{LIST} line {n}: want 'name user@host [/checkout/dir]' "
                            f"(name: {SERVER_NAME_RULE}): {line.strip()}")
-        out_.append(Server(f[0], f[1], f[2] if len(f) > 2 else DEF_DIR))
-    return out_
+        found.append(Server(name, target, checkout))
+    return found
 
 
 def find(sel: str) -> Server:
@@ -250,11 +261,10 @@ def _login(target: str) -> None:
     first = [o for o in SSH_OPTS if o != "StrictHostKeyChecking=yes"] + ["-o", "StrictHostKeyChecking=ask"]
     if subprocess.run(["ssh", *first, "-o", "BatchMode=no", target, "true"]).returncode != 0:
         raise WgtError(f"cannot log in to {target}")
-    if not can_login(target):
-        reply = ui.ask("    Log in with your SSH key from now on (ssh-copy-id)? [Y/n] ")
-        wants_key = not reply or reply.lower().startswith("y")
-        if wants_key and subprocess.run(["ssh-copy-id", target]).returncode != 0:
-            raise WgtError("ssh-copy-id failed")
+    if can_login(target) or not ui.yes("Log in with your SSH key from now on (ssh-copy-id)?", default=True):
+        return
+    if subprocess.run(["ssh-copy-id", target]).returncode != 0:
+        raise WgtError("ssh-copy-id failed")
 
 
 def _probe(target: str, address: str) -> Dict[str, str]:
@@ -300,7 +310,7 @@ def _install(target: str, branch: str) -> None:
         export DEBIAN_FRONTEND=noninteractive
         command -v git >/dev/null || {{ apt-get update -qq && apt-get install -y -qq git >/dev/null; }}
         if [ -d {DEF_DIR}/.git ]; then
-            git -C {DEF_DIR} fetch -q && git -C {DEF_DIR} checkout -q {q(branch)} && git -C {DEF_DIR} pull -q
+            git -C {DEF_DIR} fetch -q && git -C {DEF_DIR} checkout -q {q(branch)} && git -C {DEF_DIR} pull --ff-only -q
         else git clone -q -b {q(branch)} {q(url)} {DEF_DIR}; fi
         git -C {DEF_DIR} log --oneline -1""")
     if rc != 0:
@@ -332,7 +342,7 @@ def cmd_summary() -> int:
     from concurrent.futures import ThreadPoolExecutor
 
     def fetch(s: Server) -> Tuple[int, str]:
-        return ssh(s.target, f"if [ -x {s.wgt} ]; then {s.wgt} summary 2>&1; else exit 3; fi",
+        return ssh(s.target, f"if [ -x {s.wgt} ]; then {s.wgt} summary 2>&1; else exit {NO_WGT}; fi",
                    batch=True, capture=True)
 
     todo = servers()
@@ -347,8 +357,8 @@ def cmd_summary() -> int:
             print(text.rstrip("\n"))
             continue
         rc = 1
-        why = {3: f"runs an older version without wgt summary (update: wgt-ctl {s.name} pull)",
-               255: "unreachable"}.get(code, text.strip().splitlines()[-1] if text.strip() else f"failed (exit {code})")
+        last = text.strip().splitlines()[-1] if text.strip() else f"failed (exit {code})"
+        why = {NO_WGT: no_wgt(s), 255: "unreachable"}.get(code, last)
         print(f"{s.name}  ({s.target})")
         print(f"    {why}")
     print("")
@@ -361,11 +371,11 @@ def cmd_clients() -> None:
     print("")
     print(fmt.format("SERVER", *ui.CLIENT_HEAD))
     for s in servers():
-        rc, o = ssh(s.target, f"if [ -x {s.wgt} ]; then {s.wgt} client list --tsv; else exit 3; fi",
+        rc, o = ssh(s.target, f"if [ -x {s.wgt} ]; then {s.wgt} client list --tsv; else exit {NO_WGT}; fi",
                     batch=True, capture=True)
         if rc != 0:
-            note = {3: "(runs the older bash tools; wgt-ctl " + s.name + " pull)", 255: "(unreachable)"}
-            print(f"  {s.name:<10} {note.get(rc, f'(client list failed: exit {rc})')}")
+            note = {NO_WGT: no_wgt(s), 255: "unreachable"}.get(rc, f"client list failed: exit {rc}")
+            print(f"  {s.name:<10} ({note})")
             continue
         rows = sorted((ui.ClientRow.from_tsv(line) for line in o.splitlines() if line),
                       key=lambda row: store.device_key(row.name))
@@ -381,8 +391,7 @@ def cmd_clients() -> None:
 def do_wgt(s: Server, args: List[str]) -> int:
     """Any wgt command, run there. Printed scp hints use this machine's login."""
     env = f"WGT_SSH_TARGET={shlex.quote(s.target)}"
-    msg = f"ERROR: {s.name} has no {s.dir}/bin/wgt (it runs the older bash tools); update it: wgt-ctl {s.name} pull"
-    missing = f"echo {shlex.quote(msg)} >&2; exit 1"
+    missing = f"echo {shlex.quote('ERROR: ' + no_wgt(s))} >&2; exit 1"
     return ssh(s.target, f"if [ -x {s.wgt} ]; then {env} {s.wgt} {q(*args)}; else {missing}; fi", tty=True)[0]
 
 
@@ -392,10 +401,13 @@ def no_args(cmd: str, args: List[str]) -> None:
 
 
 def do_pull(s: Server, args: List[str]) -> int:
-    """git pull its checkout."""
+    """git pull its checkout (fast-forward only). A pull changes no running
+    config; when rendering changed (tools/render-diff.sh shows it), run setup."""
     no_args("pull", args)
     d = shlex.quote(s.dir)
-    return ssh(s.target, f"git -C {d} pull -q && git -C {d} log --oneline -1 | sed 's/^/    /'")[0]
+    # --ff-only: a checkout with local commits or edits stops with git's message
+    # instead of merging on a production server.
+    return ssh(s.target, f"git -C {d} pull --ff-only -q && git -C {d} log --oneline -1 | sed 's/^/    /'")[0]
 
 
 def do_branch(s: Server, args: List[str]) -> int:
@@ -403,7 +415,8 @@ def do_branch(s: Server, args: List[str]) -> int:
     if len(args) != 1 or not _BRANCH.match(args[0]):
         raise WgtError("usage: wgt-ctl <server> branch <branch>")
     d = shlex.quote(s.dir)
-    return ssh(s.target, f"set -e; git -C {d} fetch -q; git -C {d} checkout -q {q(args[0])}; git -C {d} pull -q; "
+    return ssh(s.target, f"set -e; git -C {d} fetch -q; git -C {d} checkout -q {q(args[0])}; "
+                         f"git -C {d} pull --ff-only -q; "
                          f"printf '    %s: ' \"$(git -C {d} rev-parse --abbrev-ref HEAD)\"; "
                          f"git -C {d} log --oneline -1")[0]
 
@@ -434,22 +447,36 @@ def do_backup(s: Server, args: List[str]) -> int:
     return 0
 
 
+YES = ("--yes", "-y")
+
+
+def only_yes(cmd: str, args: List[str]) -> bool:
+    """For commands whose only option is --yes: refuse anything else; True if given."""
+    if set(args) - set(YES):
+        raise WgtError(f"usage: wgt-ctl <server> {cmd} [--yes]")
+    return any(a in YES for a in args)
+
+
+def needs_terminal(cmd: str) -> None:
+    """A command about to ask, without --yes: there must be a terminal to ask on."""
+    if not ui.have_tty():
+        raise WgtError(f"{cmd} needs --yes without a terminal")
+
+
 def do_remove(s: Server, args: List[str]) -> int:
     """Tear wireguard-tools off a server: rollback --purge (keys, clients,
     WARP accounts, exit cities, rules, units; original files restored), then
     its checkout, the wgt link, wgcf and the backup archives. Packages stay.
     Only after all that succeeds is it forgotten here. Asks for the server's
     name unless --yes."""
-    if set(args) - {"--yes", "-y"}:
-        raise WgtError("usage: wgt-ctl <server> remove [--yes]")
+    sure = only_yes("remove", args)
     if s.dir.rstrip("/").count("/") < 2:
         raise WgtError(f"refusing to delete checkout '{s.dir}' (too close to /)")
     out.warn(f"this removes wireguard-tools from {s.name} ({s.target}): its keys, clients, WARP accounts, "
              f"exit cities and backup archives, and {s.dir}. Its clients stop working. Irreversible "
              f"(want a copy first? wgt-ctl {s.name} backup)")
-    if "--yes" not in args and "-y" not in args:
-        if not ui.have_tty():
-            raise WgtError("remove needs --yes without a terminal")
+    if not sure:
+        needs_terminal("remove")
         if ui.ask(f"    Type the server's name ({s.name}) to remove it: ") != s.name:
             out.info("kept")
             return 0
@@ -459,7 +486,8 @@ def do_remove(s: Server, args: List[str]) -> int:
         if [ -x {d}/bin/wgt ]; then {d}/bin/wgt rollback --purge --yes; fi
         rm -rf {d} /var/backups/wireguard-tools
         rm -f /usr/local/bin/wgcf /usr/local/sbin/wgt
-        echo "    removed {s.dir}, /usr/local/bin/wgcf and /var/backups/wireguard-tools (packages left installed)"
+        echo "    removed {s.dir}, /usr/local/sbin/wgt, /usr/local/bin/wgcf and /var/backups/wireguard-tools"
+        echo "    (packages left installed)"
         """, tty=True)
     if rc != 0:
         raise WgtError(f"teardown failed on {s.name} (exit {rc}); it stays in {LIST} - fix the cause and re-run")
@@ -468,13 +496,9 @@ def do_remove(s: Server, args: List[str]) -> int:
 
 def do_forget(s: Server, args: List[str]) -> int:
     """Drop it from local/servers; nothing on the server changes."""
-    if set(args) - {"--yes", "-y"}:
-        raise WgtError("usage: wgt-ctl <server> forget [--yes]")
-    if "--yes" not in args and "-y" not in args:
-        if not ui.have_tty():
-            raise WgtError("forget needs --yes without a terminal")
-        reply = ui.ask(f"    Remove '{s.name}' from {LIST}? (nothing on the server changes) [y/N] ")
-        if not reply.lower().startswith("y"):
+    if not only_yes("forget", args):
+        needs_terminal("forget")
+        if not ui.yes(f"Remove '{s.name}' from {LIST}? (nothing on the server changes)", default=False):
             out.info("kept")
             return 0
     lines = [line for line in (store.read_text(LIST) or "").splitlines() if (line.split() or [""])[0] != s.name]
@@ -593,7 +617,9 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
     not on the server, list them and offer to push one, so the server's exit
     menu can offer it. Skipped when the exit is already given."""
     name = next((a for a in args[1:] if not a.startswith("-")), "")
-    if "--exit" in args or any(a.startswith("--exit=") for a in args) or "." in name or "--yes" in args:
+    # Nothing to offer when the exit is given (--exit, or a <code>.<name>
+    # client name) or there must be no prompts (--yes).
+    if "--exit" in args or any(a.startswith("--exit=") for a in args) or "." in name or any(a in YES for a in args):
         return
     files = local_exit_files(s)
     if not files or not ui.have_tty():
@@ -699,6 +725,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 raise WgtError(f"usage: wgt-ctl {first} <command> (see: wgt-ctl help)")
             return on(first, rest[0], rest[1:])
         if first == "" and rest:
+            # An empty server word (an unset variable in a script) picks one, as no server does.
             return on("", rest[0], rest[1:])
         if first in CTL or first in WGT_COMMANDS:
             # No server given: pick one, then run the command.

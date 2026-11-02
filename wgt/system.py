@@ -54,9 +54,35 @@ def write_private(path: str, content: str) -> None:
     atomic_write(path, content, 0o600)
 
 
+# --- marker files in /run (the watchdogs' and exit tests' small notes) ---
+# Written directly: they aren't configuration, so no backups and no dry-run.
+
+def write_marker(path: str, value: str = "") -> None:
+    with open(path, "w") as f:
+        f.write(value)
+
+
+def read_marker(path: str) -> int:
+    """A marker's number (a timestamp), or 0 if it's missing or not a number."""
+    try:
+        with open(path) as f:
+            value = f.read().strip()
+    except OSError:
+        return 0
+    return int(value) if value.isdigit() else 0
+
+
+def remove_markers(*paths: str) -> None:
+    for path in paths:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(path)
+
+
 def is_copy_of(name: str, base: str) -> bool:
     """True for <base>.<anything>.bak (a change copy), as the shell glob
-    "<base>.*.bak" matched; a plain <base>.bak someone made by hand is not one."""
+    "<base>.*.bak" matched; a plain <base>.bak someone made by hand is not one.
+    A <base> containing glob characters matches nothing: those would be read
+    as a pattern (and no file we manage has them)."""
     return fnmatch.fnmatchcase(name, base + ".*.bak") and not fnmatch.fnmatchcase(base, "*[*?[]*")
 
 
@@ -246,7 +272,11 @@ class Files:
 
     def change_dir(self, path: str) -> str:
         """Where <path>'s change copies go: files/ plus its own directory."""
-        return self.paths.change_dir + os.path.dirname(os.path.abspath(path))
+        return self.copies_dir(os.path.dirname(os.path.abspath(path)))
+
+    def copies_dir(self, directory: str) -> str:
+        """Where change copies of files in <directory> go (files/ + <directory>)."""
+        return self.paths.change_dir + os.path.abspath(directory)
 
     def write(self, path: str, mode: int, content: str) -> bool:
         """Write <content> to <path> if it differs (atomically, after a backup).
@@ -286,7 +316,7 @@ class Files:
             os.makedirs(d, exist_ok=True)
             stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(self.clock()))
             bak = os.path.join(d, f"{os.path.basename(path)}.{stamp}.bak")
-            while os.path.exists(bak):
+            while os.path.exists(bak):   # two changes within the same second
                 bak = bak[: -len(".bak")] + f".{os.getpid() % 32768}.bak"
             shutil.copy2(path, bak)
             self.out.info(f"backup: {bak}")
@@ -299,37 +329,45 @@ class Files:
         self.prune(path)
 
     def prune(self, path: str) -> None:
-        """Keep <path>'s original copy and its KEEP_CHANGES newest; copies older
-        versions left next to the file are moved (the original) or deleted."""
+        """Keep <path>'s original copy and its KEEP_CHANGES newest change copies.
+        Copies the bash version left beside the file (<file>.*.bak) are first
+        moved into the change dir if one is the recorded original, else deleted."""
         if self.runner.dry_run:
             return
-        orig = store.backup_orig(store.read_text(self.paths.backup_map), path)
-        d = self.change_dir(path)
-        base = os.path.basename(path)
-        parent = os.path.dirname(path)
-        if os.path.isdir(parent):
-            for name in sorted(os.listdir(parent)):
-                b = os.path.join(parent, name)
-                if not (is_copy_of(name, base) and os.path.isfile(b)):
-                    continue
-                if b == orig:
-                    os.makedirs(d, exist_ok=True)
-                    shutil.move(b, os.path.join(d, name))
-                    orig = os.path.join(d, name)
-                    write_private(self.paths.backup_map,
-                                        store.backup_move(store.read_text(self.paths.backup_map), path, orig))
-                else:
-                    os.remove(b)
-        if not os.path.isdir(d):
+        orig = self._adopt_stray_copies(path)
+        copies_dir = self.change_dir(path)
+        if not os.path.isdir(copies_dir):
             return
-        baks = sorted(os.path.join(d, n) for n in os.listdir(d) if is_copy_of(n, base))
+        base = os.path.basename(path)
+        copies = sorted(os.path.join(copies_dir, n) for n in os.listdir(copies_dir) if is_copy_of(n, base))
         kept = 0
-        for b in reversed(baks):   # names end in a timestamp: newest last
-            if b == orig:
+        for copy in reversed(copies):   # names end in a timestamp: newest last
+            if copy == orig:
                 continue
             kept += 1
             if kept > KEEP_CHANGES:
-                os.remove(b)
+                os.remove(copy)
+
+    def _adopt_stray_copies(self, path: str) -> str:
+        """Move or delete the bash version's copies beside <path>; returns the
+        original's (possibly new) location."""
+        orig = store.backup_orig(store.read_text(self.paths.backup_map), path)
+        parent, base = os.path.split(path)
+        if not os.path.isdir(parent):
+            return orig
+        for name in sorted(os.listdir(parent)):
+            stray = os.path.join(parent, name)
+            if not (is_copy_of(name, base) and os.path.isfile(stray)):
+                continue
+            if stray != orig:
+                os.remove(stray)
+                continue
+            copies_dir = self.change_dir(path)
+            os.makedirs(copies_dir, exist_ok=True)
+            orig = os.path.join(copies_dir, name)
+            shutil.move(stray, orig)
+            write_private(self.paths.backup_map, store.backup_move(store.read_text(self.paths.backup_map), path, orig))
+        return orig
 
     def write_config(self, path: str, mode: int, content: str) -> bool:
         """Write a tunnel config; True only if its settings changed. A change in

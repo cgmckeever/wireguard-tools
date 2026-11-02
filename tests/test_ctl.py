@@ -3,8 +3,6 @@ details table and the first-word grammar."""
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from wgt import ctl
@@ -84,24 +82,6 @@ def test_all_log_does_not_follow(local, monkeypatch):
     ctl.on("all", "log", [])
     assert all("--no-follow" in a for a in seen)
 
-
-def test_servers_sh_wrapper_translates(tmp_path):
-    import shutil
-    import subprocess
-    root = tmp_path / "repo"
-    (root / "scripts").mkdir(parents=True)
-    (root / "bin").mkdir()
-    shutil.copy(os.path.join(ctl.ROOT, "scripts", "servers.sh"), root / "scripts")
-    (root / "bin" / "wgt-ctl").write_text('#!/bin/sh\nprintf "%s|" "$@"\n')
-    os.chmod(root / "bin" / "wgt-ctl", 0o755)
-
-    def run(*args):
-        return subprocess.run(["bash", str(root / "scripts" / "servers.sh"), *args],
-                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True).stdout
-    assert run("status", "boba") == "boba|status|"
-    assert run("client", "boba", "add", "x") == "boba|client|add|x|"
-    assert run("status") == "status|"
-    assert run("clients") == "clients|"
 
 
 def test_remove_tears_down_then_forgets(local, monkeypatch):

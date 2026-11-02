@@ -1,5 +1,5 @@
-"""The server's own files, in the formats the bash version wrote (so either
-can read what the other wrote):
+"""The server's own files, in the formats the bash version wrote (servers
+switched over with their files unchanged; keep them compatible):
 
   wg-tools.state     KEY=value lines; the last one for a key wins
   clients.db         "name ip public-key allowed-ips" (no private keys)
@@ -192,7 +192,10 @@ class Exit:
 
     def line(self) -> str:
         """The exits.db line: as read, or built from the fields."""
-        return self.raw or f"{self.code} {self.idx} {self.label}"
+        return self.raw or self.fields_line()
+
+    def fields_line(self) -> str:
+        return f"{self.code} {self.idx} {self.label}"
 
     @property
     def px(self) -> str:
@@ -226,10 +229,10 @@ def parse_exits(text: Optional[str]) -> List[Exit]:
 def put_exit(text: Optional[str], code: str, entry: Optional[Exit] = None) -> str:
     """exits.db with <code> removed (other lines kept as they are),
     optionally adding <entry> at the end."""
-    lines = [EXITS_HEADER] + [e.line() for e in parse_exits(text) if e.code != code]
+    lines = [e.line() for e in parse_exits(text) if e.code != code]
     if entry is not None:
-        lines.append(f"{entry.code} {entry.idx} {entry.label}")
-    return "\n".join(lines) + "\n"
+        lines.append(entry.fields_line())
+    return "\n".join([EXITS_HEADER, *lines]) + "\n"
 
 
 # --- backup record ---
@@ -237,8 +240,8 @@ def put_exit(text: Optional[str], code: str, entry: Optional[Exit] = None) -> st
 def backup_orig(text: Optional[str], path: str) -> str:
     """A file's original copy (what rollback restores), NEW if we created it, "" if unknown."""
     for line in (text or "").splitlines():
-        f, _, orig = line.partition("\t")
-        if f == path:
+        recorded, _, orig = line.partition("\t")
+        if recorded == path:
             return orig
     return ""
 
@@ -251,16 +254,15 @@ def backup_record(text: Optional[str], path: str, orig: str) -> str:
 
 
 def backup_forget(text: Optional[str], path: str) -> str:
+    """The backup record without <path>."""
     return "".join(line + "\n" for line in (text or "").splitlines() if line.partition("\t")[0] != path)
 
 
 def backup_move(text: Optional[str], path: str, new_orig: str) -> str:
     """The backup record with <path>'s original pointed at <new_orig>."""
-    out = []
-    for line in (text or "").splitlines():
-        f, _, orig = line.partition("\t")
-        out.append(f"{f}\t{new_orig}" if f == path else line)
-    return "".join(line + "\n" for line in out)
+    lines = [f"{path}\t{new_orig}" if line.partition("\t")[0] == path else line
+             for line in (text or "").splitlines()]
+    return "".join(line + "\n" for line in lines)
 
 
 # --- the whole picture, read once ---

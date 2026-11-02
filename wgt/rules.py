@@ -62,15 +62,15 @@ def warp_route(cfg: Config) -> List[str]:
     return [f"{f} route replace default dev {cfg.WARP_IF} table {cfg.RT_TABLE}" for f in cfg.families()]
 
 
-def ipt_lines(cfg: Config, cmd: str, out: str) -> List[IptRule]:
+def ipt_rules_for(cfg: Config, cmd: str, out_if: str) -> List[IptRule]:
     """The NAT/forwarding rules for one family (iptables|ip6tables) and way out."""
     net = cfg.family_net(cmd)
     wg = cfg.WG_IF
     return [
-        (cmd, "nat", "POSTROUTING", f"-s {net} -o {out} -j MASQUERADE"),
-        (cmd, "filter", "FORWARD", f"-i {wg} -o {out} -j ACCEPT"),
-        (cmd, "filter", "FORWARD", f"-i {out} -o {wg} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"),
-        (cmd, "mangle", "FORWARD", f"-o {out} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"),
+        (cmd, "nat", "POSTROUTING", f"-s {net} -o {out_if} -j MASQUERADE"),
+        (cmd, "filter", "FORWARD", f"-i {wg} -o {out_if} -j ACCEPT"),
+        (cmd, "filter", "FORWARD", f"-i {out_if} -o {wg} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"),
+        (cmd, "mangle", "FORWARD", f"-o {out_if} -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu"),
     ]
 
 
@@ -78,21 +78,21 @@ def ipt_rules(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[IptRule]:
     """Firewall rules for every way out (each matches only its own -o, so all
     can stay in place), plus the WireGuard port. Inserted (-I) so ufw/Docker
     DROP policies can't shadow them."""
-    out: List[IptRule] = []
+    found: List[IptRule] = []
     for cmd in ("iptables", "ip6tables"):
         if cmd == "ip6tables" and not cfg.ipv6:
             continue
-        for o in out_ifs(cfg, pub_if, exits):
-            out += ipt_lines(cfg, cmd, o)
-    out.append(("iptables", "filter", "INPUT", f"-p udp --dport {cfg.WG_PORT} -j ACCEPT"))
-    return out
+        for out_if in out_ifs(cfg, pub_if, exits):
+            found += ipt_rules_for(cfg, cmd, out_if)
+    found.append(("iptables", "filter", "INPUT", f"-p udp --dport {cfg.WG_PORT} -j ACCEPT"))
+    return found
 
 
-def ipt_rules_out(cfg: Config, out: str) -> List[IptRule]:
+def ipt_rules_via(cfg: Config, out_if: str) -> List[IptRule]:
     """The NAT/forwarding rules for one way out (both families)."""
-    rules = ipt_lines(cfg, "iptables", out)
+    rules = ipt_rules_for(cfg, "iptables", out_if)
     if cfg.ipv6:
-        rules += ipt_lines(cfg, "ip6tables", out)
+        rules += ipt_rules_for(cfg, "ip6tables", out_if)
     return rules
 
 

@@ -12,7 +12,7 @@ import sys
 import time
 from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
-from . import live, ops, render, results, rules, store, ui, units, warp
+from . import live, ops, render, results, rules, store, system, ui, units, warp
 from .const import EXIT_IDLE, EXIT_MAX, EXIT_WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 
@@ -87,8 +87,7 @@ def write_confs(ctx: Ctx, e: store.Exit) -> bool:
 def hold(ctx: Ctx, code: str) -> None:
     """Hold off the exit watchdog from <code> for a minute (while we check it)."""
     if not ctx.runner.dry_run:
-        with open(ctx.paths.exit_hold(code), "w"):
-            pass
+        system.write_marker(ctx.paths.exit_hold(code))
 
 
 def unhold(ctx: Ctx, code: str) -> None:
@@ -217,20 +216,14 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     if not store.valid_exit_code(code):
         raise WgtError(f"exit code must be {store.EXIT_CODE_RULE}: '{code}'")
     ops.take_lock(ctx)
-    if src == "-":
-        raw = sys.stdin.read()
-    else:
-        raw = store.read_text(src)
-        if raw is None:
-            raise WgtError(f"no such file: {src}")
-    check_proton_conf(raw)
+    raw = _read_proton(src)
     existing = ctx.snap.exit(code)
     label = (ctx.args.exit_label or (existing.label if existing else "") or render.proton_hint(raw) or code)
     label = label.replace("\n", "").replace("\t", "")
     if existing is None:
         idx = free_idx(ctx)
-        ep = render.profile_endpoint(raw)
-        ctx.runner.step(f"Add exit city '{code}' ({label}): Proton {ep} -> its own WARP", f"wgt exit remove {code}")
+        ctx.runner.step(f"Add exit city '{code}' ({label}): Proton {render.profile_endpoint(raw)} -> its own WARP",
+                        f"wgt exit remove {code}")
     else:
         idx = existing.idx
         ctx.runner.step(f"Update exit city '{code}' ({label})",
@@ -243,6 +236,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         os.makedirs(ctx.paths.exit_dir, mode=0o700, exist_ok=True)
     if not warp.register(ctx, ctx.paths.exit_wgcf_dir(code)):
         raise WgtError(f"could not register a WARP account for exit '{code}'")
+    # The stored copy carries its label as the first line (exit list, rollback).
     body = "".join(line + "\n" for line in raw.splitlines() if not line.startswith(f"# exit {code}: "))
     ctx.files.write(ctx.paths.proton_conf(code), 0o600, f"# exit {code}: {label}\n" + body)
     e = store.Exit(code, idx, label)
@@ -256,23 +250,47 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         ctx.out.info(f"[dry-run] would start the exit watchdog and check exit '{code}'")
         return
     changed = write_confs(ctx, e)
-    ops.write_wg_conf(ctx)
-    if ops.wg_up(ctx):
-        ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, up=True))
-        ctx.runner.sh_lines(rules.ipt_cmds(rules.ipt_rules_out(ctx.cfg, e.wx), up=True))
-    units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
-    units.write_exit_watchdog(ctx)
+    _wire_live(ctx, e)
     # A changed config (or a half-up exit) must restart to load it.
     if changed and any_up(ctx, e):
         down(ctx, e)
-    ctx.out.log(f"Checking exit '{code}'")
-    ok, t = probe(ctx, e)
-    if ok:
-        ctx.out.info(f"exit '{code}' works: {t}")
+    _check_new(ctx, e)
+
+
+def _read_proton(src: str) -> str:
+    """A Proton WireGuard config from a file or "-" (stdin), checked."""
+    if src == "-":
+        raw = sys.stdin.read()
     else:
-        ctx.out.warn(f"exit '{code}' isn't passing traffic yet ({t}); check: wgt exit test")
+        text = store.read_text(src)
+        if text is None:
+            raise WgtError(f"no such file: {src}")
+        raw = text
+    check_proton_conf(raw)
+    return raw
+
+
+def _wire_live(ctx: Ctx, e: store.Exit) -> None:
+    """A new exit's routing: into wg0.conf, live on a running wg0, through
+    ufw, and the exit watchdog on."""
+    ops.write_wg_conf(ctx)
+    if ops.wg_up(ctx):
+        ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, up=True))
+        ctx.runner.sh_lines(rules.ipt_cmds(rules.ipt_rules_via(ctx.cfg, e.wx), up=True))
+    units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
+    units.write_exit_watchdog(ctx)
+
+
+def _check_new(ctx: Ctx, e: store.Exit) -> None:
+    """Bring the new exit up once and see traffic leave through its WARP."""
+    ctx.out.log(f"Checking exit '{e.code}'")
+    ok, said = probe(ctx, e)
+    if ok:
+        ctx.out.info(f"exit '{e.code}' works: {said}")
+    else:
+        ctx.out.warn(f"exit '{e.code}' isn't passing traffic yet ({said}); check: wgt exit test")
     ctx.out.info(f"it goes down when idle and comes up when a client connects; add one: "
-                 f"wgt client add <name> --exit {code}")
+                 f"wgt client add <name> --exit {e.code}")
 
 
 def cmd_remove(ctx: Ctx, words: List[str]) -> None:
@@ -292,7 +310,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ops.confirm(ctx, f"Remove exit {code}?")
     down(ctx, e)
     if ops.wg_up(ctx):
-        ctx.runner.sh_lines(rules.ipt_cmds(reversed(rules.ipt_rules_out(ctx.cfg, e.wx)), up=False))
+        ctx.runner.sh_lines(rules.ipt_cmds(reversed(rules.ipt_rules_via(ctx.cfg, e.wx)), up=False))
         ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, up=False))
     units.close_firewall(ctx, [e.wx])
     ops.remove_exit(ctx, code)
@@ -316,10 +334,9 @@ def cmd_test(ctx: Ctx, words: List[str]) -> int:
 
 
 def cmd_exit(ctx: Ctx, words: List[str]) -> Optional[int]:
-    """wgt exit <command>: dispatch; no command means list ("rm" is kept as
-    an alias of remove)."""
+    """wgt exit <command>: dispatch; no command means list."""
     ops.require_setup(ctx)
-    return ops.dispatch(ctx, "exit", words, EXIT_COMMANDS, aliases={"rm": "remove"})
+    return ops.dispatch(ctx, "exit", words, EXIT_COMMANDS)
 
 
 # --- checks ---
@@ -351,7 +368,7 @@ def tunnel_checks(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
     """An up exit: both tunnels handshaking, and traffic leaving through its WARP."""
     for kind, ifc in (("Proton", e.px), ("WARP", e.wx)):
         res.check(f"exit {e.code}: {kind} tunnel {ifc} handshake within {WATCHDOG_STALE}s",
-                  live.hs_recent(ctx.runner, ifc, WATCHDOG_STALE))
+                  live.hs_recent(ctx.runner, ifc, WATCHDOG_STALE, ctx.clock()))
     tr = trace(ctx, e)
     if live.is_warp_trace(tr):
         res.result("PASS", f"exit {e.code}: traffic exits through WARP ({tr})")
@@ -384,7 +401,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
             res.result("PASS", f"exit {e.code}: idle, no active clients (comes up when one connects; "
                                f"'wgt exit test' checks it live)")
     res.check("exit watchdog timer enabled and running",
-              live.unit_enabled(r, f"{EXIT_WATCHDOG}.timer") and live.unit_active(r, f"{EXIT_WATCHDOG}.timer"))
+              live.timer_on(r, EXIT_WATCHDOG))
 
 
 EXIT_COMMANDS = {"list": cmd_list, "add": cmd_add, "remove": cmd_remove, "test": cmd_test}

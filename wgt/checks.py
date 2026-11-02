@@ -1,5 +1,6 @@
-"""`wgt test` (the PASS/FAIL checks) and `wgt status` (what's running), plus
-the settings table setup's review also shows."""
+"""`wgt test` (the PASS/FAIL checks), `wgt status` (everything running) and
+`wgt summary` (one line per fact), plus the settings table setup's review
+also shows."""
 
 from __future__ import annotations
 
@@ -9,7 +10,6 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from . import clients, exits, host, live, ops, results, rules, store, ui
 from .const import RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
-from .ops import require_setup
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -78,7 +78,8 @@ def settings_table(ctx: Ctx, running: bool = False, subnet_asked: bool = False) 
     for key, label, default in SETTING_ROWS:
         value = ctx.cfg.values.get(key, "")
         saved = ctx.cfg.saved.get(key, "")
-        if default and value == default and (saved or default) == default:
+        # A setting at its default is hidden, unless the saved value differed.
+        if default and value == default and saved in ("", default):
             continue
         extra = ""
         if running:
@@ -119,10 +120,11 @@ class Tests:
         else:
             self.res.result("WARN", f"{desc} (WARP is off)")
 
-    def warp_on(self) -> bool:
+    def warp_trace_on(self) -> bool:
+        """Cloudflare's trace through the WARP tunnel says warp=on (or plus)."""
         return live.trace_field(live.trace(self.runner, "--interface", self.cfg.WARP_IF), "warp") in ("on", "plus")
 
-    def warp6_on(self) -> bool:
+    def warp6_trace_on(self) -> bool:
         """warp has no IPv6 route in the main table (Table = off), so route WARP's
         own address through RT_TABLE for the length of the check."""
         src = live.ipv6_global_addr(self.runner, self.cfg.WARP_IF)
@@ -138,22 +140,26 @@ class Tests:
         return live.is_warp_trace(out)
 
     def default_route_kept(self) -> bool:
+        """The main table's default route is the one recorded at install (SSH depends on it)."""
         rec = store.state_get(self.ctx.snap.state, "DEFAULT_ROUTE")
         return bool(rec) and host.route_key(self.ctx.facts.default_route) == host.route_key(rec)
 
-    def ip_rule(self, family: str) -> bool:
+    def warp_rule_ok(self, family: str) -> bool:
+        """The WARP switch's policy rule: exactly once with WARP on, absent with it off."""
         want = 1 if self.cfg.warp_on else 0
         needle = f"from {self.cfg.family_net(family)} lookup {self.cfg.RT_TABLE}"
         return sum(1 for line in live.rules(self.runner, family).splitlines() if needle in line) == want
 
-    def table(self, family: str) -> bool:
+    def rt_table_ok(self, family: str) -> bool:
+        """RT_TABLE has the warp default, the blackhole fallback and the client subnet."""
         t = live.table(self.runner, family, self.cfg.RT_TABLE)
         net = re.escape(self.cfg.family_net(family))
         return bool(re.search(rf"^default dev {re.escape(self.cfg.WARP_IF)}( |$)", t, re.M)
                     and re.search(r"^blackhole default( |$)", t, re.M)
                     and re.search(rf"^{net} dev {re.escape(self.cfg.WG_IF)}( |$)", t, re.M))
 
-    def ordering(self) -> bool:
+    def boot_order_ok(self) -> bool:
+        """wg0's unit starts after warp's (and wants it), via setup's drop-in."""
         unit = f"wg-quick@{self.cfg.WG_IF}"
         want = f" wg-quick@{self.cfg.WARP_IF}.service "
         return (want in f" {live.unit_prop(self.runner, unit, 'After')} "
@@ -163,11 +169,11 @@ class Tests:
         """Run the checks ("warp": only those `wgt warp on` needs)."""
         r, c, res = self.runner, self.cfg, self.res
         self.scope = scope
-        self.check_warp(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_on())
+        self.check_warp(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_trace_on())
         if c.ipv6:
-            self.check_warp(f"{c.WARP_IF}: IPv6 through {c.WARP_IF} shows warp=on", self.warp6_on())
-        self.check_warp(f"{c.WARP_IF}: handshake within the last 3 minutes",
-                        live.hs_recent(r, c.WARP_IF, WATCHDOG_STALE))
+            self.check_warp(f"{c.WARP_IF}: IPv6 through {c.WARP_IF} shows warp=on", self.warp6_trace_on())
+        self.check_warp(f"{c.WARP_IF}: handshake within {WATCHDOG_STALE}s",
+                        live.hs_recent(r, c.WARP_IF, WATCHDOG_STALE, self.ctx.clock()))
         res.check("server's own traffic is not tunneled (plain curl shows warp=off)",
                   live.trace_field(live.trace(r), "warp") == "off")
         res.check(f"default route unchanged since install ({store.state_get(self.ctx.snap.state, 'DEFAULT_ROUTE')})",
@@ -184,18 +190,18 @@ class Tests:
         for f in c.families():
             net = c.family_net(f)
             if c.warp_on:
-                res.check(f"{f} rule: from {net} lookup {c.RT_TABLE} (exactly once; WARP on)", self.ip_rule(f))
+                res.check(f"{f} rule: from {net} lookup {c.RT_TABLE} (exactly once; WARP on)", self.warp_rule_ok(f))
             else:
-                res.check(f"{f} rule: none from {net} (WARP off)", self.ip_rule(f))
+                res.check(f"{f} rule: none from {net} (WARP off)", self.warp_rule_ok(f))
             self.check_warp(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
-                            self.table(f))
+                            self.rt_table_ok(f))
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             res.check(f"exactly once: {x} {t} {ch} {rule}", live.ipt_count(r, x, t, ch, rule) == 1)
         res.check(f"wg-quick@{c.WG_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WG_IF}"))
         self.check_warp(f"wg-quick@{c.WARP_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WARP_IF}"))
-        res.check(f"wg-quick@{c.WG_IF} ordered after (and wants) wg-quick@{c.WARP_IF}", self.ordering())
+        res.check(f"wg-quick@{c.WG_IF} ordered after (and wants) wg-quick@{c.WARP_IF}", self.boot_order_ok())
         res.check("WARP watchdog timer enabled and running",
-                  live.unit_enabled(r, f"{WATCHDOG}.timer") and live.unit_active(r, f"{WATCHDOG}.timer"))
+                  live.timer_on(r, WATCHDOG))
         if self.ctx.snap.exits:
             exits.run_tests(self.ctx, res, bring_up=False)
         if any(ts > 0 for ts in live.handshakes(r, c.WG_IF).values()):
@@ -207,7 +213,8 @@ class Tests:
 
 def cmd_test(ctx: Ctx, words: List[str]) -> int:
     """All checks (WARP, wg0, rules, units, exit cities)."""
-    require_setup(ctx)
+    ops.no_more_words(words, "wgt test")
+    ops.require_setup(ctx)
     ctx.out.log(f"Tests (WARP {ctx.cfg.WARP})")
     return results.report(ctx, Tests(ctx).run("all"))
 
@@ -217,7 +224,8 @@ def cmd_test(ctx: Ctx, words: List[str]) -> int:
 def cmd_status(ctx: Ctx, words: List[str]) -> None:
     """Settings (and whether they're running), interfaces, watchdogs, exit
     cities, clients, routes and rules."""
-    require_setup(ctx)
+    ops.no_more_words(words, "wgt status")
+    ops.require_setup(ctx)
     r, c, out = ctx.runner, ctx.cfg, ctx.out
     out.log(f"Settings (saved in {ctx.paths.state})")
     rep = settings_table(ctx, running=True)
@@ -234,7 +242,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
             out.info(f"{brief}  [{active}, {enabled or 'disabled'}]")
         else:
             out.info(f"{ifc}: absent  [{enabled or 'disabled'}]")
-    last = r.query(["journalctl", "-t", WATCHDOG, "-n", "1", "-o", "short-iso", "--no-pager", "-q"]).strip()[:25]
+    last = live.last_event(r, WATCHDOG)
     timer = live.unit_state(r, f"{WATCHDOG}.timer")[0]
     out.info(f"watchdog: {WATCHDOG}.timer {timer}; last port change: {last or 'never'}")
     out.log("WARP handshake")
@@ -260,7 +268,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
             ctx.out.info(f"{f} table {c.RT_TABLE}: {line}")
     out.log("Rules")
     for x, t, ch, rule in rules.ipt_rules(c, ctx.pub_if, ctx.snap.exits):
-        present = r.ok([x, "-t", t, "-C", ch] + rule.split())
+        present = live.ipt_present(r, (x, t, ch, rule))
         out.info(f"{'present' if present else 'missing'}  {x} -t {t} {ch} {rule}")
     out.info(f"ip_forward = {live.sysctl(r, 'net.ipv4.ip_forward')}")
     if c.ipv6:
@@ -280,7 +288,7 @@ def cmd_summary(ctx: Ctx, words: List[str]) -> None:
     tunnels, settings, route, firewall, watchdog, exit cities, clients.
     Each line says what is wrong when something is (details: wgt status)."""
     ops.no_more_words(words, "wgt summary")
-    if not ctx.cfg.saved.get("WARP"):
+    if not ops.is_set_up(ctx):
         ctx.out.line(ctx.facts.hostname.split(".")[0])
         ctx.out.line(SUMMARY_FMT.format("state", "not set up (wgt setup)"))
         return
@@ -320,19 +328,17 @@ def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
                   else "running as saved"))
 
     recorded = store.state_get(ctx.snap.state, "DEFAULT_ROUTE")
-    kept = host.route_key(ctx.facts.default_route) == host.route_key(recorded)
-    lines.append(("route", "default route unchanged since install" if kept
+    lines.append(("route", "default route unchanged since install" if Tests(ctx).default_route_kept()
                   else f"default route CHANGED (was: {recorded}; now: {ctx.facts.default_route})"))
 
     wanted = rules.ipt_rules(c, ctx.pub_if, ctx.snap.exits)
-    missing = sum(1 for x, t, ch, rule in wanted if not r.ok([x, "-t", t, "-C", ch, *rule.split()]))
+    missing = sum(1 for rule in wanted if not live.ipt_present(r, rule))
     lines.append(("firewall", f"all {len(wanted)} rules present" if not missing
                   else f"{missing} of {len(wanted)} rules MISSING (wgt status)"))
 
     timer = live.unit_state(r, f"{WATCHDOG}.timer")[0]
-    last = r.query(["journalctl", "-t", WATCHDOG, "-n", "1", "-o", "short-iso", "--no-pager", "-q"]).strip()[:16]
     lines.append(("watchdog", f"{'running' if timer == 'active' else timer.upper()}; "
-                              f"last port change: {last.replace('T', ' ') or 'never'}"))
+                              f"last port change: {live.last_event(r, WATCHDOG) or 'never'}"))
 
     if not ctx.snap.exits:
         lines.append(("exits", "none"))

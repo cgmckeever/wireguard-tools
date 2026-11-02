@@ -185,8 +185,7 @@ def review_settings(ctx: Ctx, subnet_asked: bool) -> None:
         if not ctx.args.yes:
             raise WgtError("no terminal to confirm the settings; re-run with --yes")
         return
-    reply = ui.ask("    Continue? [Y/n] ")
-    if reply and not reply.lower().startswith("y"):
+    if not ui.yes("Continue?", default=True):
         raise WgtError("aborted at: review settings (nothing changed)")
 
 
@@ -200,8 +199,7 @@ def offer_hostname(ctx: Ctx) -> None:
         return
     if ctx.runner.dry_run or ctx.args.yes or not ui.have_tty():
         return
-    reply = ui.ask(f"    Update hostname {cur} to {want}? [Y/n] ")
-    if reply and not reply.lower().startswith("y"):
+    if not ui.yes(f"Update hostname {cur} to {want}?", default=True):
         return
     new = want + (full[len(cur):] if "." in full else "")   # keep the domain part
     ctx.runner.step(f"Rename host {full} -> {new} (and in {ctx.paths.hosts_file})",
@@ -278,11 +276,11 @@ def ensure_server_keys(ctx: Ctx) -> bool:
     if os.path.isfile(p.server_key) and os.path.getsize(p.server_key) > 0:
         ctx.runner.step("Regenerate server keys (--new-server-keys): every client must be re-issued "
                         "(wgt client rotate)",
-                        f"restore {p.server_key} from its .bak")
+                        f"restore {p.server_key} and {os.path.basename(p.server_pub)} from their copies in "
+                        f"{ctx.files.change_dir(p.server_key)}")
         ops.confirm(ctx, "Regenerate the server keys? Every client stops working until rotated")
-        if not ctx.runner.dry_run:
-            ctx.files.backup(p.server_key)
-            ctx.files.backup(p.server_pub)
+        ctx.files.backup(p.server_key)   # the old keys stay recoverable until --purge
+        ctx.files.backup(p.server_pub)
     else:
         ctx.runner.step(f"Generate server keypair ({p.server_key})", f"rm {p.server_key} {p.server_pub}")
     if ctx.runner.dry_run:
@@ -304,49 +302,54 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
     # Patched line by line rather than re-rendered: re-rendering needs each
     # client's private key back out of its file, and would rewrite configs the
     # bash version wrote (and every device would need its config re-sent).
-    want = f"{ctx.cfg.values['ENDPOINT']}:{ctx.cfg.WG_PORT}"
+    endpoint = f"{ctx.cfg.values['ENDPOINT']}:{ctx.cfg.WG_PORT}"
     stale: List[str] = []
     for c in ctx.snap.clients:
         conf = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
-        src = conf
-        if not os.path.isfile(conf):
-            olds = ([ctx.paths.client_conf(old_name, c.name)] if old_name else []) + [ctx.paths.client_conf("", c.name)]
-            src = next((o for o in olds if os.path.isfile(o)), "")
-            if not src:
-                continue
-            ctx.runner.step(f"Rename {src} to {os.path.basename(conf)}", f"mv {conf} {src}")
-            if not ctx.runner.dry_run:
-                os.replace(src, conf)
-                src = conf
-            stale.append(c.name)
-        text = store.read_text(src) or ""
-        addr = ctx.cfg.client_addrs(c.ip).replace(",", ", ", 1)
-        allowed = c.allowed.replace(",", ", ")
-        lines = set(text.splitlines())
-        if {f"Endpoint = {want}", f"Address = {addr}", f"DNS = {ctx.cfg.WG_DNS}", f"MTU = {ctx.cfg.WG_MTU}"} <= lines \
-                and (not allowed or f"AllowedIPs = {allowed}" in lines):
+        src = conf if os.path.isfile(conf) else _move_to_current_name(ctx, c.name, conf, old_name)
+        if not src:
             continue
-        new = re.sub(r"(?m)^Endpoint = .*$", f"Endpoint = {want}", text)
-        new = re.sub(r"(?m)^Address = .*$", f"Address = {addr}", new)
-        new = re.sub(r"(?m)^DNS = .*$", f"DNS = {ctx.cfg.WG_DNS}", new)
-        new = re.sub(r"(?m)^MTU = .*$", f"MTU = {ctx.cfg.WG_MTU}", new)
-        if allowed:
-            new = re.sub(r"(?m)^AllowedIPs = .*$", f"AllowedIPs = {allowed}", new)
-        ctx.files.write(conf, 0o600, new)
-        if c.name not in stale:
+        text = store.read_text(src) or ""
+        # Address keeps the bash version's "ip/32, ip6/128" spacing (only the first comma).
+        want = {"Endpoint": endpoint, "Address": ctx.cfg.client_addrs(c.ip).replace(",", ", ", 1),
+                "DNS": ctx.cfg.WG_DNS, "MTU": ctx.cfg.WG_MTU}
+        if c.allowed:
+            want["AllowedIPs"] = c.allowed.replace(",", ", ")
+        new = text
+        for key, value in want.items():
+            new = re.sub(rf"(?m)^{key} = .*$", f"{key} = {value}".replace("\\", "\\\\"), new)
+        if new != text:
+            ctx.files.write(conf, 0o600, new)
+        if (new != text or src != conf) and c.name not in stale:
             stale.append(c.name)
     if stale:
-        ctx.out.warn(f"client configs changed (now {ctx.cfg.SERVER_NAME}.<client>.conf at {want}); re-send them "
+        ctx.out.warn(f"client configs changed (now {ctx.cfg.SERVER_NAME}.<client>.conf at {endpoint}); re-send them "
                      f"(wgt client share/show --qr): {' '.join(stale)}")
+
+
+def _move_to_current_name(ctx: Ctx, name: str, conf: str, old_name: str) -> str:
+    """A client config under an older name (the server's old name, or none):
+    move it to <conf>. Returns where its text is now ("" if there is none; in
+    a dry run it is still at the old name)."""
+    olds = ([ctx.paths.client_conf(old_name, name)] if old_name else []) + [ctx.paths.client_conf("", name)]
+    src = next((o for o in olds if os.path.isfile(o)), "")
+    if not src:
+        return ""
+    ctx.runner.step(f"Rename {src} to {os.path.basename(conf)}", f"mv {conf} {src}")
+    if ctx.runner.dry_run:
+        return src
+    os.replace(src, conf)
+    return conf
 
 
 def write_sysctl(ctx: Ctx) -> None:
     """Persist and apply the forwarding sysctls."""
     pub = ctx.pub_if
-    lines = render.sysctl_lines(ctx.cfg, pub, ctx.facts.has_ipv6, ctx.facts.accept_ra(ctx.runner, pub))
+    accept_ra = live.sysctl(ctx.runner, f"net.ipv6.conf.{pub}.accept_ra") or None
+    lines = render.sysctl_lines(ctx.cfg, pub, ctx.facts.has_ipv6, accept_ra)
     # Remember accept_ra before we change it, so rollback can restore it.
     if any("accept_ra" in line for line in lines) and not store.state_get(ctx.snap.state, "ORIG_ACCEPT_RA"):
-        ops.state_set(ctx, "ORIG_ACCEPT_RA", live.sysctl(ctx.runner, f"net.ipv6.conf.{pub}.accept_ra"))
+        ops.state_set(ctx, "ORIG_ACCEPT_RA", accept_ra or "")
     current = store.read_text(ctx.paths.sysctl_file)
     if current is None or [line for line in current.splitlines() if not line.startswith("#")] != lines:
         orig = store.state_get(ctx.snap.state, "ORIG_IP_FORWARD") or live.sysctl(ctx.runner, "net.ipv4.ip_forward")
@@ -390,8 +393,9 @@ def stop_before_rewrite(ctx: Ctx) -> bool:
 def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     """wgt setup: install or update everything; safe to re-run, and a change
     of settings is shown and confirmed first."""
+    ops.no_more_words(words, "wgt setup [--name N] [--subnet ...] (settings are flags)")
     ops.take_lock(ctx)
-    first = not ctx.cfg.saved.get("WARP")              # before save_config records it
+    first = not ops.is_set_up(ctx)              # before save_config records it
     old_name = ctx.cfg.saved.get("SERVER_NAME", "")
     asked = ask_subnet(ctx)
     ensure_subnet6(ctx)
@@ -447,6 +451,7 @@ def cmd_warp(ctx: Ctx, words: List[str]) -> None:
     """Show or switch WARP: rewrites wg0.conf (for the next start) and adds or
     removes the policy rule live; wg0 isn't restarted."""
     ops.require_setup(ctx)
+    ops.no_more_words(words[1:], "wgt warp [on|off]")
     want = words[0] if words else ""
 
     if not want:
@@ -531,15 +536,15 @@ def _remove_rules(ctx: Ctx) -> None:
 
 def _remove_units(ctx: Ctx) -> None:
     """wg0's boot-order drop-in and both watchdog timers."""
-    cfg, f = ctx.cfg, ctx.files
+    cfg, files = ctx.cfg, ctx.files
     # Our own drop-in's copies would keep its directory from being removed.
     if store.backup_orig(store.read_text(ctx.paths.backup_map), cfg.dropin) == "NEW":
-        f.remove(*glob.glob(cfg.dropin + ".*.bak"))
-    f.restore_original(cfg.dropin, remove_new=True)
-    f.remove_empty_dir(cfg.dropin_dir)
+        files.remove(*glob.glob(cfg.dropin + ".*.bak"))
+    files.restore_original(cfg.dropin, remove_new=True)
+    files.remove_empty_dir(cfg.dropin_dir)
     units.remove_timer(ctx, WATCHDOG)
     units.remove_timer(ctx, EXIT_WATCHDOG)
-    f.remove(ctx.paths.warp_marker)
+    files.remove(ctx.paths.warp_marker)
     ctx.runner.run(["systemctl", "daemon-reload"])
 
 
@@ -558,21 +563,21 @@ def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
 
 def _purge(ctx: Ctx) -> None:
     """--purge: delete everything setup made (originals were restored already)."""
-    cfg, f, p = ctx.cfg, ctx.files, ctx.paths
+    cfg, files, p = ctx.cfg, ctx.files, ctx.paths
     for path in (cfg.wg_conf, cfg.warp_conf, p.server_key, p.server_pub, p.client_db, p.sysctl_file):
-        f.remove(*glob.glob(path + ".*.bak"))   # copies left by older versions
+        files.remove(*glob.glob(path + ".*.bak"))   # copies left by older versions
     # The change copies hold old keys.
-    f.remove_tree(p.change_dir)
-    f.remove_empty_dir(p.backup_dir)
+    files.remove_tree(p.change_dir)
+    files.remove_empty_dir(p.backup_dir)
     # Configs carrying our marker are ours (a restored original never does).
     for path in (cfg.wg_conf, cfg.warp_conf):
         text = store.read_text(path)
         if text is not None and MARKER in text:
-            f.remove(path)
-    f.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.state, p.backup_map, p.exit_db)
+            files.remove(path)
+    files.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.state, p.backup_map, p.exit_db)
     for d in (p.wgcf_dir, p.client_dir, p.psk_dir, p.exit_dir):
-        f.remove_tree(d)
-    f.remove(p.wgt_link)
+        files.remove_tree(d)
+    files.remove(p.wgt_link)
     ctx.out.info(f"left installed: packages and {p.wgcf_bin}")
 
 

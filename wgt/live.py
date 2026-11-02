@@ -70,6 +70,23 @@ def unit_active(r: Runner, unit: str) -> bool:
     return r.ok(["systemctl", "is-active", "-q", unit])
 
 
+def timer_on(r: Runner, name: str) -> bool:
+    """<name>.timer is enabled at boot and running."""
+    return unit_enabled(r, f"{name}.timer") and unit_active(r, f"{name}.timer")
+
+
+def last_event(r: Runner, tag: str) -> str:
+    """When <tag> last wrote to the journal ("2026-10-29 04:06"), "" if never."""
+    line = r.query(["journalctl", "-t", tag, "-n", "1", "-o", "short-iso", "--no-pager", "-q"]).strip()
+    return line[:16].replace("T", " ")
+
+
+def ipt_present(r: Runner, rule: Tuple[str, str, str, str]) -> bool:
+    """A firewall rule (command, table, chain, rule) is in place (iptables -C)."""
+    cmd, table, chain, spec = rule
+    return r.ok([cmd, "-t", table, "-C", chain, *spec.split()])
+
+
 def unit_state(r: Runner, unit: str) -> Tuple[str, str]:
     """(is-active, is-enabled) as systemctl prints them."""
     return (r.query(["systemctl", "is-active", unit]).strip(),

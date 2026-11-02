@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List
 
 from . import live, render, store
-from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE, Paths
+from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -18,10 +18,10 @@ def checkout_wgt() -> str:
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "wgt")
 
 
-def wgt_command(ctx: Optional[Ctx] = None) -> str:
-    """How systemd runs this tool: the <sbin>/wgt link setup makes, or this
-    checkout's bin/wgt."""
-    link = (ctx.paths if ctx else Paths()).wgt_link
+def wgt_command(ctx: Ctx) -> str:
+    """How systemd (and restore) run this tool: the <sbin>/wgt link setup
+    makes, or this checkout's bin/wgt."""
+    link = ctx.paths.wgt_link
     return link if os.path.exists(link) else checkout_wgt()
 
 
@@ -37,7 +37,7 @@ def write_timer(ctx: Ctx, name: str, what: str, service: str, timer: str) -> Non
         ctx.files.forget(old_script)
     if changed:
         ctx.runner.run(["systemctl", "daemon-reload"])
-    if not (live.unit_active(ctx.runner, f"{name}.timer") and live.unit_enabled(ctx.runner, f"{name}.timer")):
+    if not live.timer_on(ctx.runner, name):
         ctx.runner.step(f"Start the {what}", f"systemctl disable --now {name}.timer")
         ctx.runner.run(["systemctl", "enable", "--now", f"{name}.timer"])
 
@@ -52,7 +52,7 @@ def remove_timer(ctx: Ctx, name: str) -> None:
 
 def write_watchdog(ctx: Ctx) -> None:
     """The WARP watchdog: every 30s, `wgt watchdog warp`."""
-    svc = render.render_template("watchdog.service.tmpl", NAME=WATCHDOG,
+    svc = render.render_template("watchdog.service.tmpl",
                                  WHAT=f"WARP watchdog (new source port if {ctx.cfg.WARP_IF} stops handshaking)",
                                  COMMAND=f"{wgt_command(ctx)} watchdog warp", TIMEOUT="60")
     timer = render.render_template("warp-watchdog.timer.tmpl")
@@ -63,7 +63,7 @@ def write_watchdog(ctx: Ctx) -> None:
 
 def write_exit_watchdog(ctx: Ctx) -> None:
     """The exit watchdog: every 10s, `wgt watchdog exits`."""
-    svc = render.render_template("watchdog.service.tmpl", NAME=EXIT_WATCHDOG,
+    svc = render.render_template("watchdog.service.tmpl",
                                  WHAT="exit-city watchdog (exits up while their clients are active)",
                                  COMMAND=f"{wgt_command(ctx)} watchdog exits", TIMEOUT="30")
     timer = render.render_template("exit-watchdog.timer.tmpl")

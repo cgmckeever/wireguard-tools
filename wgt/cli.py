@@ -1,6 +1,6 @@
-"""`wgt`: the server-side command. Parses flags (anywhere on the line, as the
-bash tools did), loads the server's settings and files, and dispatches to
-the command modules."""
+"""`wgt`: the server-side command. Parses flags (they may come anywhere on the
+line), loads the server's settings and files, and dispatches to the command
+modules; `wgt log` and the hidden `wgt debug` live here too."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import os
 import sys
 from typing import Callable, List, Optional
 
-from . import host, render, rules, store
+from . import host, ops, render, rules, store
 from .ctx import Args, Ctx, load, parse
 from .errors import WgtError
 from .system import Out, Runner
@@ -21,13 +21,15 @@ server's own IP (switchable), or per client through an exit city.
 
   setup                      install or update everything
   summary | status | test    at a glance / everything running / all checks
-  log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops)
+  log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops;
+                             --no-follow, or piped: print and stop)
   warp [on|off]              where clients exit (live)
   backup [dir] | restore <archive> | rollback [--purge]
 
-  client list | add <name> [--exit <code>[,..]] | show <name> [--qr] | share <name>
-         rotate <name> | rename <old> <new> | disable <name> | enable <name> | remove <name>
-  exit   list | add <code> <file|-> [--label NAME] | remove <code> | test
+  client list [--tsv] | add <name> [--exit <code>[,..]] [--allowed-ips ..] | show <name> [--qr]
+         share <name> | rotate <name> [--allowed-ips ..] | rename <old> <new>
+         disable <name> | enable <name> | remove <name>     (no name: pick from a list)
+  exit   list | add <code> <file|-> [--label NAME] | remove [code] | test
 
 Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
   --force             setup: reinstall wgcf, regenerate the WARP profile, take over
@@ -41,8 +43,8 @@ Settings (saved by setup): --name --subnet --subnet6 --port --mtu --warp-mtu --d
 # --- commands defined here (the rest live in their modules; see COMMANDS) ---
 
 def cmd_debug(ctx: Ctx, what: List[str]) -> None:
-    """Hidden: print what this version renders from the server's state, for
-    tools/parity (keys redacted)."""
+    """Hidden: print what this checkout renders from the server's state (keys
+    redacted), so tools/render-diff.sh can compare two versions before a deploy."""
     from .system import redact
     target = what[0] if what else "all"
     psk = store.psk_reader(ctx.paths)
@@ -74,6 +76,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     last [lines] (default 40), then new entries until Ctrl-C. With
     --no-follow, or when the output isn't a terminal, it prints and stops."""
     from .const import EXIT_WATCHDOG, WATCHDOG
+    ops.no_more_words(words[1:], "wgt log [lines] [--no-follow]")
     count = words[0] if words else "40"
     if not count.isdigit():
         raise WgtError("usage: wgt log [lines] [--no-follow]")

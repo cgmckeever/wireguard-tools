@@ -4,7 +4,6 @@ what it must; what it does is logged to the journal (`wgt log`)."""
 
 from __future__ import annotations
 
-import contextlib
 import os
 from typing import TYPE_CHECKING, List, Optional
 
@@ -12,7 +11,7 @@ from . import exits as exit_cities
 from . import live, ops
 from .const import EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
-from .system import journal
+from .system import journal, read_marker, remove_markers, write_marker
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -23,47 +22,25 @@ def log_event(ctx: Ctx, tag: str, msg: str) -> None:
     journal(ctx.runner, tag, msg)
 
 
-def _num(path: str) -> int:
-    """A file's number (a timestamp), or 0 if it's missing or not a number."""
-    try:
-        with open(path) as f:
-            v = f.read().strip()
-        return int(v) if v.isdigit() else 0
-    except OSError:
-        return 0
-
-
-def _touch(path: str, value: str = "") -> None:
-    """Write a marker file in /run (directly: markers aren't backed up or dry-run)."""
-    with open(path, "w") as f:
-        f.write(value)
-
-
-def _rm(*paths: str) -> None:
-    for p in paths:
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(p)
-
-
 def warp(ctx: Ctx) -> None:
     """If the WARP tunnel has had no handshake for WATCHDOG_STALE seconds on two
     runs in a row, give it a new source port: Cloudflare sometimes stops
     answering one flow (seen after reboots), and a new port gets a handshake
     within seconds. Nothing restarts."""
     r, ifc = ctx.runner, ctx.cfg.WARP_IF
-    mark = ctx.paths.warp_marker
+    marker = ctx.paths.warp_marker
     if not live.if_exists(r, ifc):
-        _rm(mark)
+        remove_markers(marker)
         return
-    if live.hs_recent(r, ifc, WATCHDOG_STALE):
-        _rm(mark)
+    if live.hs_recent(r, ifc, WATCHDOG_STALE, ctx.clock()):
+        remove_markers(marker)
         return
     # Unhealthy: act on the second run in a row, so a just-started tunnel gets time.
-    if not os.path.exists(mark):
-        _touch(mark)
+    if not os.path.exists(marker):
+        write_marker(marker)
         return
     old = live.listen_port(r, ifc)
-    _rm(mark)
+    remove_markers(marker)
     if r.ok(["wg", "set", ifc, "listen-port", "0"]):
         log_event(ctx, WATCHDOG, f"{ifc}: no handshake for over {WATCHDOG_STALE}s; moved from port {old} to "
                               f"{live.listen_port(r, ifc)}")
@@ -124,26 +101,26 @@ def _exits(ctx: Ctx) -> None:
             continue
         active = bool(exit_cities.active_clients(ctx.snap, e.code, hs, now))
         px_up, wx_up = live.if_exists(r, e.px), live.if_exists(r, e.wx)
-        started, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
+        started_marker, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
         wx_last_hs = live.newest_hs(r, e.wx) if active and px_up and wx_up else 0
-        action = decide(active, px_up, wx_up, now, _num(started), wx_last_hs, os.path.exists(port_marker))
+        action = decide(active, px_up, wx_up, now, read_marker(started_marker), wx_last_hs, os.path.exists(port_marker))
         stale = f"no WARP handshake for over {WATCHDOG_STALE}s"
         if action == UP:
             # restart, not start: a unit can be "active" with its link gone.
             if r.ok(["systemctl", "restart", *e.units]):
-                _touch(started, str(now))
+                write_marker(started_marker, str(now))
                 log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: a client is active; brought up")
             else:
                 log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: a client is active, but bringing it up failed")
         elif action == NEW_PORT:
             if r.ok(["wg", "set", e.wx, "listen-port", "0"]):
-                _touch(started, str(now))
-                _touch(port_marker)
+                write_marker(started_marker, str(now))
+                write_marker(port_marker)
                 log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {stale}; new source port")
         elif action == RESTART:
-            _rm(port_marker)
+            remove_markers(port_marker)
             if r.ok(["systemctl", "restart", *e.units]):
-                _touch(started, str(now))
+                write_marker(started_marker, str(now))
                 log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {stale} after a new port; restarted")
         elif action == DOWN:
             idle = f"no client handshake in the last {EXIT_IDLE}s"
