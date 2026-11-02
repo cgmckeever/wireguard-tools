@@ -206,3 +206,16 @@ def test_unknown_verb_lists_the_verbs(make_ctx):
         clients.cmd_client(ctx, ["nope"])
     with pytest.raises(WgtError, match=r"unknown exit command: nope \(list, add, remove, test;"):
         exits.cmd_exit(ctx, ["nope"])
+
+
+def test_summary_block(make_ctx, capsys):
+    """wgt summary: the server's name, then one labelled line per fact."""
+    from wgt import checks
+    ctx = make_ctx(argv=["--endpoint", "203.0.113.9"])
+    ctx.cfg.values["ENDPOINT"] = "203.0.113.9"
+    checks.cmd_summary(ctx, [])
+    out = capsys.readouterr().out.splitlines()
+    assert out[0].startswith(f"{ctx.cfg.SERVER_NAME}  (203.0.113.9)")
+    labels = [line.split()[0] for line in out[1:] if line.startswith("    ") and line[4] != " "]
+    assert labels == ["WARP", "tunnels", "settings", "route", "firewall", "watchdog", "exits", "clients"]
+    assert any("par-fr (Paris, France)" in line for line in out)

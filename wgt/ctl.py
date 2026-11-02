@@ -5,6 +5,7 @@
   wgt-ctl init [--address A] [--name N] [--user U] [--branch B] [-- setup flags]
                                         set up a new server (or adopt one already running these tools)
   wgt-ctl clients                       every client on every server
+  wgt-ctl summary                       every server at a glance (wgt summary on each)
   wgt-ctl <server|all> <wgt command>    run it there, e.g. wgt-ctl boba client add phone --exit par-fr
   wgt-ctl <server|all> pull | backup    git pull / back up and fetch the archive to local/backups/<server>/
   wgt-ctl <server> exit-add [n|all] | ssh | branch <b> | forget [--yes]
@@ -37,10 +38,10 @@ INBOX = "/etc/wireguard/exits/incoming"
 # Host keys must already be known (whatever ~/.ssh/config says); only init's
 # first login asks, so you can check the key against your provider's console.
 SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "StrictHostKeyChecking=yes"]
-RESERVED = ("init", "clients", "all", "help", "list")
+RESERVED = ("init", "clients", "summary", "all", "help", "list")
 SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.join(RESERVED)})"
 # The wgt commands (anything else after a server word is a mistake, not a command).
-WGT_COMMANDS = ("setup", "warp", "status", "test", "log", "backup", "restore", "rollback", "client", "exit")
+WGT_COMMANDS = ("setup", "warp", "summary", "status", "test", "log", "backup", "restore", "rollback", "client", "exit")
 _TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:\[\]-]+$")
 _DIR = re.compile(r"^/[A-Za-z0-9._/-]+$")
 _BRANCH = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
@@ -319,6 +320,35 @@ def repo_url() -> str:
         raise WgtError(f"no git remote 'origin' in {ROOT}")
     m = re.match(r"^git@([^:]+):(.+)$", url)   # servers clone anonymously
     return f"https://{m.group(1)}/{m.group(2)}" if m else url
+
+
+def cmd_summary() -> int:
+    """`wgt summary` from every server, one block each, fetched in parallel
+    and shown in list order. 1 if any server couldn't answer."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def fetch(s: Server) -> Tuple[int, str]:
+        return ssh(s.target, f"if [ -x {s.wgt} ]; then {s.wgt} summary 2>&1; else exit 3; fi",
+                   batch=True, capture=True)
+
+    todo = servers()
+    if not todo:
+        raise WgtError("no servers yet (add one: wgt-ctl init)")
+    with ThreadPoolExecutor(max_workers=len(todo)) as pool:
+        answers = list(pool.map(fetch, todo))
+    rc = 0
+    for s, (code, text) in zip(todo, answers):
+        print("")
+        if code == 0 and text.strip():
+            print(text.rstrip("\n"))
+            continue
+        rc = 1
+        why = {3: f"runs an older version without wgt summary (update: wgt-ctl {s.name} pull)",
+               255: "unreachable"}.get(code, text.strip().splitlines()[-1] if text.strip() else f"failed (exit {code})")
+        print(f"{s.name}  ({s.target})")
+        print(f"    {why}")
+    print("")
+    return rc
 
 
 def cmd_clients() -> None:
@@ -623,6 +653,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if first == "init":
             cmd_init(rest)
             return 0
+        if first == "summary":
+            return cmd_summary()
         if first == "clients":
             cmd_clients()
             return 0

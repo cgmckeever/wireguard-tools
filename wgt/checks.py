@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from . import clients, exits, host, live, ops, results, rules, store, ui
 from .const import RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
@@ -268,3 +268,90 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
     else:
         why = "disabled" if c.WG_SUBNET6 == "off" else "kernel IPv6 disabled"
         out.info("IPv6: off" + (f" ({why})" if c.WG_SUBNET6 else ""))
+
+
+# --- summary (wgt summary; wgt-ctl summary shows every server's) ---
+
+SUMMARY_FMT = "    {:<11} {}"
+
+
+def cmd_summary(ctx: Ctx, words: List[str]) -> None:
+    """This server at a glance, one fact per line under its name: WARP,
+    tunnels, settings, route, firewall, watchdog, exit cities, clients.
+    Each line says what is wrong when something is (details: wgt status)."""
+    ops.no_more_words(words, "wgt summary")
+    require_setup(ctx)
+    ctx.out.line(f"{ctx.cfg.SERVER_NAME}  ({ctx.cfg.values.get('ENDPOINT') or 'no endpoint saved'})")
+    for label, text in summary_lines(ctx):
+        ctx.out.line(SUMMARY_FMT.format(label, text))
+
+
+def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
+    """(label, text) pairs for cmd_summary; a label repeats as "" on continuation lines."""
+    r, c = ctx.runner, ctx.cfg
+    now = ctx.clock()
+    lines: List[Tuple[str, str]] = []
+
+    if live.if_exists(r, c.WARP_IF):
+        warp_hs = live.newest_hs(r, c.WARP_IF)
+        fresh = warp_hs > 0 and now - warp_hs <= WATCHDOG_STALE
+        warp = f"{c.WARP}, handshake {ui.ago(warp_hs, now)}" + ("" if fresh else "  <- STALE")
+    else:
+        warp = f"{c.WARP}, tunnel DOWN" if c.warp_on else f"{c.WARP} (tunnel not running)"
+    if not c.warp_on:
+        warp += f"; clients leave via {ops.default_out_if(ctx)}"
+    lines.append(("WARP", warp))
+
+    problems = []
+    for ifc in (c.WG_IF, c.WARP_IF):
+        at_boot = live.unit_state(r, f"wg-quick@{ifc}")[1]
+        if not live.if_exists(r, ifc):
+            problems.append(f"{ifc} DOWN")
+        elif at_boot != "enabled":
+            problems.append(f"{ifc} not enabled at boot")
+    lines.append(("tunnels", ", ".join(problems) if problems
+                  else f"{c.WG_IF} and {c.WARP_IF} up, enabled at boot"))
+
+    pending = settings_table(ctx, running=True).pending
+    lines.append(("settings", f"{pending} saved but not running (apply: wgt setup)" if pending
+                  else "running as saved"))
+
+    recorded = store.state_get(ctx.snap.state, "DEFAULT_ROUTE")
+    kept = host.route_key(ctx.facts.default_route) == host.route_key(recorded)
+    lines.append(("route", "default route unchanged since install" if kept
+                  else f"default route CHANGED (was: {recorded}; now: {ctx.facts.default_route})"))
+
+    wanted = rules.ipt_rules(c, ctx.pub_if, ctx.snap.exits)
+    missing = sum(1 for x, t, ch, rule in wanted if not r.ok([x, "-t", t, "-C", ch, *rule.split()]))
+    lines.append(("firewall", f"all {len(wanted)} rules present" if not missing
+                  else f"{missing} of {len(wanted)} rules MISSING (wgt status)"))
+
+    timer = live.unit_state(r, f"{WATCHDOG}.timer")[0]
+    last = r.query(["journalctl", "-t", WATCHDOG, "-n", "1", "-o", "short-iso", "--no-pager", "-q"]).strip()[:16]
+    lines.append(("watchdog", f"{'running' if timer == 'active' else timer.upper()}; "
+                              f"last port change: {last.replace('T', ' ') or 'never'}"))
+
+    if not ctx.snap.exits:
+        lines.append(("exits", "none"))
+    for i, e in enumerate(ctx.snap.exits):
+        users = len(ctx.snap.exit_clients(e.code))
+        state = f"up, {exits.active_count(ctx, e.code)} active" if exits.is_up(ctx, e) else "idle"
+        lines.append(("exits" if i == 0 else "", f"{e.code} ({e.label}): {state}; {users} client(s)"))
+
+    hs = live.handshakes(r, c.WG_IF)
+    in_use = [cl for cl in ctx.snap.clients if not ctx.snap.is_disabled(cl.name)]
+    recent = [cl for cl in in_use if hs.get(cl.pub, 0) > 0 and now - hs[cl.pub] <= 3600]
+    text = f"{len(ctx.snap.clients)}"
+    if ctx.snap.clients:
+        text += f": {len(recent)} seen in the last hour"
+        disabled = len(ctx.snap.clients) - len(in_use)
+        if disabled:
+            text += f", {disabled} disabled"
+    else:
+        text += " (add one: wgt client add <name>)"
+    lines.append(("clients", text))
+    newest = max(in_use, key=lambda cl: hs.get(cl.pub, 0), default=None)
+    if newest is not None and hs.get(newest.pub, 0):
+        lines.append(("", f"newest: {store.device_of(newest.name)} via {clients.exit_label(ctx, newest.name)}, "
+                          f"{ui.ago(hs[newest.pub], now)}"))
+    return lines

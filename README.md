@@ -418,6 +418,7 @@ wgt-ctl boba client add phone --exit par-fr
 wgt-ctl boba client                    # its client list and action menu
 wgt-ctl all test                       # each server in turn (one failing doesn't stop the rest)
 wgt-ctl clients                        # every client on every server: exit, last seen, traffic
+wgt-ctl summary                        # every server at a glance: WARP, tunnels, rules, exits, clients
 wgt-ctl boba exit-add                  # pick from local/exits/boba/*.conf (or: all) -> exit cities
 wgt-ctl all pull                       # git pull everywhere
 wgt-ctl all backup                     # wgt backup, fetched to local/backups/<server>/

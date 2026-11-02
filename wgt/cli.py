@@ -20,7 +20,7 @@ A WireGuard server whose clients exit through Cloudflare WARP or this
 server's own IP (switchable), or per client through an exit city.
 
   setup                      install or update everything
-  status | test              what's running / all checks
+  summary | status | test    at a glance / everything running / all checks
   log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops)
   warp [on|off]              where clients exit (live)
   backup [dir] | restore <archive> | rollback [--purge]
@@ -98,6 +98,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
 COMMANDS = {
     "setup": ("server", "cmd_setup"), "warp": ("server", "cmd_warp"), "backup": ("backup", "cmd_backup"),
     "restore": ("backup", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
+    "summary": ("checks", "cmd_summary"),
     "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
     "client": ("clients", "cmd_client"), "exit": ("exits", "cmd_exit"),
     "watchdog": ("watchdog", "cmd_watchdog"), "debug": ("cli", "cmd_debug"),
