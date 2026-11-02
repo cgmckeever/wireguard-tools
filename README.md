@@ -13,8 +13,8 @@ leave three ways:
 
 | Way out | Traffic leaves via | Sites see |
 |---------|--------------------|-----------|
-| **WARP** (the default) | Cloudflare WARP, tunnelled from the server | a Cloudflare IP near the server |
 | **The server's own IP** | the server's public interface | the VPS's IP: a plain, fast WireGuard VPN |
+| **WARP** (the default) | Cloudflare WARP, tunnelled from the server | a Cloudflare IP near the server |
 | **An exit city** (per client) | a Proton VPN server in a city you pick, with WARP inside that tunnel | a Cloudflare IP in that city |
 
 **WARP is a switch.** `wgt warp off` sends every client out through the
