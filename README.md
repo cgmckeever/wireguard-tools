@@ -16,6 +16,29 @@ switch:
 
 Switching is live: clients stay connected, only where their traffic exits changes.
 
+### Why route through Cloudflare?
+
+A VPS's public IP is a datacenter address, and sites treat those with
+suspicion: more CAPTCHAs, "unusual traffic" pages and outright blocks, as
+they do with commercial VPN ranges. With WARP on, clients leave from
+Cloudflare's network instead:
+
+- **Sites see a Cloudflare IP, not your VPS.** WARP addresses are shared by
+  millions of ordinary WARP users, so they're rarely blocked, and your server's
+  own IP (tied to your hosting account) never shows up in their logs.
+- **Your provider sees one encrypted tunnel to Cloudflare,** not which sites
+  your clients visit.
+- **IPv6 for clients even on an IPv4-only VPS**, through WARP's own IPv6.
+- **The location stays close to the server's:** WARP exits from a nearby
+  Cloudflare data centre, so sites still see roughly the right region.
+- **Fail closed:** if WARP goes down, clients are blocked rather than quietly
+  falling back to the VPS's IP.
+
+The trade-offs: one more hop (usually a few milliseconds, as Cloudflare is
+close to most datacenters), Cloudflare sees where traffic goes instead of
+your provider, and a few sites block WARP too; `wgt warp off` is one command
+away. It hides your server, not you: it isn't an anonymity tool.
+
 **Exit cities** add a third way out, chosen per client: through a Proton VPN
 server in a city you pick (with your own Proton VPN account), with WARP running
 inside that Proton tunnel, so sites see a Cloudflare IP in that city (see
