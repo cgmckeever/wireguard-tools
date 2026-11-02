@@ -1,6 +1,6 @@
 """`wgt-ctl`: drives the servers listed in local/servers from your own machine
-(macOS or Linux). Every command is  wgt-ctl SERVER COMMAND  where SERVER is a
-name, a list number, or all.
+(macOS or Linux). Most commands are  wgt-ctl SERVER COMMAND  where SERVER is
+a name, a list number, or all; a few take no server (below).
 
 One server:
   wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
