@@ -105,3 +105,10 @@ def test_remove_failure_keeps_the_server_listed(local, monkeypatch):
 def test_remove_refuses_a_checkout_near_root(local):
     with pytest.raises(WgtError, match="too close to /"):
         ctl.do_remove(ctl.Server("x", "root@9.9.9.9", "/opt"), ["--yes"])
+
+
+def test_client_name_skips_flag_values():
+    from wgt import ctl
+    assert ctl.client_name(["add", "--warp", "off", "par-fr.mac"]) == "par-fr.mac"
+    assert ctl.client_name(["add", "mac", "--warp", "off"]) == "mac"
+    assert ctl.client_name(["add", "--allowed-ips", "10.0.0.0/8", "--yes"]) == ""

@@ -160,20 +160,42 @@ def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool,
                      nowarp: Optional[bool] = None) -> List[str]:
     """Policy rules sending one client's addresses (ip, ip6) to its way out
     (client_table): added (<up>) or removed. A WARP-off client without a
-    jump also gets a blackhole rule right behind, so it can't reach WARP's rule."""
+    jump also gets a blackhole rule right behind, so it can't reach WARP's rule.
+
+    Adding never deletes first (the kernel refuses an identical rule), so
+    re-applying live rules (setup, rotate) leaves no moment in which the client
+    falls through to another way out; the blackhole goes in before `lookup main`."""
     table = client_table(snap, client, nowarp)
     if not table or not client.ip:
         return []
     out = []
     for f in cfg.families():
         a = f"{cfg.ip6_of(client.ip)}/128" if f == "ip -6" else f"{client.ip}/32"
-        out.append(f"while {f} rule del from {a} lookup {table} priority {EXIT_RULE_PRIO} 2>/dev/null; do :; done")
-        if table == "main":
-            out.append(f"while {f} rule del from {a} priority {DIRECT_STOP_PRIO} blackhole 2>/dev/null; do :; done")
+        lookup = f"from {a} lookup {table} priority {EXIT_RULE_PRIO}"
+        stop = f"from {a} priority {DIRECT_STOP_PRIO} blackhole"
         if up:
-            out.append(f"{f} rule add from {a} lookup {table} priority {EXIT_RULE_PRIO}")
             if table == "main":
-                out.append(f"{f} rule add from {a} priority {DIRECT_STOP_PRIO} blackhole")
+                out.append(f"{f} rule add {stop} 2>/dev/null || true")
+            out.append(f"{f} rule add {lookup} 2>/dev/null || true")
+        else:
+            out.append(f"while {f} rule del {lookup} 2>/dev/null; do :; done")
+            if table == "main":
+                out.append(f"while {f} rule del {stop} 2>/dev/null; do :; done")
+    return out
+
+
+def jump_table_cmds(cfg: Config, e: Exit) -> List[str]:
+    """The jump table's routes (idempotent: safe to re-run live): out through
+    the jump tunnel, a blackhole fallback, and for WARP-off clients, who use
+    this table too, replies to other clients on wg0 and an IPv6 blackhole
+    (jump tunnels carry IPv4 only)."""
+    t = exit_ptable(e)
+    out = [f"ip route replace default dev {e.px} table {t} 2>/dev/null || true",
+           f"ip route replace blackhole default metric {BLACKHOLE_METRIC} table {t}"]
+    for fam in cfg.families():
+        out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {t}")
+        if fam == "ip -6":
+            out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {t}")
     return out
 
 
@@ -184,14 +206,7 @@ def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
     client_table, jump_table, mark = exit_wtable(e), exit_ptable(e), exit_mark(e)
     out: List[str] = []
     if up:
-        out.append(f"ip route replace default dev {e.px} table {jump_table} 2>/dev/null || true")
-        out.append(f"ip route replace blackhole default metric {BLACKHOLE_METRIC} table {jump_table}")
-        # WARP-off clients use the jump table too: their replies to other
-        # clients stay on wg0, and IPv6 (jump tunnels carry IPv4 only) stops.
-        for fam in cfg.families():
-            out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {jump_table}")
-            if fam == "ip -6":
-                out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {jump_table}")
+        out += jump_table_cmds(cfg, e)
         out.append(f"while ip rule del fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
                    f"do :; done; ip rule add fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO}")
         for fam in cfg.families():

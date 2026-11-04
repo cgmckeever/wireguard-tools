@@ -66,16 +66,20 @@ UP, NEW_PORT, RESTART, DOWN = "up", "new port", "restart", "down"
 
 
 def decide(active: bool, px_up: bool, wx_up: bool, now: int, started_at: int, wx_last_hs: int,
-           port_tried: bool) -> Optional[str]:
+           port_tried: bool, need_wx: bool = True) -> Optional[str]:
     """The exit watchdog's rule for one jump, from what it sees (None: leave it).
 
-    - In use but not fully up: bring it up.
-    - In use, up for over WATCHDOG_STALE, and its WARP silent that long: first
-      a new source port (Cloudflare sometimes drops one flow), then a restart.
+    - In use but not up (its WARP only counts if an active client needs it,
+      <need_wx>: WARP-off clients use the jump tunnel alone): bring it up.
+    - In use, up for over WATCHDOG_STALE, and its WARP needed but silent that
+      long: first a new source port (Cloudflare sometimes drops one flow), then
+      a restart.
     - Not in use but (partly) up: take it down."""
     if active:
-        if not (px_up and wx_up):
+        if not px_up or (need_wx and not wx_up):
             return UP
+        if not need_wx:
+            return None
         if now - started_at > WATCHDOG_STALE and now - wx_last_hs > WATCHDOG_STALE:
             return RESTART if port_tried else NEW_PORT
         return None
@@ -99,35 +103,42 @@ def _exits(ctx: Ctx) -> None:
     for e in ctx.snap.exits:
         if _held(ctx, e.code, now):
             continue
-        active = bool(jumps.active_clients(ctx.snap, e.code, hs, now))
-        px_up, wx_up = live.if_exists(r, e.px), live.if_exists(r, e.wx)
+        users = jumps.active_clients(ctx.snap, e.code, hs, now)
+        active = bool(users)
+        need_wx = any(not ctx.snap.warp_off(c.name) for c in users)
+        # Touch the jump tunnel only when it must: WARP-off clients ride it alone.
+        px_up = live.if_exists(r, e.px)
+        direct_live = px_up and any(ctx.snap.warp_off(c.name) for c in users)
+        wx_up = live.if_exists(r, e.wx)
         started_marker, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
         wx_last_hs = live.newest_hs(r, e.wx) if active and px_up and wx_up else 0
-        action = decide(active, px_up, wx_up, now, read_marker(started_marker), wx_last_hs, os.path.exists(port_marker))
+        action = decide(active, px_up, wx_up, now, read_marker(started_marker), wx_last_hs, os.path.exists(port_marker),
+                        need_wx)
         stale = f"no WARP handshake for over {WATCHDOG_STALE}s"
+        units = [e.units[1]] if direct_live else (e.units if need_wx else [e.units[0]])
         if action == UP:
             # restart, not start: a unit can be "active" with its link gone.
-            if r.ok(["systemctl", "restart", *e.units]):
+            if r.ok(["systemctl", "restart", *units]):
                 write_marker(started_marker, str(now))
-                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: a client is active; brought up")
+                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: a client is active; brought up")
             else:
-                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: a client is active, but bringing it up failed")
+                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: a client is active, but bringing it up failed")
         elif action == NEW_PORT:
             if r.ok(["wg", "set", e.wx, "listen-port", "0"]):
                 write_marker(started_marker, str(now))
                 write_marker(port_marker)
-                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {stale}; new source port")
+                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {stale}; new source port")
         elif action == RESTART:
             remove_markers(port_marker)
-            if r.ok(["systemctl", "restart", *e.units]):
+            if r.ok(["systemctl", "restart", *units]):
                 write_marker(started_marker, str(now))
-                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {stale} after a new port; restarted")
+                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {stale} after a new port; restarted")
         elif action == DOWN:
             idle = f"no client handshake in the last {EXIT_IDLE}s"
             if jumps.down(ctx, e, check=False):
-                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {idle}; taken down")
+                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {idle}; taken down")
             else:
-                log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {idle}, but taking it down failed")
+                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {idle}, but taking it down failed")
 
 
 def cmd_watchdog(ctx: Ctx, words: List[str]) -> None:

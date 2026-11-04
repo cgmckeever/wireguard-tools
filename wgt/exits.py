@@ -195,13 +195,13 @@ def pick_exit(ctx: Ctx, verb: str) -> str:
     if not ui.have_tty() or ctx.args.yes:
         raise WgtError(f"usage: wgt jump {verb} <code>")
     try:
-        i = ui.menu("", [f"{e.code:<7} {e.label}" for e in ctx.snap.exits], f"{verb.capitalize()} which exit?")
+        i = ui.menu("", [f"{e.code:<7} {e.label}" for e in ctx.snap.exits], f"{verb.capitalize()} which jump?")
     except ValueError as err:
         if ctx.snap.exit(str(err)):
             return str(err)
         raise WgtError(f"no jump '{err}'") from None
     if i is None:
-        raise WgtError("no exit chosen")
+        raise WgtError("no jump chosen")
     return ctx.snap.exits[i].code
 
 
@@ -215,7 +215,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     ops.no_more_words(words[2:], usage)
     code, src = words[0], words[1]
     if not store.valid_exit_code(code):
-        raise WgtError(f"exit code must be {store.EXIT_CODE_RULE}: '{code}'")
+        raise WgtError(f"jump code must be {store.EXIT_CODE_RULE}: '{code}'")
     ops.take_lock(ctx)
     raw = _read_jump(src)
     existing = ctx.snap.exit(code)
@@ -230,13 +230,13 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         ctx.runner.step(f"Update jump '{code}' ({label})",
                         f"wgt jump add {code} <the previous copy in "
                         f"{ctx.files.change_dir(ctx.paths.jump_source(code))}>")
-    ops.confirm(ctx, f"Set up exit {code}?", default_yes=True)
+    ops.confirm(ctx, f"Set up jump {code}?", default_yes=True)
     if not warp.install_wgcf(ctx):
-        raise WgtError("wgcf is needed for the exit's WARP")
+        raise WgtError("wgcf is needed for the jump's WARP")
     if not ctx.runner.dry_run:
         os.makedirs(ctx.paths.exit_dir, mode=0o700, exist_ok=True)
     if not warp.register(ctx, ctx.paths.exit_wgcf_dir(code)):
-        raise WgtError(f"could not register a WARP account for exit '{code}'")
+        raise WgtError(f"could not register a WARP account for jump '{code}'")
     # The stored copy carries its label as the first line (exit list, rollback).
     body = "".join(line + "\n" for line in raw.splitlines() if not line.startswith(f"# exit {code}: "))
     ctx.files.write(ctx.paths.jump_source(code), 0o600, f"# exit {code}: {label}\n" + body)
@@ -248,7 +248,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         ctx.out.info(f"[dry-run] would write {ctx.paths.px_conf(code)} and {ctx.paths.wx_conf(code)}")
         ops.write_wg_conf(ctx)
         units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
-        ctx.out.info(f"[dry-run] would start the exit watchdog and check exit '{code}'")
+        ctx.out.info(f"[dry-run] would start the jump watchdog and check jump '{code}'")
         return
     changed = write_confs(ctx, e)
     _wire_live(ctx, e)
@@ -284,12 +284,12 @@ def _wire_live(ctx: Ctx, e: store.Exit) -> None:
 
 def _check_new(ctx: Ctx, e: store.Exit) -> None:
     """Bring the new exit up once and see traffic leave through its WARP."""
-    ctx.out.log(f"Checking exit '{e.code}'")
+    ctx.out.log(f"Checking jump '{e.code}'")
     ok, said = probe(ctx, e)
     if ok:
-        ctx.out.info(f"exit '{e.code}' works: {said}")
+        ctx.out.info(f"jump '{e.code}' works: {said}")
     else:
-        ctx.out.warn(f"exit '{e.code}' isn't passing traffic yet ({said}); check: wgt jump test")
+        ctx.out.warn(f"jump '{e.code}' isn't passing traffic yet ({said}); check: wgt jump test")
     ctx.out.info(f"it goes down when idle and comes up when a client connects; add one: "
                  f"wgt client add <name> --exit {e.code}")
 
@@ -305,10 +305,10 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"no jump '{code}' (see: wgt jump list)")
     users = " ".join(c.name for c in ctx.snap.exit_clients(code))
     if users:
-        raise WgtError(f"clients use exit '{code}': {users}; remove them first (wgt client remove <name>)")
+        raise WgtError(f"clients use jump '{code}': {users}; remove them first (wgt client remove <name>)")
     ctx.runner.step(f"Remove jump '{code}' ({e.label}): its tunnels, routing, WARP account and jump config",
                     f"wgt jump add {code} <wg.conf>")
-    ops.confirm(ctx, f"Remove exit {code}?")
+    ops.confirm(ctx, f"Remove jump {code}?")
     down(ctx, e)
     if ops.wg_up(ctx):
         ctx.runner.sh_lines(rules.ipt_cmds(reversed(rules.exit_ipt_rules(ctx.cfg, e)), up=False))
@@ -348,8 +348,9 @@ def tables_ok(ctx: Ctx, e: store.Exit) -> bool:
     client_table, jump_table, mark = rules.exit_wtable(e), rules.exit_ptable(e), rules.exit_mark(e)
     if f"fwmark {mark:#x} lookup {jump_table}" not in live.rules(r):
         return False
-    if "\nblackhole default" not in "\n" + live.table(r, "ip", jump_table):
-        return False
+    for fam in ctx.cfg.families():   # IPv6 too: it stops WARP-off clients' IPv6
+        if "\nblackhole default" not in "\n" + live.table(r, fam, jump_table):
+            return False
     return all("\nblackhole default" in "\n" + live.table(r, fam, client_table) for fam in ctx.cfg.families())
 
 
@@ -368,13 +369,13 @@ def client_rules_ok(ctx: Ctx, e: store.Exit) -> bool:
 def tunnel_checks(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
     """An up exit: both tunnels handshaking, and traffic leaving through its WARP."""
     for kind, ifc in (("jump", e.px), ("WARP", e.wx)):
-        res.check(f"exit {e.code}: {kind} tunnel {ifc} handshake within {WATCHDOG_STALE}s",
+        res.check(f"jump {e.code}: {kind} tunnel {ifc} handshake within {WATCHDOG_STALE}s",
                   live.hs_recent(ctx.runner, ifc, WATCHDOG_STALE, ctx.clock()))
     tr = trace(ctx, e)
     if live.is_warp_trace(tr):
-        res.result("PASS", f"exit {e.code}: traffic exits through WARP ({tr})")
+        res.result("PASS", f"jump {e.code}: traffic exits through WARP ({tr})")
     else:
-        res.result("FAIL", f"exit {e.code}: no WARP trace through {e.wx} ({tr or 'no answer'})")
+        res.result("FAIL", f"jump {e.code}: no WARP trace through {e.wx} ({tr or 'no answer'})")
 
 
 def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
@@ -385,10 +386,10 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
         res.result("SKIP", "jumps (none)")
         return
     for e in ctx.snap.exits:
-        res.check(f"exit {e.code}: tables with blackhole fallbacks, fwmark rule to the jump", tables_ok(ctx, e))
+        res.check(f"jump {e.code}: tables with blackhole fallbacks, fwmark rule to the jump", tables_ok(ctx, e))
         users = ctx.snap.exit_clients(e.code)
         off = sum(1 for c in users if ctx.snap.warp_off(c.name))
-        res.check(f"exit {e.code}: one rule per address of its {len(users)} client(s)"
+        res.check(f"jump {e.code}: one rule per address of its {len(users)} client(s)"
                   + (f" ({off} with WARP off, via the jump)" if off else ""), client_rules_ok(ctx, e))
         act = active_count(ctx, e.code)
         if bring_up or is_up(ctx, e):
@@ -396,14 +397,14 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
                 with probing(ctx, e):
                     tunnel_checks(ctx, res, e)
             except WgtError as err:
-                res.result("FAIL", f"exit {e.code}: could not bring it up ({err})")
+                res.result("FAIL", f"jump {e.code}: could not bring it up ({err})")
         elif act > 0:
-            res.result("FAIL", f"exit {e.code}: down while {act} client(s) are active "
+            res.result("FAIL", f"jump {e.code}: down while {act} client(s) are active "
                                "(the watchdog brings it up within 10s)")
         else:
-            res.result("PASS", f"exit {e.code}: idle, no active clients (comes up when one connects; "
+            res.result("PASS", f"jump {e.code}: idle, no active clients (comes up when one connects; "
                                f"'wgt jump test' checks it live)")
-    res.check("exit watchdog timer enabled and running",
+    res.check("jump watchdog timer enabled and running",
               live.timer_on(r, EXIT_WATCHDOG))
 
 

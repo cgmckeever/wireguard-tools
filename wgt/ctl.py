@@ -5,7 +5,7 @@ a name, a list number, or all; a few take no server (below).
 One server:
   wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
   wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to local/backups/SERVER/
-  wgt-ctl SERVER jump-add [n|all]       push a WireGuard config from local/exits/SERVER/ as a jump
+  wgt-ctl SERVER jump-add [n|all]       push a WireGuard config from local/exits/SERVER/ as a jump (old: exit-add)
   wgt-ctl SERVER ssh [command] | branch <b>
   wgt-ctl SERVER forget [--yes]         drop it from local/servers (the server is untouched)
   wgt-ctl SERVER remove [--yes]         tear wireguard-tools off it (rollback --purge, delete its
@@ -15,7 +15,7 @@ Every server, in turn:
   wgt-ctl all <wgt command> | pull | backup | branch <b>
 
 No server:
-  wgt-ctl [list]                        the servers: branch@commit (or unreachable), exits staged
+  wgt-ctl [list]                        the servers: branch@commit (or unreachable), jumps staged
   wgt-ctl summary                       every server at a glance (wgt summary on each)
   wgt-ctl clients                       every client on every server
   wgt-ctl init [--address A] [--name N] [--user U] [--branch B] [-- setup flags]
@@ -23,7 +23,7 @@ No server:
 
 Leave SERVER out of a server command to pick one from the list. Private
 files stay under local/ (untracked): servers, exits/<server>/*.conf (jump
-WireGuard configs, any name), exits/details.tsv (which file is which exit), backups/."""
+WireGuard configs, any name), exits/details.tsv (which file is which jump), backups/."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from . import render, store, ui
+from .ctx import VALUE_FLAGS
 from .errors import WgtError
 from .system import Out
 
@@ -196,7 +197,7 @@ def cmd_list(quick: bool = False) -> None:
             rc, o = ssh(s.target, f"cd {dq} && b=$(git rev-parse --abbrev-ref HEAD) && c=$(git rev-parse --short HEAD) "
                                   "&& printf '%s@%s' \"$b\" \"$c\"", batch=True, capture=True)
             probe = o.strip() if rc == 0 else "unreachable"
-        note = f"exits staged: {staged}" if staged else ""
+        note = f"jumps staged: {staged}" if staged else ""
         print(f"  {i:>2}) {s.name:<10} {s.target:<24} {probe:<22} {note}".rstrip())
     print("")
 
@@ -553,7 +554,7 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
         if not store.valid_exit_code(code):
             out.info(f"the code must be {store.EXIT_CODE_RULE}")
         elif code in taken:
-            out.info(f"{server} already has an exit '{code}'; pick another")
+            out.info(f"{server} already has a jump '{code}'; pick another")
         else:
             break
     with open(LINKS, "a") as f:
@@ -578,7 +579,7 @@ def add_one_exit(s: Server, path: str) -> None:
     code, label = link
     if not store.valid_exit_code(code):
         raise WgtError(f"bad code '{code}' for {file} in {LINKS}")
-    out.log(f"{s.name}: {file} -> exit {code} ({label})")
+    out.log(f"{s.name}: {file} -> jump {code} ({label})")
     if ssh(s.target, f"install -d -m 700 /etc/wireguard/exits {INBOX}")[0] != 0:
         raise WgtError(f"cannot reach {s.target}")
     fd, tmp = tempfile.mkstemp()
@@ -590,10 +591,11 @@ def add_one_exit(s: Server, path: str) -> None:
             raise WgtError("upload failed")
     finally:
         os.remove(tmp)
+    # `exit add`, not `jump add`: servers still on older code know only that name.
     rc, _ = ssh(s.target, f"{s.wgt} exit add {q(code, f'{INBOX}/{code}.conf', '--label', label, '--yes')}; "
                           f"rc=$?; rm -f {INBOX}/{code}.conf; exit $rc")
     if rc != 0:
-        raise WgtError(f"exit add failed for {code}")
+        raise WgtError(f"jump add failed for {code}")
 
 
 def local_exit_files(s: Server) -> List[str]:
@@ -621,11 +623,23 @@ def print_exit_files(s: Server, files: List[str], remote: List[str]) -> None:
     print("")
 
 
+def client_name(args: List[str]) -> str:
+    """The client name in `client add ...` words: the first word that is
+    neither a flag nor a value flag's value (`--warp off par-fr.mac`)."""
+    words = iter(args[1:])
+    for a in words:
+        if a in VALUE_FLAGS:
+            next(words, None)
+        elif not a.startswith("-"):
+            return a
+    return ""
+
+
 def offer_staged_exits(s: Server, args: List[str]) -> None:
     """Before `client add` in a terminal: if exit configs are staged here but
     not on the server, list them and offer to push one, so the server's exit
     menu can offer it. Skipped when the exit is already given."""
-    name = next((a for a in args[1:] if not a.startswith("-")), "")
+    name = client_name(args)
     # Nothing to offer when the exit is given (--exit, or a <code>.<name>
     # client name) or there must be no prompts (--yes).
     if "--exit" in args or any(a.startswith("--exit=") for a in args) or "." in name or any(a in YES for a in args):
@@ -637,7 +651,7 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
     staged = [f for f in files if (link_of(s.name, os.path.basename(f)) or ("", ""))[0] not in remote]
     if not staged:
         return
-    out.log(f"Exit configs staged here but not on {s.name}")
+    out.log(f"Jump configs staged here but not on {s.name}")
     print_exit_files(s, staged, remote)
     sel = ui.ask("    Push one first, so the new client can use it? [number, Enter skips]: ")
     if not sel:
@@ -670,8 +684,8 @@ def do_exit_add(s: Server, args: List[str]) -> int:
         raise WgtError(f"no config number '{sel}' (1-{len(files)}, or all)")
     for f in picked:
         add_one_exit(s, f)
-    out.log(f"{s.name} exits")
-    return do_wgt(s, ["exit", "list"])
+    out.log(f"{s.name} jumps")
+    return do_wgt(s, ["exit", "list"])   # the old name: works on servers not yet pulled
 
 
 CTL = {"pull": do_pull, "backup": do_backup, "jump-add": do_exit_add, "exit-add": do_exit_add, "ssh": do_ssh,

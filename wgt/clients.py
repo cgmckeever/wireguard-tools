@@ -15,7 +15,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING, List, Optional
 
-from . import live, net, ops, render, rules, store, system, ui
+from . import live, net, ops, render, rules, store, system, ui, units
 from .const import MIB
 from .errors import WgtError
 
@@ -61,7 +61,7 @@ def pick_client(ctx: Ctx, verb: str) -> str:
     if not ui.have_tty() or ctx.args.yes:
         raise WgtError(f"usage: wgt client {verb} <name>")
     try:
-        i = ui.menu("", [f"{store.device_of(c.name):<20} {exit_label(ctx, c.name):<16} {c.ip}" for c in clients],
+        i = ui.menu("", [f"{store.device_of(c.name):<20} {exit_label(ctx, c.name):<24} {c.ip}" for c in clients],
                     f"{verb.capitalize()} which client? (number or name)")
     except ValueError as e:
         if ctx.snap.client(str(e)):
@@ -173,6 +173,19 @@ def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, endpoint: str, old_
     hand_over(ctx, conf)
 
 
+def ensure_jump_live(ctx: Ctx, c: store.Client) -> None:
+    """A WARP-off jump client rides the jump tunnel directly: make sure its
+    table routes and NAT are live (idempotent), even on a wg0 still running
+    hooks from before WARP-off clients existed (pulled, not yet restarted)."""
+    e = ctx.snap.exit(c.exit) if c.exit else None
+    if e is None or not ctx.snap.warp_off(c.name) or not ops.wg_up(ctx):
+        return
+    ctx.runner.sh_lines(rules.jump_table_cmds(ctx.cfg, e))
+    ctx.runner.sh_lines(rules.ipt_cmds(rules.exit_ipt_rules(ctx.cfg, e), up=True))
+    if store.state_get(ctx.snap.state, "UFW") == "1":
+        units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
+
+
 def apply_peer(ctx: Ctx, entry: store.Client, old_pub: str) -> None:
     """Make the live wg0 match a new or re-keyed client (wg0.conf is already
     written): its exit rules first, then its peer, replacing <old_pub>. A
@@ -180,6 +193,7 @@ def apply_peer(ctx: Ctx, entry: store.Client, old_pub: str) -> None:
     up = ops.wg_up(ctx)
     disabled = ctx.snap.is_disabled(entry.name)
     if up:
+        ensure_jump_live(ctx, entry)
         ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, entry, up=True))
         if old_pub and (old_pub != entry.pub or disabled):
             ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", old_pub, "remove"])
@@ -236,13 +250,13 @@ def exit_short(ctx: Ctx, name: str, warp_off: Optional[bool] = None) -> str:
 
 def exit_label(ctx: Ctx, name: str) -> str:
     """Where a client exits, for people: its jump's full name (the label
-    given at exit add, e.g. "Paris, France"; "(no WARP)" added with WARP off),
+    given at jump add, e.g. "Paris, France"; "(direct)" added with WARP off),
     or warp/direct (no jump)."""
     code = store.client_exit(name)
     e = ctx.snap.exit(code) if code else None
     if e is None:
         return exit_short(ctx, name)
-    return (e.label or code) + (" (no WARP)" if ctx.snap.warp_off(name) else "")
+    return (e.label or code) + (" (direct)" if ctx.snap.warp_off(name) else "")
 
 
 def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str]:
@@ -263,7 +277,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     """add <name> [--exit host|<code>[,...]] [--warp on|off]: one client per
     exit (host = this server, the default), named <name> and <code>.<name>;
     asks when jumps exist. --warp off: they leave without our WARP."""
-    usage = "wgt client add <name> [--exit host|<code>[,...]] [--warp on|off]"
+    usage = "wgt client add <name> [--exit host|<jump>[,...]] [--warp on|off]"
     if not words:
         raise WgtError(f"usage: {usage}")
     ops.no_more_words(words[1:], usage)
@@ -312,7 +326,12 @@ def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str, warp_off: bo
     ctx.runner.step(f"Add client '{name}' at {ip} (exit: {exit_short(ctx, name, warp_off)})",
                     f"wgt client remove {name}")
     ops.set_nowarp(ctx, name, warp_off)
-    issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS), endpoint)
+    try:
+        issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS), endpoint)
+    except BaseException:
+        if ctx.snap.client(name) is None:
+            ops.set_nowarp(ctx, name, False)   # no client: no stale entry
+        raise
     tunnel = f"{ctx.cfg.SERVER_NAME}.{name}"
     if len(tunnel) > 15:
         ctx.out.info(f"note: Android's WireGuard app takes tunnel names up to 15 characters; '{tunnel}' is "
@@ -450,6 +469,7 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     # Moving between exits: the new exit's rules go in before the old ones come
     # out, so the client never falls back to the default exit in between.
     if ops.wg_up(ctx) and old_table != rules.client_table(ctx.snap, new_c):
+        ensure_jump_live(ctx, new_c)
         ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, new_c, up=True))
         ctx.runner.sh_lines(old_down)
     ctx.files.forget(conf)
@@ -528,6 +548,7 @@ def set_warp(ctx: Ctx, name: str, off: bool) -> None:
         ctx.out.info("note: this server's WARP is off (wgt warp on), so it still leaves via this server's IP")
     ops.write_wg_conf(ctx)
     if ops.wg_up(ctx):
+        ensure_jump_live(ctx, c)
         ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=True))
         ctx.runner.sh_lines(old_down)
     else:
@@ -640,8 +661,7 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
     elif action == "toggle":
         _set_disabled(ctx, [name], not disabled)
     elif action == "warp":
-        ops.take_lock(ctx)
-        set_warp(ctx, name, not off)
+        cmd_warp(ctx, [name, "on" if off else "off"])
     elif action == "rename":
         new = ui.ask("    New name: ")
         if new:

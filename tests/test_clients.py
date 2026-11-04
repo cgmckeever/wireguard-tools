@@ -148,7 +148,7 @@ def test_add_rereads_files_after_lock(make_ctx):
 def test_exit_remove_refused_while_used_and_ordered(make_ctx):
     from wgt import exits
     ctx = make_ctx()
-    with pytest.raises(WgtError, match="clients use exit 'par-fr'"):
+    with pytest.raises(WgtError, match="clients use jump 'par-fr'"):
         exits.cmd_remove(ctx, ["par-fr"])
     clients.cmd_remove(ctx, ["nyc-us.phone"])
     ctx.runner.calls.clear()
@@ -217,7 +217,7 @@ def test_summary_block(make_ctx, capsys):
     out = capsys.readouterr().out.splitlines()
     assert out[0].startswith(f"{ctx.cfg.SERVER_NAME}  (203.0.113.9)")
     labels = [line.split()[0] for line in out[1:] if line.startswith("    ") and line[4] != " "]
-    assert labels == ["WARP", "tunnels", "settings", "route", "firewall", "watchdog", "exits", "clients"]
+    assert labels == ["WARP", "tunnels", "settings", "route", "firewall", "watchdog", "jumps", "clients"]
     assert any("par-fr (Paris, France)" in line for line in out)
 
 
@@ -232,14 +232,14 @@ def test_add_warp_off_host_and_city(make_ctx):
     main = next(i for i, c in enumerate(calls) if f"rule add from {host_ip}/32 lookup main priority 9500" in c)
     stop = next(i for i, c in enumerate(calls) if f"rule add from {host_ip}/32 priority 9501 blackhole" in c)
     peer = next(i for i, c in enumerate(calls) if c.startswith("wg set wg0 peer") and f"{host_ip}/32" in c)
-    assert main < stop < peer
+    assert stop < main < peer   # the blackhole first: never a moment without it
     assert any(f"rule add from {city_ip}/32 lookup 231 priority 9500" in c for c in calls)   # Proton table
     assert not any(f"from {city_ip}/32 lookup 201" in c and "add" in c for c in calls)
     assert "# exit: this server's IP (WARP off for this client)" in store.read_text(clients.client_conf(ctx, "mac"))
     assert "(jump, WARP off)" in store.read_text(clients.client_conf(ctx, "par-fr.mac"))
     assert clients.exit_short(ctx, "mac") == "direct"
     assert clients.exit_short(ctx, "par-fr.mac") == "par-fr/direct"
-    assert clients.exit_label(ctx, "par-fr.mac") == "Paris, France (no WARP)"
+    assert clients.exit_label(ctx, "par-fr.mac") == "Paris, France (direct)"
 
 
 def test_add_exit_warp_is_host(make_ctx):
@@ -326,3 +326,16 @@ def test_rule_checks_split_by_warp(make_ctx):
     no_stop = v4.replace("9501:\tfrom 10.2.10.2 blackhole\n", "")
     ctx = make_ctx(answers={"ip rule show": (0, no_stop)})
     assert not checks.Tests(ctx).direct_rules_ok("ip")
+
+
+def test_warp_off_jump_wires_jump_before_rule(make_ctx):
+    """A wg0 running older hooks may lack the jump table's IPv6 blackhole and
+    NAT: they go in (idempotently) before the client's rule."""
+    ctx = make_ctx()
+    _conf(ctx, "par-fr.mbp-1")
+    clients.cmd_warp(ctx, ["par-fr.mbp-1", "off"])
+    calls = ctx.runner.changes()
+    v6_stop = next(i for i, c in enumerate(calls) if "ip -6 route replace blackhole default metric 4096 table 231" in c)
+    nat = next(i for i, c in enumerate(calls) if "-o px-par-fr -j MASQUERADE" in c)
+    rule = next(i for i, c in enumerate(calls) if "rule add from 10.2.10.3/32 lookup 231" in c)
+    assert v6_stop < rule and nat < rule

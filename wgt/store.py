@@ -99,9 +99,9 @@ def valid_client_name(name: str) -> Optional[str]:
     if "." in name:
         code, base = name.split(".", 1)
         if not valid_exit_code(code):
-            return f"bad exit code in client name '{name}' (see: wgt jump list)"
+            return f"bad jump code in client name '{name}' (see: wgt jump list)"
     if not _CLIENT_BASE.fullmatch(base):
-        return f"client name must be 1-32 of [A-Za-z0-9_-] (or <exit>.<name>): '{name}'"
+        return f"client name must be 1-32 of [A-Za-z0-9_-] (or <jump>.<name>): '{name}'"
     return None
 
 

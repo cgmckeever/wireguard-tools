@@ -1,3 +1,6 @@
+> Historical: the plan for the Python port. Exit cities have since become
+> jumps (`wgt jump`, any WireGuard server); see README.md for the current model.
+
 # Python port: plan
 
 > **Historical.** This was the plan for porting the bash tools to Python. It

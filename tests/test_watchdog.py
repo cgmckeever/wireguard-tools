@@ -39,7 +39,7 @@ def test_brings_up_city_with_active_client(make):
     calls = ctx.runner.calls
     assert "systemctl restart wg-quick@px-par-fr wg-quick@wx-par-fr" in calls
     assert not any("nyc-us" in c and c.startswith("systemctl") for c in calls)
-    assert any("exit par-fr: a client is active; brought up" in c for c in calls)
+    assert any("jump par-fr: a client is active; brought up" in c for c in calls)
 
 
 def test_takes_down_idle_city(make):
@@ -131,3 +131,28 @@ def test_watchdog_error_is_logged_not_raised(make, monkeypatch):
 ])
 def test_decide(active, px, wx, started, wx_hs, port_tried, want):
     assert watchdog.decide(active, px, wx, NOW, started, wx_hs, port_tried) == want
+
+
+def test_warp_off_jump_client_needs_only_the_jump_tunnel(make):
+    """nyc-us.phone has WARP off: its jump comes up without the jump's WARP."""
+    ctx = make({"ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
+                "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'nyc-us.phone')}\t{NOW - 30}\n")
+    watchdog.exits(ctx)
+    assert "systemctl restart wg-quick@px-nyc-us" in ctx.runner.calls
+    assert not any("wx-nyc-us" in c and c.startswith("systemctl") for c in ctx.runner.calls)
+
+
+def test_warp_off_jump_with_dead_warp_left_alone(make):
+    """Only WARP-off clients active, jump tunnel up, its WARP down: nothing to do."""
+    ctx = make({"ip link show dev px-nyc-us": UP, "ip link show dev wx-nyc-us": DOWN,
+                "ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN})
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'nyc-us.phone')}\t{NOW - 30}\n")
+    watchdog.exits(ctx)
+    assert not any(c.startswith("systemctl") for c in ctx.runner.calls)
+
+
+def test_decide_without_wx():
+    assert watchdog.decide(True, False, False, NOW, 0, 0, False, need_wx=False) == watchdog.UP
+    assert watchdog.decide(True, True, False, NOW, 0, 0, False, need_wx=False) is None
+    assert watchdog.decide(True, True, True, NOW, NOW - 999, 1, True, need_wx=False) is None

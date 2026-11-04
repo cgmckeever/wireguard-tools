@@ -224,7 +224,7 @@ def test_ask_reads_the_terminal():
 
 def test_host_is_not_an_exit_code():
     assert not store.valid_exit_code("host") and not store.valid_exit_code("warp")
-    assert store.valid_client_name("host.mac")
+    assert store.valid_client_name("host.mac") is not None   # an error: host is not a jump
 
 
 def test_client_table_per_cell():

@@ -39,9 +39,6 @@ tunnel to this server (for a Mac:
 tunnels). Sites still see a Cloudflare IP near the server or jump, but the
 WARP account is the device's own and this server only carries encrypted WARP.
 
-A jump's tunnels only run while one of its clients is connected (see
-[Jumps](#jumps)).
-
 ### Why route through Cloudflare?
 
 A VPS's public IP is a datacenter address, and sites treat those with
@@ -55,10 +52,9 @@ Cloudflare's network instead:
 - **Your provider sees one encrypted tunnel to Cloudflare** (or, through a
   jump, to the jump), not which sites your clients visit.
 - **IPv6 for clients even on an IPv4-only VPS**, through WARP's own IPv6.
-- **You pick the location.** Plain WARP exits near the server, so sites still
-  see roughly the right region; a jump puts the client in another city
-  (sites see Paris, say) while still looking like an ordinary Cloudflare user
-  rather than a VPN, and the jump sees only encrypted WARP traffic.
+- **You pick the location.** WARP exits near where it's entered: this server,
+  or a [jump](#jumps) in another city (sites see Paris, say), still looking
+  like an ordinary Cloudflare user rather than a VPN.
 - **Fail closed:** if WARP or a jump goes down, its clients are blocked rather
   than quietly falling back to the VPS's IP.
 
@@ -232,7 +228,7 @@ stay: a missing value stops the command before anything is written.
 Edit them in your own copy of the repository (a fork) and push, not on a
 server: servers update with a fast-forward-only pull, which stops (and changes
 nothing) on local edits.
-`wg0.conf`, `warp.conf` and the exit tunnels are built in code (`wgt/render.py`,
+`wg0.conf`, `warp.conf` and the jump tunnels (`px-`/`wx-<code>`) are built in code (`wgt/render.py`,
 `wgt/rules.py`), since their contents depend on the WARP setting, the routing
 rules and the client list.
 
@@ -416,12 +412,12 @@ and suggests a code from the name and the config's country tag if it has one
 (Proton's `FR#252` gives `par-fr`); the answer is kept in
 `local/exits/details.tsv`, and the file keeps its own name. The copy on the
 server records both: it starts with `# exit par-fr: Paris, France` and
-`# local file: paris.france.conf`. A code is 2-6 of a-z, 0-9 and `-`, starting
-with a letter (not `host` or `warp`).
+`# local file: paris.conf`. A code is 2-6 of a-z, 0-9 and `-`, starting
+with a letter, not ending in `-` (and not `host` or `warp`).
 
 `jump add` registers a separate WARP account for the jump, wires its routing
 into `wg0` live (clients stay connected), and checks the result:
-`exit 'par-fr' works: ip=104.28.x.x colo=CDG loc=FR warp=on` (`colo` is
+`jump 'par-fr' works: ip=104.28.x.x colo=CDG loc=FR warp=on` (`colo` is
 Cloudflare's data centre: CDG is Paris). Adding the same code again replaces
 its config.
 
@@ -430,8 +426,6 @@ wgt jump list              # jumps: state (up/idle), clients, endpoint
 wgt jump test              # bring each one up and check it
 wgt jump remove par-fr     # refused while clients use it
 ```
-
-(`wgt exit …` is the old name and still works.)
 
 **On demand.** A jump is only up while one of its clients is connected: the
 jump watchdog (every 10s) brings it up when a client handshakes and takes it
@@ -502,8 +496,10 @@ Each is a separate client with its own key, address and config
 (`dengar.par-fr.laptop.conf`, whose `# exit:` line names the jump and WARP).
 Import both on the device and switch exits by switching tunnels in the
 WireGuard app. `warp on|off` and `rename` keep the client's keys, so its
-config keeps working. `list` and `status` show each client's exit: `warp` or
-`direct` for host, the jump's code (`par-fr/direct` with WARP off). The
+config keeps working. `list`, `status` and `wgt-ctl clients` show each
+client's exit: `warp` or `direct` for host, the jump's name for a jump
+(`Paris, France (direct)` with WARP off; `--tsv` gives the code, e.g.
+`par-fr/direct`). The
 Android app only takes tunnel names up to 15 characters, so rename longer ones
 when importing there (`add` reminds you).
 
@@ -693,6 +689,10 @@ written aren't rendered again until `wgt setup` runs. With `wgt-ctl`:
    Setup restarts `wg0` only if its settings changed, not for comment-only
    changes.
 
+New commands and flags (here: `wgt jump`, `client warp`, `--warp`, `--exit
+host`) only work on a server once it has pulled; `wgt-ctl`'s own steps
+(`jump-add`, `clients`) also work with servers not yet updated.
+
 On a single server without `wgt-ctl`: `git -C /opt/wireguard-tools pull --ff-only
 && wgt test`, then `wgt setup --yes` if the change touched templates or how
 configs are rendered.
@@ -747,7 +747,7 @@ and `bin/wgt-ctl` run it from the checkout.
 ./test.sh -k exit          # just the tests matching "exit" (any pytest option works)
 ./test.sh lint             # ruff and mypy (settings in pyproject.toml)
 tools/render-diff.sh       # read-only: what this checkout would render differently on each server
-tools/trial.sh <jump.conf>     # on a throwaway server: the full cycle, back to clean
+tools/trial.sh <jump.conf>     # on a throwaway server: the full cycle, back to clean (a jump in Paris)
 ```
 
 [DEVELOPING.md](DEVELOPING.md) has the module map, the conventions and how the

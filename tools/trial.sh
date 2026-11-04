@@ -9,7 +9,7 @@
 set -uo pipefail
 [ $# -eq 1 ] || { echo "usage: $0 <jump.conf>" >&2; exit 2; }
 cd "$(dirname "$0")/.."
-proton="$1"
+jump="$1"
 W() { bin/wgt "$@"; }
 pass=0 fail=0
 exec 3>&1   # results go to fd 3, so a check's own output can be redirected to a log
@@ -38,6 +38,7 @@ device_up() {   # $1 = client config: a simulated device in netns "dev"
 }
 probe() { ip netns exec dev curl -s -m 5 https://1.1.1.1/cdn-cgi/trace | grep -E '^(loc|warp)=' | tr '\n' ' '; }
 wait_loc() { local i p; for i in $(seq 1 10); do sleep 3; p=$(probe); [[ $p == *"loc=$1"* ]] && return 0; done; return 1; }
+wait_probe() { local i p; for i in $(seq 1 10); do sleep 3; p=$(probe); [[ $p == *"$1"* ]] && return 0; done; return 1; }  # "loc=FR warp=off"
 
 echo "=== clean start"
 W rollback --purge --yes >/dev/null 2>&1
@@ -50,8 +51,8 @@ DESC="wgt test passes"; ok W test >/root/trial-test.log 2>&1
 DESC="watchdog units run wgt"; ok grep -q 'ExecStart=/usr/local/sbin/wgt watchdog warp' /etc/systemd/system/wg-tools-warp-watchdog.service
 
 echo "=== jump and clients"
-DESC="exit add par-fr"; ok W exit add par-fr "$proton" --label "Paris, France" --yes >/root/trial-exit.log 2>&1
-DESC="client add phone (warp + par-fr)"; ok W client add phone --exit warp,par-fr --no-qr --yes >/dev/null 2>&1
+DESC="jump add par-fr"; ok W jump add par-fr "$jump" --label "Paris, France" --yes >/root/trial-exit.log 2>&1
+DESC="client add phone (host + par-fr)"; ok W client add phone --exit host,par-fr --no-qr --yes >/dev/null 2>&1
 device_up /etc/wireguard/clients/bossk.par-fr.phone.conf
 DESC="device exits in Paris (on demand)"; ok wait_loc FR
 systemctl stop wg-tools-exit-watchdog.timer; systemctl stop wg-quick@wx-par-fr wg-quick@px-par-fr
@@ -60,8 +61,20 @@ systemctl start wg-tools-exit-watchdog.timer
 DESC="watchdog brings it back"; ok wait_loc FR
 device_up /etc/wireguard/clients/bossk.phone.conf
 DESC="default tunnel exits via WARP (US)"; ok wait_loc US
-DESC="exit test"; ok W exit test >/dev/null 2>&1
-DESC="remove refused while used"; ok bash -c '! bin/wgt exit remove par-fr --yes >/dev/null 2>&1'
+DESC="jump test"; ok W jump test >/dev/null 2>&1
+DESC="remove refused while used"; ok bash -c '! bin/wgt jump remove par-fr --yes >/dev/null 2>&1'
+
+echo "=== WARP off per client"
+DESC="client warp par-fr.phone off"; ok W client warp par-fr.phone off --yes >/dev/null 2>&1
+device_up /etc/wireguard/clients/bossk.par-fr.phone.conf
+DESC="jump without WARP: Paris, warp=off"; ok wait_probe "loc=FR warp=off"
+DESC="client warp par-fr.phone on"; ok W client warp par-fr.phone on --yes >/dev/null 2>&1
+DESC="jump with WARP again"; ok wait_probe "loc=FR warp=on"
+DESC="client add mac (host, WARP off)"; ok W client add mac --warp off --no-qr --yes >/dev/null 2>&1
+device_up /etc/wireguard/clients/bossk.mac.conf
+DESC="host without WARP: warp=off"; ok wait_probe "warp=off"
+DESC="host without WARP: no IPv6 through WARP"; ok bash -c '! ip netns exec dev curl -6 -s -m 5 https://[2606:4700:4700::1111]/cdn-cgi/trace | grep -q warp=on'
+DESC="wgt test with WARP-off clients"; ok W test >/dev/null 2>&1
 
 echo "=== backup, purge, restore"
 ip netns del dev
@@ -73,7 +86,7 @@ W rollback --purge --yes >/dev/null 2>&1
 DESC="purge leaves no wg0"; ok bash -c '! ip link show wg0 >/dev/null 2>&1'
 DESC="restore succeeds"; ok W restore /root/trial-archive.tgz --yes >/root/trial-restore.log 2>&1
 DESC="same keys after restore"; ok test "$keys_before" = "$(md5sum /etc/wireguard/server.key /etc/wireguard/clients/*.conf | md5sum)"
-DESC="jump back"; ok bash -c 'bin/wgt exit list | grep -q par-fr'
+DESC="jump back"; ok bash -c 'bin/wgt jump list | grep -q par-fr'
 device_up /etc/wireguard/clients/bossk.par-fr.phone.conf
 DESC="old device config still exits in Paris"; ok wait_loc FR
 ip netns del dev
@@ -86,7 +99,8 @@ DESC="test with WARP on"; ok W test >/dev/null 2>&1
 
 echo "=== purge and compare"
 W client remove par-fr.phone --yes >/dev/null 2>&1; W client remove phone --yes >/dev/null 2>&1
-DESC="exit remove"; ok W exit remove par-fr --yes >/dev/null 2>&1
+W client remove mac --yes >/dev/null 2>&1
+DESC="jump remove"; ok W jump remove par-fr --yes >/dev/null 2>&1
 DESC="rollback --purge"; ok W rollback --purge --yes >/dev/null 2>&1
 snap /root/trial-after
 DESC="box matches the clean snapshot"; ok diff -r /root/trial-before /root/trial-after

@@ -211,9 +211,8 @@ class Tests:
             self.check_warp(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
                             self.rt_table_ok(f))
             direct = len(self.ctx.snap.direct_clients())
-            if direct:
-                res.check(f"{f} rules: {direct} client(s) with WARP off leave via this server's IP "
-                          "(main, then blackhole)", self.direct_rules_ok(f))
+            res.check(f"{f} rules: {direct} client(s) with WARP off leave via this server's IP "
+                      "(main, then blackhole; no stale ones)", self.direct_rules_ok(f))
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             res.check(f"exactly once: {x} {t} {ch} {rule}", live.ipt_count(r, x, t, ch, rule) == 1)
         res.check(f"wg-quick@{c.WG_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WG_IF}"))
@@ -360,11 +359,11 @@ def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
                               f"last port change: {live.last_event(r, WATCHDOG) or 'never'}"))
 
     if not ctx.snap.exits:
-        lines.append(("exits", "none"))
+        lines.append(("jumps", "none"))
     for i, e in enumerate(ctx.snap.exits):
         users = len(ctx.snap.exit_clients(e.code))
         state = f"up, {exits.active_count(ctx, e.code)} active" if exits.is_up(ctx, e) else "idle"
-        lines.append(("exits" if i == 0 else "", f"{e.code} ({e.label}): {state}; {users} client(s)"))
+        lines.append(("jumps" if i == 0 else "", f"{e.code} ({e.label}): {state}; {users} client(s)"))
 
     hs = live.handshakes(r, c.WG_IF)
     in_use = [cl for cl in ctx.snap.clients if not ctx.snap.is_disabled(cl.name)]
