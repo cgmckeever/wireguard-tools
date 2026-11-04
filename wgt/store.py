@@ -4,6 +4,7 @@ switched over with their files unchanged; keep them compatible):
   wg-tools.state     KEY=value lines; the last one for a key wins
   clients.db         "name ip public-key allowed-ips" (no private keys)
   clients.disabled   one name per line
+  clients.nowarp     one name per line: clients with WARP off (exit straight out)
   exits.db           "code idx label..."
   wg-tools.backups   "path<TAB>original-copy|NEW"
 
@@ -78,12 +79,13 @@ def saved_settings(text: Optional[str], keys: Iterable[str]) -> Dict[str, str]:
 
 # --- names ---
 
-EXIT_CODE_RULE = "2-6 of a-z0-9 and -, starting with a letter, not ending in -, not 'warp' (e.g. par-fr)"
+EXIT_CODE_RULE = "2-6 of a-z0-9 and -, starting with a letter, not ending in -, not 'warp' or 'host' (e.g. par-fr)"
+HOST_EXITS = ("host", "warp")   # --exit words for this server's own way out ("warp": the old spelling)
 
 
 def valid_exit_code(code: str) -> bool:
     """See EXIT_CODE_RULE (the code names interfaces px-<code>, wx-<code>)."""
-    return bool(_EXIT_CODE.fullmatch(code)) and code != "warp"
+    return bool(_EXIT_CODE.fullmatch(code)) and code not in HOST_EXITS
 
 
 def client_exit(name: str) -> str:
@@ -174,6 +176,10 @@ def set_disabled(text: Optional[str], name: str, disabled: bool) -> str:
     if disabled:
         names.append(name)
     return "".join(n + "\n" for n in names)
+
+
+parse_nowarp = parse_disabled
+set_nowarp = set_disabled   # same format: clients.nowarp with <name> added (WARP off) or dropped
 
 
 # --- exits ---
@@ -272,6 +278,7 @@ class Snapshot:
     clients: List[Client]
     disabled: List[str]
     exits: List[Exit]
+    nowarp: List[str] = field(default_factory=list)
 
     def client(self, name: str) -> Optional[Client]:
         return next((c for c in self.clients if c.name == name), None)
@@ -285,6 +292,15 @@ class Snapshot:
     def is_disabled(self, name: str) -> bool:
         return name in self.disabled
 
+    def warp_off(self, name: str) -> bool:
+        """Client <name> has WARP off: it leaves straight out of its exit (this
+        server's IP, or its city's Proton tunnel), never through a WARP of ours."""
+        return name in self.nowarp
+
+    def direct_clients(self) -> List[Client]:
+        """Clients without an exit city and with WARP off (out this server's IP)."""
+        return [c for c in self.clients if not c.exit and self.warp_off(c.name)]
+
 
 def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
     """Read the server's files (through <read>, default read_text)."""
@@ -294,6 +310,7 @@ def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
         clients=parse_clients(read(paths.client_db)),
         disabled=parse_disabled(read(paths.disabled_db)),
         exits=parse_exits(read(paths.exit_db)),
+        nowarp=parse_nowarp(read(paths.nowarp_db)),
     )
 
 

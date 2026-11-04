@@ -93,7 +93,7 @@ def test_list_shows_device_first(make_ctx, capsys):
     names = clients.print_clients(ctx, numbered=True)
     shown = [line.split()[1:3] for line in capsys.readouterr().out.splitlines()[1:]]
     # grouped by device, default exit first; the full names come back for the menu
-    assert shown == [["mbp-1", "warp"], ["mbp-1", "Paris,"], ["phone", "New"], ["tv", "Paris,"]]
+    assert shown == [["mbp-1", "direct"], ["mbp-1", "Paris,"], ["phone", "New"], ["tv", "Paris,"]]
     assert names == ["mbp-1", "par-fr.mbp-1", "nyc-us.phone", "par-fr.tv"]
 
 
@@ -219,3 +219,110 @@ def test_summary_block(make_ctx, capsys):
     labels = [line.split()[0] for line in out[1:] if line.startswith("    ") and line[4] != " "]
     assert labels == ["WARP", "tunnels", "settings", "route", "firewall", "watchdog", "exits", "clients"]
     assert any("par-fr (Paris, France)" in line for line in out)
+
+
+# --- WARP per client (clients.nowarp): exit (host | city) x WARP (on | off) ---
+
+def test_add_warp_off_host_and_city(make_ctx):
+    ctx = make_ctx(argv=["--exit", "host,par-fr", "--warp", "off"])
+    clients.cmd_add(ctx, ["mac"])
+    assert ctx.snap.warp_off("mac") and ctx.snap.warp_off("par-fr.mac")
+    calls = ctx.runner.changes()
+    host_ip, city_ip = ctx.snap.client("mac").ip, ctx.snap.client("par-fr.mac").ip
+    main = next(i for i, c in enumerate(calls) if f"rule add from {host_ip}/32 lookup main priority 9500" in c)
+    stop = next(i for i, c in enumerate(calls) if f"rule add from {host_ip}/32 priority 9501 blackhole" in c)
+    peer = next(i for i, c in enumerate(calls) if c.startswith("wg set wg0 peer") and f"{host_ip}/32" in c)
+    assert main < stop < peer
+    assert any(f"rule add from {city_ip}/32 lookup 231 priority 9500" in c for c in calls)   # Proton table
+    assert not any(f"from {city_ip}/32 lookup 201" in c and "add" in c for c in calls)
+    assert "# exit: this server's IP (WARP off for this client)" in store.read_text(clients.client_conf(ctx, "mac"))
+    assert "(Proton, WARP off)" in store.read_text(clients.client_conf(ctx, "par-fr.mac"))
+    assert clients.exit_short(ctx, "mac") == "direct"
+    assert clients.exit_short(ctx, "par-fr.mac") == "par-fr/direct"
+    assert clients.exit_label(ctx, "par-fr.mac") == "Paris, France (no WARP)"
+
+
+def test_add_exit_warp_is_host(make_ctx):
+    ctx = make_ctx(argv=["--exit", "warp,host"])
+    clients.cmd_add(ctx, ["phone2"])
+    assert [c.name for c in ctx.snap.clients].count("phone2") == 1
+    assert not ctx.snap.warp_off("phone2")
+    assert not any("phone2" in c or "lookup main" in c for c in ctx.runner.changes() if " rule " in c)
+
+
+def test_warp_flag_values(make_ctx):
+    with pytest.raises(WgtError, match="--warp takes on or off"):
+        make_ctx(argv=["--warp", "maybe"])
+
+
+def test_client_warp_switch_adds_before_removing(make_ctx):
+    ctx = make_ctx()
+    _conf(ctx, "par-fr.mbp-1")
+    clients.cmd_warp(ctx, ["par-fr.mbp-1", "off"])
+    assert ctx.snap.warp_off("par-fr.mbp-1")
+    calls = ctx.runner.changes()
+    add_new = next(i for i, c in enumerate(calls) if "rule add from 10.2.10.3/32 lookup 231" in c)
+    del_old = next(i for i, c in enumerate(calls) if "rule del from 10.2.10.3/32 lookup 201" in c)
+    assert add_new < del_old
+    conf = store.read_text(clients.client_conf(ctx, "par-fr.mbp-1"))
+    assert "# exit: par-fr = Paris, France (Proton, WARP off)" in conf
+    assert "lookup 231 priority 9500" in store.read_text(ctx.cfg.wg_conf)
+
+
+def test_client_warp_on_for_host_drops_its_rules(make_ctx):
+    ctx = make_ctx()   # the fixture has mbp-1 with WARP off
+    _conf(ctx, "mbp-1")
+    clients.cmd_warp(ctx, ["mbp-1", "on"])
+    assert not ctx.snap.warp_off("mbp-1")
+    calls = ctx.runner.changes()
+    assert any("rule del from 10.2.10.2/32 lookup main priority 9500" in c for c in calls)
+    assert any("rule del from 10.2.10.2/32 priority 9501 blackhole" in c for c in calls)
+    assert not any("rule add" in c for c in calls)
+    ctx.runner.calls.clear()
+    clients.cmd_warp(ctx, ["mbp-1", "on"])   # already on: nothing
+    assert not ctx.runner.changes()
+
+
+def test_client_warp_usage(make_ctx):
+    ctx = make_ctx()
+    with pytest.raises(WgtError, match="usage: wgt client warp"):
+        clients.cmd_warp(ctx, ["mbp-1"])
+    with pytest.raises(WgtError, match="no client"):
+        clients.cmd_warp(ctx, ["nobody", "off"])
+
+
+def test_rename_carries_warp_off(make_ctx):
+    ctx = make_ctx()
+    _conf(ctx, "mbp-1")
+    clients.cmd_rename(ctx, ["mbp-1", "par-fr.mac"])
+    assert ctx.snap.warp_off("par-fr.mac") and not ctx.snap.warp_off("mbp-1")
+    calls = ctx.runner.changes()
+    add_new = next(i for i, c in enumerate(calls) if "rule add from 10.2.10.2/32 lookup 231" in c)
+    del_old = next(i for i, c in enumerate(calls) if "rule del from 10.2.10.2/32 lookup main" in c)
+    assert add_new < del_old
+    assert "(Proton, WARP off)" in store.read_text(clients.client_conf(ctx, "par-fr.mac"))
+
+
+def test_remove_forgets_warp_off(make_ctx):
+    ctx = make_ctx()
+    clients.cmd_remove(ctx, ["mbp-1"])
+    assert "mbp-1" not in store.parse_nowarp(store.read_text(ctx.paths.nowarp_db))
+    assert any("rule del from 10.2.10.2/32 priority 9501 blackhole" in c for c in ctx.runner.changes())
+
+
+def test_rule_checks_split_by_warp(make_ctx):
+    from wgt import checks, exits
+    v4 = ("0:\tfrom all lookup local\n9400:\tfrom all fwmark 0x5701 lookup 231\n"
+          "9500:\tfrom 10.2.10.2 lookup main\n9500:\tfrom 10.2.10.3 lookup 201\n9500:\tfrom 10.2.10.4 lookup 233\n"
+          "9500:\tfrom 10.2.10.5 lookup 201\n9501:\tfrom 10.2.10.2 blackhole\n10000:\tfrom 10.2.10.0/24 lookup 100\n")
+    v6 = v4.replace("10.2.10.0/24", "fdfc:cd08:368e::/64").replace("from 10.2.10.", "from fdfc:cd08:368e::")
+    ctx = make_ctx(answers={"ip rule show": (0, v4), "ip -6 rule show": (0, v6)})
+    assert checks.Tests(ctx).direct_rules_ok("ip") and checks.Tests(ctx).direct_rules_ok("ip -6")
+    assert exits.client_rules_ok(ctx, ctx.snap.exit("par-fr")) and exits.client_rules_ok(ctx, ctx.snap.exit("nyc-us"))
+    # nyc-us.phone has WARP off: a rule to its WARP table (203) instead of Proton (233) fails
+    wrong = v4.replace("lookup 233", "lookup 203")
+    ctx = make_ctx(answers={"ip rule show": (0, wrong), "ip -6 rule show": (0, v6)})
+    assert not exits.client_rules_ok(ctx, ctx.snap.exit("nyc-us"))
+    no_stop = v4.replace("9501:\tfrom 10.2.10.2 blackhole\n", "")
+    ctx = make_ctx(answers={"ip rule show": (0, no_stop)})
+    assert not checks.Tests(ctx).direct_rules_ok("ip")

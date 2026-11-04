@@ -195,12 +195,17 @@ def proton_hint(raw: str) -> str:
 
 # --- client configs ---
 
-def exit_desc(snap: Snapshot, name: str) -> str:
-    """The "# exit:" line of a client's config."""
+def exit_desc(snap: Snapshot, name: str, warp_off: Optional[bool] = None) -> str:
+    """The "# exit:" line of a client's config (<warp_off> overrides clients.nowarp)."""
     code = client_exit(name)
+    off = snap.warp_off(name) if warp_off is None else warp_off
     if code:
         e = snap.exit(code)
+        if off:
+            return f"{code} = {e.label if e else ''} (Proton, WARP off)"
         return f"{code} = {e.label if e else ''} (Proton -> Cloudflare WARP)"
+    if off:
+        return "this server's IP (WARP off for this client)"
     return "default (this server's WARP setting: wgt warp on|off)"
 
 

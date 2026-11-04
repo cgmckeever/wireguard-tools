@@ -220,3 +220,20 @@ def test_ask_reads_the_terminal():
     os.waitpid(pid, 0)
     text = out.decode()
     assert "Which? " in text and "GOT=2" in text, text
+
+
+def test_host_is_not_an_exit_code():
+    assert not store.valid_exit_code("host") and not store.valid_exit_code("warp")
+    assert store.valid_client_name("host.mac")
+
+
+def test_client_table_per_cell():
+    from wgt import rules
+    snap = store.Snapshot(state="", clients=[store.Client("a", "10.0.0.2", "K"),
+                                            store.Client("par-fr.a", "10.0.0.3", "K")],
+                          disabled=[], exits=[store.Exit("par-fr", 1, "Paris")])
+    host, city = snap.clients
+    assert rules.client_table(snap, host) == "" and rules.client_table(snap, city) == "201"
+    snap.nowarp = ["a", "par-fr.a"]
+    assert rules.client_table(snap, host) == "main" and rules.client_table(snap, city) == "231"
+    assert [c.name for c in snap.direct_clients()] == ["a"]

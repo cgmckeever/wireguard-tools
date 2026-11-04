@@ -59,7 +59,7 @@ def test_exits(server):
         for direction in ("up", "down"):
             got = lines(rules.exit_hook_cmds(server.cfg, server.snap, e, up=direction == "up"))
             assert_golden(server.case, f"exit-{e.code}-{direction}.txt", got)
-        got = lines("|".join(r) for r in rules.ipt_rules_via(server.cfg, f"wx-{e.code}"))
+        got = lines("|".join(r) for r in rules.exit_ipt_rules(server.cfg, e))
         assert_golden(server.case, f"exit-{e.code}-ipt.txt", got)
 
 

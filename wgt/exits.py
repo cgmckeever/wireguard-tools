@@ -276,7 +276,7 @@ def _wire_live(ctx: Ctx, e: store.Exit) -> None:
     ops.write_wg_conf(ctx)
     if ops.wg_up(ctx):
         ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, up=True))
-        ctx.runner.sh_lines(rules.ipt_cmds(rules.ipt_rules_via(ctx.cfg, e.wx), up=True))
+        ctx.runner.sh_lines(rules.ipt_cmds(rules.exit_ipt_rules(ctx.cfg, e), up=True))
     units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
     units.write_exit_watchdog(ctx)
 
@@ -310,9 +310,9 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ops.confirm(ctx, f"Remove exit {code}?")
     down(ctx, e)
     if ops.wg_up(ctx):
-        ctx.runner.sh_lines(rules.ipt_cmds(reversed(rules.ipt_rules_via(ctx.cfg, e.wx)), up=False))
+        ctx.runner.sh_lines(rules.ipt_cmds(reversed(rules.exit_ipt_rules(ctx.cfg, e)), up=False))
         ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, up=False))
-    units.close_firewall(ctx, [e.wx])
+    units.close_firewall(ctx, rules.exit_ifs(e))
     ops.remove_exit(ctx, code)
     ops.write_wg_conf(ctx)
     for path in (ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.proton_conf(code)):
@@ -353,14 +353,14 @@ def tables_ok(ctx: Ctx, e: store.Exit) -> bool:
 
 
 def client_rules_ok(ctx: Ctx, e: store.Exit) -> bool:
-    """One rule per client address."""
-    client_table = rules.exit_wtable(e)
-    want = len(ctx.snap.exit_clients(e.code))
+    """One rule per client address: to its WARP table, or (WARP off) its Proton table."""
+    users = ctx.snap.exit_clients(e.code)
+    off = sum(1 for c in users if ctx.snap.warp_off(c.name))
     for fam in ctx.cfg.families():
-        found = sum(1 for line in live.rules(ctx.runner, fam).splitlines()
-                    if re.search(rf"lookup {client_table}\b", line))
-        if found != want:
-            return False
+        lines = [line for line in live.rules(ctx.runner, fam).splitlines() if "fwmark" not in line]
+        for table, want in ((rules.exit_wtable(e), len(users) - off), (rules.exit_ptable(e), off)):
+            if sum(1 for line in lines if re.search(rf"lookup {table}\b", line)) != want:
+                return False
     return True
 
 
@@ -385,8 +385,10 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
         return
     for e in ctx.snap.exits:
         res.check(f"exit {e.code}: tables with blackhole fallbacks, fwmark rule to Proton", tables_ok(ctx, e))
-        res.check(f"exit {e.code}: one rule per address of its {len(ctx.snap.exit_clients(e.code))} client(s)",
-                  client_rules_ok(ctx, e))
+        users = ctx.snap.exit_clients(e.code)
+        off = sum(1 for c in users if ctx.snap.warp_off(c.name))
+        res.check(f"exit {e.code}: one rule per address of its {len(users)} client(s)"
+                  + (f" ({off} with WARP off, via Proton)" if off else ""), client_rules_ok(ctx, e))
         act = active_count(ctx, e.code)
         if bring_up or is_up(ctx, e):
             try:

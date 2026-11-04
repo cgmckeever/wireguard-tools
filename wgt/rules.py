@@ -10,17 +10,29 @@ How it fits together (see README "How it works"):
   230+n (default dev px-<code>, blackhole) chosen by the fwmark of the city's
   WARP tunnel. All of it lives in wg0's hooks, so a city that is down blocks
   its clients instead of leaking them.
+- WARP off for one client (clients.nowarp): its rule picks the plain way out
+  instead of a WARP of ours. A city client's rule points at the Proton table
+  (px, NATed like any way out); a client without a city gets `lookup main`
+  plus a blackhole rule behind it, so a missing main route (IPv6 on an
+  IPv4-only server) stops there rather than falling through to WARP's rule.
+
+Per client, then, the way out is exit (host | city) x WARP (on | off):
+
+             WARP on                       WARP off
+  host       RT_TABLE (the WARP switch)    main (this server's IP)
+  city       client table 200+n (wx)       Proton table 230+n (px)
 
 Every line is idempotent, and "down" is the exact inverse of "up" in reverse
 order. The text matches the bash version byte for byte (wg0.conf embeds it)."""
 
 from __future__ import annotations
 
-from typing import Iterable, List, Sequence, Tuple
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 from .config import Config
 from .const import (
     BLACKHOLE_METRIC,
+    DIRECT_STOP_PRIO,
     EXIT_MARK_BASE,
     EXIT_MARK_PRIO,
     EXIT_PTABLE_BASE,
@@ -49,8 +61,22 @@ def exit_mark(e: Exit) -> int:
 
 
 def out_ifs(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[str]:
-    """Every way out: WARP, the public interface, each exit city's WARP tunnel."""
-    return [cfg.WARP_IF, pub_if] + [e.wx for e in exits]
+    """Every way out: WARP, the public interface, each exit city's WARP tunnel
+    and (for its WARP-off clients) its Proton tunnel."""
+    out = [cfg.WARP_IF, pub_if]
+    for e in exits:
+        out += exit_ifs(e)
+    return out
+
+
+def exit_ifs(e: Exit) -> List[str]:
+    """An exit city's ways out: its WARP tunnel, and its Proton tunnel (WARP-off clients)."""
+    return [e.wx, e.px]
+
+
+def exit_ipt_rules(cfg: Config, e: Exit) -> List[IptRule]:
+    """An exit city's NAT/forwarding rules: through its WARP, and (IPv4) through Proton."""
+    return ipt_rules_via(cfg, e.wx) + ipt_rules_via(cfg, e.px, v4_only=True)
 
 
 def rule_spec(cfg: Config, family: str) -> str:
@@ -79,19 +105,21 @@ def ipt_rules(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[IptRule]:
     can stay in place), plus the WireGuard port. Inserted (-I) so ufw/Docker
     DROP policies can't shadow them."""
     found: List[IptRule] = []
+    v4_only = {e.px for e in exits}   # Proton tunnels carry IPv4 only
     for cmd in ("iptables", "ip6tables"):
         if cmd == "ip6tables" and not cfg.ipv6:
             continue
         for out_if in out_ifs(cfg, pub_if, exits):
-            found += ipt_rules_for(cfg, cmd, out_if)
+            if cmd == "iptables" or out_if not in v4_only:
+                found += ipt_rules_for(cfg, cmd, out_if)
     found.append(("iptables", "filter", "INPUT", f"-p udp --dport {cfg.WG_PORT} -j ACCEPT"))
     return found
 
 
-def ipt_rules_via(cfg: Config, out_if: str) -> List[IptRule]:
-    """The NAT/forwarding rules for one way out (both families)."""
+def ipt_rules_via(cfg: Config, out_if: str, v4_only: bool = False) -> List[IptRule]:
+    """The NAT/forwarding rules for one way out (both families, unless <v4_only>)."""
     rules = ipt_rules_for(cfg, "iptables", out_if)
-    if cfg.ipv6:
+    if cfg.ipv6 and not v4_only:
         rules += ipt_rules_for(cfg, "ip6tables", out_if)
     return rules
 
@@ -115,19 +143,37 @@ def warp_rule_cmds(cfg: Config, on: bool) -> List[str]:
     return out
 
 
-def exit_client_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool) -> List[str]:
-    """Policy rules sending one client's addresses (ip, ip6) to its exit's table:
-    added (<up>) or removed."""
-    e = snap.exit(client.exit) if client.exit else None
-    if e is None or not client.ip:
+def client_table(snap: Snapshot, client: Client, nowarp: Optional[bool] = None) -> str:
+    """The routing table a client's own rules point at ("" for none: it
+    follows the server's WARP switch). <nowarp> overrides clients.nowarp
+    (for the rules of a state the client is leaving)."""
+    off = snap.warp_off(client.name) if nowarp is None else nowarp
+    if client.exit:
+        e = snap.exit(client.exit)
+        if e is None:
+            return ""
+        return str(exit_ptable(e) if off else exit_wtable(e))
+    return "main" if off else ""
+
+
+def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool,
+                     nowarp: Optional[bool] = None) -> List[str]:
+    """Policy rules sending one client's addresses (ip, ip6) to its way out
+    (client_table): added (<up>) or removed. A WARP-off client without a
+    city also gets a blackhole rule right behind, so it can't reach WARP's rule."""
+    table = client_table(snap, client, nowarp)
+    if not table or not client.ip:
         return []
-    table = exit_wtable(e)
     out = []
     for f in cfg.families():
         a = f"{cfg.ip6_of(client.ip)}/128" if f == "ip -6" else f"{client.ip}/32"
         out.append(f"while {f} rule del from {a} lookup {table} priority {EXIT_RULE_PRIO} 2>/dev/null; do :; done")
+        if table == "main":
+            out.append(f"while {f} rule del from {a} priority {DIRECT_STOP_PRIO} blackhole 2>/dev/null; do :; done")
         if up:
             out.append(f"{f} rule add from {a} lookup {table} priority {EXIT_RULE_PRIO}")
+            if table == "main":
+                out.append(f"{f} rule add from {a} priority {DIRECT_STOP_PRIO} blackhole")
     return out
 
 
@@ -140,6 +186,12 @@ def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
     if up:
         out.append(f"ip route replace default dev {e.px} table {proton_table} 2>/dev/null || true")
         out.append(f"ip route replace blackhole default metric {BLACKHOLE_METRIC} table {proton_table}")
+        # WARP-off clients use the Proton table too: their replies to other
+        # clients stay on wg0, and IPv6 (Proton's tunnel carries IPv4 only) stops.
+        for fam in cfg.families():
+            out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {proton_table}")
+            if fam == "ip -6":
+                out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {proton_table}")
         out.append(f"while ip rule del fwmark {mark} lookup {proton_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
                    f"do :; done; ip rule add fwmark {mark} lookup {proton_table} priority {EXIT_MARK_PRIO}")
         for fam in cfg.families():
@@ -147,15 +199,16 @@ def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
             out.append(f"{fam} route replace default dev {e.wx} table {client_table} 2>/dev/null || true")
             out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {client_table}")
         for c in snap.exit_clients(e.code):
-            out += exit_client_cmds(cfg, snap, c, up=True)
+            out += client_rule_cmds(cfg, snap, c, up=True)
     else:
         for c in snap.exit_clients(e.code):
-            out += exit_client_cmds(cfg, snap, c, up=False)
+            out += client_rule_cmds(cfg, snap, c, up=False)
         for fam in reversed(cfg.families()):
             out.append(f"{fam} route flush table {client_table} 2>/dev/null || true")
         out.append(f"while ip rule del fwmark {mark} lookup {proton_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
                    "do :; done")
-        out.append(f"ip route flush table {proton_table} 2>/dev/null || true")
+        for fam in reversed(cfg.families()):
+            out.append(f"{fam} route flush table {proton_table} 2>/dev/null || true")
     return out
 
 
@@ -175,7 +228,11 @@ def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
         out += ipt_cmds(ipt_rules(cfg, pub_if, snap.exits), up=True)
         for e in snap.exits:
             out += exit_hook_cmds(cfg, snap, e, up=True)
+        for c in snap.direct_clients():
+            out += client_rule_cmds(cfg, snap, c, up=True)
     else:
+        for c in reversed(snap.direct_clients()):
+            out += client_rule_cmds(cfg, snap, c, up=False)
         for e in reversed(snap.exits):
             out += exit_hook_cmds(cfg, snap, e, up=False)
         out += ipt_cmds(reversed(ipt_rules(cfg, pub_if, snap.exits)), up=False)

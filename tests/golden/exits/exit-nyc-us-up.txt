@@ -1,5 +1,8 @@
 ip route replace default dev px-nyc-us table 233 2>/dev/null || true
 ip route replace blackhole default metric 4096 table 233
+ip route replace 10.2.10.0/24 dev wg0 table 233
+ip -6 route replace fdfc:cd08:368e::/64 dev wg0 table 233
+ip -6 route replace blackhole default metric 4096 table 233
 while ip rule del fwmark 22275 lookup 233 priority 9400 2>/dev/null; do :; done; ip rule add fwmark 22275 lookup 233 priority 9400
 ip route replace 10.2.10.0/24 dev wg0 table 203
 ip route replace default dev wx-nyc-us table 203 2>/dev/null || true
@@ -7,7 +10,7 @@ ip route replace blackhole default metric 4096 table 203
 ip -6 route replace fdfc:cd08:368e::/64 dev wg0 table 203
 ip -6 route replace default dev wx-nyc-us table 203 2>/dev/null || true
 ip -6 route replace blackhole default metric 4096 table 203
-while ip rule del from 10.2.10.4/32 lookup 203 priority 9500 2>/dev/null; do :; done
-ip rule add from 10.2.10.4/32 lookup 203 priority 9500
-while ip -6 rule del from fdfc:cd08:368e::4/128 lookup 203 priority 9500 2>/dev/null; do :; done
-ip -6 rule add from fdfc:cd08:368e::4/128 lookup 203 priority 9500
+while ip rule del from 10.2.10.4/32 lookup 233 priority 9500 2>/dev/null; do :; done
+ip rule add from 10.2.10.4/32 lookup 233 priority 9500
+while ip -6 rule del from fdfc:cd08:368e::4/128 lookup 233 priority 9500 2>/dev/null; do :; done
+ip -6 rule add from fdfc:cd08:368e::4/128 lookup 233 priority 9500

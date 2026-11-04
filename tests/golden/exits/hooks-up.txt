@@ -18,10 +18,18 @@ iptables -t nat -C POSTROUTING -s 10.2.10.0/24 -o wx-par-fr -j MASQUERADE 2>/dev
 iptables -t filter -C FORWARD -i wg0 -o wx-par-fr -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o wx-par-fr -j ACCEPT
 iptables -t filter -C FORWARD -i wx-par-fr -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wx-par-fr -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables -t mangle -C FORWARD -o wx-par-fr -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD -o wx-par-fr -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables -t nat -C POSTROUTING -s 10.2.10.0/24 -o px-par-fr -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING -s 10.2.10.0/24 -o px-par-fr -j MASQUERADE
+iptables -t filter -C FORWARD -i wg0 -o px-par-fr -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o px-par-fr -j ACCEPT
+iptables -t filter -C FORWARD -i px-par-fr -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i px-par-fr -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -t mangle -C FORWARD -o px-par-fr -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD -o px-par-fr -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 iptables -t nat -C POSTROUTING -s 10.2.10.0/24 -o wx-nyc-us -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING -s 10.2.10.0/24 -o wx-nyc-us -j MASQUERADE
 iptables -t filter -C FORWARD -i wg0 -o wx-nyc-us -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o wx-nyc-us -j ACCEPT
 iptables -t filter -C FORWARD -i wx-nyc-us -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wx-nyc-us -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables -t mangle -C FORWARD -o wx-nyc-us -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD -o wx-nyc-us -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables -t nat -C POSTROUTING -s 10.2.10.0/24 -o px-nyc-us -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING -s 10.2.10.0/24 -o px-nyc-us -j MASQUERADE
+iptables -t filter -C FORWARD -i wg0 -o px-nyc-us -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o px-nyc-us -j ACCEPT
+iptables -t filter -C FORWARD -i px-nyc-us -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i px-nyc-us -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -t mangle -C FORWARD -o px-nyc-us -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null || iptables -t mangle -I FORWARD -o px-nyc-us -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 ip6tables -t nat -C POSTROUTING -s fdfc:cd08:368e::/64 -o warp -j MASQUERADE 2>/dev/null || ip6tables -t nat -I POSTROUTING -s fdfc:cd08:368e::/64 -o warp -j MASQUERADE
 ip6tables -t filter -C FORWARD -i wg0 -o warp -j ACCEPT 2>/dev/null || ip6tables -t filter -I FORWARD -i wg0 -o warp -j ACCEPT
 ip6tables -t filter -C FORWARD -i warp -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || ip6tables -t filter -I FORWARD -i warp -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
@@ -41,6 +49,9 @@ ip6tables -t mangle -C FORWARD -o wx-nyc-us -p tcp --tcp-flags SYN,RST SYN -j TC
 iptables -t filter -C INPUT -p udp --dport 51820 -j ACCEPT 2>/dev/null || iptables -t filter -I INPUT -p udp --dport 51820 -j ACCEPT
 ip route replace default dev px-par-fr table 231 2>/dev/null || true
 ip route replace blackhole default metric 4096 table 231
+ip route replace 10.2.10.0/24 dev wg0 table 231
+ip -6 route replace fdfc:cd08:368e::/64 dev wg0 table 231
+ip -6 route replace blackhole default metric 4096 table 231
 while ip rule del fwmark 22273 lookup 231 priority 9400 2>/dev/null; do :; done; ip rule add fwmark 22273 lookup 231 priority 9400
 ip route replace 10.2.10.0/24 dev wg0 table 201
 ip route replace default dev wx-par-fr table 201 2>/dev/null || true
@@ -58,6 +69,9 @@ while ip -6 rule del from fdfc:cd08:368e::5/128 lookup 201 priority 9500 2>/dev/
 ip -6 rule add from fdfc:cd08:368e::5/128 lookup 201 priority 9500
 ip route replace default dev px-nyc-us table 233 2>/dev/null || true
 ip route replace blackhole default metric 4096 table 233
+ip route replace 10.2.10.0/24 dev wg0 table 233
+ip -6 route replace fdfc:cd08:368e::/64 dev wg0 table 233
+ip -6 route replace blackhole default metric 4096 table 233
 while ip rule del fwmark 22275 lookup 233 priority 9400 2>/dev/null; do :; done; ip rule add fwmark 22275 lookup 233 priority 9400
 ip route replace 10.2.10.0/24 dev wg0 table 203
 ip route replace default dev wx-nyc-us table 203 2>/dev/null || true
@@ -65,7 +79,15 @@ ip route replace blackhole default metric 4096 table 203
 ip -6 route replace fdfc:cd08:368e::/64 dev wg0 table 203
 ip -6 route replace default dev wx-nyc-us table 203 2>/dev/null || true
 ip -6 route replace blackhole default metric 4096 table 203
-while ip rule del from 10.2.10.4/32 lookup 203 priority 9500 2>/dev/null; do :; done
-ip rule add from 10.2.10.4/32 lookup 203 priority 9500
-while ip -6 rule del from fdfc:cd08:368e::4/128 lookup 203 priority 9500 2>/dev/null; do :; done
-ip -6 rule add from fdfc:cd08:368e::4/128 lookup 203 priority 9500
+while ip rule del from 10.2.10.4/32 lookup 233 priority 9500 2>/dev/null; do :; done
+ip rule add from 10.2.10.4/32 lookup 233 priority 9500
+while ip -6 rule del from fdfc:cd08:368e::4/128 lookup 233 priority 9500 2>/dev/null; do :; done
+ip -6 rule add from fdfc:cd08:368e::4/128 lookup 233 priority 9500
+while ip rule del from 10.2.10.2/32 lookup main priority 9500 2>/dev/null; do :; done
+while ip rule del from 10.2.10.2/32 priority 9501 blackhole 2>/dev/null; do :; done
+ip rule add from 10.2.10.2/32 lookup main priority 9500
+ip rule add from 10.2.10.2/32 priority 9501 blackhole
+while ip -6 rule del from fdfc:cd08:368e::2/128 lookup main priority 9500 2>/dev/null; do :; done
+while ip -6 rule del from fdfc:cd08:368e::2/128 priority 9501 blackhole 2>/dev/null; do :; done
+ip -6 rule add from fdfc:cd08:368e::2/128 lookup main priority 9500
+ip -6 rule add from fdfc:cd08:368e::2/128 priority 9501 blackhole

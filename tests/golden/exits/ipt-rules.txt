@@ -10,10 +10,18 @@ iptables|nat|POSTROUTING|-s 10.2.10.0/24 -o wx-par-fr -j MASQUERADE
 iptables|filter|FORWARD|-i wg0 -o wx-par-fr -j ACCEPT
 iptables|filter|FORWARD|-i wx-par-fr -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables|mangle|FORWARD|-o wx-par-fr -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables|nat|POSTROUTING|-s 10.2.10.0/24 -o px-par-fr -j MASQUERADE
+iptables|filter|FORWARD|-i wg0 -o px-par-fr -j ACCEPT
+iptables|filter|FORWARD|-i px-par-fr -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables|mangle|FORWARD|-o px-par-fr -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 iptables|nat|POSTROUTING|-s 10.2.10.0/24 -o wx-nyc-us -j MASQUERADE
 iptables|filter|FORWARD|-i wg0 -o wx-nyc-us -j ACCEPT
 iptables|filter|FORWARD|-i wx-nyc-us -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables|mangle|FORWARD|-o wx-nyc-us -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables|nat|POSTROUTING|-s 10.2.10.0/24 -o px-nyc-us -j MASQUERADE
+iptables|filter|FORWARD|-i wg0 -o px-nyc-us -j ACCEPT
+iptables|filter|FORWARD|-i px-nyc-us -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables|mangle|FORWARD|-o px-nyc-us -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 ip6tables|nat|POSTROUTING|-s fdfc:cd08:368e::/64 -o warp -j MASQUERADE
 ip6tables|filter|FORWARD|-i wg0 -o warp -j ACCEPT
 ip6tables|filter|FORWARD|-i warp -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT

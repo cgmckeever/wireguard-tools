@@ -30,6 +30,7 @@ EXIT_MARK_BASE = 22272       # fwmark of exit idx: 0x5700+idx
 EXIT_MAX = 20
 EXIT_RULE_PRIO = 9500        # per-client rules: before the WARP rule (RULE_PRIO)
 EXIT_MARK_PRIO = 9400
+DIRECT_STOP_PRIO = 9501      # WARP-off host clients: blackhole after their main-table rule
 EXIT_PROTON_MTU = 1420
 EXIT_IDLE = 300              # seconds without a client handshake before an exit goes down
 
@@ -82,6 +83,10 @@ class Paths:
     @property
     def disabled_db(self) -> str:
         return self.wg("clients.disabled")
+
+    @property
+    def nowarp_db(self) -> str:
+        return self.wg("clients.nowarp")
 
     @property
     def psk_dir(self) -> str:

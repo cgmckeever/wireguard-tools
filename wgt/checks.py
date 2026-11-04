@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from . import clients, exits, host, live, ops, results, rules, store, ui
-from .const import RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
+from .const import DIRECT_STOP_PRIO, EXIT_RULE_PRIO, RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -158,6 +158,21 @@ class Tests:
                     and re.search(r"^blackhole default( |$)", t, re.M)
                     and re.search(rf"^{net} dev {re.escape(self.cfg.WG_IF)}( |$)", t, re.M))
 
+    def direct_rules_ok(self, family: str) -> bool:
+        """Each WARP-off client without a city: its main-table rule and the
+        blackhole behind it, once each, and no others of either kind."""
+        out = live.rules(self.runner, family).splitlines()
+        want = set()
+        for c in self.ctx.snap.direct_clients():
+            want.add(self.cfg.ip6_of(c.ip) if family == "ip -6" else c.ip)
+        patterns = (rf"^{EXIT_RULE_PRIO}:\s+from (\S+) lookup main\b",
+                    rf"^{DIRECT_STOP_PRIO}:\s+from (\S+) blackhole\b")
+        for pattern in patterns:
+            found = [m.group(1) for m in (re.match(pattern, line) for line in out) if m]
+            if sorted(found) != sorted(want):
+                return False
+        return True
+
     def boot_order_ok(self) -> bool:
         """wg0's unit starts after warp's (and wants it), via setup's drop-in."""
         unit = f"wg-quick@{self.cfg.WG_IF}"
@@ -195,6 +210,10 @@ class Tests:
                 res.check(f"{f} rule: none from {net} (WARP off)", self.warp_rule_ok(f))
             self.check_warp(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
                             self.rt_table_ok(f))
+            direct = len(self.ctx.snap.direct_clients())
+            if direct:
+                res.check(f"{f} rules: {direct} client(s) with WARP off leave via this server's IP "
+                          "(main, then blackhole)", self.direct_rules_ok(f))
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             res.check(f"exactly once: {x} {t} {ch} {rule}", live.ipt_count(r, x, t, ch, rule) == 1)
         res.check(f"wg-quick@{c.WG_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WG_IF}"))

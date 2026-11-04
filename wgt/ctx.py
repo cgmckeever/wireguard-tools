@@ -21,7 +21,7 @@ VALUE_FLAGS = {
     "--mtu": "WG_MTU", "--warp-mtu": "WARP_MTU", "--dns": "WG_DNS", "--endpoint": "ENDPOINT",
     "--wg-if": "WG_IF", "--warp-if": "WARP_IF", "--table": "RT_TABLE", "--allowed-ips": "CLIENT_ALLOWED_IPS",
     # Not settings, but they take a value:
-    "--exit": "EXIT_CODES", "--label": "EXIT_LABEL",
+    "--exit": "EXIT_CODES", "--label": "EXIT_LABEL", "--warp": "CLIENT_WARP",
 }
 BOOL_FLAGS = {
     "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--new-server-keys": "new_server_keys",
@@ -37,6 +37,7 @@ class Args:
     settings: Dict[str, str] = field(default_factory=dict)
     exit_codes: str = ""
     exit_label: str = ""
+    warp: str = ""              # client add --warp on|off ("" = on)
     dry_run: bool = False
     yes: bool = False
     force: bool = False
@@ -79,9 +80,13 @@ def parse(argv: List[str]) -> Args:
 
 
 def _set(a: Args, flag: str, value: str) -> None:
-    """Store a value flag: --exit/--label on Args, the rest as settings."""
+    """Store a value flag: --exit/--label/--warp on Args, the rest as settings."""
     key = VALUE_FLAGS[flag]
-    if key == "EXIT_CODES":
+    if key == "CLIENT_WARP":
+        if value not in ("on", "off"):
+            raise WgtError(f"--warp takes on or off: '{value}'")
+        a.warp = value
+    elif key == "EXIT_CODES":
         a.exit_codes = value
     elif key == "EXIT_LABEL":
         a.exit_label = value

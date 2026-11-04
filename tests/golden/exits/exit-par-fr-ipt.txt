@@ -6,3 +6,7 @@ ip6tables|nat|POSTROUTING|-s fdfc:cd08:368e::/64 -o wx-par-fr -j MASQUERADE
 ip6tables|filter|FORWARD|-i wg0 -o wx-par-fr -j ACCEPT
 ip6tables|filter|FORWARD|-i wx-par-fr -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 ip6tables|mangle|FORWARD|-o wx-par-fr -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
+iptables|nat|POSTROUTING|-s 10.2.10.0/24 -o px-par-fr -j MASQUERADE
+iptables|filter|FORWARD|-i wg0 -o px-par-fr -j ACCEPT
+iptables|filter|FORWARD|-i px-par-fr -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables|mangle|FORWARD|-o px-par-fr -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu

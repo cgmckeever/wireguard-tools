@@ -207,6 +207,16 @@ def set_disabled(ctx: Ctx, name: str, disabled: bool) -> None:
     ctx.reload()
 
 
+def set_nowarp(ctx: Ctx, name: str, off: bool) -> None:
+    """Mark <name> WARP off (or not) in clients.nowarp; reloads ctx.snap."""
+    db = ctx.paths.nowarp_db
+    text = ctx.files.read(db)
+    if (name in store.parse_nowarp(text)) == off:
+        return
+    ctx.files.write(db, 0o600, store.set_nowarp(text, name, off))
+    ctx.reload()
+
+
 def save_exit(ctx: Ctx, entry: store.Exit) -> None:
     """Add <entry> to exits.db, replacing any exit of that code; reloads ctx.snap."""
     _write_exits(ctx, entry.code, entry)

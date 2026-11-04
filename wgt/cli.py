@@ -16,8 +16,8 @@ from .system import Out, Runner
 USAGE = """\
 Usage: wgt [options] <command> ...
 
-A WireGuard server whose clients exit through Cloudflare WARP or this
-server's own IP (switchable), or per client through an exit city.
+A WireGuard server whose clients exit through this server or an exit city,
+with or without WARP: the server's switch (warp on|off), or per client.
 
   setup                      install or update everything
   summary | status | test    at a glance / everything running / all checks
@@ -26,9 +26,9 @@ server's own IP (switchable), or per client through an exit city.
   warp [on|off]              where clients exit (live)
   backup [dir] | restore <archive> | rollback [--purge]
 
-  client list [--tsv] | add <name> [--exit <code>[,..]] [--allowed-ips ..] | show <name> [--qr]
-         share <name> | rotate <name> [--allowed-ips ..] | rename <old> <new>
-         disable <name> | enable <name> | remove <name>     (no name: pick from a list)
+  client list [--tsv] | add <name> [--exit host|<code>[,..]] [--warp on|off] [--allowed-ips ..]
+         show <name> [--qr] | share <name> | rotate <name> [--allowed-ips ..] | rename <old> <new>
+         warp <name> on|off | disable <name> | enable <name> | remove <name>   (no name: pick from a list)
   exit   list | add <code> <file|-> [--label NAME] | remove [code] | test
 
 Options: --dry-run, --yes/-y, --purge, --qr/--no-qr

@@ -1,8 +1,9 @@
 """`wgt client ...`: the clients of this server. Each has a keypair, a
 preshared key and an address; its config is
 /etc/wireguard/clients/<server>.<name>.conf. A client named <code>.<name>
-exits through exit city <code>. Changes apply live; other clients stay
-connected."""
+exits through exit city <code>; one in clients.nowarp has WARP off (it
+leaves straight out of its exit: this server's IP, or its city's Proton
+tunnel). Changes apply live; other clients stay connected."""
 
 from __future__ import annotations
 
@@ -72,20 +73,20 @@ def pick_client(ctx: Ctx, verb: str) -> str:
 
 
 def pick_exits(ctx: Ctx, name: str) -> List[str]:
-    """Ask which exit(s) a new client gets: codes, "warp" being the default."""
+    """Ask which exit(s) a new client gets: codes, "host" (this server) being the default."""
     codes = [e.code for e in ctx.snap.exits]
-    items = [f"{'warp':<6} Cloudflare WARP from {ctx.cfg.SERVER_NAME} (default)"]
+    items = [f"{'host':<6} {ctx.cfg.SERVER_NAME} itself (default)"]
     items += [f"{e.code:<6} {e.label}" for e in ctx.snap.exits]
     ui.say("\n".join(["", f"  Exit for {name}:"] + [f"    {i + 1}) {it}" for i, it in enumerate(items)]) + "\n")
-    reply = ui.ask("  Exit [Enter = 1 (warp); several: 1,2]: ")
+    reply = ui.ask("  Exit [Enter = 1 (host); several: 1,2]: ")
     if not reply:
-        return ["warp"]
+        return ["host"]
     out = []
     for part in reply.replace(",", " ").split():
         if not part.isdigit():
             out.append(part)
         elif 1 <= int(part) <= len(items):
-            out.append("warp" if int(part) == 1 else codes[int(part) - 2])
+            out.append("host" if int(part) == 1 else codes[int(part) - 2])
         else:
             raise WgtError(f"no exit number {part}")
     if not out:
@@ -179,7 +180,7 @@ def apply_peer(ctx: Ctx, entry: store.Client, old_pub: str) -> None:
     up = ops.wg_up(ctx)
     disabled = ctx.snap.is_disabled(entry.name)
     if up:
-        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, entry, up=True))
+        ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, entry, up=True))
         if old_pub and (old_pub != entry.pub or disabled):
             ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", old_pub, "remove"])
     if disabled:
@@ -222,20 +223,26 @@ def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
     return rows
 
 
-def exit_short(ctx: Ctx, name: str) -> str:
-    """Where a client exits, as a code: its exit city's code, or warp/direct (the default)."""
+def exit_short(ctx: Ctx, name: str, warp_off: Optional[bool] = None) -> str:
+    """Where a client exits, as a code: its exit city's code (<code>/direct
+    with WARP off), or warp/direct (no city: the server's WARP switch, or
+    direct with WARP off)."""
     code = store.client_exit(name)
+    off = ctx.snap.warp_off(name) if warp_off is None else warp_off
     if code:
-        return code
-    return "warp" if ctx.cfg.warp_on else "direct"
+        return f"{code}/direct" if off else code
+    return "warp" if ctx.cfg.warp_on and not off else "direct"
 
 
 def exit_label(ctx: Ctx, name: str) -> str:
     """Where a client exits, for people: its exit city's full name (the label
-    given at exit add, e.g. "Paris, France"), or warp/direct (the default)."""
+    given at exit add, e.g. "Paris, France"; "(no WARP)" added with WARP off),
+    or warp/direct (no city)."""
     code = store.client_exit(name)
     e = ctx.snap.exit(code) if code else None
-    return (e.label or code) if e else exit_short(ctx, name)
+    if e is None:
+        return exit_short(ctx, name)
+    return (e.label or code) + (" (no WARP)" if ctx.snap.warp_off(name) else "")
 
 
 def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str]:
@@ -253,9 +260,10 @@ def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str
 # --- commands ---
 
 def cmd_add(ctx: Ctx, words: List[str]) -> None:
-    """add <name> [--exit <code>[,...]]: one client per exit (warp = the
-    default), named <name> and <code>.<name>; asks when exit cities exist."""
-    usage = "wgt client add <name> [--exit <code>[,...]]"
+    """add <name> [--exit host|<code>[,...]] [--warp on|off]: one client per
+    exit (host = this server, the default), named <name> and <code>.<name>;
+    asks when exit cities exist. --warp off: they leave without our WARP."""
+    usage = "wgt client add <name> [--exit host|<code>[,...]] [--warp on|off]"
     if not words:
         raise WgtError(f"usage: {usage}")
     ops.no_more_words(words[1:], usage)
@@ -274,31 +282,36 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     elif ctx.snap.exits and not ctx.args.yes and not ctx.runner.dry_run and ui.have_tty():
         codes = pick_exits(ctx, base)
     else:
-        codes = ["warp"]
+        codes = ["host"]
         if not ctx.snap.exits:
             ctx.out.info(f"no exit cities on this server: the client exits via {exit_short(ctx, base)} "
                          "(add a city: wgt exit add <code> <proton.conf>)")
     uniq: List[str] = []
     for code in codes:
-        if code != "warp" and ctx.snap.exit(code) is None:
+        code = "host" if code in store.HOST_EXITS else code
+        if code != "host" and ctx.snap.exit(code) is None:
             raise WgtError(f"no exit city '{code}' on this server (see: wgt exit list)")
         if code not in uniq:
             uniq.append(code)
     endpoint = ops.resolve_endpoint(ctx, save=False)
     planned: List[str] = []
     for code in uniq:
-        add_one(ctx, base if code == "warp" else f"{code}.{base}", planned, endpoint)
+        add_one(ctx, base if code == "host" else f"{code}.{base}", planned, endpoint, ctx.args.warp == "off")
 
 
-def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
-    """Add one client (skipped if it exists)."""
+def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str, warp_off: bool = False) -> None:
+    """Add one client (skipped if it exists). <warp_off> is recorded before its
+    rules and peer go in, so its first packets already take the right way out."""
     existing = ctx.snap.client(name)
     if existing:
         ctx.out.info(f"client '{name}' already exists ({existing.ip}); config: {client_conf(ctx, name)}")
-        ctx.out.info(f"use 'wgt client rotate {name}' to issue new keys")
+        ctx.out.info(f"use 'wgt client rotate {name}' to issue new keys"
+                     + (f", 'wgt client warp {name} on|off' to switch its WARP" if ctx.args.warp else ""))
         return
     ip = next_free_ip(ctx, planned)
-    ctx.runner.step(f"Add client '{name}' at {ip} (exit: {exit_short(ctx, name)})", f"wgt client remove {name}")
+    ctx.runner.step(f"Add client '{name}' at {ip} (exit: {exit_short(ctx, name, warp_off)})",
+                    f"wgt client remove {name}")
+    ops.set_nowarp(ctx, name, warp_off)
     issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS), endpoint)
     tunnel = f"{ctx.cfg.SERVER_NAME}.{name}"
     if len(tunnel) > 15:
@@ -365,10 +378,11 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     # Peer first, then its exit rules: no packet of it may fall back to the default exit.
     if ops.wg_up(ctx):
         ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", c.pub, "remove"])
-        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, c, up=False))
+        ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False))
     ops.remove_client(ctx, name)
     if ctx.snap.is_disabled(name):
         ops.set_disabled(ctx, name, False)
+    ops.set_nowarp(ctx, name, False)
     # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
     if ops.is_set_up(ctx):
         ops.write_wg_conf(ctx)
@@ -414,15 +428,20 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     if not psk.strip():
         raise WgtError(f"'{old}' has no preshared key ({ctx.paths.psk(old)}); rotate it instead")
     new_c = store.Client(new, c.ip, c.pub, c.allowed)
-    ctx.runner.step(f"Rename client '{old}' to '{new}' (same keys and address; exit: {exit_short(ctx, new)})",
+    off = ctx.snap.warp_off(old)
+    ctx.runner.step(f"Rename client '{old}' to '{new}' (same keys and address; exit: {exit_short(ctx, new, off)})",
                     f"wgt client rename {new} {old}")
     text = re.sub(r"(?m)^# wireguard-tools client: .*$",
                   f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
-    text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
+    text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new, off)}", text)
     ctx.files.write(newconf, 0o600, text)
     ctx.files.write(ctx.paths.psk(new), 0o600, psk)
     was_disabled = ctx.snap.is_disabled(old)
+    old_down = rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False)
+    old_table = rules.client_table(ctx.snap, c)
     ops.remove_client(ctx, old)
+    ops.set_nowarp(ctx, old, False)
+    ops.set_nowarp(ctx, new, off)
     ops.save_client(ctx, new_c)
     if was_disabled:
         ops.set_disabled(ctx, old, False)
@@ -430,9 +449,9 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     ops.write_wg_conf(ctx)
     # Moving between exits: the new exit's rules go in before the old ones come
     # out, so the client never falls back to the default exit in between.
-    if ops.wg_up(ctx) and c.exit != new_c.exit:
-        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, new_c, up=True))
-        ctx.runner.sh_lines(rules.exit_client_cmds(ctx.cfg, ctx.snap, c, up=False))
+    if ops.wg_up(ctx) and old_table != rules.client_table(ctx.snap, new_c):
+        ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, new_c, up=True))
+        ctx.runner.sh_lines(old_down)
     ctx.files.forget(conf)
     ctx.files.forget(ctx.paths.psk(old))
     ctx.out.info(f"config now: {newconf} (same keys: the device's tunnel keeps working; rename it there if you like)")
@@ -476,6 +495,47 @@ def cmd_disable(ctx: Ctx, words: List[str]) -> None:
 def cmd_enable(ctx: Ctx, words: List[str]) -> None:
     """wgt client enable [name]"""
     _set_disabled(ctx, words, False)
+
+
+def cmd_warp(ctx: Ctx, words: List[str]) -> None:
+    """warp <name> on|off: whether a client's traffic goes through a WARP of
+    ours (on), or straight out of its exit (off: this server's IP, or its
+    city's Proton tunnel). Live; keys, address and config stay valid."""
+    usage = "wgt client warp <name> on|off"
+    if len(words) != 2 or words[1] not in ("on", "off"):
+        raise WgtError(f"usage: {usage}")
+    name, off = words[0], words[1] == "off"
+    valid_name(name)
+    ops.take_lock(ctx)
+    ops.require_server(ctx)
+    set_warp(ctx, name, off)
+
+
+def set_warp(ctx: Ctx, name: str, off: bool) -> None:
+    """Switch client <name>'s WARP: the new rules go in before the old come out."""
+    c = ctx.snap.client(name)
+    if c is None:
+        raise WgtError(f"no client '{name}' (see: wgt client list)")
+    if ctx.snap.warp_off(name) == off:
+        ctx.out.info(f"'{name}' already has WARP {'off' if off else 'on'} (exit: {exit_short(ctx, name)})")
+        return
+    old_down = rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False)
+    ctx.runner.step(f"Switch WARP {'off' if off else 'on'} for '{name}' "
+                    f"(exit: {exit_short(ctx, name)} -> {exit_short(ctx, name, off)})",
+                    f"wgt client warp {name} {'on' if off else 'off'}")
+    ops.set_nowarp(ctx, name, off)
+    if not off and not c.exit and not ctx.cfg.warp_on:
+        ctx.out.info("note: this server's WARP is off (wgt warp on), so it still leaves via this server's IP")
+    ops.write_wg_conf(ctx)
+    if ops.wg_up(ctx):
+        ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=True))
+        ctx.runner.sh_lines(old_down)
+    else:
+        ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
+    conf = client_conf(ctx, name)
+    text = store.read_text(conf)
+    if text is not None:
+        ctx.files.write(conf, 0o600, re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, name)}", text))
 
 
 def cmd_show(ctx: Ctx, words: List[str]) -> None:
@@ -540,6 +600,7 @@ ACTIONS = (
     ("share", "send with magic-wormhole"),
     ("rotate", "new keys; the current config stops working"),
     ("toggle", ""),
+    ("warp", ""),
     ("rename", "new name, same keys"),
     ("remove", "delete the client, its keys and config"),
 )
@@ -557,8 +618,11 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
     disabled = ctx.snap.is_disabled(name)
     toggle = (("enable", "let back in with its existing config") if disabled
               else ("disable", "cut off now, keep keys and address"))
+    off = ctx.snap.warp_off(name)
+    warp = ("warp on", "back through WARP") if off else ("warp off", "straight out of its exit, no WARP")
     items = [f"{label:<9} {what}" for label, what in
-             (toggle if action == "toggle" else (action, what) for action, what in ACTIONS)]
+             (toggle if action == "toggle" else warp if action == "warp" else (action, what)
+              for action, what in ACTIONS)]
     try:
         i = ui.menu(f"{name}:", items, "Action")
     except ValueError as e:
@@ -575,6 +639,9 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
         cmd_rotate(ctx, [name])
     elif action == "toggle":
         _set_disabled(ctx, [name], not disabled)
+    elif action == "warp":
+        ops.take_lock(ctx)
+        set_warp(ctx, name, not off)
     elif action == "rename":
         new = ui.ask("    New name: ")
         if new:
@@ -591,4 +658,5 @@ def cmd_client(ctx: Ctx, words: List[str]) -> Optional[int]:
 CLIENT_COMMANDS = {
     "list": cmd_list, "add": cmd_add, "show": cmd_show, "share": cmd_share, "rotate": cmd_rotate,
     "rename": cmd_rename, "disable": cmd_disable, "enable": cmd_enable, "remove": cmd_remove,
+    "warp": cmd_warp,
 }
