@@ -12,20 +12,20 @@ free VPN service; the server connects to it as one WARP "device"), and through
 a **jump**: another WireGuard server you add, such as a VPN provider's server
 in another city (Proton VPN works well) or a second server of your own.
 
-A **client** is a device (your laptop, say). It gets **tunnel configs**, one
-per way out, and its name says which:
+A **client** is a device (your laptop, say). It gets one **tunnel config**
+per way out, named `[warp.][<jump>.]<device>`:
 
-| config | exits | sites see |
+| config | traffic goes | sites see |
 |---|---|---|
-| `boba.laptop` | the WireGuard server (host) | the server's IP: a plain, fast VPN |
-| `boba.warp.laptop` | host, through Cloudflare WARP | a Cloudflare IP near the server |
-| `boba.par-fr.laptop` | the `par-fr` jump | the jump's IP |
-| `boba.warp.par-fr.laptop` | the jump, through WARP | a Cloudflare IP near the jump (Paris, say) |
+| `laptop` | out of this server | the server's IP: a plain, fast VPN |
+| `warp.laptop` | out of this server, through Cloudflare WARP | a Cloudflare IP near the server |
+| `par-fr.laptop` | out of the `par-fr` jump | the jump's IP |
+| `warp.par-fr.laptop` | out of the `par-fr` jump, through WARP | a Cloudflare IP near the jump (Paris, say) |
 
-`boba.` is the server's name, on the file only (`boba.warp.laptop.conf`);
-`wgt client` commands take the rest (`warp.laptop`). The pattern is
-`<server>.[warp.][<jump>.]<device>`. The device imports the configs it wants
-and turns on one at a time: choosing an exit is choosing a tunnel.
+Install the configs you want on the device and turn on one at a time: picking
+a tunnel picks the exit. `wgt client` commands use these names; the files add
+the server's name in front, so `warp.laptop` on boba is
+`boba.warp.laptop.conf`.
 
 ```bash
 wgt client add laptop                          # laptop and warp.laptop
