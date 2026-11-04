@@ -86,6 +86,8 @@ an entry (`store.Client`, `clients.py`, `clients.db`).
 - Paths come from `Paths` helpers (const.py), never literals, so tests can
   move every one of them into a temp dir.
 - Docstrings and comments say why, not what.
+- `wgt-ctl`'s own steps (`jump-add`, `clients`) run only `wgt` commands every
+  server version knows, since servers may not have pulled yet.
 
 ## Tests
 
