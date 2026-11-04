@@ -81,7 +81,7 @@ def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[i
 
 # --- the clients table (wgt client list, wgt-ctl clients) ---
 
-CLIENT_FMT = "{:<24} {:<18} {:<4} {:<15} {:<14} {:<12} {}"
+CLIENT_FMT = "{:<24} {:<22} {:<4} {:<15} {:<14} {:<12} {}"
 CLIENT_HEAD = ("CONFIG", "EXIT", "WARP", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
 
 

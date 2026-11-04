@@ -326,6 +326,7 @@ Flags for one run (not saved), for setup and other commands:
 | `--exit host\|<jump>[,…]` | `wgt client add` | the exit: `host` (the WireGuard server; `warp` is the old spelling) or a jump code; a comma list makes one config per exit |
 | `--warp on\|off` | `wgt client add` | only the `warp.` config (`on`) or only the plain one (`off`); both by default |
 | `--label "<name>"` | `wgt jump add` | the jump's full name, e.g. `"Paris, France"` |
+| `--location "<place>"` | `setup` | where this server is, shown as `host:<place>`; by default its city, looked up once (ipinfo.io) |
 | `--no-follow` | `wgt log` | print the last lines and stop (also when piped) |
 
 `wgt help` and `wgt-ctl help` list everything.
@@ -488,7 +489,8 @@ Each config is its own WireGuard peer with its own key and address
 (`dengar.warp.par-fr.laptop.conf`, whose `# exit:` line says the same in
 words). Import the ones you want on the device and switch exits by switching
 tunnels in the WireGuard app. `list` and `wgt-ctl clients` show each config
-with its EXIT (host, or the jump's name) and WARP (on/off) columns. The
+with its EXIT (`host:Atlanta`, the server's location, or `jump:Paris, France`)
+and WARP (on/off) columns. The
 Android app only takes tunnel names up to 15 characters, so rename longer ones
 when importing there (`add` reminds you).
 

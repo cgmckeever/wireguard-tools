@@ -243,11 +243,14 @@ def exit_short(name: str) -> str:
 
 
 def exit_label(ctx: Ctx, name: str) -> str:
-    """Where a config exits, for people: host, or its jump's full name (the
-    label given at jump add, e.g. "Paris, France")."""
+    """Where a config exits, for people: host:<this server's location> or
+    jump:<the jump's label> (given at jump add, e.g. "Paris, France")."""
     code = store.client_exit(name)
-    e = ctx.snap.exit(code) if code else None
-    return (e.label or code) if e else exit_short(name)
+    if not code:
+        loc = store.state_get(ctx.snap.state, "LOCATION")
+        return f"host:{loc}" if loc else "host"
+    e = ctx.snap.exit(code)
+    return f"jump:{(e.label if e else '') or code}"
 
 
 def way_out(ctx: Ctx, name: str) -> str:

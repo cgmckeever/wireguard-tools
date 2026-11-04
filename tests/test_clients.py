@@ -235,7 +235,10 @@ def test_add_makes_plain_and_warp_per_exit(make_ctx):
     assert "# exit: par-fr = Paris, France (jump, no WARP)" in conf("par-fr.mac")
     assert "# exit: par-fr = Paris, France (jump -> Cloudflare WARP)" in conf("warp.par-fr.mac")
     assert clients.exit_short("warp.par-fr.mac") == "par-fr" and clients.exit_short("warp.mac") == "host"
-    assert clients.way_out(ctx, "par-fr.mac") == "Paris, France, no WARP"
+    assert clients.way_out(ctx, "par-fr.mac") == "jump:Paris, France, no WARP"
+    assert clients.exit_label(ctx, "warp.mac") == "host"   # no LOCATION saved
+    ctx.snap.state += "LOCATION=Atlanta\n"
+    assert clients.exit_label(ctx, "warp.mac") == "host:Atlanta"
 
 
 def test_add_one_warp_setting(make_ctx):

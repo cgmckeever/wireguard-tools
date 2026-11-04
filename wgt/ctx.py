@@ -21,7 +21,7 @@ VALUE_FLAGS = {
     "--mtu": "WG_MTU", "--warp-mtu": "WARP_MTU", "--dns": "WG_DNS", "--endpoint": "ENDPOINT",
     "--wg-if": "WG_IF", "--warp-if": "WARP_IF", "--table": "RT_TABLE", "--allowed-ips": "CLIENT_ALLOWED_IPS",
     # Not settings, but they take a value:
-    "--exit": "EXIT_CODES", "--label": "EXIT_LABEL", "--warp": "CLIENT_WARP",
+    "--exit": "EXIT_CODES", "--label": "EXIT_LABEL", "--warp": "CLIENT_WARP", "--location": "LOCATION",
 }
 BOOL_FLAGS = {
     "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--new-server-keys": "new_server_keys",
@@ -38,6 +38,7 @@ class Args:
     exit_codes: str = ""
     exit_label: str = ""
     warp: str = ""              # client add --warp on|off|on,off ("" = both)
+    location: str = ""          # setup --location: where this server is, for people
     dry_run: bool = False
     yes: bool = False
     force: bool = False
@@ -90,6 +91,8 @@ def _set(a: Args, flag: str, value: str) -> None:
         a.exit_codes = value
     elif key == "EXIT_LABEL":
         a.exit_label = value
+    elif key == "LOCATION":
+        a.location = value.strip()
     else:
         a.settings[key] = value
 

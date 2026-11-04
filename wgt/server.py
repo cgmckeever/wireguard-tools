@@ -9,6 +9,7 @@ the WARP ones (fail closed: never leaked) until it's fixed."""
 from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 from typing import TYPE_CHECKING, List, Optional
@@ -424,6 +425,27 @@ def write_dropin(ctx: Ctx) -> None:
         ctx.runner.run(["systemctl", "daemon-reload"])
 
 
+def save_location(ctx: Ctx) -> None:
+    """Where this server is, for people (`host:Atlanta` in client lists):
+    --location, else looked up once from the public IP (ipinfo.io city),
+    saved as LOCATION in wg-tools.state."""
+    want = ctx.args.location
+    if not want and store.state_get(ctx.snap.state, "LOCATION"):
+        return
+    if not want:
+        out = ctx.runner.query(["curl", "-fsS", "--max-time", "8", "https://ipinfo.io/json"])
+        try:
+            want = str(json.loads(out or "{}").get("city", "")).strip()
+        except ValueError:
+            want = ""
+        if not want:
+            ctx.out.info("location: not found (set one: wgt setup --location \"Atlanta, GA\")")
+            return
+    if want != store.state_get(ctx.snap.state, "LOCATION"):
+        ops.state_set(ctx, "LOCATION", want)
+        ctx.out.info(f"location: {want}")
+
+
 def restart_if_drifted(ctx: Ctx) -> None:
     """wg0.conf is unchanged, but the running rules may not be its rules (wg0
     last started with an older config): restart wg0 so its PostUp applies them."""
@@ -483,6 +505,7 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     ctx.out.log("WireGuard server (configs named warp.* leave through WARP, the rest straight out)")
     keys_changed = ensure_server_keys(ctx)
     ops.resolve_endpoint(ctx, save=True)
+    save_location(ctx)
     sync_client_configs(ctx, old_name)
     write_sysctl(ctx)
     write_dropin(ctx)

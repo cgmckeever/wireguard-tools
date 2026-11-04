@@ -38,7 +38,7 @@ Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
                       configs these tools didn't create
   --new-server-keys   setup: new server keypair (every client must then be rotated)
 Settings (saved by setup): --name --subnet --subnet6 --port --mtu --warp-mtu --dns
-  --endpoint --wg-if --warp-if --table --allowed-ips
+  --endpoint --wg-if --warp-if --table --allowed-ips --location
 """
 
 
