@@ -85,10 +85,6 @@ class Paths:
         return self.wg("clients.disabled")
 
     @property
-    def nowarp_db(self) -> str:
-        return self.wg("clients.nowarp")
-
-    @property
     def psk_dir(self) -> str:
         return self.wg("psk")
 

@@ -23,7 +23,7 @@ wgt/                      the package (Python 3.8+, standard library only)
   ops.py                  shared operations: lock, confirm, setup checks, state, endpoint, wg0.conf,
                           peers, the client/exit databases, subcommand dispatch
   warp.py, units.py       wgcf and WARP profiles; systemd units, watchdog timers, ufw
-  server.py               setup (and the one-time name migration), rollback (setup's inverse)
+  server.py               setup, rollback (setup's inverse)
   backup.py               backup, restore (archive checks)
   clients.py              client commands, the clients table (and QR, share)
   exits.py                `wgt jump` (alias `exit`): bringing a jump up/down, probing it
@@ -51,8 +51,7 @@ A **client** is a device; each of its **configs** is one clients.db entry
 (one peer, key and address) named `[warp.][<jump>.]<device>`
 (`store.split_name` / `config_name`). The name is the only record of a
 config's exit and WARP: no switch, no side file. Code still says "client" for
-an entry (`store.Client`, `clients.py`, `clients.db`). Servers from before this
-are migrated once by setup (`server.migrate_names`, `NAMES=3` in the state).
+an entry (`store.Client`, `clients.py`, `clients.db`).
 
 ## Conventions
 

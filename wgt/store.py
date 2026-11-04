@@ -4,7 +4,6 @@ switched over with their files unchanged; keep them compatible):
   wg-tools.state     KEY=value lines; the last one for a key wins
   clients.db         "name ip public-key allowed-ips" (no private keys)
   clients.disabled   one name per line
-  clients.nowarp     (old) one name per line: WARP off; setup folds it into the names
   exits.db           "code idx label..."
   wg-tools.backups   "path<TAB>original-copy|NEW"
 
@@ -204,7 +203,6 @@ def set_disabled(text: Optional[str], name: str, disabled: bool) -> str:
     return "".join(n + "\n" for n in names)
 
 
-parse_nowarp = parse_disabled   # the old clients.nowarp: same format
 
 
 # --- exits ---

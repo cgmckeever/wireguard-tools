@@ -330,11 +330,6 @@ Setup runs in two stages:
 If WARP can't be set up, setup still finishes: plain configs work, `warp.*`
 ones are blocked until it does; fix it and re-run setup.
 
-**Servers from before config names carried WARP:** the first setup on the new
-version renames each config that went through WARP to its `warp.` name (same
-keys and address, so devices keep working; rename the tunnel on the device if
-you like) and drops the old `clients.nowarp` and `wgt warp` setting, once.
-
 To change a setting, re-run setup with the new flag, e.g.
 `wgt setup --port 51821`. A change that affects clients (`--name`,
 `--endpoint`, `--port`, `--dns`, `--mtu`, `--subnet`, `--subnet6`) rewrites
