@@ -237,3 +237,24 @@ def test_install_wgcf_checks_the_download(make_ctx, monkeypatch):
     assert any(c.startswith("install -m 755 ") and c.endswith(ctx.paths.wgcf_bin) for c in ctx.runner.calls)
     with pytest.raises(WgtError, match="checksum mismatch"):
         warp.install_wgcf(ctx, reinstall=True, fetch=fetch(b"0" * 64 + b"  wgcf_2.2_linux_amd64\n"))
+
+
+def test_drift_seen_when_wg0_runs_older_rules(make_ctx):
+    """wg0 started with an older config: no WARP rule live, though wg0.conf has it."""
+    from wgt import checks
+    ctx = make_ctx(answers={"ip rule show": (0, "0:\tfrom all lookup local\n"),
+                            "ip -6 rule show": (0, "0:\tfrom all lookup local\n")})
+    drift = checks.Tests(ctx).wg0_drift()
+    assert "ip WARP rule" in drift and "ip -6 WARP rule" in drift
+
+
+def test_setup_restarts_wg0_only_on_drift(make_ctx, monkeypatch):
+    from wgt import checks
+    from wgt import server as srv
+    ctx = make_ctx()
+    monkeypatch.setattr(checks.Tests, "wg0_drift", lambda self: [])
+    srv.restart_if_drifted(ctx)
+    assert not any("restart wg-quick@wg0" in c for c in ctx.runner.changes())
+    monkeypatch.setattr(checks.Tests, "wg0_drift", lambda self: ["ip WARP rule"])
+    srv.restart_if_drifted(ctx)
+    assert "systemctl restart wg-quick@wg0" in ctx.runner.changes()

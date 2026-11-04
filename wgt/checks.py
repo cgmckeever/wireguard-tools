@@ -173,6 +173,28 @@ class Tests:
                 return False
         return True
 
+    def wg0_drift(self) -> List[str]:
+        """What wg0's PostUp sets up that isn't live (a wg0 started with an
+        older config, or rules removed by hand): empty when it all matches."""
+        c, out = self.cfg, []
+        for f in c.families():
+            if not self.warp_rule_ok(f):
+                out.append(f"{f} WARP rule")
+            t = live.table(self.runner, f, c.RT_TABLE)
+            net = re.escape(c.family_net(f))
+            if not (re.search(r"^blackhole default( |$)", t, re.M)
+                    and re.search(rf"^{net} dev {re.escape(c.WG_IF)}( |$)", t, re.M)):
+                out.append(f"{f} table {c.RT_TABLE}")
+            if not self.direct_rules_ok(f):
+                out.append(f"{f} plain host config rules")
+        for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
+            if live.ipt_count(self.runner, x, t, ch, rule) != 1:
+                out.append(f"{x} {t} {ch} {rule}")
+        for e in self.ctx.snap.exits:
+            if not exits.client_rules_ok(self.ctx, e):
+                out.append(f"jump {e.code} config rules")
+        return out
+
     def boot_order_ok(self) -> bool:
         """wg0's unit starts after warp's (and wants it), via setup's drop-in."""
         unit = f"wg-quick@{self.cfg.WG_IF}"

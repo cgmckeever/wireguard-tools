@@ -424,6 +424,20 @@ def write_dropin(ctx: Ctx) -> None:
         ctx.runner.run(["systemctl", "daemon-reload"])
 
 
+def restart_if_drifted(ctx: Ctx) -> None:
+    """wg0.conf is unchanged, but the running rules may not be its rules (wg0
+    last started with an older config): restart wg0 so its PostUp applies them."""
+    drift = checks.Tests(ctx).wg0_drift()
+    if not drift:
+        return
+    unit = f"wg-quick@{ctx.cfg.WG_IF}"
+    shown = ", ".join(drift[:3]) + (f" (+{len(drift) - 3} more)" if len(drift) > 3 else "")
+    ctx.runner.step(f"Restart {ctx.cfg.WG_IF}: its running rules don't match {ctx.cfg.wg_conf} ({shown})",
+                    f"systemctl restart {unit}")
+    ops.confirm(ctx, f"Restart {ctx.cfg.WG_IF} now?")
+    ctx.runner.run(["systemctl", "restart", unit])
+
+
 def stop_before_rewrite(ctx: Ctx) -> bool:
     """wg0's config is about to change: stop wg0 with its current config first,
     so its PostDown removes exactly the rules its PostUp added (old subnet, old
@@ -487,6 +501,8 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
                 ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
                 run_hooks(ctx, up=False)
             raise
+    if not stopped and not changed and ops.wg_up(ctx):
+        restart_if_drifted(ctx)
     guard_default_route(ctx)
     units.write_watchdog(ctx)
     exits.sync(ctx)
