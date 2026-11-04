@@ -16,13 +16,13 @@ def test_add_with_exit_puts_rules_before_peer(make_ctx):
     ctx = make_ctx(argv=["--exit", "warp,par-fr,par-fr", "--warp", "on"])
     clients.cmd_add(ctx, ["phone"])
     names = [c.name for c in ctx.snap.clients]
-    assert names.count("warp.phone") == 1 and names.count("par-fr.warp.phone") == 1   # deduplicated
+    assert names.count("warp.phone") == 1 and names.count("warp.par-fr.phone") == 1   # deduplicated
     calls = ctx.runner.changes()
     rule = next(i for i, c in enumerate(calls) if "rule add from 10.2.10.7/32 lookup 201" in c)
     peer = next(i for i, c in enumerate(calls)
                 if c.startswith("wg set wg0 peer CLIENTPUBLICKEY") and "10.2.10.7/32" in c)
     assert rule < peer
-    conf = store.read_text(clients.client_conf(ctx, "par-fr.warp.phone"))
+    conf = store.read_text(clients.client_conf(ctx, "warp.par-fr.phone"))
     assert "# exit: par-fr = Paris, France (jump -> Cloudflare WARP)" in conf
     assert "Address = 10.2.10.7/32, fdfc:cd08:368e::7/128" in conf
 
@@ -45,27 +45,27 @@ def test_removal_targets_spare_exit_clients(tmp_path):
 
 def test_remove_takes_peer_out_before_rules(make_ctx):
     ctx = make_ctx()
-    c = ctx.snap.client("par-fr.warp.mbp-1")
-    clients.cmd_remove(ctx, ["par-fr.warp.mbp-1"])
+    c = ctx.snap.client("warp.par-fr.mbp-1")
+    clients.cmd_remove(ctx, ["warp.par-fr.mbp-1"])
     calls = ctx.runner.changes()
     peer = calls.index(f"wg set wg0 peer {c.pub} remove")
     rule = next(i for i, x in enumerate(calls) if "rule del from 10.2.10.3/32" in x)
     assert peer < rule
-    assert ctx.snap.client("par-fr.warp.mbp-1") is None
+    assert ctx.snap.client("warp.par-fr.mbp-1") is None
 
 
 def test_rename_keeps_keys(make_ctx):
     ctx = make_ctx()
-    before = ctx.snap.client("par-fr.warp.mbp-1")
+    before = ctx.snap.client("warp.par-fr.mbp-1")
     os.makedirs(ctx.paths.client_dir, exist_ok=True)
-    Path(clients.client_conf(ctx, "par-fr.warp.mbp-1")).write_text(
-        "# wireguard-tools client: par-fr.warp.mbp-1 on boba\n# exit: x\n[Interface]\nPrivateKey = K\n")
-    clients.cmd_rename(ctx, ["par-fr.warp.mbp-1", "nyc-us.warp.laptop"])
-    after = ctx.snap.client("nyc-us.warp.laptop")
+    Path(clients.client_conf(ctx, "warp.par-fr.mbp-1")).write_text(
+        "# wireguard-tools client: warp.par-fr.mbp-1 on boba\n# exit: x\n[Interface]\nPrivateKey = K\n")
+    clients.cmd_rename(ctx, ["warp.par-fr.mbp-1", "warp.nyc-us.laptop"])
+    after = ctx.snap.client("warp.nyc-us.laptop")
     assert (after.ip, after.pub) == (before.ip, before.pub)
-    conf = store.read_text(clients.client_conf(ctx, "nyc-us.warp.laptop"))
-    assert conf.startswith("# wireguard-tools client: nyc-us.warp.laptop on boba\n# exit: nyc-us = New York, US")
-    assert not os.path.exists(clients.client_conf(ctx, "par-fr.warp.mbp-1"))
+    conf = store.read_text(clients.client_conf(ctx, "warp.nyc-us.laptop"))
+    assert conf.startswith("# wireguard-tools client: warp.nyc-us.laptop on boba\n# exit: nyc-us = New York, US")
+    assert not os.path.exists(clients.client_conf(ctx, "warp.par-fr.mbp-1"))
     calls = ctx.runner.changes()
     assert any("rule del from 10.2.10.3/32 lookup 201" in x for x in calls)
     assert any("rule add from 10.2.10.3/32 lookup 203" in x for x in calls)
@@ -94,10 +94,10 @@ def test_list_shows_configs_by_device(make_ctx, capsys):
     out = capsys.readouterr().out.splitlines()
     assert out[0].split()[1:4] == ["CONFIG", "EXIT", "WARP"]
     # grouped by device: the host's configs first, then the jumps'
-    assert names == ["mbp-1", "par-fr.warp.mbp-1", "nyc-us.phone", "par-fr.warp.tv"]
+    assert names == ["mbp-1", "warp.par-fr.mbp-1", "nyc-us.phone", "warp.par-fr.tv"]
     rows = {line.split()[1]: line for line in out[1:]}
     assert rows["mbp-1"].split()[2:4] == ["host", "off"]
-    assert "Paris, France" in rows["par-fr.warp.mbp-1"] and " on " in rows["par-fr.warp.mbp-1"]
+    assert "Paris, France" in rows["warp.par-fr.mbp-1"] and " on " in rows["warp.par-fr.mbp-1"]
 
 
 def _conf(ctx, name):
@@ -116,8 +116,8 @@ def test_rename_dry_run_with_wg0_up(make_ctx):
 
 def test_rename_between_exits_adds_before_removing(make_ctx):
     ctx = make_ctx()
-    _conf(ctx, "par-fr.warp.mbp-1")
-    clients.cmd_rename(ctx, ["par-fr.warp.mbp-1", "nyc-us.warp.mbp-1"])
+    _conf(ctx, "warp.par-fr.mbp-1")
+    clients.cmd_rename(ctx, ["warp.par-fr.mbp-1", "warp.nyc-us.mbp-1"])
     calls = ctx.runner.changes()
     add_new = next(i for i, c in enumerate(calls) if "rule add from 10.2.10.3/32 lookup 203" in c)
     del_old = next(i for i, c in enumerate(calls) if "rule del from 10.2.10.3/32 lookup 201" in c)
@@ -126,8 +126,8 @@ def test_rename_between_exits_adds_before_removing(make_ctx):
 
 def test_rename_same_exit_leaves_rules(make_ctx):
     ctx = make_ctx()
-    _conf(ctx, "par-fr.warp.mbp-1")
-    clients.cmd_rename(ctx, ["par-fr.warp.mbp-1", "par-fr.warp.laptop"])
+    _conf(ctx, "warp.par-fr.mbp-1")
+    clients.cmd_rename(ctx, ["warp.par-fr.mbp-1", "warp.par-fr.laptop"])
     assert not [c for c in ctx.runner.changes() if " rule " in c]
 
 
@@ -213,14 +213,14 @@ def test_summary_block(make_ctx, capsys):
     assert any("par-fr (Paris, France)" in line for line in out)
 
 
-# --- names say the way out: [<jump>.][warp.]<device> ---
+# --- names say the way out: [warp.][<jump>.]<device> ---
 
 def test_add_makes_plain_and_warp_per_exit(make_ctx):
     ctx = make_ctx(argv=["--exit", "host,par-fr"])
     clients.cmd_add(ctx, ["mac"])
-    for name in ("mac", "warp.mac", "par-fr.mac", "par-fr.warp.mac"):
+    for name in ("mac", "warp.mac", "par-fr.mac", "warp.par-fr.mac"):
         assert ctx.snap.client(name), name
-    ip = {n: ctx.snap.client(n).ip for n in ("mac", "warp.mac", "par-fr.mac", "par-fr.warp.mac")}
+    ip = {n: ctx.snap.client(n).ip for n in ("mac", "warp.mac", "par-fr.mac", "warp.par-fr.mac")}
     calls = ctx.runner.changes()
     main = next(i for i, c in enumerate(calls) if f"rule add from {ip['mac']}/32 lookup main priority 9500" in c)
     stop = next(i for i, c in enumerate(calls) if f"rule add from {ip['mac']}/32 priority 9501 blackhole" in c)
@@ -228,13 +228,13 @@ def test_add_makes_plain_and_warp_per_exit(make_ctx):
     assert stop < main < peer   # the blackhole first: never a moment without it
     assert not any(f"from {ip['warp.mac']}/32" in c for c in calls if " rule " in c)   # the subnet's WARP rule
     assert any(f"rule add from {ip['par-fr.mac']}/32 lookup 231 priority 9500" in c for c in calls)
-    assert any(f"rule add from {ip['par-fr.warp.mac']}/32 lookup 201 priority 9500" in c for c in calls)
+    assert any(f"rule add from {ip['warp.par-fr.mac']}/32 lookup 201 priority 9500" in c for c in calls)
     conf = lambda n: store.read_text(clients.client_conf(ctx, n))   # noqa: E731
     assert "# exit: this server's IP (no WARP)" in conf("mac")
     assert "# exit: this server -> Cloudflare WARP" in conf("warp.mac")
     assert "# exit: par-fr = Paris, France (jump, no WARP)" in conf("par-fr.mac")
-    assert "# exit: par-fr = Paris, France (jump -> Cloudflare WARP)" in conf("par-fr.warp.mac")
-    assert clients.exit_short("par-fr.warp.mac") == "par-fr" and clients.exit_short("warp.mac") == "host"
+    assert "# exit: par-fr = Paris, France (jump -> Cloudflare WARP)" in conf("warp.par-fr.mac")
+    assert clients.exit_short("warp.par-fr.mac") == "par-fr" and clients.exit_short("warp.mac") == "host"
     assert clients.way_out(ctx, "par-fr.mac") == "Paris, France, no WARP"
 
 
@@ -254,8 +254,8 @@ def test_add_warp_off_only(make_ctx):
 
 def test_add_full_config_name(make_ctx):
     ctx = make_ctx()
-    clients.cmd_add(ctx, ["par-fr.warp.tablet"])
-    assert [c.name for c in ctx.snap.clients if "tablet" in c.name] == ["par-fr.warp.tablet"]
+    clients.cmd_add(ctx, ["warp.par-fr.tablet"])
+    assert [c.name for c in ctx.snap.clients if "tablet" in c.name] == ["warp.par-fr.tablet"]
     ctx = make_ctx(argv=["--warp", "on"])
     with pytest.raises(WgtError, match="full config name"):
         clients.cmd_add(ctx, ["warp.tablet"])
@@ -268,12 +268,12 @@ def test_warp_flag_values(make_ctx):
 
 
 def test_rename_out_of_warp_adds_before_removing(make_ctx):
-    """Renaming is how a config changes its WARP: par-fr.warp.mbp-1 -> par-fr.mbp-1
+    """Renaming is how a config changes its WARP: warp.par-fr.mbp-1 -> par-fr.mbp-1
     moves it from the jump's WARP table (201) to the jump table (231), the jump
     table's IPv6 blackhole and NAT first (a wg0 running older hooks may lack them)."""
     ctx = make_ctx()
-    _conf(ctx, "par-fr.warp.mbp-1")
-    clients.cmd_rename(ctx, ["par-fr.warp.mbp-1", "par-fr.mbp-1"])
+    _conf(ctx, "warp.par-fr.mbp-1")
+    clients.cmd_rename(ctx, ["warp.par-fr.mbp-1", "par-fr.mbp-1"])
     calls = ctx.runner.changes()
     v6_stop = next(i for i, c in enumerate(calls) if "ip -6 route replace blackhole default metric 4096 table 231" in c)
     nat = next(i for i, c in enumerate(calls) if "-o px-par-fr -j MASQUERADE" in c)
@@ -345,12 +345,30 @@ def test_setup_folds_warp_into_names_once(make_ctx):
     Path(wg.state).write_text(store.state_unset(store.read_text(wg.state), "NAMES"))
     ctx.reload()
     srv.migrate_names(ctx)
-    assert sorted(c.name for c in ctx.snap.clients) == ["nyc-us.phone", "par-fr.warp.mbp-1", "warp.mbp-1"]
-    assert ctx.snap.client("par-fr.warp.mbp-1").pub == "K2" and ctx.snap.is_disabled("par-fr.warp.mbp-1")
-    assert store.read_text(wg.psk("par-fr.warp.mbp-1")) == "PSK2\n" and not os.path.exists(wg.psk("par-fr.mbp-1"))
+    assert sorted(c.name for c in ctx.snap.clients) == ["nyc-us.phone", "warp.mbp-1", "warp.par-fr.mbp-1"]
+    assert ctx.snap.client("warp.par-fr.mbp-1").pub == "K2" and ctx.snap.is_disabled("warp.par-fr.mbp-1")
+    assert store.read_text(wg.psk("warp.par-fr.mbp-1")) == "PSK2\n" and not os.path.exists(wg.psk("par-fr.mbp-1"))
     conf = store.read_text(clients.client_conf(ctx, "warp.mbp-1"))
     assert conf.startswith("# wireguard-tools client: warp.mbp-1 on boba\n# exit: this server -> Cloudflare WARP")
     assert not os.path.exists(clients.client_conf(ctx, "mbp-1")) and not os.path.exists(wg.nowarp_db)
-    assert store.state_get(store.read_text(wg.state), "NAMES") == "2"
+    assert store.state_get(store.read_text(wg.state), "NAMES") == "3"
     srv.migrate_names(ctx)   # once: a plain config made later stays plain
-    assert sorted(c.name for c in ctx.snap.clients) == ["nyc-us.phone", "par-fr.warp.mbp-1", "warp.mbp-1"]
+    assert sorted(c.name for c in ctx.snap.clients) == ["nyc-us.phone", "warp.mbp-1", "warp.par-fr.mbp-1"]
+
+
+def test_setup_moves_warp_to_the_front(make_ctx):
+    """Servers migrated to <jump>.warp.<device> (NAMES=2) get warp.<jump>.<device>."""
+    from wgt import server as srv
+    ctx = make_ctx()
+    wg = ctx.paths
+    Path(wg.client_db).write_text(store.CLIENTS_HEADER + "\n"
+                                  "warp.mbp-1 10.2.10.2 K1 0.0.0.0/0,::/0\n"
+                                  "par-fr.warp.mbp-1 10.2.10.3 K2 0.0.0.0/0,::/0\n"
+                                  "par-fr.mbp-1 10.2.10.4 K3 0.0.0.0/0,::/0\n")
+    Path(wg.psk("par-fr.warp.mbp-1")).write_text("PSK2\n")
+    Path(wg.state).write_text(store.state_set(store.read_text(wg.state), "NAMES", "2"))
+    ctx.reload()
+    srv.migrate_names(ctx)
+    assert sorted(c.name for c in ctx.snap.clients) == ["par-fr.mbp-1", "warp.mbp-1", "warp.par-fr.mbp-1"]
+    assert store.read_text(wg.psk("warp.par-fr.mbp-1")) == "PSK2\n"
+    assert store.state_get(store.read_text(wg.state), "NAMES") == "3"

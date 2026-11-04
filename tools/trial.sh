@@ -54,7 +54,7 @@ echo "=== jump and clients"
 DESC="jump add par-fr"; ok W jump add par-fr "$jump" --label "Paris, France" --yes >/root/trial-exit.log 2>&1
 DESC="client add phone (host + par-fr, plain + warp)"; ok W client add phone --exit host,par-fr --no-qr --yes >/dev/null 2>&1
 DESC="four configs"; ok test "$(ls /etc/wireguard/clients/bossk.*phone.conf | wc -l)" = 4
-device_up /etc/wireguard/clients/bossk.par-fr.warp.phone.conf
+device_up /etc/wireguard/clients/bossk.warp.par-fr.phone.conf
 DESC="device exits in Paris (on demand)"; ok wait_loc FR
 systemctl stop wg-tools-exit-watchdog.timer; systemctl stop wg-quick@wx-par-fr wg-quick@px-par-fr
 DESC="device blocked while the jump is down"; ok test -z "$(probe)"
@@ -68,7 +68,7 @@ DESC="remove refused while used"; ok bash -c '! bin/wgt jump remove par-fr --yes
 echo "=== plain configs (no WARP)"
 device_up /etc/wireguard/clients/bossk.par-fr.phone.conf
 DESC="jump without WARP: Paris, warp=off"; ok wait_probe "loc=FR warp=off"
-DESC="rename par-fr.phone -> par-fr.warp.phone2 (live)"; ok W client rename par-fr.phone par-fr.warp.phone2 --yes >/dev/null 2>&1
+DESC="rename par-fr.phone -> warp.par-fr.phone2 (live)"; ok W client rename par-fr.phone warp.par-fr.phone2 --yes >/dev/null 2>&1
 DESC="same tunnel now through WARP"; ok wait_probe "loc=FR warp=on"
 device_up /etc/wireguard/clients/bossk.phone.conf
 DESC="host without WARP: warp=off"; ok wait_probe "warp=off"
@@ -86,7 +86,7 @@ DESC="purge leaves no wg0"; ok bash -c '! ip link show wg0 >/dev/null 2>&1'
 DESC="restore succeeds"; ok W restore /root/trial-archive.tgz --yes >/root/trial-restore.log 2>&1
 DESC="same keys after restore"; ok test "$keys_before" = "$(md5sum /etc/wireguard/server.key /etc/wireguard/clients/*.conf | md5sum)"
 DESC="jump back"; ok bash -c 'bin/wgt jump list | grep -q par-fr'
-device_up /etc/wireguard/clients/bossk.par-fr.warp.phone.conf
+device_up /etc/wireguard/clients/bossk.warp.par-fr.phone.conf
 DESC="old device config still exits in Paris"; ok wait_loc FR
 ip netns del dev
 

@@ -48,11 +48,11 @@ so running servers need no migration. Nothing in the code is Proton-specific:
 any single-peer WireGuard config with an IPv4 address is a jump.
 
 A **client** is a device; each of its **configs** is one clients.db entry
-(one peer, key and address) named `[<jump>.][warp.]<device>`
+(one peer, key and address) named `[warp.][<jump>.]<device>`
 (`store.split_name` / `config_name`). The name is the only record of a
 config's exit and WARP: no switch, no side file. Code still says "client" for
 an entry (`store.Client`, `clients.py`, `clients.db`). Servers from before this
-are migrated once by setup (`server.migrate_names`, `NAMES=2` in the state).
+are migrated once by setup (`server.migrate_names`, `NAMES=3` in the state).
 
 ## Conventions
 

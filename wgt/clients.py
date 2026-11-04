@@ -1,7 +1,7 @@
 """`wgt client ...`: a client is a device; it has one tunnel config per exit
 and WARP choice, each with its own keypair, preshared key and address, at
 /etc/wireguard/clients/<server>.<name>.conf. The name says the way out:
-[<jump>.][warp.]<device>. With <jump> it exits through that jump, without
+[warp.][<jump>.]<device>. With <jump> it exits through that jump, without
 through this server; with warp through a WARP of ours, without straight out.
 Changes apply live; other configs stay connected."""
 
@@ -279,8 +279,8 @@ def warp_choices(value: str) -> List[bool]:
 def cmd_add(ctx: Ctx, words: List[str]) -> None:
     """add <device> [--exit host|<code>[,...]] [--warp on|off]: one config per
     exit (host = the WireGuard server itself, the default; asks when jumps
-    exist) and WARP setting (both by default), named [<jump>.][warp.]<device>.
-    A full config name (par-fr.warp.tablet) adds just that one."""
+    exist) and WARP setting (both by default), named [warp.][<jump>.]<device>.
+    A full config name (warp.par-fr.tablet) adds just that one."""
     usage = "wgt client add <device|config> [--exit host|<jump>[,...]] [--warp on|off|on,off]"
     if not words:
         raise WgtError(f"usage: {usage}")

@@ -92,20 +92,20 @@ WARP_TAG = "warp"   # the name part of a config that goes through WARP
 
 
 def split_name(name: str) -> Tuple[str, bool, str]:
-    """A config name [<jump>.][warp.]<device> as (jump code or "", WARP on,
-    device): par-fr.warp.mbp-1 -> ("par-fr", True, "mbp-1"). Not validated
+    """A config name [warp.][<jump>.]<device> as (jump code or "", WARP on,
+    device): warp.par-fr.mbp-1 -> ("par-fr", True, "mbp-1"). Not validated
     (valid_client_name does that)."""
     parts = name.split(".")
     device, pre = parts[-1], parts[:-1]
-    warp = bool(pre) and pre[-1] == WARP_TAG
+    warp = bool(pre) and pre[0] == WARP_TAG
     if warp:
-        pre = pre[:-1]
+        pre = pre[1:]
     return (pre[0] if pre else ""), warp, device
 
 
 def config_name(code: str, warp: bool, device: str) -> str:
     """The config name for a device's exit and WARP: split_name reversed."""
-    return ".".join(([code] if code else []) + ([WARP_TAG] if warp else []) + [device])
+    return ".".join(([WARP_TAG] if warp else []) + ([code] if code else []) + [device])
 
 
 def client_exit(name: str) -> str:
@@ -119,8 +119,8 @@ def name_warp(name: str) -> bool:
 
 
 def valid_client_name(name: str) -> Optional[str]:
-    """None if <name> is a valid config name ([<jump>.][warp.]<device>), else why not."""
-    shape = f"a config name is [<jump>.][warp.]<device>, the device 1-32 of [A-Za-z0-9_-]: '{name}'"
+    """None if <name> is a valid config name ([warp.][<jump>.]<device>), else why not."""
+    shape = f"a config name is [warp.][<jump>.]<device>, the device 1-32 of [A-Za-z0-9_-]: '{name}'"
     parts = name.split(".")
     code, warp, device = split_name(name)
     if len(parts) - 1 != bool(code) + warp or not _CLIENT_BASE.fullmatch(device):
@@ -133,7 +133,7 @@ def valid_client_name(name: str) -> Optional[str]:
 # --- clients ---
 
 def device_of(name: str) -> str:
-    """The device part of a config name: par-fr.warp.mbp-1 -> mbp-1."""
+    """The device part of a config name: warp.par-fr.mbp-1 -> mbp-1."""
     return split_name(name)[2]
 
 
@@ -146,7 +146,7 @@ def device_key(name: str) -> Tuple[str, bool, str, bool]:
 
 @dataclass
 class Client:
-    """A clients.db entry: one tunnel config, named [<jump>.][warp.]<device>."""
+    """A clients.db entry: one tunnel config, named [warp.][<jump>.]<device>."""
 
     name: str
     ip: str
@@ -311,7 +311,7 @@ class Snapshot:
         return next((e for e in self.exits if e.code == code), None)
 
     def exit_clients(self, code: str) -> List[Client]:
-        return [c for c in self.clients if c.name.startswith(code + ".")]
+        return [c for c in self.clients if client_exit(c.name) == code]
 
     def is_disabled(self, name: str) -> bool:
         return name in self.disabled

@@ -17,7 +17,7 @@ USAGE = """\
 Usage: wgt [options] <command> ...
 
 A WireGuard server for your devices. Each device (client) gets tunnel configs
-named [<jump>.][warp.]<device>: out of this server or a jump, with or without
+named [warp.][<jump>.]<device>: out of this server or a jump, with or without
 Cloudflare WARP. The device picks one at a time.
 
   setup                      install or update everything

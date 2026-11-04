@@ -88,7 +88,7 @@ CLIENT_HEAD = ("CONFIG", "EXIT", "WARP", "ADDRESS", "LAST SEEN", "RX/TX MiB", "A
 class ClientRow(NamedTuple):
     """One client in the table; `wgt client list --tsv` prints these fields in order."""
 
-    name: str          # config name, e.g. par-fr.warp.mbp-1
+    name: str          # config name, e.g. warp.par-fr.mbp-1
     exit: str          # jump code, or host
     ip: str
     seen: str          # "3m ago", "never", "disabled"

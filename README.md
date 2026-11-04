@@ -20,18 +20,18 @@ per way out, and its name says which:
 | `boba.laptop` | the WireGuard server (host) | the server's IP: a plain, fast VPN |
 | `boba.warp.laptop` | host, through Cloudflare WARP | a Cloudflare IP near the server |
 | `boba.par-fr.laptop` | the `par-fr` jump | the jump's IP |
-| `boba.par-fr.warp.laptop` | the jump, through WARP | a Cloudflare IP near the jump (Paris, say) |
+| `boba.warp.par-fr.laptop` | the jump, through WARP | a Cloudflare IP near the jump (Paris, say) |
 
 `boba.` is the server's name, on the file only (`boba.warp.laptop.conf`);
-`wgt client` commands take the rest (`warp.laptop`). Read left to right, a name
-follows the traffic: server, jump, WARP. The device imports the configs it
-wants and turns on one at a time: choosing an exit is choosing a tunnel.
+`wgt client` commands take the rest (`warp.laptop`). The pattern is
+`<server>.[warp.][<jump>.]<device>`. The device imports the configs it wants
+and turns on one at a time: choosing an exit is choosing a tunnel.
 
 ```bash
 wgt client add laptop                          # laptop and warp.laptop
-wgt client add laptop --exit host,par-fr       # ...plus par-fr.laptop and par-fr.warp.laptop
+wgt client add laptop --exit host,par-fr       # ...plus par-fr.laptop and warp.par-fr.laptop
 wgt client add phone --warp on                 # only warp.phone (--warp off: only phone)
-wgt client add par-fr.warp.tablet              # exactly that one config
+wgt client add warp.par-fr.tablet              # exactly that one config
 ```
 
 Nothing is switched on the server: a config's name fixes its way out. To move
@@ -365,13 +365,13 @@ as large as the old one.
 
 A jump is another WireGuard server that clients can leave through instead of
 this one: a VPN provider's server in a city you pick, or a server of your own.
-Through `par-fr.warp.<device>`, the traffic goes into a WARP tunnel that itself runs
+Through `warp.par-fr.<device>`, the traffic goes into a WARP tunnel that itself runs
 inside the jump tunnel, so Cloudflare places it near the jump: sites see a
 Cloudflare IP there (fewer CAPTCHAs and blocks than a VPN's own IPs), and the
 jump sees only encrypted WARP traffic. Through `par-fr.<device>`, sites see the jump's IP.
 
 ```
-par-fr.warp.phone: phone -> wg0 (this server) -> wx-par-fr (WARP) -> inside px-par-fr (jump, Paris) -> Cloudflare, Paris
+warp.par-fr.phone: phone -> wg0 (this server) -> wx-par-fr (WARP) -> inside px-par-fr (jump, Paris) -> Cloudflare, Paris
 par-fr.phone:      phone -> wg0 (this server) -> px-par-fr (jump, Paris) -> sites
 ```
 
@@ -468,7 +468,7 @@ Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 
 #### Choosing exits
 
-A config's name is `[<jump>.][warp.]<device>` (see the table in
+A config's name is `[warp.][<jump>.]<device>` (see the table in
 [Overview](#overview)). `add <device>` makes a plain and a `warp.` config for
 each exit; it asks which exit(s) when jumps exist, or take them with `--exit`
 (`host` is the WireGuard server itself; `--exit host,par-fr` covers both), and
@@ -478,14 +478,14 @@ each device gets one when you add it. Through
 `local/exits/<server>/` but not yet added, so they show up in that menu:
 
 ```bash
-wgt client add laptop --exit host,par-fr          # laptop, warp.laptop, par-fr.laptop, par-fr.warp.laptop
+wgt client add laptop --exit host,par-fr          # laptop, warp.laptop, par-fr.laptop, warp.par-fr.laptop
 wgt client add mac --exit par-fr --warp off       # only par-fr.mac (e.g. the Mac runs its own WARP)
-wgt client add par-fr.warp.tablet                 # exactly that one
-wgt client rename par-fr.warp.tablet par-fr.tablet   # same keys; now without WARP, live
+wgt client add warp.par-fr.tablet                 # exactly that one
+wgt client rename warp.par-fr.tablet par-fr.tablet   # same keys; now without WARP, live
 ```
 
 Each config is its own WireGuard peer with its own key and address
-(`dengar.par-fr.warp.laptop.conf`, whose `# exit:` line says the same in
+(`dengar.warp.par-fr.laptop.conf`, whose `# exit:` line says the same in
 words). Import the ones you want on the device and switch exits by switching
 tunnels in the WireGuard app. `list` and `wgt-ctl clients` show each config
 with its EXIT (host, or the jump's name) and WARP (on/off) columns. The

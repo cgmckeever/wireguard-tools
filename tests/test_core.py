@@ -24,9 +24,9 @@ def test_exit_codes(code, ok):
 
 @pytest.mark.parametrize("name,ok", [
     ("laptop", True), ("par-fr.laptop", True), ("Work_PC-2", True), ("x" * 32, True),
-    ("warp.laptop", True), ("par-fr.warp.laptop", True), ("warp", True),
-    ("x" * 33, False), ("warp.par-fr.laptop", False), ("bad code.x", False), ("a.b.c", False),
-    ("warp.warp.x", False), ("par-fr.warp.", False), ("", False),
+    ("warp.laptop", True), ("warp.par-fr.laptop", True), ("warp", True),
+    ("x" * 33, False), ("par-fr.warp.laptop", False), ("bad code.x", False), ("a.b.c", False),
+    ("warp.warp.x", False), ("warp.par-fr.", False), ("", False),
 ])
 def test_client_names(name, ok):
     assert (store.valid_client_name(name) is None) is ok
@@ -34,19 +34,19 @@ def test_client_names(name, ok):
 
 def test_client_exit():
     assert store.client_exit("par-fr.laptop") == "par-fr"
-    assert store.client_exit("par-fr.warp.laptop") == "par-fr"
+    assert store.client_exit("warp.par-fr.laptop") == "par-fr"
     assert store.client_exit("warp.laptop") == ""
     assert store.client_exit("laptop") == ""
 
 
 def test_split_and_build_names():
     for name, parts in [("mac", ("", False, "mac")), ("warp.mac", ("", True, "mac")),
-                        ("par-fr.mac", ("par-fr", False, "mac")), ("par-fr.warp.mac", ("par-fr", True, "mac"))]:
+                        ("par-fr.mac", ("par-fr", False, "mac")), ("warp.par-fr.mac", ("par-fr", True, "mac"))]:
         assert store.split_name(name) == parts
         assert store.config_name(*parts) == name
-    assert store.device_of("par-fr.warp.mac") == "mac"
-    order = sorted(["par-fr.warp.mac", "warp.mac", "par-fr.mac", "mac"], key=store.device_key)
-    assert order == ["mac", "warp.mac", "par-fr.mac", "par-fr.warp.mac"]
+    assert store.device_of("warp.par-fr.mac") == "mac"
+    order = sorted(["warp.par-fr.mac", "warp.mac", "par-fr.mac", "mac"], key=store.device_key)
+    assert order == ["mac", "warp.mac", "par-fr.mac", "warp.par-fr.mac"]
 
 
 # --- addresses ---
@@ -244,7 +244,7 @@ def test_host_is_not_an_exit_code():
 def test_client_table_per_cell():
     from wgt import rules
     snap = store.Snapshot(state="", clients=[store.Client("warp.a", "10.0.0.2", "K"),
-                                            store.Client("par-fr.warp.a", "10.0.0.3", "K"),
+                                            store.Client("warp.par-fr.a", "10.0.0.3", "K"),
                                             store.Client("a", "10.0.0.4", "K"),
                                             store.Client("par-fr.a", "10.0.0.5", "K")],
                           disabled=[], exits=[store.Exit("par-fr", 1, "Paris")])

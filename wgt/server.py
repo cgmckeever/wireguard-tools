@@ -293,48 +293,60 @@ def ensure_server_keys(ctx: Ctx) -> bool:
 
 
 def migrate_names(ctx: Ctx) -> None:
-    """Once per server (NAMES=2 in wg-tools.state): fold WARP into the config
-    names. Before, a config went through WARP unless clients.nowarp listed it
-    (or, without a jump, unless WARP was switched off); now the name says so. Each
-    one that went through WARP is renamed [<jump>.]warp.<device>: same keys
-    and address, so the device's tunnel keeps working. wg0.conf is rewritten
-    afterwards by setup as usual."""
-    if store.state_get(ctx.snap.state, "NAMES") == "2":
+    """Once per server (NAMES=3 in wg-tools.state): fold WARP into the config
+    names, warp.[<jump>.]<device>. Before (no NAMES), a config went through
+    WARP unless clients.nowarp listed it (or, without a jump, unless WARP was
+    switched off); NAMES=2 servers had the warp after the jump
+    (<jump>.warp.<device>). Renamed configs keep their keys and address, so the
+    device's tunnel keeps working. wg0.conf is rewritten afterwards by setup."""
+    version = store.state_get(ctx.snap.state, "NAMES")
+    if version == "3":
         return
     nowarp = set(store.parse_nowarp(ctx.files.read(ctx.paths.nowarp_db)))
     host_warp = ctx.cfg.saved.get("WARP", "on") != "off"
     moves = []
     for c in ctx.snap.clients:
-        code, warp_on, device = store.split_name(c.name)
-        if not warp_on and c.name not in nowarp and (code or host_warp):
-            moves.append((c, store.config_name(code, True, device)))
+        parts = c.name.split(".")
+        if version == "2":
+            if len(parts) == 3 and parts[1] == store.WARP_TAG:
+                moves.append((c, store.config_name(parts[0], True, parts[2])))
+        elif parts[0] != store.WARP_TAG and c.name not in nowarp:
+            code, device = (parts[0], parts[-1]) if len(parts) > 1 else ("", parts[0])
+            if code or host_warp:
+                moves.append((c, store.config_name(code, True, device)))
     if moves:
         ctx.runner.step(f"Rename {len(moves)} config(s) that go through WARP to warp.* names "
                         "(same keys and addresses: devices keep working)", "")
     for c, new in moves:
-        old_conf = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
-        text = store.read_text(old_conf)
-        if text is not None:
-            text = re.sub(r"(?m)^# wireguard-tools client: .*$",
-                          f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
-            text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
-            ctx.files.write(ctx.paths.client_conf(ctx.cfg.SERVER_NAME, new), 0o600, text)
-        psk = store.read_text(ctx.paths.psk(c.name))
-        if psk is not None:
-            ctx.files.write(ctx.paths.psk(new), 0o600, psk)
-        disabled = ctx.snap.is_disabled(c.name)
-        ops.remove_client(ctx, c.name)
-        ops.save_client(ctx, store.Client(new, c.ip, c.pub, c.allowed))
-        if disabled:
-            ops.set_disabled(ctx, c.name, False)
-            ops.set_disabled(ctx, new, True)
-        if text is not None:
-            ctx.files.forget(old_conf)
-        if psk is not None:
-            ctx.files.forget(ctx.paths.psk(c.name))
+        _rename_files(ctx, c, new)
         ctx.out.info(f"  {c.name} -> {new}")
     ctx.files.remove(ctx.paths.nowarp_db)
-    ops.state_set(ctx, "NAMES", "2")
+    ops.state_set(ctx, "NAMES", "3")
+
+
+def _rename_files(ctx: Ctx, c: store.Client, new: str) -> None:
+    """Move config <c> to name <new> in the files only (clients.db, its config,
+    preshared key and disabled entry); wg0 is rebuilt by the caller."""
+    old_conf = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
+    text = store.read_text(old_conf)
+    if text is not None:
+        text = re.sub(r"(?m)^# wireguard-tools client: .*$",
+                      f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
+        text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
+        ctx.files.write(ctx.paths.client_conf(ctx.cfg.SERVER_NAME, new), 0o600, text)
+    psk = store.read_text(ctx.paths.psk(c.name))
+    if psk is not None:
+        ctx.files.write(ctx.paths.psk(new), 0o600, psk)
+    disabled = ctx.snap.is_disabled(c.name)
+    ops.remove_client(ctx, c.name)
+    ops.save_client(ctx, store.Client(new, c.ip, c.pub, c.allowed))
+    if disabled:
+        ops.set_disabled(ctx, c.name, False)
+        ops.set_disabled(ctx, new, True)
+    if text is not None:
+        ctx.files.forget(old_conf)
+    if psk is not None:
+        ctx.files.forget(ctx.paths.psk(c.name))
 
 
 def sync_client_configs(ctx: Ctx, old_name: str) -> None:
