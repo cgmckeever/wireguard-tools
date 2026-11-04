@@ -53,7 +53,7 @@ SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "St
 RESERVED = ("init", "clients", "summary", "all", "help", "list")
 SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.join(RESERVED)})"
 # The wgt commands (anything else after a server word is a mistake, not a command).
-WGT_COMMANDS = ("setup", "warp", "summary", "status", "test", "log", "backup", "restore", "rollback", "client",
+WGT_COMMANDS = ("setup", "summary", "status", "test", "log", "backup", "restore", "rollback", "client",
                 "jump", "exit")
 _TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:\[\]-]+$")
 _DIR = re.compile(r"^/[A-Za-z0-9._/-]+$")

@@ -127,7 +127,7 @@ def register(ctx: Ctx, directory: Optional[str] = None, regenerate: bool = False
         ctx.runner.step(f"Register a free WARP account in {d} (accepts Cloudflare's WARP terms)", f"rm -rf {d}")
         if not ctx.runner.dry_run and not _wgcf(ctx, d, ["register", "--accept-tos"], log, append=False):
             ctx.out.warn(f"wgcf register failed; see {log}. WARP may refuse registrations from some server IPs:\n"
-                         "       retry later ('wgt warp on'), or register on another machine and copy\n"
+                         "       retry later (re-run 'wgt setup'), or register on another machine and copy\n"
                          f"       wgcf-account.toml and wgcf-profile.conf into {d}/ (see README)")
             return False
     if os.path.isfile(ctx.paths.wgcf_profile(d)) and not regenerate:

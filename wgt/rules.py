@@ -2,17 +2,17 @@
 PostUp/PostDown, rollback, live changes and the tests.
 
 How it fits together (see README "How it works"):
-- WARP switch: RT_TABLE always holds "default dev warp" with a blackhole
-  fallback; WARP on adds one policy rule per family, `from <subnet> lookup
-  RT_TABLE`, WARP off removes it.
+- WARP: RT_TABLE always holds "default dev warp" with a blackhole fallback;
+  one policy rule per family, `from <subnet> lookup RT_TABLE`, sends the
+  subnet there unless a config's own rule (below) says otherwise.
 - Jump <code> with index n: client table 200+n (default dev wx-<code>,
   blackhole fallback) chosen by one rule per client address; jump table
   230+n (default dev px-<code>, blackhole) chosen by the fwmark of the jump's
   WARP tunnel. All of it lives in wg0's hooks, so a jump that is down blocks
   its clients instead of leaking them.
-- WARP off for one client (clients.nowarp): its rule picks the plain way out
-  instead of a WARP of ours. A jump client's rule points at the jump table
-  (px, NATed like any way out); a client without a jump gets `lookup main`
+- A config without warp in its name skips our WARP: its rule picks the plain
+  way out. A jump config's rule points at the jump table (px, NATed like any
+  way out); a host config gets `lookup main`
   plus a blackhole rule behind it, so a missing main route (IPv6 on an
   IPv4-only server) stops there rather than falling through to WARP's rule.
 
@@ -27,7 +27,7 @@ order. The text matches the bash version byte for byte (wg0.conf embeds it)."""
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Iterable, List, Sequence, Tuple
 
 from .config import Config
 from .const import (
@@ -143,11 +143,10 @@ def warp_rule_cmds(cfg: Config, on: bool) -> List[str]:
     return out
 
 
-def client_table(snap: Snapshot, client: Client, nowarp: Optional[bool] = None) -> str:
-    """The routing table a client's own rules point at ("" for none: it
-    follows the server's WARP switch). <nowarp> overrides clients.nowarp
-    (for the rules of a state the client is leaving)."""
-    off = snap.warp_off(client.name) if nowarp is None else nowarp
+def client_table(snap: Snapshot, client: Client) -> str:
+    """The routing table a config's own rules point at ("" for none: the
+    subnet's WARP rule)."""
+    off = snap.warp_off(client.name)
     if client.exit:
         e = snap.exit(client.exit)
         if e is None:
@@ -156,8 +155,7 @@ def client_table(snap: Snapshot, client: Client, nowarp: Optional[bool] = None) 
     return "main" if off else ""
 
 
-def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool,
-                     nowarp: Optional[bool] = None) -> List[str]:
+def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool) -> List[str]:
     """Policy rules sending one client's addresses (ip, ip6) to its way out
     (client_table): added (<up>) or removed. A WARP-off client without a
     jump also gets a blackhole rule right behind, so it can't reach WARP's rule.
@@ -165,7 +163,7 @@ def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool,
     Adding never deletes first (the kernel refuses an identical rule), so
     re-applying live rules (setup, rotate) leaves no moment in which the client
     falls through to another way out; the blackhole goes in before `lookup main`."""
-    table = client_table(snap, client, nowarp)
+    table = client_table(snap, client)
     if not table or not client.ip:
         return []
     out = []

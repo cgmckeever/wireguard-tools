@@ -1,9 +1,9 @@
-"""`wgt client ...`: the clients of this server. Each has a keypair, a
-preshared key and an address; its config is
-/etc/wireguard/clients/<server>.<name>.conf. A client named <code>.<name>
-exits through jump <code>; one in clients.nowarp has WARP off (it
-leaves straight out of its exit: this server's IP, or its jump's
-tunnel). Changes apply live; other clients stay connected."""
+"""`wgt client ...`: a client is a device; it has one tunnel config per exit
+and WARP choice, each with its own keypair, preshared key and address, at
+/etc/wireguard/clients/<server>.<name>.conf. The name says the way out:
+[<jump>.][warp.]<device>. With <jump> it exits through that jump, without
+through this server; with warp through a WARP of ours, without straight out.
+Changes apply live; other configs stay connected."""
 
 from __future__ import annotations
 
@@ -61,7 +61,7 @@ def pick_client(ctx: Ctx, verb: str) -> str:
     if not ui.have_tty() or ctx.args.yes:
         raise WgtError(f"usage: wgt client {verb} <name>")
     try:
-        i = ui.menu("", [f"{store.device_of(c.name):<20} {exit_label(ctx, c.name):<24} {c.ip}" for c in clients],
+        i = ui.menu("", [f"{c.name:<24} {way_out(ctx, c.name):<32} {c.ip}" for c in clients],
                     f"{verb.capitalize()} which client? (number or name)")
     except ValueError as e:
         if ctx.snap.client(str(e)):
@@ -174,7 +174,7 @@ def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, endpoint: str, old_
 
 
 def ensure_jump_live(ctx: Ctx, c: store.Client) -> None:
-    """A WARP-off jump client rides the jump tunnel directly: make sure its
+    """A jump config without WARP rides the jump tunnel directly: make sure its
     table routes and NAT are live (idempotent), even on a wg0 still running
     hooks from before WARP-off clients existed (pulled, not yet restarted)."""
     e = ctx.snap.exit(c.exit) if c.exit else None
@@ -231,32 +231,28 @@ def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
     for cl in ctx.snap.clients:
         seen = "disabled" if ctx.snap.is_disabled(cl.name) else ui.ago(hs.get(cl.pub, 0), now)
         rx_b, tx_b = tx.get(cl.pub, (0, 0))
-        rows.append(ui.ClientRow(cl.name, exit_short(ctx, cl.name), cl.ip, seen,
+        rows.append(ui.ClientRow(cl.name, exit_short(cl.name), cl.ip, seen,
                                  f"{rx_b // MIB}/{tx_b // MIB}", cl.allowed.replace(",", ", "),
                                  exit_label(ctx, cl.name)))
     return rows
 
 
-def exit_short(ctx: Ctx, name: str, warp_off: Optional[bool] = None) -> str:
-    """Where a client exits, as a code: its jump's code (<code>/direct
-    with WARP off), or warp/direct (no jump: the server's WARP switch, or
-    direct with WARP off)."""
-    code = store.client_exit(name)
-    off = ctx.snap.warp_off(name) if warp_off is None else warp_off
-    if code:
-        return f"{code}/direct" if off else code
-    return "warp" if ctx.cfg.warp_on and not off else "direct"
+def exit_short(name: str) -> str:
+    """Where a config exits, as a code: its jump's, or host."""
+    return store.client_exit(name) or "host"
 
 
 def exit_label(ctx: Ctx, name: str) -> str:
-    """Where a client exits, for people: its jump's full name (the label
-    given at jump add, e.g. "Paris, France"; "(direct)" added with WARP off),
-    or warp/direct (no jump)."""
+    """Where a config exits, for people: host, or its jump's full name (the
+    label given at jump add, e.g. "Paris, France")."""
     code = store.client_exit(name)
     e = ctx.snap.exit(code) if code else None
-    if e is None:
-        return exit_short(ctx, name)
-    return (e.label or code) + (" (direct)" if ctx.snap.warp_off(name) else "")
+    return (e.label or code) if e else exit_short(name)
+
+
+def way_out(ctx: Ctx, name: str) -> str:
+    """Exit and WARP in a few words: "Paris, France, through WARP"."""
+    return f"{exit_label(ctx, name)}, {'through WARP' if store.name_warp(name) else 'no WARP'}"
 
 
 def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str]:
@@ -273,22 +269,32 @@ def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str
 
 # --- commands ---
 
+def warp_choices(value: str) -> List[bool]:
+    """--warp as the WARP settings to make configs for: both by default."""
+    if value in ("on", "off"):
+        return [value == "on"]
+    return [False, True]
+
+
 def cmd_add(ctx: Ctx, words: List[str]) -> None:
-    """add <name> [--exit host|<code>[,...]] [--warp on|off]: one client per
-    exit given (host = the WireGuard server itself, the default), named
-    <name> and <code>.<name>; asks when jumps exist. --warp off: they leave without our WARP."""
-    usage = "wgt client add <name> [--exit host|<jump>[,...]] [--warp on|off]"
+    """add <device> [--exit host|<code>[,...]] [--warp on|off]: one config per
+    exit (host = the WireGuard server itself, the default; asks when jumps
+    exist) and WARP setting (both by default), named [<jump>.][warp.]<device>.
+    A full config name (par-fr.warp.tablet) adds just that one."""
+    usage = "wgt client add <device|config> [--exit host|<jump>[,...]] [--warp on|off|on,off]"
     if not words:
         raise WgtError(f"usage: {usage}")
     ops.no_more_words(words[1:], usage)
     name = words[0]
     valid_name(name)
-    base = name.split(".", 1)[1] if "." in name else name
+    code0, warp0, base = store.split_name(name)
     exit_codes = ctx.args.exit_codes
-    if "." in name:
-        if exit_codes:
-            raise WgtError(f"give the exit either in the name ({name}) or with --exit, not both")
-        exit_codes = store.client_exit(name)
+    warps = warp_choices(ctx.args.warp)
+    if name != base:
+        if exit_codes or ctx.args.warp:
+            raise WgtError(f"'{name}' is a full config name: leave out --exit and --warp "
+                           f"(or give the device, {base}, with them)")
+        exit_codes, warps = code0 or "host", [warp0]
     ops.take_lock(ctx)
     ops.require_server(ctx)
     if exit_codes:
@@ -298,7 +304,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     else:
         codes = ["host"]
         if not ctx.snap.exits:
-            ctx.out.info(f"no jumps on this server: the client exits via {exit_short(ctx, base)} "
+            ctx.out.info("no jumps on this server: its configs exit from this server "
                          "(add one: wgt jump add <code> <wg.conf>)")
     uniq: List[str] = []
     for code in codes:
@@ -310,28 +316,21 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     endpoint = ops.resolve_endpoint(ctx, save=False)
     planned: List[str] = []
     for code in uniq:
-        add_one(ctx, base if code == "host" else f"{code}.{base}", planned, endpoint, ctx.args.warp == "off")
+        for warp in warps:
+            add_one(ctx, store.config_name("" if code == "host" else code, warp, base), planned, endpoint)
 
 
-def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str, warp_off: bool = False) -> None:
-    """Add one client (skipped if it exists). <warp_off> is recorded before its
-    rules and peer go in, so its first packets already take the right way out."""
+def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
+    """Add one config (skipped if it exists); its name says its exit and WARP."""
     existing = ctx.snap.client(name)
     if existing:
-        ctx.out.info(f"client '{name}' already exists ({existing.ip}); config: {client_conf(ctx, name)}")
-        ctx.out.info(f"use 'wgt client rotate {name}' to issue new keys"
-                     + (f", 'wgt client warp {name} on|off' to switch its WARP" if ctx.args.warp else ""))
+        ctx.out.info(f"'{name}' already exists ({existing.ip}); config: {client_conf(ctx, name)}")
+        ctx.out.info(f"use 'wgt client rotate {name}' to issue new keys")
         return
     ip = next_free_ip(ctx, planned)
-    ctx.runner.step(f"Add client '{name}' at {ip} (exit: {exit_short(ctx, name, warp_off)})",
+    ctx.runner.step(f"Add config '{name}' at {ip} ({way_out(ctx, name)})",
                     f"wgt client remove {name}")
-    ops.set_nowarp(ctx, name, warp_off)
-    try:
-        issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS), endpoint)
-    except BaseException:
-        if ctx.snap.client(name) is None:
-            ops.set_nowarp(ctx, name, False)   # no client: no stale entry
-        raise
+    issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS), endpoint)
     tunnel = f"{ctx.cfg.SERVER_NAME}.{name}"
     if len(tunnel) > 15:
         ctx.out.info(f"note: Android's WireGuard app takes tunnel names up to 15 characters; '{tunnel}' is "
@@ -401,7 +400,6 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ops.remove_client(ctx, name)
     if ctx.snap.is_disabled(name):
         ops.set_disabled(ctx, name, False)
-    ops.set_nowarp(ctx, name, False)
     # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
     if ops.is_set_up(ctx):
         ops.write_wg_conf(ctx)
@@ -447,20 +445,17 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     if not psk.strip():
         raise WgtError(f"'{old}' has no preshared key ({ctx.paths.psk(old)}); rotate it instead")
     new_c = store.Client(new, c.ip, c.pub, c.allowed)
-    off = ctx.snap.warp_off(old)
-    ctx.runner.step(f"Rename client '{old}' to '{new}' (same keys and address; exit: {exit_short(ctx, new, off)})",
+    ctx.runner.step(f"Rename '{old}' to '{new}' (same keys and address; {way_out(ctx, new)})",
                     f"wgt client rename {new} {old}")
     text = re.sub(r"(?m)^# wireguard-tools client: .*$",
                   f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
-    text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new, off)}", text)
+    text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
     ctx.files.write(newconf, 0o600, text)
     ctx.files.write(ctx.paths.psk(new), 0o600, psk)
     was_disabled = ctx.snap.is_disabled(old)
     old_down = rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False)
     old_table = rules.client_table(ctx.snap, c)
     ops.remove_client(ctx, old)
-    ops.set_nowarp(ctx, old, False)
-    ops.set_nowarp(ctx, new, off)
     ops.save_client(ctx, new_c)
     if was_disabled:
         ops.set_disabled(ctx, old, False)
@@ -515,48 +510,6 @@ def cmd_disable(ctx: Ctx, words: List[str]) -> None:
 def cmd_enable(ctx: Ctx, words: List[str]) -> None:
     """wgt client enable [name]"""
     _set_disabled(ctx, words, False)
-
-
-def cmd_warp(ctx: Ctx, words: List[str]) -> None:
-    """warp <name> on|off: whether a client's traffic goes through a WARP of
-    ours (on), or straight out of its exit (off: this server's IP, or its
-    jump's tunnel). Live; keys, address and config stay valid."""
-    usage = "wgt client warp <name> on|off"
-    if len(words) != 2 or words[1] not in ("on", "off"):
-        raise WgtError(f"usage: {usage}")
-    name, off = words[0], words[1] == "off"
-    valid_name(name)
-    ops.take_lock(ctx)
-    ops.require_server(ctx)
-    set_warp(ctx, name, off)
-
-
-def set_warp(ctx: Ctx, name: str, off: bool) -> None:
-    """Switch client <name>'s WARP: the new rules go in before the old come out."""
-    c = ctx.snap.client(name)
-    if c is None:
-        raise WgtError(f"no client '{name}' (see: wgt client list)")
-    if ctx.snap.warp_off(name) == off:
-        ctx.out.info(f"'{name}' already has WARP {'off' if off else 'on'} (exit: {exit_short(ctx, name)})")
-        return
-    old_down = rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False)
-    ctx.runner.step(f"Switch WARP {'off' if off else 'on'} for '{name}' "
-                    f"(exit: {exit_short(ctx, name)} -> {exit_short(ctx, name, off)})",
-                    f"wgt client warp {name} {'on' if off else 'off'}")
-    ops.set_nowarp(ctx, name, off)
-    if not off and not c.exit and not ctx.cfg.warp_on:
-        ctx.out.info("note: this server's WARP is off (wgt warp on), so it still leaves via this server's IP")
-    ops.write_wg_conf(ctx)
-    if ops.wg_up(ctx):
-        ensure_jump_live(ctx, c)
-        ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=True))
-        ctx.runner.sh_lines(old_down)
-    else:
-        ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
-    conf = client_conf(ctx, name)
-    text = store.read_text(conf)
-    if text is not None:
-        ctx.files.write(conf, 0o600, re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, name)}", text))
 
 
 def cmd_show(ctx: Ctx, words: List[str]) -> None:
@@ -621,7 +574,6 @@ ACTIONS = (
     ("share", "send with magic-wormhole"),
     ("rotate", "new keys; the current config stops working"),
     ("toggle", ""),
-    ("warp", ""),
     ("rename", "new name, same keys"),
     ("remove", "delete the client, its keys and config"),
 )
@@ -639,11 +591,8 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
     disabled = ctx.snap.is_disabled(name)
     toggle = (("enable", "let back in with its existing config") if disabled
               else ("disable", "cut off now, keep keys and address"))
-    off = ctx.snap.warp_off(name)
-    warp = ("warp on", "back through WARP") if off else ("warp off", "straight out of its exit, no WARP")
     items = [f"{label:<9} {what}" for label, what in
-             (toggle if action == "toggle" else warp if action == "warp" else (action, what)
-              for action, what in ACTIONS)]
+             (toggle if action == "toggle" else (action, what) for action, what in ACTIONS)]
     try:
         i = ui.menu(f"{name}:", items, "Action")
     except ValueError as e:
@@ -660,8 +609,6 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
         cmd_rotate(ctx, [name])
     elif action == "toggle":
         _set_disabled(ctx, [name], not disabled)
-    elif action == "warp":
-        cmd_warp(ctx, [name, "on" if off else "off"])
     elif action == "rename":
         new = ui.ask("    New name: ")
         if new:
@@ -678,5 +625,4 @@ def cmd_client(ctx: Ctx, words: List[str]) -> Optional[int]:
 CLIENT_COMMANDS = {
     "list": cmd_list, "add": cmd_add, "show": cmd_show, "share": cmd_share, "rotate": cmd_rotate,
     "rename": cmd_rename, "disable": cmd_disable, "enable": cmd_enable, "remove": cmd_remove,
-    "warp": cmd_warp,
 }

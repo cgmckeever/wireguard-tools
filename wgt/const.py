@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-# Settings saved in the state file by setup (and warp on|off), in this order.
+# Settings saved in the state file by setup, in this order (WARP: always on now; marks set up).
 CONFIG_KEYS = (
     "WARP", "SERVER_NAME", "WG_SUBNET", "WG_SUBNET6", "WG_PORT", "WG_MTU", "WARP_MTU",
     "WG_DNS", "WG_IF", "WARP_IF", "RT_TABLE", "CLIENT_ALLOWED_IPS",

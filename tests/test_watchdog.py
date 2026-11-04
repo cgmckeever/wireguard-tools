@@ -34,7 +34,7 @@ UP = (0, "")
 def test_brings_up_city_with_active_client(make):
     ctx = make({"ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
-    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW - 30}\n")
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.warp.mbp-1')}\t{NOW - 30}\n")
     watchdog.exits(ctx)
     calls = ctx.runner.calls
     assert "systemctl restart wg-quick@px-par-fr wg-quick@wx-par-fr" in calls
@@ -45,7 +45,7 @@ def test_brings_up_city_with_active_client(make):
 def test_takes_down_idle_city(make):
     ctx = make({"ip link show dev px-par-fr": UP, "ip link show dev wx-par-fr": UP,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
-    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW - 400}\n")
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.warp.mbp-1')}\t{NOW - 400}\n")
     watchdog.exits(ctx)
     assert "systemctl stop wg-quick@wx-par-fr wg-quick@px-par-fr" in ctx.runner.calls
 
@@ -53,7 +53,7 @@ def test_takes_down_idle_city(make):
 def test_disabled_client_doesnt_keep_city_up(make):
     ctx = make({"ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
-    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.tv')}\t{NOW - 5}\n")
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.warp.tv')}\t{NOW - 5}\n")
     watchdog.exits(ctx)
     assert not any(c.startswith("systemctl restart") for c in ctx.runner.calls)
 
@@ -71,7 +71,7 @@ def test_stale_city_new_port_then_restart(make):
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN,
                 "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n"),
                 "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 5}\n")})   # the jump itself is fine
-    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW - 10}\n")
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.warp.mbp-1')}\t{NOW - 10}\n")
     watchdog.exits(ctx)
     assert "wg set wx-par-fr listen-port 0" in ctx.runner.calls
     started = os.path.join(ctx.paths.run_dir, f"{EXIT_WATCHDOG}.par-fr")
@@ -85,7 +85,7 @@ def test_dead_jump_restarts_whole(make):
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN,
                 "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n"),
                 "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n")})
-    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW - 10}\n")
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.warp.mbp-1')}\t{NOW - 10}\n")
     watchdog.exits(ctx)
     assert "systemctl restart wg-quick@px-par-fr wg-quick@wx-par-fr" in ctx.runner.calls
 
@@ -93,7 +93,7 @@ def test_dead_jump_restarts_whole(make):
 def test_skips_while_locked(make):
     import fcntl
     ctx = make({"ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN})
-    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW}\n")
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.warp.mbp-1')}\t{NOW}\n")
     fd = os.open(ctx.paths.lock_file, os.O_WRONLY | os.O_CREAT)
     fcntl.flock(fd, fcntl.LOCK_EX)
     try:
@@ -202,7 +202,7 @@ def test_silent_warp_restarts_only_its_warp(make, tmp_path):
                 "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 5}\n"),
                 "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 999}\n")})
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (
-        0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW - 30}\n")
+        0, f"{pub(ctx, 'par-fr.warp.mbp-1')}\t{NOW - 30}\n")
     Path(ctx.paths.exit_marker("par-fr")).write_text(str(NOW - 999))
     Path(ctx.paths.exit_port_marker("par-fr")).write_text("")
     watchdog.exits(ctx)

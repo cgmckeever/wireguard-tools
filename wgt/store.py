@@ -4,7 +4,7 @@ switched over with their files unchanged; keep them compatible):
   wg-tools.state     KEY=value lines; the last one for a key wins
   clients.db         "name ip public-key allowed-ips" (no private keys)
   clients.disabled   one name per line
-  clients.nowarp     one name per line: clients with WARP off (exit straight out)
+  clients.nowarp     (old) one name per line: WARP off; setup folds it into the names
   exits.db           "code idx label..."
   wg-tools.backups   "path<TAB>original-copy|NEW"
 
@@ -88,39 +88,65 @@ def valid_exit_code(code: str) -> bool:
     return bool(_EXIT_CODE.fullmatch(code)) and code not in HOST_EXITS
 
 
+WARP_TAG = "warp"   # the name part of a config that goes through WARP
+
+
+def split_name(name: str) -> Tuple[str, bool, str]:
+    """A config name [<jump>.][warp.]<device> as (jump code or "", WARP on,
+    device): par-fr.warp.mbp-1 -> ("par-fr", True, "mbp-1"). Not validated
+    (valid_client_name does that)."""
+    parts = name.split(".")
+    device, pre = parts[-1], parts[:-1]
+    warp = bool(pre) and pre[-1] == WARP_TAG
+    if warp:
+        pre = pre[:-1]
+    return (pre[0] if pre else ""), warp, device
+
+
+def config_name(code: str, warp: bool, device: str) -> str:
+    """The config name for a device's exit and WARP: split_name reversed."""
+    return ".".join(([code] if code else []) + ([WARP_TAG] if warp else []) + [device])
+
+
 def client_exit(name: str) -> str:
-    """A client's exit code (from a <code>.<name> name), empty for the default."""
-    return name.split(".", 1)[0] if "." in name else ""
+    """A config's jump code (from its name), empty for the host."""
+    return split_name(name)[0]
+
+
+def name_warp(name: str) -> bool:
+    """A config goes through WARP: its name has the warp part."""
+    return split_name(name)[1]
 
 
 def valid_client_name(name: str) -> Optional[str]:
-    """None if <name> is a valid client name (<name> or <code>.<name>), else why not."""
-    base = name
-    if "." in name:
-        code, base = name.split(".", 1)
-        if not valid_exit_code(code):
-            return f"bad jump code in client name '{name}' (see: wgt jump list)"
-    if not _CLIENT_BASE.fullmatch(base):
-        return f"client name must be 1-32 of [A-Za-z0-9_-] (or <jump>.<name>): '{name}'"
+    """None if <name> is a valid config name ([<jump>.][warp.]<device>), else why not."""
+    shape = f"a config name is [<jump>.][warp.]<device>, the device 1-32 of [A-Za-z0-9_-]: '{name}'"
+    parts = name.split(".")
+    code, warp, device = split_name(name)
+    if len(parts) - 1 != bool(code) + warp or not _CLIENT_BASE.fullmatch(device):
+        return shape
+    if code and not valid_exit_code(code):
+        return f"bad jump code in config name '{name}' (see: wgt jump list)"
     return None
 
 
 # --- clients ---
 
 def device_of(name: str) -> str:
-    """The device part of a client name: par-fr.mbp-1 -> mbp-1."""
-    return name.split(".", 1)[1] if "." in name else name
+    """The device part of a config name: par-fr.warp.mbp-1 -> mbp-1."""
+    return split_name(name)[2]
 
 
-def device_key(name: str) -> Tuple[str, bool, str]:
-    """Sort key grouping clients by device: its default exit first, then its
-    jumps by code."""
-    return device_of(name).lower(), "." in name, client_exit(name)
+def device_key(name: str) -> Tuple[str, bool, str, bool]:
+    """Sort key grouping configs by device: the host first, then jumps by
+    code; within each, the plain one before the WARP one."""
+    code, warp, device = split_name(name)
+    return device.lower(), bool(code), code, warp
 
 
 @dataclass
 class Client:
-    """A clients.db entry; the name is [<exit>.]<device>."""
+    """A clients.db entry: one tunnel config, named [<jump>.][warp.]<device>."""
 
     name: str
     ip: str
@@ -178,8 +204,7 @@ def set_disabled(text: Optional[str], name: str, disabled: bool) -> str:
     return "".join(n + "\n" for n in names)
 
 
-parse_nowarp = parse_disabled
-set_nowarp = set_disabled   # same format: clients.nowarp with <name> added (WARP off) or dropped
+parse_nowarp = parse_disabled   # the old clients.nowarp: same format
 
 
 # --- exits ---
@@ -278,7 +303,6 @@ class Snapshot:
     clients: List[Client]
     disabled: List[str]
     exits: List[Exit]
-    nowarp: List[str] = field(default_factory=list)
 
     def client(self, name: str) -> Optional[Client]:
         return next((c for c in self.clients if c.name == name), None)
@@ -293,12 +317,12 @@ class Snapshot:
         return name in self.disabled
 
     def warp_off(self, name: str) -> bool:
-        """Client <name> has WARP off: it leaves straight out of its exit (this
-        server's IP, or its jump's jump tunnel), never through a WARP of ours."""
-        return name in self.nowarp
+        """Config <name> has no warp part: it leaves straight out of its exit
+        (this server's IP, or its jump's tunnel), never through a WARP of ours."""
+        return not name_warp(name)
 
     def direct_clients(self) -> List[Client]:
-        """Clients without a jump and with WARP off (out this server's IP)."""
+        """Host configs without warp (out this server's IP)."""
         return [c for c in self.clients if not c.exit and self.warp_off(c.name)]
 
 
@@ -310,7 +334,6 @@ def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
         clients=parse_clients(read(paths.client_db)),
         disabled=parse_disabled(read(paths.disabled_db)),
         exits=parse_exits(read(paths.exit_db)),
-        nowarp=parse_nowarp(read(paths.nowarp_db)),
     )
 
 

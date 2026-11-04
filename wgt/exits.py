@@ -415,7 +415,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
         users = ctx.snap.exit_clients(e.code)
         off = sum(1 for c in users if ctx.snap.warp_off(c.name))
         res.check(f"jump {e.code}: one rule per address of its {len(users)} client(s)"
-                  + (f" ({off} with WARP off, via the jump)" if off else ""), client_rules_ok(ctx, e))
+                  + (f" ({off} without WARP, via the jump)" if off else ""), client_rules_ok(ctx, e))
         act = active_count(ctx, e.code)
         if not bring_up and act > 0 and state(ctx, e) == "up, no WARP" and not needs_wx(ctx, e):
             res.check(f"jump {e.code}: jump tunnel {e.px} handshake within {WATCHDOG_STALE}s "

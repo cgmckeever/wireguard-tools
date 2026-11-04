@@ -13,7 +13,7 @@ wgt/                      the package (Python 3.8+, standard library only)
   ctl.py                  wgt-ctl (ssh/scp to the servers)
   const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError
   config.py               settings: flag > env > saved > default, validation
-  store.py                the server files: state, clients.db, exits.db (jumps), disabled, nowarp, backup record
+  store.py                the server files: state, clients.db, exits.db (jumps), disabled, backup record; config names
   net.py, host.py         address maths; host facts and preflight
   rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP switch, jumps, per-client WARP)
   render.py               wg0.conf, warp.conf, px/wx, client configs, templates
@@ -23,7 +23,7 @@ wgt/                      the package (Python 3.8+, standard library only)
   ops.py                  shared operations: lock, confirm, setup checks, state, endpoint, wg0.conf,
                           peers, the client/exit databases, subcommand dispatch
   warp.py, units.py       wgcf and WARP profiles; systemd units, watchdog timers, ufw
-  server.py               setup, warp on|off, rollback (setup's inverse)
+  server.py               setup (and the one-time name migration), rollback (setup's inverse)
   backup.py               backup, restore (archive checks)
   clients.py              client commands, the clients table (and QR, share)
   exits.py                `wgt jump` (alias `exit`): bringing a jump up/down, probing it
@@ -46,6 +46,13 @@ code still says exit (`exits.py`, `store.Exit`, `exits.db`), and files and
 interfaces keep their names (`exits/<code>.proton.conf`, `px-`/`wx-<code>`),
 so running servers need no migration. Nothing in the code is Proton-specific:
 any single-peer WireGuard config with an IPv4 address is a jump.
+
+A **client** is a device; each of its **configs** is one clients.db entry
+(one peer, key and address) named `[<jump>.][warp.]<device>`
+(`store.split_name` / `config_name`). The name is the only record of a
+config's exit and WARP: no switch, no side file. Code still says "client" for
+an entry (`store.Client`, `clients.py`, `clients.db`). Servers from before this
+are migrated once by setup (`server.migrate_names`, `NAMES=2` in the state).
 
 ## Conventions
 

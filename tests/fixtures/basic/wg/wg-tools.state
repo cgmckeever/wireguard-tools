@@ -13,3 +13,4 @@ CLIENT_ALLOWED_IPS=0.0.0.0/0, ::/0
 DEFAULT_ROUTE=default via 192.3.63.1 dev eth0 proto static
 PUB_IF=eth0
 ENDPOINT=192.3.63.161
+NAMES=2

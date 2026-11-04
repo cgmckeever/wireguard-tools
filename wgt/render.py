@@ -195,18 +195,14 @@ def peer_hint(raw: str) -> str:
 
 # --- client configs ---
 
-def exit_desc(snap: Snapshot, name: str, warp_off: Optional[bool] = None) -> str:
-    """The "# exit:" line of a client's config (<warp_off> overrides clients.nowarp)."""
+def exit_desc(snap: Snapshot, name: str) -> str:
+    """The "# exit:" line of a config: its exit and WARP, from its name."""
     code = client_exit(name)
-    off = snap.warp_off(name) if warp_off is None else warp_off
+    off = snap.warp_off(name)
     if code:
         e = snap.exit(code)
-        if off:
-            return f"{code} = {e.label if e else ''} (jump, WARP off)"
-        return f"{code} = {e.label if e else ''} (jump -> Cloudflare WARP)"
-    if off:
-        return "this server's IP (WARP off for this client)"
-    return "default (this server's WARP setting: wgt warp on|off)"
+        return f"{code} = {e.label if e else ''} (jump{', no WARP' if off else ' -> Cloudflare WARP'})"
+    return "this server's IP (no WARP)" if off else "this server -> Cloudflare WARP"
 
 
 def render_client_conf(cfg: Config, snap: Snapshot, name: str, ip: str, private_key: str,

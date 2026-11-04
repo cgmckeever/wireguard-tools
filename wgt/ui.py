@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from typing import List, NamedTuple, Optional, Sequence
 
-from .store import device_of
+from .store import name_warp
 
 
 def ago(ts: int, now: Optional[float] = None) -> str:
@@ -81,15 +81,15 @@ def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[i
 
 # --- the clients table (wgt client list, wgt-ctl clients) ---
 
-CLIENT_FMT = "{:<20} {:<24} {:<15} {:<14} {:<12} {}"
-CLIENT_HEAD = ("NAME", "EXIT", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
+CLIENT_FMT = "{:<24} {:<18} {:<4} {:<15} {:<14} {:<12} {}"
+CLIENT_HEAD = ("CONFIG", "EXIT", "WARP", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
 
 
 class ClientRow(NamedTuple):
     """One client in the table; `wgt client list --tsv` prints these fields in order."""
 
-    name: str          # full name, e.g. par-fr.mbp-1
-    exit: str          # exit code, or warp/direct
+    name: str          # config name, e.g. par-fr.warp.mbp-1
+    exit: str          # jump code, or host
     ip: str
     seen: str          # "3m ago", "never", "disabled"
     traffic: str       # "rx/tx" MiB
@@ -104,5 +104,7 @@ class ClientRow(NamedTuple):
         return cls(*(line.split("\t") + [""] * 7)[:7])
 
     def cells(self) -> Sequence[str]:
-        """The table's columns: the device, then where it exits (its full name)."""
-        return (device_of(self.name), self.exit_label or self.exit, self.ip, self.seen, self.traffic, self.allowed)
+        """The table's columns: the config, where it exits (the jump's full
+        name), and whether through WARP."""
+        return (self.name, self.exit_label or self.exit, "on" if name_warp(self.name) else "off",
+                self.ip, self.seen, self.traffic, self.allowed)

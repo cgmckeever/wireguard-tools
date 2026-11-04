@@ -1,10 +1,10 @@
-"""The server's lifecycle: setup, warp on|off and rollback (setup's inverse,
-kept beside it). Backup and restore are in backup.py.
+"""The server's lifecycle: setup and rollback (setup's inverse, kept beside
+it). Backup and restore are in backup.py.
 
-Setup installs or updates everything: the WARP tunnel, then wg0 with the
-saved WARP setting (on for a new install). WARP failing on a first install
-leaves it off; on an existing install with WARP on it stays on (fail closed:
-clients are blocked, not leaked) until fixed or switched off."""
+Setup installs or updates everything: the WARP tunnel, then wg0. Whether a
+config goes through WARP is in its name (warp.<device>), so there's no
+server-wide switch: WARP failing leaves the plain configs working and blocks
+the WARP ones (fail closed: never leaked) until it's fixed."""
 
 from __future__ import annotations
 
@@ -292,6 +292,51 @@ def ensure_server_keys(ctx: Ctx) -> bool:
     return True
 
 
+def migrate_names(ctx: Ctx) -> None:
+    """Once per server (NAMES=2 in wg-tools.state): fold WARP into the config
+    names. Before, a config went through WARP unless clients.nowarp listed it
+    (or, without a jump, unless WARP was switched off); now the name says so. Each
+    one that went through WARP is renamed [<jump>.]warp.<device>: same keys
+    and address, so the device's tunnel keeps working. wg0.conf is rewritten
+    afterwards by setup as usual."""
+    if store.state_get(ctx.snap.state, "NAMES") == "2":
+        return
+    nowarp = set(store.parse_nowarp(ctx.files.read(ctx.paths.nowarp_db)))
+    host_warp = ctx.cfg.saved.get("WARP", "on") != "off"
+    moves = []
+    for c in ctx.snap.clients:
+        code, warp_on, device = store.split_name(c.name)
+        if not warp_on and c.name not in nowarp and (code or host_warp):
+            moves.append((c, store.config_name(code, True, device)))
+    if moves:
+        ctx.runner.step(f"Rename {len(moves)} config(s) that go through WARP to warp.* names "
+                        "(same keys and addresses: devices keep working)", "")
+    for c, new in moves:
+        old_conf = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
+        text = store.read_text(old_conf)
+        if text is not None:
+            text = re.sub(r"(?m)^# wireguard-tools client: .*$",
+                          f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
+            text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
+            ctx.files.write(ctx.paths.client_conf(ctx.cfg.SERVER_NAME, new), 0o600, text)
+        psk = store.read_text(ctx.paths.psk(c.name))
+        if psk is not None:
+            ctx.files.write(ctx.paths.psk(new), 0o600, psk)
+        disabled = ctx.snap.is_disabled(c.name)
+        ops.remove_client(ctx, c.name)
+        ops.save_client(ctx, store.Client(new, c.ip, c.pub, c.allowed))
+        if disabled:
+            ops.set_disabled(ctx, c.name, False)
+            ops.set_disabled(ctx, new, True)
+        if text is not None:
+            ctx.files.forget(old_conf)
+        if psk is not None:
+            ctx.files.forget(ctx.paths.psk(c.name))
+        ctx.out.info(f"  {c.name} -> {new}")
+    ctx.files.remove(ctx.paths.nowarp_db)
+    ops.state_set(ctx, "NAMES", "2")
+
+
 def sync_client_configs(ctx: Ctx, old_name: str) -> None:
     """Keep every client config named <server>.<client>.conf (renaming ones
     still under the server's previous name), pointed at the current
@@ -392,13 +437,14 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     of settings is shown and confirmed first."""
     ops.no_more_words(words, "wgt setup [--name N] [--subnet ...] (settings are flags)")
     ops.take_lock(ctx)
-    first = not ops.is_set_up(ctx)              # before save_config records it
     old_name = ctx.cfg.saved.get("SERVER_NAME", "")
     asked = ask_subnet(ctx)
     ensure_subnet6(ctx)
     review_settings(ctx, asked)
     # Refuse to take over a wg0.conf we didn't create, before saving or touching anything.
     ops.ensure_managed(ctx, ctx.cfg.wg_conf)
+    migrate_names(ctx)
+    ctx.cfg.values["WARP"] = "on"               # no longer a switch; kept as the set-up marker
     renumber_clients(ctx)
     offer_hostname(ctx)
     save_config(ctx)
@@ -406,14 +452,9 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     install_packages(ctx)
     link_wgt(ctx)
     if not provision_warp(ctx):
-        if first and ctx.cfg.warp_on:
-            ctx.out.warn("WARP isn't usable here; finishing with WARP off (clients exit via this server's IP). "
-                         "Fix it, then: wgt warp on")
-            ctx.cfg.values["WARP"] = "off"
-            save_config(ctx)
-        elif ctx.cfg.warp_on:
-            ctx.out.warn("WARP is on but not working: clients are blocked until it is (or: wgt warp off)")
-    ctx.out.log(f"WireGuard server (WARP {ctx.cfg.WARP}: client traffic leaves via {ops.default_out_if(ctx)})")
+        ctx.out.warn("WARP isn't working: warp.* configs are blocked until it is (plain configs work); "
+                     "see 'wgt status', then re-run setup")
+    ctx.out.log("WireGuard server (configs named warp.* leave through WARP, the rest straight out)")
     keys_changed = ensure_server_keys(ctx)
     ops.resolve_endpoint(ctx, save=True)
     sync_client_configs(ctx, old_name)
@@ -438,43 +479,8 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     units.write_watchdog(ctx)
     exits.sync(ctx)
     ctx.out.line()
-    ctx.out.info(f"WARP is {ctx.cfg.WARP}; switch with: wgt warp on|off")
     ctx.out.info(f"REMINDER: open UDP {ctx.cfg.WG_PORT} in your VPS provider's firewall / security group.")
-    ctx.out.info("Next: wgt client add <name>")
-
-
-def cmd_warp(ctx: Ctx, words: List[str]) -> None:
-    """Show or switch WARP: rewrites wg0.conf (for the next start) and adds or
-    removes the policy rule live; wg0 isn't restarted."""
-    ops.require_setup(ctx)
-    ops.no_more_words(words[1:], "wgt warp [on|off]")
-    want = words[0] if words else ""
-
-    if not want:
-        ctx.out.info(f"WARP is {ctx.cfg.WARP}: client traffic leaves via {ops.default_out_if(ctx)}")
-        return
-    if want not in ("on", "off"):
-        raise WgtError("usage: wgt warp [on|off]")
-    ops.take_lock(ctx)
-    if want == "on" and not provision_warp(ctx):
-        raise WgtError("WARP isn't working; leaving it off (see 'wgt status')")
-    conf = store.read_text(ctx.cfg.wg_conf) or ""
-    if want == ctx.cfg.WARP and f"(WARP {want})" in conf:
-        ctx.out.info(f"WARP is already {want} (client traffic leaves via {ops.default_out_if(ctx, want)})")
-        if ops.wg_up(ctx):
-            ctx.runner.sh_lines(rules.warp_rule_cmds(ctx.cfg, want == "on"))
-        return
-    ctx.cfg.values["WARP"] = want
-    other = "off" if want == "on" else "on"
-    ctx.runner.step(f"Switch WARP {want}: client traffic leaves via {ops.default_out_if(ctx, want)}",
-                    f"wgt warp {other}")
-    save_config(ctx)
-    ops.write_wg_conf(ctx)
-    if ops.wg_up(ctx):
-        ctx.runner.sh_lines(rules.warp_rule_cmds(ctx.cfg, want == "on"))
-        ctx.out.info("applied live; clients stay connected (open connections reset once)")
-    else:
-        ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
+    ctx.out.info("Next: wgt client add <device> (makes <device> and warp.<device>)")
 
 
 def cmd_rollback(ctx: Ctx, words: List[str]) -> None:

@@ -181,7 +181,7 @@ class Tests:
                 and want in f" {live.unit_prop(self.runner, unit, 'Wants')} ")
 
     def run(self, scope: str = "all") -> results.Results:
-        """Run the checks ("warp": only those `wgt warp on` needs)."""
+        """Run the checks ("warp": only those WARP itself needs)."""
         r, c, res = self.runner, self.cfg, self.res
         self.scope = scope
         self.check_warp(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_trace_on())
@@ -211,7 +211,7 @@ class Tests:
             self.check_warp(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
                             self.rt_table_ok(f))
             direct = len(self.ctx.snap.direct_clients())
-            res.check(f"{f} rules: {direct} client(s) with WARP off leave via this server's IP "
+            res.check(f"{f} rules: {direct} plain host config(s) leave via this server's IP "
                       "(main, then blackhole; no stale ones)", self.direct_rules_ok(f))
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             res.check(f"exactly once: {x} {t} {ch} {rule}", live.ipt_count(r, x, t, ch, rule) == 1)
@@ -251,7 +251,8 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
         ctx.out.line(line)
     if rep.pending:
         out.warn(f"{rep.pending} saved setting(s) pending (not running yet); apply with: wgt setup")
-    out.log(f"WARP {c.WARP} (client traffic leaves via {ops.default_out_if(ctx)})")
+    out.log(f"WARP (warp.* configs leave via {c.WARP_IF}, the rest straight out)" if c.warp_on
+            else f"WARP {c.WARP} (old setting: run 'wgt setup'; client traffic leaves via {ops.default_out_if(ctx)})")
     out.log("Interfaces")
     for ifc in (c.WARP_IF, c.WG_IF):
         active, enabled = live.unit_state(r, f"wg-quick@{ifc}")

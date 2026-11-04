@@ -1,3 +1,7 @@
+while ip rule del from 10.8.0.3/32 lookup main priority 9500 2>/dev/null; do :; done
+while ip rule del from 10.8.0.3/32 priority 9501 blackhole 2>/dev/null; do :; done
+while ip rule del from 10.8.0.2/32 lookup main priority 9500 2>/dev/null; do :; done
+while ip rule del from 10.8.0.2/32 priority 9501 blackhole 2>/dev/null; do :; done
 while iptables -t filter -C INPUT -p udp --dport 51999 -j ACCEPT 2>/dev/null; do iptables -t filter -D INPUT -p udp --dport 51999 -j ACCEPT || break; done
 while iptables -t mangle -C FORWARD -o ens3 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu 2>/dev/null; do iptables -t mangle -D FORWARD -o ens3 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu || break; done
 while iptables -t filter -C FORWARD -i ens3 -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null; do iptables -t filter -D FORWARD -i ens3 -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || break; done

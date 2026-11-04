@@ -37,7 +37,7 @@ class Args:
     settings: Dict[str, str] = field(default_factory=dict)
     exit_codes: str = ""
     exit_label: str = ""
-    warp: str = ""              # client add --warp on|off ("" = on)
+    warp: str = ""              # client add --warp on|off|on,off ("" = both)
     dry_run: bool = False
     yes: bool = False
     force: bool = False
@@ -83,9 +83,9 @@ def _set(a: Args, flag: str, value: str) -> None:
     """Store a value flag: --exit/--label/--warp on Args, the rest as settings."""
     key = VALUE_FLAGS[flag]
     if key == "CLIENT_WARP":
-        if value not in ("on", "off"):
-            raise WgtError(f"--warp takes on or off: '{value}'")
-        a.warp = value
+        if value.replace(" ", "") not in ("on", "off", "on,off", "off,on", "both"):
+            raise WgtError(f"--warp takes on, off or on,off: '{value}'")
+        a.warp = value.replace(" ", "")
     elif key == "EXIT_CODES":
         a.exit_codes = value
     elif key == "EXIT_LABEL":

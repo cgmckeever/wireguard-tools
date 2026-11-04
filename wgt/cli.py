@@ -16,21 +16,21 @@ from .system import Out, Runner
 USAGE = """\
 Usage: wgt [options] <command> ...
 
-A WireGuard server whose clients exit from the server itself (host) or a jump,
-with or without WARP: the server's switch (warp on|off), or per client.
+A WireGuard server for your devices. Each device (client) gets tunnel configs
+named [<jump>.][warp.]<device>: out of this server or a jump, with or without
+Cloudflare WARP. The device picks one at a time.
 
   setup                      install or update everything
   summary | status | test    at a glance / everything running / all checks
   log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops;
                              --no-follow, or piped: print and stop)
-  warp [on|off]              server-wide WARP default (live; per config: client warp)
   backup [dir] | restore <archive> | rollback [--purge]
 
-  client list [--tsv] | add <name> [--exit host|<jump>[,..]] [--warp on|off] [--allowed-ips ..]
-         show <name> [--qr] | share <name> | rotate <name> [--allowed-ips ..] | rename <old> <new>
-         warp <name> on|off | disable <name> | enable <name> | remove <name>
-         (add: one config per --exit, named <name> or <jump>.<name>; the rest take a config name;
-          rotate, remove, disable, enable, show, share: no name picks from a list)
+  client list [--tsv] | add <device> [--exit host|<jump>[,..]] [--warp on|off] [--allowed-ips ..]
+         show <config> [--qr] | share <config> | rotate <config> [--allowed-ips ..]
+         rename <old> <new> | disable <config> | enable <config> | remove <config>
+         (add: per exit, <device> and warp.<device> (--warp on|off: one); a full config
+          name adds just that; rotate, remove, disable, enable, show, share: none picks)
   jump   list | add <code> <wg.conf|-> [--label NAME] | remove [code] | test   (old name: exit)
 
 Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
@@ -101,7 +101,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
 # command -> (module, function); a module is only imported when its command runs
 # (the watchdogs run every 10s and need little).
 COMMANDS = {
-    "setup": ("server", "cmd_setup"), "warp": ("server", "cmd_warp"), "backup": ("backup", "cmd_backup"),
+    "setup": ("server", "cmd_setup"), "backup": ("backup", "cmd_backup"),
     "restore": ("backup", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
     "summary": ("checks", "cmd_summary"),
     "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
