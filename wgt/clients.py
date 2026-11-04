@@ -1,8 +1,8 @@
 """`wgt client ...`: the clients of this server. Each has a keypair, a
 preshared key and an address; its config is
 /etc/wireguard/clients/<server>.<name>.conf. A client named <code>.<name>
-exits through exit city <code>; one in clients.nowarp has WARP off (it
-leaves straight out of its exit: this server's IP, or its city's Proton
+exits through jump <code>; one in clients.nowarp has WARP off (it
+leaves straight out of its exit: this server's IP, or its jump's
 tunnel). Changes apply live; other clients stay connected."""
 
 from __future__ import annotations
@@ -142,7 +142,7 @@ def show_qr(ctx: Ctx, conf: str) -> None:
 def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, endpoint: str, old_pub: str = "") -> None:
     """Generate keys for <name> at <ip>, write its config (pointing at
     <endpoint>, from ops.resolve_endpoint), update clients.db, wg0.conf and the
-    live interface (<old_pub> is replaced). An exit-city client's routing rules
+    live interface (<old_pub> is replaced). A jump client's routing rules
     go in before its peer, so its first packets can't leave through the
     default exit."""
     if not endpoint:
@@ -224,8 +224,8 @@ def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
 
 
 def exit_short(ctx: Ctx, name: str, warp_off: Optional[bool] = None) -> str:
-    """Where a client exits, as a code: its exit city's code (<code>/direct
-    with WARP off), or warp/direct (no city: the server's WARP switch, or
+    """Where a client exits, as a code: its jump's code (<code>/direct
+    with WARP off), or warp/direct (no jump: the server's WARP switch, or
     direct with WARP off)."""
     code = store.client_exit(name)
     off = ctx.snap.warp_off(name) if warp_off is None else warp_off
@@ -235,9 +235,9 @@ def exit_short(ctx: Ctx, name: str, warp_off: Optional[bool] = None) -> str:
 
 
 def exit_label(ctx: Ctx, name: str) -> str:
-    """Where a client exits, for people: its exit city's full name (the label
+    """Where a client exits, for people: its jump's full name (the label
     given at exit add, e.g. "Paris, France"; "(no WARP)" added with WARP off),
-    or warp/direct (no city)."""
+    or warp/direct (no jump)."""
     code = store.client_exit(name)
     e = ctx.snap.exit(code) if code else None
     if e is None:
@@ -262,7 +262,7 @@ def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str
 def cmd_add(ctx: Ctx, words: List[str]) -> None:
     """add <name> [--exit host|<code>[,...]] [--warp on|off]: one client per
     exit (host = this server, the default), named <name> and <code>.<name>;
-    asks when exit cities exist. --warp off: they leave without our WARP."""
+    asks when jumps exist. --warp off: they leave without our WARP."""
     usage = "wgt client add <name> [--exit host|<code>[,...]] [--warp on|off]"
     if not words:
         raise WgtError(f"usage: {usage}")
@@ -284,13 +284,13 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     else:
         codes = ["host"]
         if not ctx.snap.exits:
-            ctx.out.info(f"no exit cities on this server: the client exits via {exit_short(ctx, base)} "
-                         "(add a city: wgt exit add <code> <proton.conf>)")
+            ctx.out.info(f"no jumps on this server: the client exits via {exit_short(ctx, base)} "
+                         "(add one: wgt jump add <code> <wg.conf>)")
     uniq: List[str] = []
     for code in codes:
         code = "host" if code in store.HOST_EXITS else code
         if code != "host" and ctx.snap.exit(code) is None:
-            raise WgtError(f"no exit city '{code}' on this server (see: wgt exit list)")
+            raise WgtError(f"no jump '{code}' on this server (see: wgt jump list)")
         if code not in uniq:
             uniq.append(code)
     endpoint = ops.resolve_endpoint(ctx, save=False)
@@ -419,7 +419,7 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"a client '{new}' already exists")
     code = store.client_exit(new)
     if code and ctx.snap.exit(code) is None:
-        raise WgtError(f"no exit city '{code}' on this server (see: wgt exit list)")
+        raise WgtError(f"no jump '{code}' on this server (see: wgt jump list)")
     conf, newconf = client_conf(ctx, old), client_conf(ctx, new)
     text = store.read_text(conf)
     if text is None:
@@ -500,7 +500,7 @@ def cmd_enable(ctx: Ctx, words: List[str]) -> None:
 def cmd_warp(ctx: Ctx, words: List[str]) -> None:
     """warp <name> on|off: whether a client's traffic goes through a WARP of
     ours (on), or straight out of its exit (off: this server's IP, or its
-    city's Proton tunnel). Live; keys, address and config stay valid."""
+    jump's tunnel). Live; keys, address and config stay valid."""
     usage = "wgt client warp <name> on|off"
     if len(words) != 2 or words[1] not in ("on", "off"):
         raise WgtError(f"usage: {usage}")

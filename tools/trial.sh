@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # trial.sh — Full trial of the Python version on a throwaway server (bossk),
 # ending where it started. Run on the server, as root, from the checkout:
-#   tools/trial.sh <proton.conf>
+#   tools/trial.sh <jump.conf>   (any single-peer WireGuard config in Paris, e.g. Proton's)
 #
-# purge -> snapshot -> setup -> test -> exit city + clients
+# purge -> snapshot -> setup -> test -> jump + clients
 # -> device on-demand and fail-closed -> backup -> purge -> restore (same keys)
 # -> warp off/on -> purge -> diff with the snapshot.
 set -uo pipefail
-[ $# -eq 1 ] || { echo "usage: $0 <proton.conf>" >&2; exit 2; }
+[ $# -eq 1 ] || { echo "usage: $0 <jump.conf>" >&2; exit 2; }
 cd "$(dirname "$0")/.."
 proton="$1"
 W() { bin/wgt "$@"; }
@@ -49,13 +49,13 @@ DESC="setup succeeds"; ok W setup --name bossk --yes >/root/trial-setup.log 2>&1
 DESC="wgt test passes"; ok W test >/root/trial-test.log 2>&1
 DESC="watchdog units run wgt"; ok grep -q 'ExecStart=/usr/local/sbin/wgt watchdog warp' /etc/systemd/system/wg-tools-warp-watchdog.service
 
-echo "=== exit city and clients"
+echo "=== jump and clients"
 DESC="exit add par-fr"; ok W exit add par-fr "$proton" --label "Paris, France" --yes >/root/trial-exit.log 2>&1
 DESC="client add phone (warp + par-fr)"; ok W client add phone --exit warp,par-fr --no-qr --yes >/dev/null 2>&1
 device_up /etc/wireguard/clients/bossk.par-fr.phone.conf
 DESC="device exits in Paris (on demand)"; ok wait_loc FR
 systemctl stop wg-tools-exit-watchdog.timer; systemctl stop wg-quick@wx-par-fr wg-quick@px-par-fr
-DESC="device blocked while the city is down"; ok test -z "$(probe)"
+DESC="device blocked while the jump is down"; ok test -z "$(probe)"
 systemctl start wg-tools-exit-watchdog.timer
 DESC="watchdog brings it back"; ok wait_loc FR
 device_up /etc/wireguard/clients/bossk.phone.conf
@@ -73,7 +73,7 @@ W rollback --purge --yes >/dev/null 2>&1
 DESC="purge leaves no wg0"; ok bash -c '! ip link show wg0 >/dev/null 2>&1'
 DESC="restore succeeds"; ok W restore /root/trial-archive.tgz --yes >/root/trial-restore.log 2>&1
 DESC="same keys after restore"; ok test "$keys_before" = "$(md5sum /etc/wireguard/server.key /etc/wireguard/clients/*.conf | md5sum)"
-DESC="exit city back"; ok bash -c 'bin/wgt exit list | grep -q par-fr'
+DESC="jump back"; ok bash -c 'bin/wgt exit list | grep -q par-fr'
 device_up /etc/wireguard/clients/bossk.par-fr.phone.conf
 DESC="old device config still exits in Paris"; ok wait_loc FR
 ip netns del dev

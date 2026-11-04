@@ -23,13 +23,13 @@ def test_add_with_exit_puts_rules_before_peer(make_ctx):
                 if c.startswith("wg set wg0 peer CLIENTPUBLICKEY") and "10.2.10.7/32" in c)
     assert rule < peer
     conf = store.read_text(clients.client_conf(ctx, "par-fr.phone"))
-    assert "# exit: par-fr = Paris, France (Proton -> Cloudflare WARP)" in conf
+    assert "# exit: par-fr = Paris, France (jump -> Cloudflare WARP)" in conf
     assert "Address = 10.2.10.7/32, fdfc:cd08:368e::7/128" in conf
 
 
 def test_add_unknown_exit(make_ctx):
     ctx = make_ctx(argv=["--exit", "zz-qq"])
-    with pytest.raises(WgtError, match="no exit city 'zz-qq'"):
+    with pytest.raises(WgtError, match="no jump 'zz-qq'"):
         clients.cmd_add(ctx, ["phone"])
 
 
@@ -204,7 +204,7 @@ def test_unknown_verb_lists_the_verbs(make_ctx):
     ctx = make_ctx()
     with pytest.raises(WgtError, match=r"unknown client command: nope \(list, add, show"):
         clients.cmd_client(ctx, ["nope"])
-    with pytest.raises(WgtError, match=r"unknown exit command: nope \(list, add, remove, test;"):
+    with pytest.raises(WgtError, match=r"unknown jump command: nope \(list, add, remove, test;"):
         exits.cmd_exit(ctx, ["nope"])
 
 
@@ -236,7 +236,7 @@ def test_add_warp_off_host_and_city(make_ctx):
     assert any(f"rule add from {city_ip}/32 lookup 231 priority 9500" in c for c in calls)   # Proton table
     assert not any(f"from {city_ip}/32 lookup 201" in c and "add" in c for c in calls)
     assert "# exit: this server's IP (WARP off for this client)" in store.read_text(clients.client_conf(ctx, "mac"))
-    assert "(Proton, WARP off)" in store.read_text(clients.client_conf(ctx, "par-fr.mac"))
+    assert "(jump, WARP off)" in store.read_text(clients.client_conf(ctx, "par-fr.mac"))
     assert clients.exit_short(ctx, "mac") == "direct"
     assert clients.exit_short(ctx, "par-fr.mac") == "par-fr/direct"
     assert clients.exit_label(ctx, "par-fr.mac") == "Paris, France (no WARP)"
@@ -265,7 +265,7 @@ def test_client_warp_switch_adds_before_removing(make_ctx):
     del_old = next(i for i, c in enumerate(calls) if "rule del from 10.2.10.3/32 lookup 201" in c)
     assert add_new < del_old
     conf = store.read_text(clients.client_conf(ctx, "par-fr.mbp-1"))
-    assert "# exit: par-fr = Paris, France (Proton, WARP off)" in conf
+    assert "# exit: par-fr = Paris, France (jump, WARP off)" in conf
     assert "lookup 231 priority 9500" in store.read_text(ctx.cfg.wg_conf)
 
 
@@ -300,7 +300,7 @@ def test_rename_carries_warp_off(make_ctx):
     add_new = next(i for i, c in enumerate(calls) if "rule add from 10.2.10.2/32 lookup 231" in c)
     del_old = next(i for i, c in enumerate(calls) if "rule del from 10.2.10.2/32 lookup main" in c)
     assert add_new < del_old
-    assert "(Proton, WARP off)" in store.read_text(clients.client_conf(ctx, "par-fr.mac"))
+    assert "(jump, WARP off)" in store.read_text(clients.client_conf(ctx, "par-fr.mac"))
 
 
 def test_remove_forgets_warp_off(make_ctx):

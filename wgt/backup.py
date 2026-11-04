@@ -1,5 +1,5 @@
 """wgt backup and wgt restore: one archive of the server's keys, clients,
-exit cities and settings, and setting a new server up from it."""
+jumps and settings, and setting a new server up from it."""
 
 from __future__ import annotations
 
@@ -55,7 +55,7 @@ def rebuild_backup_map(ctx: Ctx, keep_map: Optional[str], members: List[str]) ->
 
 
 def cmd_backup(ctx: Ctx, words: List[str]) -> None:
-    """Archive keys, configs, clients, exit cities and state (mode 600: it holds
+    """Archive keys, configs, clients, jumps and state (mode 600: it holds
     private keys), then prune old archives and change copies."""
     ops.no_more_words(words[1:], "wgt backup [dir]")
     dest_dir = words[0] if words else ctx.paths.backup_dir
@@ -87,8 +87,8 @@ def cmd_backup(ctx: Ctx, words: List[str]) -> None:
 
 
 def cmd_restore(ctx: Ctx, words: List[str]) -> None:
-    """Set this server up from a backup: keys, clients, WARP accounts, exit
-    cities and settings come across; the old server's baseline, firewall and
+    """Set this server up from a backup: keys, clients, WARP accounts, jumps
+    and settings come across; the old server's baseline, firewall and
     backup records are dropped and an IP endpoint is re-detected; then setup."""
     if not words:
         raise WgtError("usage: wgt restore <archive.tar.gz>")
@@ -104,7 +104,7 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     has_exits = any(re.match(re.escape(ctx.paths.exit_dir) + r"/.*/wgcf-account\.toml$", m) for m in members)
     what = "keys, clients, settings"
     what += " and WARP account" if has_warp else ""
-    what += ", exit cities" if has_exits else ""
+    what += ", jumps" if has_exits else ""
     ctx.runner.step(f"Restore {what} from {archive}", "wgt rollback --purge")
     ops.confirm(ctx, "Restore from this backup?")
     keep_map = store.read_text(ctx.paths.backup_map)
@@ -123,7 +123,7 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     if has_warp:
         ctx.out.warn("the WARP account is now on this server too; don't keep running it on the old one")
     if has_exits:
-        ctx.out.warn("the exit cities' Proton keys and WARP accounts are now here too; remove them from the old server")
+        ctx.out.warn("the jumps' keys and WARP accounts are now here too; remove them from the old server")
     ops.release_lock(ctx)
     ctx.out.log("Setting up")
     ctx.out.info("if setup stops, fix the cause and run 'wgt setup' (the restored files stay in place)")

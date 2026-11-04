@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 Reader = Callable[[str], Optional[str]]
 
 CLIENTS_HEADER = "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
-EXITS_HEADER = "# wireguard-tools exit cities: code idx label (wgt exit add)"
+EXITS_HEADER = "# wireguard-tools jumps: code idx label (wgt jump add)"
 
 _EXIT_CODE = re.compile(r"[a-z][a-z0-9-]{0,4}[a-z0-9]")
 _CLIENT_BASE = re.compile(r"[A-Za-z0-9_-]{1,32}")
@@ -99,7 +99,7 @@ def valid_client_name(name: str) -> Optional[str]:
     if "." in name:
         code, base = name.split(".", 1)
         if not valid_exit_code(code):
-            return f"bad exit code in client name '{name}' (see: wgt exit list)"
+            return f"bad exit code in client name '{name}' (see: wgt jump list)"
     if not _CLIENT_BASE.fullmatch(base):
         return f"client name must be 1-32 of [A-Za-z0-9_-] (or <exit>.<name>): '{name}'"
     return None
@@ -114,7 +114,7 @@ def device_of(name: str) -> str:
 
 def device_key(name: str) -> Tuple[str, bool, str]:
     """Sort key grouping clients by device: its default exit first, then its
-    exit cities by code."""
+    jumps by code."""
     return device_of(name).lower(), "." in name, client_exit(name)
 
 
@@ -202,17 +202,17 @@ class Exit:
 
     @property
     def px(self) -> str:
-        """Its Proton tunnel's interface."""
+        """Its jump tunnel's interface."""
         return f"px-{self.code}"
 
     @property
     def wx(self) -> str:
-        """Its WARP tunnel's interface (inside the Proton one)."""
+        """Its WARP tunnel's interface (inside the jump one)."""
         return f"wx-{self.code}"
 
     @property
     def units(self) -> List[str]:
-        """Its wg-quick units, in start order (Proton first)."""
+        """Its wg-quick units, in start order (jump first)."""
         return [f"wg-quick@{self.px}", f"wg-quick@{self.wx}"]
 
 
@@ -294,11 +294,11 @@ class Snapshot:
 
     def warp_off(self, name: str) -> bool:
         """Client <name> has WARP off: it leaves straight out of its exit (this
-        server's IP, or its city's Proton tunnel), never through a WARP of ours."""
+        server's IP, or its jump's jump tunnel), never through a WARP of ours."""
         return name in self.nowarp
 
     def direct_clients(self) -> List[Client]:
-        """Clients without an exit city and with WARP off (out this server's IP)."""
+        """Clients without a jump and with WARP off (out this server's IP)."""
         return [c for c in self.clients if not c.exit and self.warp_off(c.name)]
 
 

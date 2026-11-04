@@ -1,4 +1,4 @@
-"""Config files, rendered as text: wg0.conf, warp.conf (and each exit city's
+"""Config files, rendered as text: wg0.conf, warp.conf (and each jump's
 wx-<code>.conf), px-<code>.conf, client configs and the templates. Output is
 byte-identical to the bash version, so switching tools rewrites nothing."""
 
@@ -10,7 +10,7 @@ from typing import Callable, List, Optional, Tuple
 
 from . import rules
 from .config import Config
-from .const import EXIT_PROTON_MTU, MARKER, TEMPLATE_DIR
+from .const import JUMP_MTU, MARKER, TEMPLATE_DIR
 from .errors import WgtError
 from .store import Exit, Snapshot, client_exit
 
@@ -73,7 +73,7 @@ def render_wg_conf(cfg: Config, snap: Snapshot, pub_if: str, psk: Callable[[str]
     return text
 
 
-# --- warp.conf and exit cities' wx-<code>.conf ---
+# --- warp.conf and jumps' wx-<code>.conf ---
 
 def profile_endpoint(profile: str) -> str:
     for line in profile.splitlines():
@@ -91,9 +91,9 @@ def render_warp_conf(cfg: Config, profile: str, has_ipv6: bool,
     loose rp_filter (strict would drop WARP's replies) and the routing table's
     default route(s), which go when the tunnel goes down.
 
-    For an exit city's WARP give <table> and <mark>: its routes go to <table>,
-    its packets carry <mark> (routed through Proton), and its endpoint is IPv4
-    (Proton carries only IPv4 for it). Otherwise the endpoint is made IPv4 only
+    For a jump's WARP give <table> and <mark>: its routes go to <table>,
+    its packets carry <mark> (routed through the jump), and its endpoint is IPv4
+    (the jump carries only IPv4 for it). Otherwise the endpoint is made IPv4 only
     on hosts without IPv6."""
     ep = profile_endpoint(profile)
     if (mark is not None or not has_ipv6) and ep:
@@ -148,17 +148,17 @@ def render_warp_conf(cfg: Config, profile: str, has_ipv6: bool,
     return "\n".join(out) + "\n"
 
 
-# --- exit cities' px-<code>.conf ---
+# --- jumps' px-<code>.conf ---
 
-def render_proton_conf(raw: str, e: Exit) -> str:
-    """px-<code>.conf from an imported Proton config: its key, IPv4 address and
+def render_jump_conf(raw: str, e: Exit) -> str:
+    """px-<code>.conf from an imported jump config: its key, IPv4 address and
     peer only; Table = off, our MTU, no DNS, loose rp_filter, and the exit's
-    Proton table's default route (the blackhole stays when the tunnel goes)."""
-    out = [f"{MARKER} exit {e.code}: Proton tunnel from exits/{e.code}.proton.conf; WARP inside it is wx-{e.code}"]
+    jump table's default route (the blackhole stays when the tunnel goes)."""
+    out = [f"{MARKER} exit {e.code}: jump tunnel from exits/{e.code}.proton.conf; WARP inside it is wx-{e.code}"]
     sec = ""
     for line in raw.splitlines():
         if re.match(r"^\s*\[Interface\]", line):
-            out += ["[Interface]", f"MTU = {EXIT_PROTON_MTU}", "Table = off",
+            out += ["[Interface]", f"MTU = {JUMP_MTU}", "Table = off",
                     "PostUp = sysctl -q -w net.ipv4.conf.%i.rp_filter=2",
                     f"PostUp = ip route replace default dev %i table {rules.exit_ptable(e)}"]
             sec = "i"
@@ -182,8 +182,8 @@ def render_proton_conf(raw: str, e: Exit) -> str:
     return "\n".join(out) + "\n"
 
 
-def proton_hint(raw: str) -> str:
-    """The comment Proton puts under [Peer], e.g. "FR#252" ("" if none)."""
+def peer_hint(raw: str) -> str:
+    """The comment under [Peer] some providers write, e.g. Proton's "FR#252" ("" if none)."""
     in_peer = False
     for line in raw.splitlines():
         if re.match(r"^\s*\[Peer\]", line):
@@ -202,8 +202,8 @@ def exit_desc(snap: Snapshot, name: str, warp_off: Optional[bool] = None) -> str
     if code:
         e = snap.exit(code)
         if off:
-            return f"{code} = {e.label if e else ''} (Proton, WARP off)"
-        return f"{code} = {e.label if e else ''} (Proton -> Cloudflare WARP)"
+            return f"{code} = {e.label if e else ''} (jump, WARP off)"
+        return f"{code} = {e.label if e else ''} (jump -> Cloudflare WARP)"
     if off:
         return "this server's IP (WARP off for this client)"
     return "default (this server's WARP setting: wgt warp on|off)"

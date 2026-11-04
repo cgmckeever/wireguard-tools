@@ -183,7 +183,7 @@ def test_exit_add_wires_a_new_city(make_ctx, tmp_path, monkeypatch):
     exits.cmd_add(ctx, ["ams-nl", str(src)])
     e = ctx.snap.exit("ams-nl")
     assert (e.idx, e.label) == (2, "Amsterdam, NL")
-    stored = Path(ctx.paths.proton_conf("ams-nl")).read_text()
+    stored = Path(ctx.paths.jump_source("ams-nl")).read_text()
     assert stored.startswith("# exit ams-nl: Amsterdam, NL\n") and "Endpoint = 198.51.100.7:51820" in stored
     assert os.path.isfile(ctx.paths.px_conf("ams-nl")) and os.path.isfile(ctx.paths.wx_conf("ams-nl"))
     calls = "\n".join(ctx.runner.changes())

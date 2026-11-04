@@ -7,50 +7,63 @@ arm64) into a WireGuard VPN server and manages its clients, on the server
 itself or, for several servers, from your own machine.
 
 A plain WireGuard server sends its clients out through its own IP. This one
-also runs [Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free VPN service;
-the server connects to it as one WARP "device"), on by default, and can add
-exit cities through your own Proton VPN account. So clients' traffic can
-leave three ways:
+can also send them through [Cloudflare WARP](https://1.1.1.1/) (Cloudflare's
+free VPN service; the server connects to it as one WARP "device"), and through
+a **jump**: another WireGuard server you add, such as a VPN provider's server
+in another city (Proton VPN works well) or a second server of your own.
 
-| Way out | Traffic leaves via | Sites see |
-|---------|--------------------|-----------|
-| **The server's own IP** | the server's public interface | the VPS's IP: a plain, fast WireGuard VPN |
-| **WARP** (the default) | Cloudflare WARP, tunnelled from the server | a Cloudflare IP near the server |
-| **An exit city** (per client) | a Proton VPN server in a city you pick, with WARP inside that tunnel | a Cloudflare IP in that city |
+Each client picks two things:
 
-**WARP is a switch.** `wgt warp off` sends every client out through the
-server's own IP instead, and `wgt warp on` brings WARP back. Switching is
-live: clients stay connected, only where their traffic exits changes.
+- **exit**: `host` (this server, the default) or a jump (`--exit par-fr`);
+- **WARP**: `on` (the default: Cloudflare WARP on top) or `off`.
 
-**Exit cities** add a third way out, chosen per client: through a Proton VPN
-server in a city you pick (with your own Proton VPN account), with WARP
-running inside that Proton tunnel, so sites see a Cloudflare IP in that city.
-A client is added with its city (`wgt client add phone --exit par-fr`), and a
-city's tunnels only run while one of its clients is connected (see
-[Exit cities](#exit-cities)).
+| | WARP on | WARP off |
+|---|---|---|
+| **host** | a Cloudflare IP near this server | this server's IP: a plain, fast WireGuard VPN |
+| **jump** | a Cloudflare IP near the jump (sites see Paris, say) | the jump's IP |
+
+```bash
+wgt client add phone                                 # host, WARP on
+wgt client add laptop --exit host,par-fr             # two tunnels: host and the par-fr jump
+wgt client add mac --exit par-fr --warp off          # the jump's IP (or bring your own WARP, below)
+wgt client warp mac on                               # switch later, live
+```
+
+`wgt warp on|off` is the server-wide switch for WARP (on by default); a
+client's `--warp off` overrides it for that client. Switching either is live:
+clients stay connected, only where their traffic exits changes.
+
+**Bring your own WARP.** A WARP-off client can run WARP itself, inside its
+tunnel to this server (for a Mac:
+[wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels)' warped
+tunnels). Sites still see a Cloudflare IP near the server or jump, but the
+WARP account is the device's own and this server only carries encrypted WARP.
+
+A jump's tunnels only run while one of its clients is connected (see
+[Jumps](#jumps)).
 
 ### Why route through Cloudflare?
 
 A VPS's public IP is a datacenter address, and sites treat those with
 suspicion: more CAPTCHAs, "unusual traffic" pages and outright blocks, as
-they do with commercial VPN ranges. With WARP, and with an exit city, clients
-leave from Cloudflare's network instead:
+they do with commercial VPN ranges. With WARP on, clients leave from
+Cloudflare's network instead:
 
 - **Sites see a Cloudflare IP, not your VPS.** WARP addresses are shared by
   millions of ordinary WARP users, so they're rarely blocked, and your server's
   own IP (tied to your hosting account) never shows up in their logs.
-- **Your provider sees one encrypted tunnel to Cloudflare** (or, for an exit
-  city, to Proton), not which sites your clients visit.
+- **Your provider sees one encrypted tunnel to Cloudflare** (or, through a
+  jump, to the jump), not which sites your clients visit.
 - **IPv6 for clients even on an IPv4-only VPS**, through WARP's own IPv6.
 - **You pick the location.** Plain WARP exits near the server, so sites still
-  see roughly the right region; an exit city puts the client in another city
+  see roughly the right region; a jump puts the client in another city
   (sites see Paris, say) while still looking like an ordinary Cloudflare user
-  rather than a VPN, and Proton sees only encrypted WARP traffic.
-- **Fail closed:** if WARP or a city goes down, its clients are blocked rather
+  rather than a VPN, and the jump sees only encrypted WARP traffic.
+- **Fail closed:** if WARP or a jump goes down, its clients are blocked rather
   than quietly falling back to the VPS's IP.
 
 The trade-offs: an extra hop (a few milliseconds for WARP, as Cloudflare is
-close to most datacenters; more for a distant city), Cloudflare sees where
+close to most datacenters; more for a distant jump), Cloudflare sees where
 traffic goes instead of your provider, and a few sites block WARP too;
 `wgt warp off` is one command away. It hides your server, not you: it isn't
 an anonymity tool.
@@ -81,12 +94,12 @@ There are two:
 
 - **`wgt`** runs as root on the server: `setup`, `warp on|off`, `summary`,
   `status`, `test`, `log`, `backup`, `restore`, `rollback`, plus `wgt client …` (`add`, `list`,
-  `show`, `share`, `rotate`, `rename`, `disable`, `enable`, `remove`) and
-  `wgt exit …` for exit cities.
+  `show`, `share`, `rotate`, `rename`, `warp`, `disable`, `enable`, `remove`) and
+  `wgt jump …` for jumps (`wgt exit …` still works).
 - **`wgt-ctl`** runs on your own machine and drives your servers over SSH,
   mostly as `wgt-ctl SERVER COMMAND`: the server first, then any `wgt` command
   (`wgt-ctl boba client add phone`). It also sets up new servers, pulls
-  updates, pushes exit cities from local files and fetches backups
+  updates, pushes jumps from local files and fetches backups
   ([Fleet management](#fleet-management)).
 
 Both are safe to re-run, back up every file they change, take `--dry-run` for
@@ -130,19 +143,32 @@ handshake for 180s on two checks in a row, it moves `warp` to a new source
 port (`wg set warp listen-port 0`, no restart) and logs it
 (`wgt log`). `status` shows the last time it acted.
 
-**Exit cities.** Each city `<code>` (e.g. `par-fr`) has two tunnels:
-`px-<code>`, to Proton, and `wx-<code>`, its own WARP tunnel running inside it.
-Each city has an index *n* (in `exits.db`). Its client table
+**Jumps.** Each jump `<code>` (e.g. `par-fr`) has two tunnels: `px-<code>`,
+to the jump's WireGuard server, and `wx-<code>`, its own WARP tunnel running
+inside it. Each jump has an index *n* (in `exits.db`). Its client table
 `200+n` holds a default route through `wx-<code>` and a blackhole fallback;
 one rule per client address (`from 10.4.5.7 lookup 201`, priority 9500, ahead
-of the WARP rule) sends that client there. The city's WARP tunnel marks its
+of the WARP rule) sends that client there. The jump's WARP tunnel marks its
 own packets (fwmark `0x5700+n`), and a rule sends marked packets to table
-`230+n`: a default route through the Proton tunnel `px-<code>`, again with a
-blackhole fallback, so the city's WARP can never connect from the server's own
-IP. The tunnels use `Table = off` and aren't enabled at boot; the exit
+`230+n`: a default route through the jump tunnel `px-<code>`, again with a
+blackhole fallback, so the jump's WARP can never connect from the server's own
+IP. The tunnels use `Table = off` and aren't enabled at boot; the jump
 watchdog (`wg-tools-exit-watchdog.timer`, every 10s) starts and stops them.
 The tables, rules and blackholes live in `wg0.conf` like everything else, so
-they're there even while a city is down.
+they're there even while a jump is down.
+
+**WARP off for one client.** Clients listed in `clients.nowarp` skip our WARP.
+A jump client's rule points at the jump table `230+n` instead (NATed out
+`px-<code>`; IPv4 only, its IPv6 is blackholed). A client without a jump gets
+`from <address> lookup main` (this server's own routes) plus a blackhole rule
+right behind it (priority 9501), so if the server has no route (IPv6 on an
+IPv4-only server) the traffic stops there instead of falling through to the
+WARP rule.
+
+| | WARP on | WARP off |
+|---|---|---|
+| **host** | table 100 (the WARP switch) | `main`, then blackhole |
+| **jump** `<code>` | table `200+n` (`wx-<code>`) | table `230+n` (`px-<code>`) |
 
 **Always.** All routing/NAT/firewall rules live in `wg0.conf`'s
 `PostUp`/`PostDown`, generated from one list so `PostDown` and `rollback` undo
@@ -171,16 +197,17 @@ address to every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/server.key`, `server.pub` | server keypair |
 | `/etc/wireguard/clients.db` | `name address public-key allowed-ips`, no private keys |
 | `/etc/wireguard/clients.disabled` | names of disabled clients |
+| `/etc/wireguard/clients.nowarp` | names of clients with WARP off |
 | `/etc/wireguard/psk/<name>.psk` | per-client preshared keys |
 | `/etc/wireguard/clients/<server>.<name>.conf` | client configs (the only copy of each client's private key) |
 | `/etc/wireguard/wg-tools.state` | saved settings (including `WARP=on|off`), recorded default route |
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1`, plus IPv6 forwarding (and `accept_ra = 2` on the public interface) when IPv6 is on |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
 | `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog (runs `wgt watchdog warp` every 30s) |
-| `/etc/wireguard/exits.db` | exit cities: `code index label` |
-| `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a city's Proton config and its own WARP account |
-| `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a city's Proton tunnel and the WARP tunnel inside it |
-| `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | exit watchdog (runs `wgt watchdog exits` every 10s: cities up on demand) |
+| `/etc/wireguard/exits.db` | jumps: `code index label` |
+| `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a jump's WireGuard config as given (any provider; the file name is historical) and its own WARP account |
+| `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a jump's tunnel and the WARP tunnel inside it |
+| `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | jump watchdog (runs `wgt watchdog exits` every 10s: jumps up on demand) |
 | `/usr/local/sbin/wgt` | link to the checkout's `bin/wgt` |
 
 Secrets are mode 600 in 700 directories. Before any file is changed, a
@@ -296,10 +323,11 @@ Flags for one run (not saved), for setup and other commands:
 | `--yes`, `-y` | everything | skip the per-step prompts; `setup` still asks to confirm its settings (unless there's no terminal) |
 | `--force` | `setup` | reinstall wgcf, regenerate the WARP profile, take over configs these tools didn't create |
 | `--new-server-keys` | `setup` | a new server keypair: every client stops working until rotated (`wgt client rotate`) |
-| `--purge` | `rollback` | also delete keys, clients, the WARP accounts and exit cities |
+| `--purge` | `rollback` | also delete keys, clients, the WARP accounts and jumps |
 | `--qr` / `--no-qr` | `wgt client add`, `rotate`, `show` | force or skip the QR code |
-| `--exit <code>[,…]` | `wgt client add` | the client's exit(s): city codes, or `warp` for the server's normal way out |
-| `--label "<name>"` | `wgt exit add` | the exit city's full name, e.g. `"Paris, France"` |
+| `--exit host\|<jump>[,…]` | `wgt client add` | the client's exit(s): `host` (this server; `warp` is the old spelling) or jump codes |
+| `--warp on\|off` | `wgt client add` | `off`: no WARP of ours for the new client(s) |
+| `--label "<name>"` | `wgt jump add` | the jump's full name, e.g. `"Paris, France"` |
 | `--no-follow` | `wgt log` | print the last lines and stop (also when piped) |
 
 `wgt help` and `wgt-ctl help` list everything.
@@ -313,8 +341,8 @@ Setup runs in two stages:
    [Register WARP on another machine](#register-warp-on-another-machine).)
 2. **WireGuard server:** creates `wg0` with server keys, NAT for both ways out
    (WARP and the public interface), forwarding and systemd units, with WARP on,
-   plus the [WARP watchdog](#how-it-works). Exit cities, if any, get their
-   configs refreshed.
+   plus the [WARP watchdog](#how-it-works). Jumps, if any, get their configs
+   refreshed.
 
 If WARP can't be set up on a first install, setup still finishes, with WARP
 off; fix it, then `wgt warp on`.
@@ -345,63 +373,75 @@ outage blocks clients rather than letting them leak out through the VPS's own
 IP. With it off, clients' IPv6 goes out the server's own IPv6; a server
 without public IPv6 gives clients IPv4 only while WARP is off.
 
-### Exit cities
+This is the server's default. One client can have WARP off whatever it says
+(`wgt client warp <name> off`, or `--warp off` at `client add`); jump clients
+use their jump's WARP unless they have it off themselves.
 
-A client can leave through a city of your choosing instead of the server's
-own location. Its traffic goes into a WARP tunnel that itself runs inside a
-Proton VPN tunnel to that city, so Cloudflare places it there: sites see a
-Cloudflare IP in that city (fewer CAPTCHAs and blocks than a VPN's own IPs),
-and Proton sees only encrypted WARP traffic.
+### Jumps
+
+A jump is another WireGuard server that clients can leave through instead of
+this one: a VPN provider's server in a city you pick, or a server of your own.
+With WARP on, the client's traffic goes into a WARP tunnel that itself runs
+inside the jump tunnel, so Cloudflare places it near the jump: sites see a
+Cloudflare IP there (fewer CAPTCHAs and blocks than a VPN's own IPs), and the
+jump sees only encrypted WARP traffic. With WARP off, sites see the jump's IP.
 
 ```
-phone -> wg0 (this server) -> wx-par-fr (WARP) -> inside px-par-fr (Proton, Paris) -> Cloudflare, Paris
+WARP on:  phone -> wg0 (this server) -> wx-par-fr (WARP) -> inside px-par-fr (jump, Paris) -> Cloudflare, Paris
+WARP off: phone -> wg0 (this server) -> px-par-fr (jump, Paris) -> sites
 ```
 
-**Get a Proton config.** At account.protonvpn.com: Downloads -> WireGuard
-configuration; platform Linux; NetShield off; Moderate NAT, NAT-PMP and VPN
-Accelerator off; pick a server in the city; Create; download. Each downloaded
-config is one key: use it on one of *your* servers only, so download one per
-server per city.
+Any WireGuard client config with one peer and an IPv4 address works. Each
+config is one key: use it on one of *your* servers only.
 
-**Add the city**, from your machine with `wgt-ctl` (see
+**Proton VPN** is a good source of jumps in many cities. At
+account.protonvpn.com: Downloads -> WireGuard configuration; platform Linux;
+NetShield off; Moderate NAT, NAT-PMP and VPN Accelerator off; pick a server in
+the city; Create; download (one per server per city).
+
+**Add the jump**, from your machine with `wgt-ctl` (see
 [Fleet management](#fleet-management)) or on the server:
 
 ```bash
 # your machine: save it as local/exits/<server>/<any name>.conf, then
-wgt-ctl boba exit-add                    # pick it by number (or: all)
+wgt-ctl boba jump-add                    # pick it by number (or: all)
 
 # or on the server: copy it there first (scp paris.conf root@<server>:), then
-wgt exit add par-fr paris.conf --label "Paris, France"
-wgt exit add par-fr - --label "Paris, France" < paris.conf    # or read it from stdin
+wgt jump add par-fr paris.conf --label "Paris, France"
+wgt jump add par-fr - --label "Paris, France" < paris.conf    # or read it from stdin
 ```
 
-The first time `exit-add` sees a file it asks what it is ("Paris, France")
-and suggests a code from the city and Proton's country tag (`par-fr`); the
-answer is kept in `local/exits/details.tsv`, and the file keeps its own name.
-The copy on the server records both: it starts with `# exit par-fr: Paris,
-France` and `# local file: paris.france.conf`.
-A code is 2-6 of a-z, 0-9 and `-`, starting with a letter.
+The first time `jump-add` sees a file it asks what it is ("Paris, France")
+and suggests a code from the name and the config's country tag if it has one
+(Proton's `FR#252` gives `par-fr`); the answer is kept in
+`local/exits/details.tsv`, and the file keeps its own name. The copy on the
+server records both: it starts with `# exit par-fr: Paris, France` and
+`# local file: paris.france.conf`. A code is 2-6 of a-z, 0-9 and `-`, starting
+with a letter (not `host` or `warp`).
 
-`exit add` registers a separate WARP account for the city, wires its routing
+`jump add` registers a separate WARP account for the jump, wires its routing
 into `wg0` live (clients stay connected), and checks the result:
 `exit 'par-fr' works: ip=104.28.x.x colo=CDG loc=FR warp=on` (`colo` is
-Cloudflare's data centre: CDG is Paris). Adding the same
-code again replaces its Proton config.
+Cloudflare's data centre: CDG is Paris). Adding the same code again replaces
+its config.
 
 ```bash
-wgt exit list              # cities: state (up/idle), clients, Proton server
-wgt exit test              # bring each one up and check it
-wgt exit remove par-fr     # refused while clients use it
+wgt jump list              # jumps: state (up/idle), clients, endpoint
+wgt jump test              # bring each one up and check it
+wgt jump remove par-fr     # refused while clients use it
 ```
 
-**On demand.** A city is only up while one of its clients is connected: the
-exit watchdog (every 10s) brings it up when a client handshakes and takes it
-down after 5 minutes with none, so an idle city holds no Proton connection. A
-device switching to a city's tunnel waits about 10-15 seconds the first time.
-While a city is down, or broken, its clients are blocked, never sent out
-another way; an up city whose WARP stops handshaking is restarted.
+(`wgt exit …` is the old name and still works.)
 
-Clients choose a city when they're added: see [Exit-city clients](#exit-city-clients).
+**On demand.** A jump is only up while one of its clients is connected: the
+jump watchdog (every 10s) brings it up when a client handshakes and takes it
+down after 5 minutes with none, so an idle jump holds no connection. A device
+switching to a jump's tunnel waits about 10-15 seconds the first time. While a
+jump is down, or broken, its clients are blocked, never sent out another way;
+an up jump whose WARP stops handshaking is restarted.
+
+Clients choose their exit when they're added: see
+[Choosing a client's exit](#choosing-a-clients-exit).
 
 ### Manage clients
 
@@ -416,6 +456,7 @@ wgt client rotate laptop                         # new keys, same address; old c
 wgt client disable laptop                        # cut it off now; keys, config and address kept
 wgt client enable laptop                         # let it back in with the same config
 wgt client rename laptop work-laptop             # same keys and address; its config keeps working
+wgt client warp laptop off                       # this client skips WARP (on: back through it)
 wgt client remove laptop
 ```
 
@@ -424,7 +465,8 @@ Leave out the name on `rotate`, `remove`, `disable`, `enable`, `show` or
 connected.
 
 In a terminal, `list` then asks for a client number and shows its actions as a
-numbered menu (show, QR, share, rotate, disable/enable, rename, remove). It runs
+numbered menu (show, QR, share, rotate, disable/enable, warp on/off, rename,
+remove). It runs
 the one you choose and exits; Enter at either prompt exits without doing
 anything. With `--yes`
 or when piped, `list` only prints the table.
@@ -440,25 +482,30 @@ Each client gets its own keypair, a preshared key and the next free address.
 Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 `dengar.laptop.conf`), so configs from different servers don't collide.
 
-#### Exit-city clients
+#### Choosing a client's exit
 
-A client of a city is named `<code>.<name>`. `add` asks which
-exit(s) when cities exist, or take them with `--exit`; `warp` there means the
-server's normal way out (WARP, or the server's IP while `wgt warp` is off). Through `wgt-ctl`, `add`
-first offers to push exit configs you've staged in `local/exits/<server>/` but
-not yet added, so their cities show up in that menu:
+A client has an exit (`host` or a jump) and WARP on or off (see the table in
+[Overview](#overview)). A jump client is named `<code>.<name>`. `add` asks
+which exit(s) when jumps exist, or take them with `--exit`; `host` there means
+this server (WARP, or the server's IP while `wgt warp` is off). Through
+`wgt-ctl`, `add` first offers to push jump configs you've staged in
+`local/exits/<server>/` but not yet added, so they show up in that menu:
 
 ```bash
-wgt client add laptop --exit warp,par-fr   # laptop (the server's normal way out) and par-fr.laptop
+wgt client add laptop --exit host,par-fr          # laptop (this server) and par-fr.laptop
 wgt client add par-fr.tablet
+wgt client add mac --exit host,par-fr --warp off  # both without our WARP (e.g. the Mac runs its own)
+wgt client warp par-fr.tablet off                 # switch one client, live
 ```
 
 Each is a separate client with its own key, address and config
-(`dengar.par-fr.laptop.conf`, whose `# exit:` line names the city). Import both
-on the device and switch exits by switching tunnels in the WireGuard app.
-`list` and `status` show each client's exit. The Android app only takes tunnel
-names up to 15 characters, so rename longer ones when importing there (`add`
-reminds you).
+(`dengar.par-fr.laptop.conf`, whose `# exit:` line names the jump and WARP).
+Import both on the device and switch exits by switching tunnels in the
+WireGuard app. `warp on|off` and `rename` keep the client's keys, so its
+config keeps working. `list` and `status` show each client's exit: `warp` or
+`direct` for host, the jump's code (`par-fr/direct` with WARP off). The
+Android app only takes tunnel names up to 15 characters, so rename longer ones
+when importing there (`add` reminds you).
 
 #### Getting a config onto a device
 
@@ -491,7 +538,7 @@ wgt log [N]           # its changes, both watchdogs and the tunnels: last lines,
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
 wgt rollback          # stop everything, remove all rules, restore original files
-wgt rollback --purge  # ...and delete keys, clients, WARP accounts and exit cities
+wgt rollback --purge  # ...and delete keys, clients, WARP accounts and jumps
 ```
 
 `test` checks: WARP is up and handshaking, traffic through `warp` shows
@@ -500,9 +547,11 @@ default route never changed, `wg0` is listening, forwarding is on, the WARP
 rule is there exactly once (WARP on) or absent (off), every NAT/firewall rule
 exists exactly once, the services start at boot in the right order, the WARP
 watchdog timer is running, and whether any client has connected. With WARP
-off, WARP problems are warnings. For each exit city: its routing (blackhole
-fallbacks, one rule per client address), the exit watchdog, and, if the city
-is up, both its handshakes and a WARP trace through it.
+off, WARP problems are warnings. Clients with WARP off and no jump: their
+`main` and blackhole rules. For each jump: its routing (blackhole fallbacks,
+one rule per client address, to the right table for its WARP setting), the
+jump watchdog, and, if the jump is up, both its handshakes and a WARP trace
+through it.
 
 #### Moving to a new server (or rebuilding)
 
@@ -520,7 +569,7 @@ scp wireguard-tools.<host>.<date>.tar.gz root@<new>:
 
 `restore` brings over the server keys, every client (same keys, addresses and
 allowed IPs), the settings (including WARP on or off), the WARP account (so it
-doesn't need to register again) and the exit cities, then runs setup. It won't overwrite a
+doesn't need to register again) and the jumps, then runs setup. It won't overwrite a
 server that's already set up (`rollback` or `rollback --purge` first).
 
 The new server records its own default route and public interface, and an IP
@@ -536,7 +585,7 @@ so re-cloning the tools keeps them; `rollback` restores originals from its
 `files/`); `backup <dir>` writes elsewhere. Each `backup` also prunes old
 archives and file copies. A backup holds private keys (it's created mode 600);
 keep it somewhere safe. Stop the old server once the new one works: both would
-be using the same WARP devices and Proton keys.
+be using the same WARP devices and jump keys.
 
 ## Fleet management
 
@@ -569,7 +618,7 @@ exactly as if you'd typed it there:
 wgt-ctl boba summary                   # wgt summary on boba (likewise status, test, log, warp, setup, ...)
 wgt-ctl boba client add phone --exit par-fr
 wgt-ctl boba client                    # boba's client list and action menu
-wgt-ctl boba exit list
+wgt-ctl boba jump list
 ```
 
 and these run from your machine, against that server:
@@ -577,7 +626,7 @@ and these run from your machine, against that server:
 ```bash
 wgt-ctl boba pull                      # git pull its checkout (fast-forward only)
 wgt-ctl boba backup                    # wgt backup there, fetched to local/backups/boba/
-wgt-ctl boba exit-add                  # push a Proton config from local/exits/boba/ as an exit city
+wgt-ctl boba jump-add                  # push a WireGuard config from local/exits/boba/ as a jump
 wgt-ctl boba ssh                       # log in (or: ssh <command>)
 wgt-ctl boba branch some-branch        # switch its checkout
 wgt-ctl boba forget                    # drop it from local/servers; the server is untouched
@@ -598,7 +647,7 @@ wgt-ctl all backup
 **No server.** Overviews of every server, and adding a new one:
 
 ```bash
-wgt-ctl [list]                         # the servers: branch@commit (or unreachable), exit configs staged
+wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump configs staged
 wgt-ctl summary                        # every server at a glance (wgt summary on each, side by side)
 wgt-ctl clients                        # every client on every server: exit, last seen, traffic
 wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
@@ -624,8 +673,8 @@ server already running these tools is adopted under its saved name instead.
 
 ### Private files
 
-Private files stay on your machine under `local/`: Proton configs for exit
-cities in `exits/<server>/` (see [Exit cities](#exit-cities)), the table that
+Private files stay on your machine under `local/`: jump configs in
+`exits/<server>/` (see [Jumps](#jumps)), the table that
 names them in `exits/details.tsv`, and archives fetched by `backup` in
 `backups/<server>/` (they hold private keys).
 
@@ -658,10 +707,10 @@ configs are rendered.
   (no handshake), the provider is blocking WARP's traffic: `wgt warp off`.
 - **Some sites hang with WARP on:** MTU is already 1280 (the lowest allowed)
   and TCP MSS is clamped; try `wgt warp off` to see if it's WARP's path.
-- **A city's clients have no internet:** `wgt exit test` says which
-  layer fails. No Proton handshake usually means the Proton server was retired
-  or the key revoked: download a new config for that server and add it again
-  (same code). `wgt log` shows the watchdog bringing cities up and down.
+- **A jump's clients have no internet:** `wgt jump test` says which layer
+  fails. No jump handshake usually means the server was retired or the key
+  revoked (Proton does both): get a new config and add it again (same code).
+  `wgt log` shows the watchdog bringing jumps up and down.
 - **Handshake works but nothing loads:** the device's config is out of date
   (e.g. after a `--subnet` change) or its `Address` is mistyped; re-send it.
 - **Anything else:** `wgt status` (marks saved settings still
@@ -698,7 +747,7 @@ and `bin/wgt-ctl` run it from the checkout.
 ./test.sh -k exit          # just the tests matching "exit" (any pytest option works)
 ./test.sh lint             # ruff and mypy (settings in pyproject.toml)
 tools/render-diff.sh       # read-only: what this checkout would render differently on each server
-tools/trial.sh <proton.conf>   # on a throwaway server: the full cycle, back to clean
+tools/trial.sh <jump.conf>     # on a throwaway server: the full cycle, back to clean
 ```
 
 [DEVELOPING.md](DEVELOPING.md) has the module map, the conventions and how the

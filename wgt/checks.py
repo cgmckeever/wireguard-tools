@@ -159,7 +159,7 @@ class Tests:
                     and re.search(rf"^{net} dev {re.escape(self.cfg.WG_IF)}( |$)", t, re.M))
 
     def direct_rules_ok(self, family: str) -> bool:
-        """Each WARP-off client without a city: its main-table rule and the
+        """Each WARP-off client without a jump: its main-table rule and the
         blackhole behind it, once each, and no others of either kind."""
         out = live.rules(self.runner, family).splitlines()
         want = set()
@@ -231,7 +231,7 @@ class Tests:
 
 
 def cmd_test(ctx: Ctx, words: List[str]) -> int:
-    """All checks (WARP, wg0, rules, units, exit cities)."""
+    """All checks (WARP, wg0, rules, units, jumps)."""
     ops.no_more_words(words, "wgt test")
     ops.require_setup(ctx)
     ctx.out.log(f"Tests (WARP {ctx.cfg.WARP})")
@@ -241,8 +241,8 @@ def cmd_test(ctx: Ctx, words: List[str]) -> int:
 # --- status ---
 
 def cmd_status(ctx: Ctx, words: List[str]) -> None:
-    """Settings (and whether they're running), interfaces, watchdogs, exit
-    cities, clients, routes and rules."""
+    """Settings (and whether they're running), interfaces, watchdogs, jumps,
+    clients, routes and rules."""
     ops.no_more_words(words, "wgt status")
     ops.require_setup(ctx)
     r, c, out = ctx.runner, ctx.cfg, ctx.out
@@ -268,7 +268,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
     if live.if_exists(r, c.WARP_IF):
         out.info(f"{c.WARP_IF}: {ui.ago(live.newest_hs(r, c.WARP_IF))}")
     if ctx.snap.exits:
-        out.log("Exit cities")
+        out.log("Jumps")
         exits.print_list(ctx)
     out.log("Clients")
     clients.print_clients(ctx, prefix="    ", numbered=False)
@@ -304,7 +304,7 @@ SUMMARY_FMT = "    {:<11} {}"
 
 def cmd_summary(ctx: Ctx, words: List[str]) -> None:
     """This server at a glance, one fact per line under its name: WARP,
-    tunnels, settings, route, firewall, watchdog, exit cities, clients.
+    tunnels, settings, route, firewall, watchdog, jumps, clients.
     Each line says what is wrong when something is (details: wgt status)."""
     ops.no_more_words(words, "wgt summary")
     if not ops.is_set_up(ctx):

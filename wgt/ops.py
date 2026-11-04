@@ -91,7 +91,7 @@ def is_set_up(ctx: Ctx) -> bool:
 
 
 def require_setup(ctx: Ctx) -> None:
-    """For commands that need only `wgt setup` to have run (exit cities): its
+    """For commands that need only `wgt setup` to have run (jumps): its
     settings are saved (after rollback no WARP setting is)."""
     if not is_set_up(ctx):
         raise WgtError("not set up; run 'wgt setup'")
@@ -134,7 +134,7 @@ def state_unset(ctx: Ctx, key: str) -> None:
 
 
 def default_out_if(ctx: Ctx, warp: Optional[str] = None) -> str:
-    """Where clients without an exit city leave: warp, or the public interface
+    """Where clients without a jump leave: warp, or the public interface
     with WARP off. <warp> ("on"/"off") asks about a mode other than the current one."""
     on = ctx.cfg.warp_on if warp is None else warp == "on"
     return ctx.cfg.WARP_IF if on else ctx.pub_if

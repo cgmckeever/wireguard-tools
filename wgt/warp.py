@@ -1,5 +1,5 @@
 """Cloudflare WARP: the wgcf tool, account registration and the WARP tunnel
-configs (warp.conf, and each exit city's wx-<code>.conf)."""
+configs (warp.conf, and each jump's wx-<code>.conf)."""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def _fetch(url: str, timeout: int) -> bytes:
 
 def register(ctx: Ctx, directory: Optional[str] = None, regenerate: bool = False) -> bool:
     """Register a WARP account and generate its WireGuard profile (once) in
-    <directory> (default the main one; each exit city has its own; with
+    <directory> (default the main one; each jump has its own; with
     <regenerate> the profile is made again from the same account). False if
     WARP refuses (setup can carry on without WARP)."""
     d = directory or ctx.paths.wgcf_dir
@@ -149,7 +149,7 @@ def _wgcf(ctx: Ctx, d: str, args: List[str], log: str, append: bool) -> bool:
 
 
 def render_profile(ctx: Ctx, profile_path: str, table: Optional[int] = None, mark: Optional[int] = None) -> str:
-    """warp.conf (or an exit city's wx-<code>.conf) from a wgcf profile."""
+    """warp.conf (or a jump's wx-<code>.conf) from a wgcf profile."""
     profile = store.read_text(profile_path)
     if profile is None:
         raise WgtError(f"missing {profile_path}")

@@ -108,7 +108,7 @@ def test_finalize_derives():
     ({"WG_SUBNET": "10.4.5.1/24"}, "not a network address (did you mean 10.4.5.0/24?)"),
     ({"WG_SUBNET": "10.4.5.0/31"}, "prefix must be /16 to /30"),
     ({"WG_MTU": "1500", "WARP_MTU": "1280"}, "must not exceed WARP_MTU"),
-    ({"RT_TABLE": "205"}, "reserved for exit cities"),
+    ({"RT_TABLE": "205"}, "reserved for jumps"),
     ({"WG_IF": "warp"}, "must differ"),
     ({"WG_SUBNET6": "fdaa::/48"}, "bad --subnet6"),
     ({"SERVER_NAME": "a.b"}, "server name must be"),

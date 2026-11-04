@@ -1,4 +1,4 @@
-"""PASS/FAIL results for `wgt test` and `wgt exit test`."""
+"""PASS/FAIL results for `wgt test` and `wgt jump test`."""
 
 from __future__ import annotations
 

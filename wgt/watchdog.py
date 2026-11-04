@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, List, Optional
 
-from . import exits as exit_cities
+from . import exits as jumps
 from . import live, ops
 from .const import EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
@@ -47,7 +47,7 @@ def warp(ctx: Ctx) -> None:
 
 
 def exits(ctx: Ctx) -> None:
-    """An exit city is up only while one of its clients has handshaked within
+    """A jump is up only while one of its clients has handshaked within
     EXIT_IDLE seconds: brought up when one does, taken down when none has. An
     up exit whose WARP has had no handshake for WATCHDOG_STALE seconds gets a
     new source port, then a restart. Skips the run while wireguard-tools is
@@ -61,13 +61,13 @@ def exits(ctx: Ctx) -> None:
         ops.release_lock(ctx)
 
 
-# What the exit watchdog does to one city on a run.
+# What the exit watchdog does to one jump on a run.
 UP, NEW_PORT, RESTART, DOWN = "up", "new port", "restart", "down"
 
 
 def decide(active: bool, px_up: bool, wx_up: bool, now: int, started_at: int, wx_last_hs: int,
            port_tried: bool) -> Optional[str]:
-    """The exit watchdog's rule for one city, from what it sees (None: leave it).
+    """The exit watchdog's rule for one jump, from what it sees (None: leave it).
 
     - In use but not fully up: bring it up.
     - In use, up for over WATCHDOG_STALE, and its WARP silent that long: first
@@ -83,7 +83,7 @@ def decide(active: bool, px_up: bool, wx_up: bool, now: int, started_at: int, wx
 
 
 def _held(ctx: Ctx, code: str, now: int) -> bool:
-    """`wgt exit add/test` is checking <code> (its hold file is under EXIT_HOLD old)."""
+    """`wgt jump add/test` is checking <code> (its hold file is under EXIT_HOLD old)."""
     try:
         return now - int(os.stat(ctx.paths.exit_hold(code)).st_mtime) < EXIT_HOLD
     except OSError:
@@ -91,15 +91,15 @@ def _held(ctx: Ctx, code: str, now: int) -> bool:
 
 
 def _exits(ctx: Ctx) -> None:
-    """One pass over the exit cities. Uses r.ok, not run: a timer job must get
-    through every city whatever fails, and logs what it did instead."""
+    """One pass over the jumps. Uses r.ok, not run: a timer job must get
+    through every jump whatever fails, and logs what it did instead."""
     r = ctx.runner
     now = int(ctx.clock())
     hs = live.handshakes(r, ctx.cfg.WG_IF)
     for e in ctx.snap.exits:
         if _held(ctx, e.code, now):
             continue
-        active = bool(exit_cities.active_clients(ctx.snap, e.code, hs, now))
+        active = bool(jumps.active_clients(ctx.snap, e.code, hs, now))
         px_up, wx_up = live.if_exists(r, e.px), live.if_exists(r, e.wx)
         started_marker, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
         wx_last_hs = live.newest_hs(r, e.wx) if active and px_up and wx_up else 0
@@ -124,7 +124,7 @@ def _exits(ctx: Ctx) -> None:
                 log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {stale} after a new port; restarted")
         elif action == DOWN:
             idle = f"no client handshake in the last {EXIT_IDLE}s"
-            if exit_cities.down(ctx, e, check=False):
+            if jumps.down(ctx, e, check=False):
                 log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {idle}; taken down")
             else:
                 log_event(ctx, EXIT_WATCHDOG, f"exit {e.code}: {idle}, but taking it down failed")

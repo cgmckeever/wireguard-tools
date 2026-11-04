@@ -25,19 +25,19 @@ MARKER = "# Managed by wireguard-tools"
 TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
 
 EXIT_TABLE_BASE = 200        # client table of exit idx: 200+idx
-EXIT_PTABLE_BASE = 230       # Proton table of exit idx: 230+idx
+EXIT_PTABLE_BASE = 230       # jump table of exit idx: 230+idx
 EXIT_MARK_BASE = 22272       # fwmark of exit idx: 0x5700+idx
 EXIT_MAX = 20
 EXIT_RULE_PRIO = 9500        # per-client rules: before the WARP rule (RULE_PRIO)
 EXIT_MARK_PRIO = 9400
 DIRECT_STOP_PRIO = 9501      # WARP-off host clients: blackhole after their main-table rule
-EXIT_PROTON_MTU = 1420
+JUMP_MTU = 1420
 EXIT_IDLE = 300              # seconds without a client handshake before an exit goes down
 
 LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes
 WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
-EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a city
+EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a jump
 WATCHDOG_STALE = 180         # seconds without a WARP handshake before it acts
 
 MIB = 1024 * 1024
@@ -138,11 +138,11 @@ class Paths:
         return os.path.join(directory or self.wgcf_dir, "wgcf-profile.conf")
 
     def exit_wgcf_dir(self, code: str) -> str:
-        """Exit city <code>'s own WARP account."""
+        """Jump <code>'s own WARP account."""
         return os.path.join(self.exit_dir, code)
 
-    def proton_conf(self, code: str) -> str:
-        """Exit city <code>'s Proton config as given (with its label comment)."""
+    def jump_source(self, code: str) -> str:
+        """Jump <code>'s jump config as given (with its label comment)."""
         return os.path.join(self.exit_dir, f"{code}.proton.conf")
 
     def px_conf(self, code: str) -> str:

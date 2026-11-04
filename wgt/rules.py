@@ -5,22 +5,22 @@ How it fits together (see README "How it works"):
 - WARP switch: RT_TABLE always holds "default dev warp" with a blackhole
   fallback; WARP on adds one policy rule per family, `from <subnet> lookup
   RT_TABLE`, WARP off removes it.
-- Exit city <code> with index n: client table 200+n (default dev wx-<code>,
-  blackhole fallback) chosen by one rule per client address; Proton table
-  230+n (default dev px-<code>, blackhole) chosen by the fwmark of the city's
-  WARP tunnel. All of it lives in wg0's hooks, so a city that is down blocks
+- Jump <code> with index n: client table 200+n (default dev wx-<code>,
+  blackhole fallback) chosen by one rule per client address; jump table
+  230+n (default dev px-<code>, blackhole) chosen by the fwmark of the jump's
+  WARP tunnel. All of it lives in wg0's hooks, so a jump that is down blocks
   its clients instead of leaking them.
 - WARP off for one client (clients.nowarp): its rule picks the plain way out
-  instead of a WARP of ours. A city client's rule points at the Proton table
-  (px, NATed like any way out); a client without a city gets `lookup main`
+  instead of a WARP of ours. A jump client's rule points at the jump table
+  (px, NATed like any way out); a client without a jump gets `lookup main`
   plus a blackhole rule behind it, so a missing main route (IPv6 on an
   IPv4-only server) stops there rather than falling through to WARP's rule.
 
-Per client, then, the way out is exit (host | city) x WARP (on | off):
+Per client, then, the way out is exit (host | jump) x WARP (on | off):
 
              WARP on                       WARP off
   host       RT_TABLE (the WARP switch)    main (this server's IP)
-  city       client table 200+n (wx)       Proton table 230+n (px)
+  jump       client table 200+n (wx)       jump table 230+n (px)
 
 Every line is idempotent, and "down" is the exact inverse of "up" in reverse
 order. The text matches the bash version byte for byte (wg0.conf embeds it)."""
@@ -51,18 +51,18 @@ def exit_wtable(e: Exit) -> int:
 
 
 def exit_ptable(e: Exit) -> int:
-    """The exit's Proton table: its WARP tunnel's packets, out through Proton (px)."""
+    """The exit's jump table: its WARP tunnel's packets, out through the jump (px)."""
     return EXIT_PTABLE_BASE + e.idx
 
 
 def exit_mark(e: Exit) -> int:
-    """The fwmark on the exit's WARP packets, which picks its Proton table."""
+    """The fwmark on the exit's WARP packets, which picks its jump table."""
     return EXIT_MARK_BASE + e.idx
 
 
 def out_ifs(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[str]:
-    """Every way out: WARP, the public interface, each exit city's WARP tunnel
-    and (for its WARP-off clients) its Proton tunnel."""
+    """Every way out: WARP, the public interface, each jump's WARP tunnel
+    and (for its WARP-off clients) its jump tunnel."""
     out = [cfg.WARP_IF, pub_if]
     for e in exits:
         out += exit_ifs(e)
@@ -70,12 +70,12 @@ def out_ifs(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[str]:
 
 
 def exit_ifs(e: Exit) -> List[str]:
-    """An exit city's ways out: its WARP tunnel, and its Proton tunnel (WARP-off clients)."""
+    """A jump's ways out: its WARP tunnel, and its jump tunnel (WARP-off clients)."""
     return [e.wx, e.px]
 
 
 def exit_ipt_rules(cfg: Config, e: Exit) -> List[IptRule]:
-    """An exit city's NAT/forwarding rules: through its WARP, and (IPv4) through Proton."""
+    """A jump's NAT/forwarding rules: through its WARP, and (IPv4) through the jump."""
     return ipt_rules_via(cfg, e.wx) + ipt_rules_via(cfg, e.px, v4_only=True)
 
 
@@ -105,7 +105,7 @@ def ipt_rules(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[IptRule]:
     can stay in place), plus the WireGuard port. Inserted (-I) so ufw/Docker
     DROP policies can't shadow them."""
     found: List[IptRule] = []
-    v4_only = {e.px for e in exits}   # Proton tunnels carry IPv4 only
+    v4_only = {e.px for e in exits}   # jump tunnels carry IPv4 only
     for cmd in ("iptables", "ip6tables"):
         if cmd == "ip6tables" and not cfg.ipv6:
             continue
@@ -160,7 +160,7 @@ def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool,
                      nowarp: Optional[bool] = None) -> List[str]:
     """Policy rules sending one client's addresses (ip, ip6) to its way out
     (client_table): added (<up>) or removed. A WARP-off client without a
-    city also gets a blackhole rule right behind, so it can't reach WARP's rule."""
+    jump also gets a blackhole rule right behind, so it can't reach WARP's rule."""
     table = client_table(snap, client, nowarp)
     if not table or not client.ip:
         return []
@@ -179,21 +179,21 @@ def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool,
 
 def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
     """One exit's part of wg0's PostUp (<up>) or PostDown: its tables with blackhole fallbacks, the
-    fwmark rule sending its WARP tunnel's packets through Proton, and its
+    fwmark rule sending its WARP tunnel's packets through the jump, and its
     clients' rules (its firewall rules come with ipt_rules)."""
-    client_table, proton_table, mark = exit_wtable(e), exit_ptable(e), exit_mark(e)
+    client_table, jump_table, mark = exit_wtable(e), exit_ptable(e), exit_mark(e)
     out: List[str] = []
     if up:
-        out.append(f"ip route replace default dev {e.px} table {proton_table} 2>/dev/null || true")
-        out.append(f"ip route replace blackhole default metric {BLACKHOLE_METRIC} table {proton_table}")
-        # WARP-off clients use the Proton table too: their replies to other
-        # clients stay on wg0, and IPv6 (Proton's tunnel carries IPv4 only) stops.
+        out.append(f"ip route replace default dev {e.px} table {jump_table} 2>/dev/null || true")
+        out.append(f"ip route replace blackhole default metric {BLACKHOLE_METRIC} table {jump_table}")
+        # WARP-off clients use the jump table too: their replies to other
+        # clients stay on wg0, and IPv6 (jump tunnels carry IPv4 only) stops.
         for fam in cfg.families():
-            out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {proton_table}")
+            out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {jump_table}")
             if fam == "ip -6":
-                out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {proton_table}")
-        out.append(f"while ip rule del fwmark {mark} lookup {proton_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
-                   f"do :; done; ip rule add fwmark {mark} lookup {proton_table} priority {EXIT_MARK_PRIO}")
+                out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {jump_table}")
+        out.append(f"while ip rule del fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
+                   f"do :; done; ip rule add fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO}")
         for fam in cfg.families():
             out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {client_table}")
             out.append(f"{fam} route replace default dev {e.wx} table {client_table} 2>/dev/null || true")
@@ -205,10 +205,10 @@ def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
             out += client_rule_cmds(cfg, snap, c, up=False)
         for fam in reversed(cfg.families()):
             out.append(f"{fam} route flush table {client_table} 2>/dev/null || true")
-        out.append(f"while ip rule del fwmark {mark} lookup {proton_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
+        out.append(f"while ip rule del fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
                    "do :; done")
         for fam in reversed(cfg.families()):
-            out.append(f"{fam} route flush table {proton_table} 2>/dev/null || true")
+            out.append(f"{fam} route flush table {jump_table} 2>/dev/null || true")
     return out
 
 

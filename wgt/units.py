@@ -59,7 +59,7 @@ def write_watchdog(ctx: Ctx) -> None:
 def write_exit_watchdog(ctx: Ctx) -> None:
     """The exit watchdog: every 10s, `wgt watchdog exits`."""
     svc = render.render_template("watchdog.service.tmpl",
-                                 WHAT="exit-city watchdog (exits up while their clients are active)",
+                                 WHAT="jump watchdog (exits up while their clients are active)",
                                  COMMAND=f"{wgt_command(ctx)} watchdog exits", TIMEOUT="30")
     timer = render.render_template("exit-watchdog.timer.tmpl")
     write_timer(ctx, EXIT_WATCHDOG,

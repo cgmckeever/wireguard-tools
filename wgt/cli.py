@@ -16,7 +16,7 @@ from .system import Out, Runner
 USAGE = """\
 Usage: wgt [options] <command> ...
 
-A WireGuard server whose clients exit through this server or an exit city,
+A WireGuard server whose clients exit through this server or a jump,
 with or without WARP: the server's switch (warp on|off), or per client.
 
   setup                      install or update everything
@@ -26,10 +26,10 @@ with or without WARP: the server's switch (warp on|off), or per client.
   warp [on|off]              where clients exit (live)
   backup [dir] | restore <archive> | rollback [--purge]
 
-  client list [--tsv] | add <name> [--exit host|<code>[,..]] [--warp on|off] [--allowed-ips ..]
+  client list [--tsv] | add <name> [--exit host|<jump>[,..]] [--warp on|off] [--allowed-ips ..]
          show <name> [--qr] | share <name> | rotate <name> [--allowed-ips ..] | rename <old> <new>
          warp <name> on|off | disable <name> | enable <name> | remove <name>   (no name: pick from a list)
-  exit   list | add <code> <file|-> [--label NAME] | remove [code] | test
+  jump   list | add <code> <wg.conf|-> [--label NAME] | remove [code] | test   (old name: exit)
 
 Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
   --force             setup: reinstall wgcf, regenerate the WARP profile, take over
@@ -56,8 +56,8 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
         pieces.append(("warp", render.render_warp_conf(ctx.cfg, profile, ctx.facts.has_ipv6, host.resolve4)))
     if target in ("all", "exits"):
         for e in ctx.snap.exits:
-            raw = store.read_text(ctx.paths.proton_conf(e.code)) or ""
-            pieces.append((f"px-{e.code}", render.render_proton_conf(raw, e)))
+            raw = store.read_text(ctx.paths.jump_source(e.code)) or ""
+            pieces.append((f"px-{e.code}", render.render_jump_conf(raw, e)))
             prof = store.read_text(ctx.paths.wgcf_profile(ctx.paths.exit_wgcf_dir(e.code))) or ""
             pieces.append((f"wx-{e.code}", render.render_warp_conf(
                 ctx.cfg, prof, ctx.facts.has_ipv6, host.resolve4, table=rules.exit_wtable(e), mark=rules.exit_mark(e))))
@@ -72,7 +72,7 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
 
 def cmd_log(ctx: Ctx, words: List[str]) -> None:
     """One time-ordered log: these tools' own steps, both watchdogs, and the
-    wg-quick units (wg0, warp, each exit city's tunnels). Like tail -f: the
+    wg-quick units (wg0, warp, each jump's tunnels). Like tail -f: the
     last [lines] (default 40), then new entries until Ctrl-C. With
     --no-follow, or when the output isn't a terminal, it prints and stops."""
     from .const import EXIT_WATCHDOG, WATCHDOG
@@ -103,7 +103,7 @@ COMMANDS = {
     "restore": ("backup", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
     "summary": ("checks", "cmd_summary"),
     "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
-    "client": ("clients", "cmd_client"), "exit": ("exits", "cmd_exit"),
+    "client": ("clients", "cmd_client"), "jump": ("exits", "cmd_exit"), "exit": ("exits", "cmd_exit"),
     "watchdog": ("watchdog", "cmd_watchdog"), "debug": ("cli", "cmd_debug"),
 }
 

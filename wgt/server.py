@@ -479,15 +479,15 @@ def cmd_warp(ctx: Ctx, words: List[str]) -> None:
 
 def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
     """Undo setup: stop everything, remove every rule, restore original files;
-    --purge also deletes keys, clients, WARP accounts and exit cities."""
+    --purge also deletes keys, clients, WARP accounts and jumps."""
     ops.no_more_words(words, "wgt rollback [--purge]")
     ops.take_lock(ctx)
     cfg = ctx.cfg
-    ctx.runner.step(f"Roll back: stop {cfg.WG_IF}, {cfg.WARP_IF} and exit cities, remove routing/NAT/firewall "
+    ctx.runner.step(f"Roll back: stop {cfg.WG_IF}, {cfg.WARP_IF} and jumps, remove routing/NAT/firewall "
                     "rules, restore original files", "wgt setup")
     if ctx.args.purge:
         ctx.out.warn("--purge also deletes the WARP accounts, server and client keys, client configs and "
-                     "exit cities (irreversible)")
+                     "jumps (irreversible)")
     ops.confirm(ctx, "Proceed with rollback?")
     # Read before anything below changes the state file.
     state = ctx.snap.state
@@ -507,7 +507,7 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
 
 
 def _stop_everything(ctx: Ctx) -> None:
-    """The watchdogs first (they'd bring things back), then exit cities, wg0, warp."""
+    """The watchdogs first (they'd bring things back), then jumps, wg0, warp."""
     r, cfg = ctx.runner, ctx.cfg
     timers = [f"{name}.timer" for name in (WATCHDOG, EXIT_WATCHDOG)
               if os.path.exists(ctx.paths.unit_file(f"{name}.timer"))]
@@ -581,5 +581,5 @@ def _keep(ctx: Ctx) -> None:
     if os.path.isdir(p.wgcf_dir):
         kept += f", WARP account ({p.wgcf_dir})"
     if ctx.snap.exits:
-        kept += f", exit cities ({p.exit_dir})"
+        kept += f", jumps ({p.exit_dir})"
     ctx.out.info(f"kept: {kept} (rollback --purge removes them)")

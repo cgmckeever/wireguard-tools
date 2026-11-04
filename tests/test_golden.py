@@ -51,7 +51,7 @@ def test_dropin(server):
 def test_exits(server):
     for e in server.snap.exits:
         raw = Path(server.paths.wg("exits", f"{e.code}.proton.conf")).read_text()
-        assert_golden(server.case, f"px-{e.code}.conf", render.render_proton_conf(raw, e))
+        assert_golden(server.case, f"px-{e.code}.conf", render.render_jump_conf(raw, e))
         profile = Path(server.paths.wg("exits", e.code, "wgcf-profile.conf")).read_text()
         wx = render.render_warp_conf(server.cfg, profile, has_ipv6=True, resolve4=lambda h: None,
                                      table=rules.exit_wtable(e), mark=rules.exit_mark(e))

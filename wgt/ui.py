@@ -94,7 +94,7 @@ class ClientRow(NamedTuple):
     seen: str          # "3m ago", "never", "disabled"
     traffic: str       # "rx/tx" MiB
     allowed: str       # "0.0.0.0/0, ::/0"
-    exit_label: str = ""   # the exit city's full name ("Paris, France")
+    exit_label: str = ""   # the jump's full name ("Paris, France")
 
     def tsv(self) -> str:
         return "\t".join(self)

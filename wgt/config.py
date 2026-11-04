@@ -107,7 +107,7 @@ class Config:
             raise WgtError(f"bad table (1-252): {v['RT_TABLE']}")
         table = int(v["RT_TABLE"])
         if EXIT_TABLE_BASE < table <= EXIT_PTABLE_BASE + EXIT_MAX:
-            raise WgtError(f"table {table} is reserved for exit cities "
+            raise WgtError(f"table {table} is reserved for jumps "
                            f"({EXIT_TABLE_BASE + 1}-{EXIT_PTABLE_BASE + EXIT_MAX})")
         subnet = v["WG_SUBNET"]
         if not _SUBNET4.fullmatch(subnet):

@@ -13,9 +13,9 @@ wgt/                      the package (Python 3.8+, standard library only)
   ctl.py                  wgt-ctl (ssh/scp to the servers)
   const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError
   config.py               settings: flag > env > saved > default, validation
-  store.py                the server files: state, clients.db, exits.db, disabled, backup record
+  store.py                the server files: state, clients.db, exits.db (jumps), disabled, nowarp, backup record
   net.py, host.py         address maths; host facts and preflight
-  rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP switch, exits)
+  rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP switch, jumps, per-client WARP)
   render.py               wg0.conf, warp.conf, px/wx, client configs, templates
   system.py               Runner (commands, dry-run, journal), FakeRunner, Files (writes with backups),
                           marker files
@@ -26,10 +26,10 @@ wgt/                      the package (Python 3.8+, standard library only)
   server.py               setup, warp on|off, rollback (setup's inverse)
   backup.py               backup, restore (archive checks)
   clients.py              client commands, the clients table (and QR, share)
-  exits.py                exit commands, bringing a city up/down, probing it
+  exits.py                `wgt jump` (alias `exit`): bringing a jump up/down, probing it
   checks.py               test, status, summary
-  results.py              PASS/FAIL counts shared by `test` and `exit test`
-  watchdog.py             both watchdogs (the exit watchdog's rule is the pure `decide`)
+  results.py              PASS/FAIL counts shared by `test` and `jump test`
+  watchdog.py             both watchdogs (the jump watchdog's rule is the pure `decide`)
   ui.py                   ages, prompts, numbered menus, the clients table's columns
 bin/wgt, bin/wgt-ctl      launchers (put the checkout on sys.path and call main)
 templates/                client config and systemd unit templates
@@ -38,6 +38,14 @@ tools/                    render-diff.sh (before a deploy), trial.sh (full cycle
                           server), golden-bash.sh (how the golden files were first made)
 test.sh, pyproject.toml   tests and lint (sets up .venv on first use); lint settings
 ```
+
+## Naming
+
+User-facing, a second hop is a **jump** (`wgt jump`, `--exit <code>`); the
+code still says exit (`exits.py`, `store.Exit`, `exits.db`), and files and
+interfaces keep their names (`exits/<code>.proton.conf`, `px-`/`wx-<code>`),
+so running servers need no migration. Nothing in the code is Proton-specific:
+any single-peer WireGuard config with an IPv4 address is a jump.
 
 ## Conventions
 

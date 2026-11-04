@@ -5,7 +5,7 @@ a name, a list number, or all; a few take no server (below).
 One server:
   wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
   wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to local/backups/SERVER/
-  wgt-ctl SERVER exit-add [n|all]       push a Proton config from local/exits/SERVER/ as an exit city
+  wgt-ctl SERVER jump-add [n|all]       push a WireGuard config from local/exits/SERVER/ as a jump
   wgt-ctl SERVER ssh [command] | branch <b>
   wgt-ctl SERVER forget [--yes]         drop it from local/servers (the server is untouched)
   wgt-ctl SERVER remove [--yes]         tear wireguard-tools off it (rollback --purge, delete its
@@ -22,8 +22,8 @@ No server:
                                         set up a new server (or adopt one already running these tools)
 
 Leave SERVER out of a server command to pick one from the list. Private
-files stay under local/ (untracked): servers, exits/<server>/*.conf (Proton
-configs, any name), exits/details.tsv (which file is which exit), backups/."""
+files stay under local/ (untracked): servers, exits/<server>/*.conf (jump
+WireGuard configs, any name), exits/details.tsv (which file is which exit), backups/."""
 
 from __future__ import annotations
 
@@ -52,7 +52,8 @@ SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "St
 RESERVED = ("init", "clients", "summary", "all", "help", "list")
 SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.join(RESERVED)})"
 # The wgt commands (anything else after a server word is a mistake, not a command).
-WGT_COMMANDS = ("setup", "warp", "summary", "status", "test", "log", "backup", "restore", "rollback", "client", "exit")
+WGT_COMMANDS = ("setup", "warp", "summary", "status", "test", "log", "backup", "restore", "rollback", "client",
+                "jump", "exit")
 _TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:\[\]-]+$")
 _DIR = re.compile(r"^/[A-Za-z0-9._/-]+$")
 _BRANCH = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
@@ -219,7 +220,7 @@ def cmd_init(argv: List[str]) -> None:
         raise WgtError(f"setup did not finish; fix the cause and re-run: wgt-ctl init --address {address} "
                        f"--name {name} --user {opts['--user']} --branch {opts['--branch']}")
     record(name, target)
-    out.info(f"next: wgt-ctl {name} client add <client>   (or add exit cities: wgt-ctl {name} exit-add)")
+    out.info(f"next: wgt-ctl {name} client add <client>   (or add jumps: wgt-ctl {name} jump-add)")
 
 
 def _parse_init(argv: List[str]) -> Tuple[Dict[str, str], List[str]]:
@@ -473,7 +474,7 @@ def needs_terminal(cmd: str) -> None:
 
 def do_remove(s: Server, args: List[str]) -> int:
     """Tear wireguard-tools off a server: rollback --purge (keys, clients,
-    WARP accounts, exit cities, rules, units; original files restored), then
+    WARP accounts, jumps, rules, units; original files restored), then
     its checkout, the wgt link, wgcf and the backup archives. Packages stay.
     Only after all that succeeds is it forgotten here. Asks for the server's
     name unless --yes."""
@@ -481,7 +482,7 @@ def do_remove(s: Server, args: List[str]) -> int:
     if s.dir.rstrip("/").count("/") < 2:
         raise WgtError(f"refusing to delete checkout '{s.dir}' (too close to /)")
     out.warn(f"this removes wireguard-tools from {s.name} ({s.target}): its keys, clients, WARP accounts, "
-             f"exit cities and backup archives, and {s.dir}. Its clients stop working. Irreversible "
+             f"jumps and backup archives, and {s.dir}. Its clients stop working. Irreversible "
              f"(want a copy first? wgt-ctl {s.name} backup)")
     if not sure:
         needs_terminal("remove")
@@ -516,7 +517,7 @@ def do_forget(s: Server, args: List[str]) -> int:
     return 0
 
 
-# --- exit cities from local files ---
+# --- jumps from local files ---
 
 def links() -> List[Tuple[str, str, str, str]]:
     """local/exits/details.tsv: (server, local file, code, full name) per named config."""
@@ -530,14 +531,14 @@ def link_of(server: str, file: str) -> Optional[Tuple[str, str]]:
 
 
 def make_link(server: str, path: str) -> Tuple[str, str]:
-    """First push of a local config: ask what it is and pick its code (city's
-    first 3 letters + Proton's country tag, e.g. par-fr). A code another of
+    """First push of a local config: ask what it is and pick its code (the name's
+    first 3 letters + a country tag like Proton's "FR#252", e.g. par-fr). A code another of
     this server's files already uses is refused."""
     file = os.path.basename(path)
-    hint = render.proton_hint(store.read_text(path) or "")
+    hint = render.peer_hint(store.read_text(path) or "")
     if not ui.have_tty():
-        raise WgtError(f"{file} isn't named yet; run exit-add in a terminal once to name it")
-    name = ui.ask(f"    What is {file} (Proton {hint or '?'})? e.g. Paris, France: ")
+        raise WgtError(f"{file} isn't named yet; run jump-add in a terminal once to name it")
+    name = ui.ask(f"    What is {file} ({hint or 'no hint'})? e.g. Paris, France: ")
     if not name:
         raise WgtError(f"no name for {file}")
     m = re.match(r"^([A-Za-z]{2})#", hint)
@@ -569,7 +570,7 @@ def with_local_file_comment(text: str, file: str) -> str:
 
 
 def add_one_exit(s: Server, path: str) -> None:
-    """Copy one local config to the server and add it there as its exit city;
+    """Copy one local config to the server and add it there as its jump;
     the uploaded copy is deleted once imported."""
     file = os.path.basename(path)
     os.chmod(path, 0o600)
@@ -596,13 +597,13 @@ def add_one_exit(s: Server, path: str) -> None:
 
 
 def local_exit_files(s: Server) -> List[str]:
-    """This server's staged Proton configs (local/exits/<server>/*.conf)."""
+    """This server's staged jump configs (local/exits/<server>/*.conf)."""
     src = os.path.join(LOCAL, "exits", s.name)
     return sorted(os.path.join(src, f) for f in os.listdir(src) if f.endswith(".conf")) if os.path.isdir(src) else []
 
 
 def remote_exit_codes(s: Server) -> List[str]:
-    """The exit city codes the server has (read from its exits.db directly, so
+    """The jump codes the server has (read from its exits.db directly, so
     it also works on a server that hasn't pulled a newer wgt yet)."""
     _, o = ssh(s.target, "awk '!/^#/ { print $1 }' /etc/wireguard/exits.db 2>/dev/null", batch=True, capture=True)
     return o.split()
@@ -651,12 +652,12 @@ def do_exit_add(s: Server, args: List[str]) -> int:
     src = os.path.join(LOCAL, "exits", s.name)
     files = local_exit_files(s)
     if not files:
-        raise WgtError(f"no configs in {src} (save Proton WireGuard configs there, any name ending .conf)")
+        raise WgtError(f"no configs in {src} (save WireGuard configs there, any name ending .conf)")
     os.chmod(src, 0o700)
     sel = args[0] if args else ""
     if not sel:
         if not ui.have_tty():
-            raise WgtError(f"no config given (and no terminal to pick one): wgt-ctl {s.name} exit-add <n|all>")
+            raise WgtError(f"no config given (and no terminal to pick one): wgt-ctl {s.name} jump-add <n|all>")
         print_exit_files(s, files, remote_exit_codes(s))
         sel = ui.ask("  Add which? [number or all]: ")
     if not sel:
@@ -673,8 +674,8 @@ def do_exit_add(s: Server, args: List[str]) -> int:
     return do_wgt(s, ["exit", "list"])
 
 
-CTL = {"pull": do_pull, "backup": do_backup, "exit-add": do_exit_add, "ssh": do_ssh, "branch": do_branch,
-       "forget": do_forget, "remove": do_remove}
+CTL = {"pull": do_pull, "backup": do_backup, "jump-add": do_exit_add, "exit-add": do_exit_add, "ssh": do_ssh,
+       "branch": do_branch, "forget": do_forget, "remove": do_remove}
 ALL_OK = ("pull", "backup", "branch")   # ctl commands that take "all" (every wgt command does)
 
 
