@@ -65,7 +65,7 @@ def print_list(ctx: Ctx) -> None:
     if not ctx.snap.exits:
         out.info("no jumps (add one: wgt jump add <code> <wg.conf>)")
         return
-    fmt = "{:<7} {:<22} {:<18} {:<8} {}"
+    fmt = "{:<7} {:<22} {:<24} {:<8} {}"
     out.info(fmt.format("CODE", "NAME", "STATE", "CLIENTS", "ENDPOINT"))
     for e in ctx.snap.exits:
         n = len(ctx.snap.exit_clients(e.code))
