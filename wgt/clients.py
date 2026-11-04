@@ -73,7 +73,7 @@ def pick_client(ctx: Ctx, verb: str) -> str:
 
 
 def pick_exits(ctx: Ctx, name: str) -> List[str]:
-    """Ask which exit(s) a new client gets: codes, "host" (this server) being the default."""
+    """Ask which exit(s) a new client gets: codes, "host" (the WireGuard server itself) being the default."""
     codes = [e.code for e in ctx.snap.exits]
     items = [f"{'host':<6} {ctx.cfg.SERVER_NAME} itself (default)"]
     items += [f"{e.code:<6} {e.label}" for e in ctx.snap.exits]
@@ -275,8 +275,8 @@ def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str
 
 def cmd_add(ctx: Ctx, words: List[str]) -> None:
     """add <name> [--exit host|<code>[,...]] [--warp on|off]: one client per
-    exit (host = this server, the default), named <name> and <code>.<name>;
-    asks when jumps exist. --warp off: they leave without our WARP."""
+    exit given (host = the WireGuard server itself, the default), named
+    <name> and <code>.<name>; asks when jumps exist. --warp off: they leave without our WARP."""
     usage = "wgt client add <name> [--exit host|<jump>[,...]] [--warp on|off]"
     if not words:
         raise WgtError(f"usage: {usage}")

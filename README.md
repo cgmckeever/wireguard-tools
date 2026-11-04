@@ -14,17 +14,18 @@ in another city (Proton VPN works well) or a second server of your own.
 
 Each client picks two things:
 
-- **exit**: `host` (this server, the default) or a jump (`--exit par-fr`);
+- **exit**: `host` (the WireGuard server itself, the default) or a jump
+  (`--exit par-fr`);
 - **WARP**: `on` (the default: Cloudflare WARP on top) or `off`.
 
 | | WARP on | WARP off |
 |---|---|---|
-| **host** | a Cloudflare IP near this server | this server's IP: a plain, fast WireGuard VPN |
+| **host** | a Cloudflare IP near the WireGuard server | the WireGuard server's IP: a plain, fast VPN |
 | **jump** | a Cloudflare IP near the jump (sites see Paris, say) | the jump's IP |
 
 ```bash
 wgt client add phone                                 # host, WARP on
-wgt client add laptop --exit host,par-fr             # two tunnels: host and the par-fr jump
+wgt client add laptop --exit host,par-fr             # two clients: laptop (host) and par-fr.laptop (jump)
 wgt client add mac --exit par-fr --warp off          # the jump's IP (or bring your own WARP, below)
 wgt client warp par-fr.mac on                        # switch later, live
 ```
@@ -321,7 +322,7 @@ Flags for one run (not saved), for setup and other commands:
 | `--new-server-keys` | `setup` | a new server keypair: every client stops working until rotated (`wgt client rotate`) |
 | `--purge` | `rollback` | also delete keys, clients, the WARP accounts and jumps |
 | `--qr` / `--no-qr` | `wgt client add`, `rotate`, `show` | force or skip the QR code |
-| `--exit host\|<jump>[,…]` | `wgt client add` | the client's exit(s): `host` (this server; `warp` is the old spelling) or jump codes |
+| `--exit host\|<jump>[,…]` | `wgt client add` | the client's exit: `host` (the WireGuard server; `warp` is the old spelling) or a jump code; a comma list makes one client per exit |
 | `--warp on\|off` | `wgt client add` | `off`: no WARP of ours for the new client(s) |
 | `--label "<name>"` | `wgt jump add` | the jump's full name, e.g. `"Paris, France"` |
 | `--no-follow` | `wgt log` | print the last lines and stop (also when piped) |
@@ -481,15 +482,16 @@ Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 
 A client has an exit (`host` or a jump) and WARP on or off (see the table in
 [Overview](#overview)). A jump client is named `<code>.<name>`. `add` asks
-which exit(s) when jumps exist, or take them with `--exit`; `host` there means
-this server (WARP, or the server's IP while `wgt warp` is off). Through
+which exit(s) when jumps exist, or take them with `--exit`. `host` means the
+WireGuard server itself; a comma list (`--exit host,par-fr`) makes one client
+per exit, so a device can have a tunnel for each and pick one. Through
 `wgt-ctl`, `add` first offers to push jump configs you've staged in
 `local/exits/<server>/` but not yet added, so they show up in that menu:
 
 ```bash
-wgt client add laptop --exit host,par-fr          # laptop (this server) and par-fr.laptop
+wgt client add laptop --exit host,par-fr          # two clients: laptop (host) and par-fr.laptop (jump)
 wgt client add par-fr.tablet
-wgt client add mac --exit host,par-fr --warp off  # both without our WARP (e.g. the Mac runs its own)
+wgt client add mac --exit host,par-fr --warp off  # same pair, both with WARP off (e.g. the Mac runs its own)
 wgt client warp par-fr.tablet off                 # switch one client, live
 ```
 

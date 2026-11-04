@@ -16,7 +16,7 @@ from .system import Out, Runner
 USAGE = """\
 Usage: wgt [options] <command> ...
 
-A WireGuard server whose clients exit through this server or a jump,
+A WireGuard server whose clients exit from the server itself (host) or a jump,
 with or without WARP: the server's switch (warp on|off), or per client.
 
   setup                      install or update everything
