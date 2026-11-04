@@ -17,7 +17,7 @@ Each device picks where its traffic comes out, and whether through WARP:
 | | without WARP | through WARP |
 |---|---|---|
 | **this server** | the server's IP: a plain, fast VPN | a Cloudflare IP near the server |
-| **a jump** | the jump's IP | a Cloudflare IP near the jump (Paris, say) |
+| **a jump** | the jump's IP | a Cloudflare IP near the jump (such as Paris) |
 
 A device gets a tunnel for each combination you give it and switches between
 them in its WireGuard app; nothing is switched on the server (see
@@ -43,7 +43,7 @@ Cloudflare's network instead:
   jump, to the jump), not which sites your clients visit.
 - **IPv6 for clients even on an IPv4-only VPS**, through WARP's own IPv6.
 - **You pick the location.** WARP exits near where it's entered: this server,
-  or a [jump](#jumps) in another city (sites see Paris, say), still looking
+  or a [jump](#jumps) in another city (sites see somewhere such as Paris), still looking
   like an ordinary Cloudflare user rather than a VPN.
 - **Fail closed:** if WARP or a jump goes down, its clients are blocked rather
   than quietly falling back to the VPS's IP.
