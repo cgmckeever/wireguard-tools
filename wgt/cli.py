@@ -23,13 +23,14 @@ with or without WARP: the server's switch (warp on|off), or per client.
   summary | status | test    at a glance / everything running / all checks
   log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops;
                              --no-follow, or piped: print and stop)
-  warp [on|off]              server-wide WARP default (live; per client: client warp)
+  warp [on|off]              server-wide WARP default (live; per config: client warp)
   backup [dir] | restore <archive> | rollback [--purge]
 
   client list [--tsv] | add <name> [--exit host|<jump>[,..]] [--warp on|off] [--allowed-ips ..]
          show <name> [--qr] | share <name> | rotate <name> [--allowed-ips ..] | rename <old> <new>
          warp <name> on|off | disable <name> | enable <name> | remove <name>
-         (rotate, remove, disable, enable, show, share: no name picks from a list)
+         (add: one config per --exit, named <name> or <jump>.<name>; the rest take a config name;
+          rotate, remove, disable, enable, show, share: no name picks from a list)
   jump   list | add <code> <wg.conf|-> [--label NAME] | remove [code] | test   (old name: exit)
 
 Options: --dry-run, --yes/-y, --purge, --qr/--no-qr

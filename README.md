@@ -12,11 +12,17 @@ free VPN service; the server connects to it as one WARP "device"), and through
 a **jump**: another WireGuard server you add, such as a VPN provider's server
 in another city (Proton VPN works well) or a second server of your own.
 
-Each client picks two things:
+A **client** is a device (your laptop, say). It gets one **tunnel config** per
+exit you give it, and each config picks two things:
 
 - **exit**: `host` (the WireGuard server itself, the default) or a jump
   (`--exit par-fr`);
 - **WARP**: `on` (the default: Cloudflare WARP on top) or `off`.
+
+A config is named after the client, with the jump's code in front for a jump:
+`laptop` exits from the host, `par-fr.laptop` through the `par-fr` jump. The
+device imports its configs and turns on one at a time; `wgt client` commands
+take a config name.
 
 | | WARP on | WARP off |
 |---|---|---|
@@ -25,17 +31,17 @@ Each client picks two things:
 
 ```bash
 wgt client add phone                                 # host, WARP on
-wgt client add laptop --exit host,par-fr             # two clients: laptop (host) and par-fr.laptop (jump)
+wgt client add laptop --exit host,par-fr             # one client, two configs: laptop and par-fr.laptop
 wgt client add mac --exit par-fr --warp off          # the jump's IP (or bring your own WARP, below)
 wgt client warp par-fr.mac on                        # switch later, live
 ```
 
 `wgt warp on|off` is the server-wide switch for WARP (on by default); a
-client's `--warp off` overrides it for that client. Switching either is live:
+config's `--warp off` overrides it for that config. Switching either is live:
 clients stay connected, only where their traffic exits changes.
 
-**Bring your own WARP.** A WARP-off client can run WARP itself, inside its
-tunnel to this server (for a Mac:
+**Bring your own WARP.** A device on a WARP-off config can run WARP itself,
+inside its tunnel to this server (for a Mac:
 [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels)' warped
 tunnels). Sites still see a Cloudflare IP near the server or jump, but the
 WARP account is the device's own and this server only carries encrypted WARP.
@@ -102,7 +108,7 @@ There are two:
 Both are safe to re-run, back up every file they change, take `--dry-run` for
 anything that changes a server (with `wgt-ctl`, pass it to the `wgt` command:
 `wgt-ctl boba setup --dry-run`),
-and never print private keys except inside a client's QR code (shown by
+and never print private keys except inside a config's QR code (shown by
 `client add` and `rotate`, or `client show --qr`). They're Python 3.8+ with
 only the standard library, so a server needs nothing extra.
 
@@ -142,10 +148,10 @@ port (`wg set warp listen-port 0`, no restart) and logs it
 
 **Jumps.** Each jump `<code>` (e.g. `par-fr`) has two tunnels: `px-<code>`,
 to the jump's WireGuard server, and `wx-<code>`, its own WARP tunnel running
-inside it. Each jump has an index *n* (in `exits.db`). Its client table
+inside it. Each jump has an index *n* (in `exits.db`). Its WARP table
 `200+n` holds a default route through `wx-<code>` and a blackhole fallback;
-one rule per client address (`from 10.4.5.7 lookup 201`, priority 9500, ahead
-of the WARP rule) sends that client there. The jump's WARP tunnel marks its
+one rule per config address (`from 10.4.5.7 lookup 201`, priority 9500, ahead
+of the WARP rule) sends that config's traffic there. The jump's WARP tunnel marks its
 own packets (fwmark `0x5700+n`), and a rule sends marked packets to table
 `230+n`: a default route through the jump tunnel `px-<code>`, again with a
 blackhole fallback, so the jump's WARP can never connect from the server's own
@@ -154,9 +160,9 @@ watchdog (`wg-tools-exit-watchdog.timer`, every 10s) starts and stops them.
 The tables, rules and blackholes live in `wg0.conf` like everything else, so
 they're there even while a jump is down.
 
-**WARP off for one client.** Clients listed in `clients.nowarp` skip our WARP.
-A jump client's rule points at the jump table `230+n` instead (NATed out
-`px-<code>`; IPv4 only, its IPv6 is blackholed). A client without a jump gets
+**WARP off for one config.** Configs listed in `clients.nowarp` skip our WARP.
+A jump config's rule points at the jump table `230+n` instead (NATed out
+`px-<code>`; IPv4 only, its IPv6 is blackholed). A host config gets
 `from <address> lookup main` (this server's own routes) plus a blackhole rule
 right behind it (priority 9501), so if the server has no route (IPv6 on an
 IPv4-only server) the traffic stops there instead of falling through to the
@@ -172,7 +178,7 @@ WARP rule.
 exactly what `PostUp` did. Forward rules are inserted at the top so ufw/Docker
 can't block them, and TCP MSS is clamped to avoid MTU stalls.
 
-**IPv6.** Each client also gets an IPv6 address in a private `fd…::/64`
+**IPv6.** Each config also gets an IPv6 address in a private `fd…::/64`
 (picked at random once at setup and saved; `--subnet6` sets your own), with the
 same host number as its IPv4 address (`10.4.5.5` → `fd…::5`). Its IPv6 is
 NATed out the same way as IPv4: with WARP on through WARP's own IPv6, which
@@ -182,7 +188,7 @@ fallback; with WARP off out the public interface, if the server has IPv6
 `AllowedIPs` include `::/0` either way, so their IPv6 can't bypass the tunnel.
 Turning IPv6 on for an existing server (`wgt setup --subnet6 <cidr>`, or a
 plain re-run if it was off only because the kernel had IPv6 disabled) adds the
-address to every client config; re-send them. `--subnet6 off` disables it.
+address to every config; re-send them. `--subnet6 off` disables it.
 
 ### Files
 
@@ -192,11 +198,11 @@ address to every client config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/warp.conf` | WARP tunnel |
 | `/etc/wireguard/wgcf/` | WARP account and profile |
 | `/etc/wireguard/server.key`, `server.pub` | server keypair |
-| `/etc/wireguard/clients.db` | `name address public-key allowed-ips`, no private keys |
-| `/etc/wireguard/clients.disabled` | names of disabled clients |
-| `/etc/wireguard/clients.nowarp` | names of clients with WARP off |
-| `/etc/wireguard/psk/<name>.psk` | per-client preshared keys |
-| `/etc/wireguard/clients/<server>.<name>.conf` | client configs (the only copy of each client's private key) |
+| `/etc/wireguard/clients.db` | one line per config: `name address public-key allowed-ips`, no private keys |
+| `/etc/wireguard/clients.disabled` | names of disabled configs |
+| `/etc/wireguard/clients.nowarp` | names of configs with WARP off |
+| `/etc/wireguard/psk/<name>.psk` | per-config preshared keys |
+| `/etc/wireguard/clients/<server>.<name>.conf` | tunnel configs (the only copy of each one's private key) |
 | `/etc/wireguard/wg-tools.state` | saved settings (including `WARP=on|off`), recorded default route |
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1`, plus IPv6 forwarding (and `accept_ra = 2` on the public interface) when IPv6 is on |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
@@ -295,11 +301,11 @@ also be set as an environment variable (flag > env > saved > default).
 
 | Flag | Env | Default | What it sets |
 |------|-----|---------|--------------|
-| `--name <name>` | `SERVER_NAME` | short hostname | server name; client configs are `<name>.<client>.conf` |
+| `--name <name>` | `SERVER_NAME` | short hostname | server name; tunnel configs are `<name>.<config>.conf` |
 | `--port <port>` | `WG_PORT` | `51820` | UDP port clients connect to |
-| `--endpoint <host-or-ip>` | `ENDPOINT` | detected public IPv4 | address written into client configs (a hostname lets you move servers without re-sending configs) |
+| `--endpoint <host-or-ip>` | `ENDPOINT` | detected public IPv4 | address written into tunnel configs (a hostname lets you move servers without re-sending configs) |
 | `--dns <ip>` | `WG_DNS` | `1.1.1.1` | DNS server given to clients |
-| `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new clients (per client on `add`/`rotate`); `"10.4.5.0/24, fd…::/64"` (your subnets) for VPN-network only |
+| `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new configs (per config on `add`/`rotate`); `"10.4.5.0/24, fd…::/64"` (your subnets) for VPN-network only |
 | `--subnet <cidr>` | `WG_SUBNET` | random `10.<1-10>.<1-10>.0/24` | clients' IPv4 network (server is `.1`); first setup asks, Enter takes the random one |
 | `--subnet6 <cidr>` | `WG_SUBNET6` | random `fd…::/64` | clients' IPv6 network; `off` disables client IPv6 |
 | `--mtu <bytes>` | `WG_MTU` | `1280` | tunnel MTU for server and clients (1280 minimum, at most `--warp-mtu`) |
@@ -322,8 +328,8 @@ Flags for one run (not saved), for setup and other commands:
 | `--new-server-keys` | `setup` | a new server keypair: every client stops working until rotated (`wgt client rotate`) |
 | `--purge` | `rollback` | also delete keys, clients, the WARP accounts and jumps |
 | `--qr` / `--no-qr` | `wgt client add`, `rotate`, `show` | force or skip the QR code |
-| `--exit host\|<jump>[,…]` | `wgt client add` | the client's exit: `host` (the WireGuard server; `warp` is the old spelling) or a jump code; a comma list makes one client per exit |
-| `--warp on\|off` | `wgt client add` | `off`: no WARP of ours for the new client(s) |
+| `--exit host\|<jump>[,…]` | `wgt client add` | the exit: `host` (the WireGuard server; `warp` is the old spelling) or a jump code; a comma list makes one config per exit |
+| `--warp on\|off` | `wgt client add` | `off`: no WARP of ours for the new config(s) |
 | `--label "<name>"` | `wgt jump add` | the jump's full name, e.g. `"Paris, France"` |
 | `--no-follow` | `wgt log` | print the last lines and stop (also when piped) |
 
@@ -370,14 +376,14 @@ outage blocks clients rather than letting them leak out through the VPS's own
 IP. With it off, clients' IPv6 goes out the server's own IPv6; a server
 without public IPv6 gives clients IPv4 only while WARP is off.
 
-This is the server-wide default; a client can have WARP off regardless (see
-[Choosing a client's exit](#choosing-a-clients-exit)).
+This is the server-wide default; a config can have WARP off regardless (see
+[Choosing exits](#choosing-exits)).
 
 ### Jumps
 
 A jump is another WireGuard server that clients can leave through instead of
 this one: a VPN provider's server in a city you pick, or a server of your own.
-With WARP on, the client's traffic goes into a WARP tunnel that itself runs
+With WARP on, the device's traffic goes into a WARP tunnel that itself runs
 inside the jump tunnel, so Cloudflare places it near the jump: sites see a
 Cloudflare IP there (fewer CAPTCHAs and blocks than a VPN's own IPs), and the
 jump sees only encrypted WARP traffic. With WARP off, sites see the jump's IP.
@@ -387,8 +393,9 @@ WARP on:  phone -> wg0 (this server) -> wx-par-fr (WARP) -> inside px-par-fr (ju
 WARP off: phone -> wg0 (this server) -> px-par-fr (jump, Paris) -> sites
 ```
 
-Any WireGuard client config with one peer and an IPv4 address works. Each
-config is one key: use it on one of *your* servers only.
+Any WireGuard config with one peer and an IPv4 address works (it's the
+jump's client config: this server connects to the jump as a client). Each is
+one key: use it on one of *your* servers only.
 
 **Proton VPN** is a good source of jumps in many cities. At
 account.protonvpn.com: Downloads -> WireGuard configuration; platform Linux;
@@ -422,22 +429,22 @@ Cloudflare's data centre: CDG is Paris). Adding the same code again replaces
 its config.
 
 ```bash
-wgt jump list              # jumps: state (up, up without WARP, idle), clients, endpoint
+wgt jump list              # jumps: state (up, up without WARP, idle), configs, endpoint
 wgt jump test              # bring each one up and check it
-wgt jump remove par-fr     # refused while clients use it
+wgt jump remove par-fr     # refused while configs use it
 ```
 
-**On demand.** A jump is only up while one of its clients is connected: the
-jump watchdog (every 10s) brings it up when a client handshakes and takes it
+**On demand.** A jump is only up while one of its configs is connected: the
+jump watchdog (every 10s) brings it up when one handshakes and takes it
 down after 5 minutes with none, so an idle jump holds no connection. A device
 switching to a jump's tunnel waits about 10-15 seconds the first time. While a
-jump is down, or broken, its clients are blocked, never sent out another way.
-The jump's WARP is only started when a WARP-on client needs it. A jump tunnel that
+jump is down, or broken, its configs are blocked, never sent out another way.
+The jump's WARP is only started when a WARP-on config needs it. A jump tunnel that
 stops handshaking is restarted; a WARP inside it that does gets a new source
 port, then a restart of the WARP alone.
 
-Clients choose their exit when they're added: see
-[Choosing a client's exit](#choosing-a-clients-exit).
+Configs get their exit when they're added: see
+[Choosing exits](#choosing-exits).
 
 ### Manage clients
 
@@ -452,57 +459,57 @@ wgt client rotate laptop                         # new keys, same address; old c
 wgt client disable laptop                        # cut it off now; keys, config and address kept
 wgt client enable laptop                         # let it back in with the same config
 wgt client rename laptop work-laptop             # same keys and address; its config keeps working
-wgt client warp laptop off                       # this client skips WARP (on: back through it)
+wgt client warp laptop off                       # this config skips WARP (on: back through it)
 wgt client remove laptop
 ```
 
-Leave out the name on `rotate`, `remove`, `disable`, `enable`, `show` or
-`share` to pick from a numbered list (`wgt client` alone is `list`). Changes apply live; other clients stay
-connected.
+Each command takes a config name (`laptop`, `par-fr.laptop`). Leave it out on
+`rotate`, `remove`, `disable`, `enable`, `show` or `share` to pick from a
+numbered list (`wgt client` alone is `list`). Changes apply live; other configs
+stay connected.
 
-In a terminal, `list` then asks for a client number and shows its actions as a
+In a terminal, `list` then asks for a config number and shows its actions as a
 numbered menu (show, QR, share, rotate, disable/enable, warp on/off, rename,
 remove). It runs
 the one you choose and exits; Enter at either prompt exits without doing
 anything. With `--yes`
 or when piped, `list` only prints the table.
 
-`disable` removes the client's peer from the running `wg0` and leaves it out of
+`disable` removes the config's peer from the running `wg0` and leaves it out of
 `wg0.conf`, so it stays off across restarts; `list` shows it as `disabled`.
 Nothing on the device changes: its tunnel just gets no handshake (with a
 full-tunnel config, no internet until its tunnel is switched off). `enable`
-puts it back; the same config works, nothing to re-send. Disabled clients are
+puts it back; the same config works, nothing to re-send. Disabled configs are
 listed in `/etc/wireguard/clients.disabled`.
 
-Each client gets its own keypair, a preshared key and the next free address.
+Each config gets its own keypair, a preshared key and the next free address.
 Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 `dengar.laptop.conf`), so configs from different servers don't collide.
 
-#### Choosing a client's exit
+#### Choosing exits
 
-A client has an exit (`host` or a jump) and WARP on or off (see the table in
-[Overview](#overview)). A jump client is named `<code>.<name>`. `add` asks
+Each config has an exit (`host` or a jump) and WARP on or off (see the table
+in [Overview](#overview)). A jump config is named `<code>.<name>`. `add` asks
 which exit(s) when jumps exist, or take them with `--exit`. `host` means the
-WireGuard server itself; a comma list (`--exit host,par-fr`) makes one client
-per exit, so a device can have a tunnel for each and pick one. Through
+WireGuard server itself; a comma list (`--exit host,par-fr`) gives the client
+one config per exit, and the device picks one at a time. Through
 `wgt-ctl`, `add` first offers to push jump configs you've staged in
 `local/exits/<server>/` but not yet added, so they show up in that menu:
 
 ```bash
-wgt client add laptop --exit host,par-fr          # two clients: laptop (host) and par-fr.laptop (jump)
-wgt client add par-fr.tablet
+wgt client add laptop --exit host,par-fr          # one client, two configs: laptop and par-fr.laptop
+wgt client add par-fr.tablet                      # one config, through par-fr
 wgt client add mac --exit host,par-fr --warp off  # same pair, both with WARP off (e.g. the Mac runs its own)
-wgt client warp par-fr.tablet off                 # switch one client, live
+wgt client warp par-fr.tablet off                 # switch one config, live
 ```
 
-Each is a separate client with its own key, address and config
+Each config is its own WireGuard peer with its own key and address
 (`dengar.par-fr.laptop.conf`, whose `# exit:` line names the jump and WARP).
 Import both on the device and switch exits by switching tunnels in the
-WireGuard app. `warp on|off` and `rename` keep the client's keys, so its
-config keeps working. `list`, `status` and `wgt-ctl clients` show each
-client's exit: `warp` or `direct` for host, the jump's name for a jump
-(`Paris, France (direct)` with WARP off; `--tsv` gives the code, e.g.
-`par-fr/direct`). The
+WireGuard app. `warp on|off` and `rename` keep the config's keys, so it keeps
+working. `list`, `status` and `wgt-ctl clients` show each config's exit:
+`warp` or `direct` for host, the jump's name for a jump (`Paris, France
+(direct)` with WARP off; `--tsv` gives the code, e.g. `par-fr/direct`). The
 Android app only takes tunnel names up to 15 characters, so rename longer ones
 when importing there (`add` reminds you).
 
@@ -524,8 +531,8 @@ In iTerm2 or WezTerm the QR code is drawn as an inline image 32 columns wide
 (set `QR_WIDTH`, e.g. `QR_WIDTH=24`; `QR_WIDTH=0` for the text version, which
 other terminals and tmux always get). The image is streamed, never written to disk.
 
-Both the QR code and the wormhole transfer carry the client's private key:
-send them only to that client's owner.
+Both the QR code and the wormhole transfer carry the config's private key:
+send them only to that device's owner.
 
 ### Check, back up, restore, clean up
 
@@ -545,10 +552,10 @@ wgt rollback --purge  # ...and delete keys, clients, WARP accounts and jumps
 default route never changed, `wg0` is listening, forwarding is on, the WARP
 rule is there exactly once (WARP on) or absent (off), every NAT/firewall rule
 exists exactly once, the services start at boot in the right order, the WARP
-watchdog timer is running, the `main` and blackhole rules of clients with
-WARP off and no jump, and whether any client has connected. With WARP off,
+watchdog timer is running, the `main` and blackhole rules of host configs
+with WARP off, and whether any config has connected. With WARP off,
 WARP problems are warnings. For each jump: its routing (blackhole fallbacks,
-one rule per client address, to the right table for its WARP setting), the
+one rule per config address, to the right table for its WARP setting), the
 jump watchdog, and, if it's up, its handshakes and a WARP trace through it
 (only the jump tunnel's handshake while it runs without WARP).
 
@@ -572,7 +579,7 @@ doesn't need to register again) and the jumps, then runs setup. It won't overwri
 server that's already set up (`rollback` or `rollback --purge` first).
 
 The new server records its own default route and public interface, and an IP
-endpoint is re-detected. If the address changed, every client config's
+endpoint is re-detected. If the address changed, every config's
 `Endpoint` is updated and the clients to re-send are listed (`wgt client
 share` or `show --qr`); their keys don't change. This also happens whenever a
 re-run changes `--endpoint` or `--port`. An endpoint set as a hostname
@@ -648,7 +655,7 @@ wgt-ctl all backup
 ```bash
 wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump configs staged
 wgt-ctl summary                        # every server at a glance (wgt summary on each, side by side)
-wgt-ctl clients                        # every client on every server: exit, last seen, traffic
+wgt-ctl clients                        # every config on every server: exit, last seen, traffic
 wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
 wgt-ctl init --address 1.2.3.4 --name lando --user root --branch main -- --port 51821
 ```
@@ -710,7 +717,7 @@ configs are rendered.
   (no handshake), the provider is blocking WARP's traffic: `wgt warp off`.
 - **Some sites hang with WARP on:** MTU is already 1280 (the lowest allowed)
   and TCP MSS is clamped; try `wgt warp off` to see if it's WARP's path.
-- **A jump's clients have no internet:** `wgt jump test` says which layer
+- **No internet through a jump:** `wgt jump test` says which layer
   fails. No jump handshake usually means the server was retired or the key
   revoked (Proton does both): get a new config and add it again (same code).
   `wgt log` shows the watchdog bringing jumps up and down.
