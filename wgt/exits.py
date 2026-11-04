@@ -38,6 +38,21 @@ def active_clients(snap: store.Snapshot, code: str, handshakes: Dict[str, int], 
             if not snap.is_disabled(c.name) and handshakes.get(c.pub, 0) > 0 and now - handshakes[c.pub] <= EXIT_IDLE]
 
 
+def state(ctx: Ctx, e: store.Exit) -> str:
+    """up (both tunnels), "up, no WARP" (the jump tunnel alone: only WARP-off
+    clients active), or idle."""
+    px, wx = live.if_exists(ctx.runner, e.px), live.if_exists(ctx.runner, e.wx)
+    if px and wx:
+        return "up"
+    return "up, no WARP" if px else "idle"
+
+
+def needs_wx(ctx: Ctx, e: store.Exit) -> bool:
+    """An active client of <e> has WARP on (so the jump's WARP must run)."""
+    hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
+    return any(not ctx.snap.warp_off(c.name) for c in active_clients(ctx.snap, e.code, hs, ctx.clock()))
+
+
 def active_count(ctx: Ctx, code: str) -> int:
     """How many of <code>'s clients are active right now."""
     return len(active_clients(ctx.snap, code, live.handshakes(ctx.runner, ctx.cfg.WG_IF), ctx.clock()))
@@ -54,9 +69,10 @@ def print_list(ctx: Ctx) -> None:
     out.info(fmt.format("CODE", "NAME", "STATE", "CLIENTS", "ENDPOINT"))
     for e in ctx.snap.exits:
         n = len(ctx.snap.exit_clients(e.code))
-        state = f"up ({active_count(ctx, e.code)} active)" if is_up(ctx, e) else "idle"
+        st = state(ctx, e)
+        st = f"{st} ({active_count(ctx, e.code)} active)" if st != "idle" else st
         ep = render.profile_endpoint(store.read_text(ctx.paths.px_conf(e.code)) or "")
-        out.info(fmt.format(e.code, e.label, state, n, ep or "?"))
+        out.info(fmt.format(e.code, e.label, st, n, ep or "?"))
 
 
 # --- configs, up and down ---
@@ -132,18 +148,24 @@ def trace(ctx: Ctx, e: store.Exit) -> str:
 
 @contextlib.contextmanager
 def probing(ctx: Ctx, e: store.Exit) -> Iterator[None]:
-    """Have an exit up (and held from the watchdog) for a check, then leave it
-    as it was: taken down again if this started it. Raises WgtError if it
-    can't be brought up (and takes it down again)."""
-    was_up = is_up(ctx, e)
+    """Have a jump up (and held from the watchdog) for a check, then leave it
+    as it was: what this started is stopped again, but a jump tunnel that was
+    already up (WARP-off clients on it) stays. Raises WgtError if it can't be
+    brought up (and takes down what it started)."""
+    px_was, wx_was = live.if_exists(ctx.runner, e.px), live.if_exists(ctx.runner, e.wx)
     hold(ctx, e.code)
     try:
-        if not was_up:
+        if not (px_was and wx_was):
             up(ctx, e)
         wait_hs(ctx, e)
         yield
     finally:
-        if was_up:
+        if px_was and wx_was:
+            unhold(ctx, e.code)
+        elif px_was:
+            ctx.runner.run(["systemctl", "stop", e.units[1]], check=False)
+            if live.if_exists(ctx.runner, e.wx):
+                ctx.runner.run(["ip", "link", "del", "dev", e.wx], check=False)
             unhold(ctx, e.code)
         else:
             down(ctx, e)
@@ -392,7 +414,11 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
         res.check(f"jump {e.code}: one rule per address of its {len(users)} client(s)"
                   + (f" ({off} with WARP off, via the jump)" if off else ""), client_rules_ok(ctx, e))
         act = active_count(ctx, e.code)
-        if bring_up or is_up(ctx, e):
+        if not bring_up and act > 0 and state(ctx, e) == "up, no WARP" and not needs_wx(ctx, e):
+            res.check(f"jump {e.code}: jump tunnel {e.px} handshake within {WATCHDOG_STALE}s "
+                      "(only WARP-off clients active; its WARP idle)",
+                      live.hs_recent(r, e.px, WATCHDOG_STALE, ctx.clock()))
+        elif bring_up or is_up(ctx, e):
             try:
                 with probing(ctx, e):
                     tunnel_checks(ctx, res, e)

@@ -156,3 +156,16 @@ def test_decide_without_wx():
     assert watchdog.decide(True, False, False, NOW, 0, 0, False, need_wx=False) == watchdog.UP
     assert watchdog.decide(True, True, False, NOW, 0, 0, False, need_wx=False) is None
     assert watchdog.decide(True, True, True, NOW, NOW - 999, 1, True, need_wx=False) is None
+
+
+def test_probe_keeps_a_jump_tunnel_in_use(make, monkeypatch):
+    """`jump test` on a jump whose tunnel carries WARP-off clients: it starts
+    the jump's WARP for the check and stops only that again."""
+    from wgt import exits
+    monkeypatch.setattr(exits, "wait_hs", lambda ctx, e, seconds=10: None)
+    ctx = make({"ip link show dev px-nyc-us": UP, "ip link show dev wx-nyc-us": DOWN})
+    with exits.probing(ctx, ctx.snap.exit("nyc-us")):
+        pass
+    calls = ctx.runner.calls
+    assert "systemctl stop wg-quick@wx-nyc-us" in calls
+    assert not any(c.startswith("systemctl stop") and "px-nyc-us" in c for c in calls)
