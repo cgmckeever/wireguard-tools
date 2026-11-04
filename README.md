@@ -9,8 +9,8 @@ on the server itself or, for several servers, from your own machine.
 A plain WireGuard server sends traffic out through its own IP. This one can
 also send it through [Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free VPN
 service; the server registers its own free WARP account), and through a
-**jump**: a WireGuard server elsewhere, such as a Proton VPN server in Paris
-or a second server of your own, that this server connects to as a client, so
+**jump**: another server elsewhere, such as a Proton VPN server in Paris
+or a second server of your own, that the Wireguard Server connects to as a client, so
 traffic leaves from there.
 
 ### Terms
@@ -19,17 +19,17 @@ traffic leaves from there.
 |---|---|
 | **device** | a phone, laptop or router that connects to the server. The `wgt client` commands manage them: a client is a device |
 | **config** | one WireGuard tunnel for a device, with its own key and address. A device can have several; it picks its way out by turning on one of them in its WireGuard app |
-| **exit** | where a config's traffic leaves: **`host`** (this server) or a **jump**. (In file names, such as `exits.db` and `local/exits/`, "exit" means a jump, for historical reasons) |
+| **exit** | where a config's traffic leaves: **`host`** (the Wireguard Server) or a **jump**. (In file names, such as `exits.db` and `local/exits/`, "exit" means a jump, for historical reasons) |
 | **WARP / plain** | a `warp.` config's traffic also goes through Cloudflare WARP; a plain config's doesn't |
-| **jump file** | the WireGuard file a VPN provider gives you for a jump (this server's side of it), not a device config |
+| **jump file** | the WireGuard file a VPN provider gives you for a jump (the Wireguard Server's side of it), not a device config |
 
 A config's name says which way it goes: `[warp.][<jump>.]<device>`. For a
 device called `laptop` and a jump called `par-fr` (Paris):
 
 | config | traffic leaves | sites see |
 |---|---|---|
-| `laptop` | this server | the server's IP: a plain, fast VPN |
-| `warp.laptop` | this server, through WARP | a Cloudflare IP near the server |
+| `laptop` | the Wireguard Server | the server's IP: a plain, fast VPN |
+| `warp.laptop` | the Wireguard Server, through WARP | a Cloudflare IP near the server |
 | `par-fr.laptop` | the `par-fr` jump | the jump's IP |
 | `warp.par-fr.laptop` | the `par-fr` jump, through WARP | a Cloudflare IP near the jump (such as Paris) |
 
@@ -54,7 +54,7 @@ magic-wormhole, the WARP client) and links `/usr/local/sbin/wgt`.
    can't reach the provider's firewall; this is the usual reason devices can't
    connect.
 2. **Add a device:** `wgt client add phone` makes two configs, `phone` (out
-   of this server) and `warp.phone` (out through WARP), and prints a QR code
+   of the Wireguard Server) and `warp.phone` (out through WARP), and prints a QR code
    for each. Scan one or both in the WireGuard app; with both, you switch
    between them there.
 3. **Check it:** `wgt summary` (or `wgt test`).
@@ -85,7 +85,7 @@ Cloudflare's network instead:
 - **Your provider sees one encrypted tunnel to Cloudflare** (or, through a
   jump, to the jump), not which sites your devices visit.
 - **IPv6 for devices even on an IPv4-only VPS**, through WARP's own IPv6.
-- **You pick the location.** WARP exits near where it's entered: this server,
+- **You pick the location.** WARP exits near where it's entered: the Wireguard Server,
   or a [jump](#jumps) in another city (sites see somewhere such as Paris),
   still looking like an ordinary Cloudflare user rather than a VPN.
 - **Fail closed:** if WARP or a jump goes down, its configs are blocked rather
@@ -124,7 +124,7 @@ be set as an environment variable (flag > env > saved > default).
 | `--name <name>` | `SERVER_NAME` | short hostname | server name; config files are `<name>.<config>.conf` |
 | `--port <port>` | `WG_PORT` | `51820` | UDP port devices connect to |
 | `--endpoint <host-or-ip>` | `ENDPOINT` | detected public IPv4 | address written into configs (a hostname lets you move servers without re-sending configs) |
-| `--location "<place>"` | | its city, looked up once (ipinfo.io) | where this server is, shown as `host:<place>` in client lists |
+| `--location "<place>"` | | its city, looked up once (ipinfo.io) | where the Wireguard Server is, shown as `host:<place>` in client lists |
 | `--dns <ip>` | `WG_DNS` | `1.1.1.1` | DNS server given to devices |
 | `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new configs (per config on `add`/`rotate`); `"10.4.5.0/24, fd…::/64"` (your subnets) for VPN-network only |
 | `--subnet <cidr>` | `WG_SUBNET` | random `10.<1-10>.<1-10>.0/24` | devices' IPv4 network (server is `.1`); first setup asks, Enter takes the random one |
@@ -210,7 +210,7 @@ wgt client add warp.par-fr.tablet                 # a full config name: exactly 
 
 | Flag | Does |
 |---|---|
-| `--exit host\|<jump>[,…]` | which exit(s): `host` (this server) or a jump's code; one pair of configs per exit |
+| `--exit host\|<jump>[,…]` | which exit(s): `host` (the Wireguard Server) or a jump's code; one pair of configs per exit |
 | `--warp on\|off` | only the `warp.` config (`on`) or only the plain one (`off`); both by default |
 | `--allowed-ips "<cidrs>"` | this config's allowed IPs instead of the default (e.g. your subnets only, for a split tunnel) |
 | `--qr` / `--no-qr` | force or skip the QR code (also on `rotate` and `show`) |
@@ -294,13 +294,13 @@ A device on a plain config can run WARP itself, inside its tunnel to this
 server (for a Mac:
 [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels)' warped
 tunnels). Sites still see a Cloudflare IP near the server or jump, but the
-WARP account is the device's own and this server only carries encrypted WARP.
+WARP account is the device's own and the Wireguard Server only carries encrypted WARP.
 Add such a device with `--warp off`.
 
 ### Jumps
 
-A jump is another WireGuard server that configs can leave through instead of
-this one: a VPN provider's server in a city you pick, or a server of your own.
+A jump is another server that configs can leave through instead of
+the Wireguard Server: a VPN provider's server in a city you pick, or a server of your own.
 Each jump has a short code such as `par-fr`. Through `warp.par-fr.<device>`,
 the traffic goes into a WARP tunnel that itself runs inside the jump tunnel, so
 Cloudflare places it near the jump: sites see a Cloudflare IP there (fewer
@@ -308,12 +308,12 @@ CAPTCHAs and blocks than a VPN's own IPs), and the jump sees only encrypted
 WARP traffic. Through `par-fr.<device>`, sites see the jump's IP.
 
 ```
-warp.par-fr.phone: phone -> wg0 (this server) -> wx-par-fr (WARP) -> inside px-par-fr (jump, Paris) -> Cloudflare, Paris
-par-fr.phone:      phone -> wg0 (this server) -> px-par-fr (jump, Paris) -> sites
+warp.par-fr.phone: phone -> wg0 (the Wireguard Server) -> wx-par-fr (WARP) -> inside px-par-fr (jump, Paris) -> Cloudflare, Paris
+par-fr.phone:      phone -> wg0 (the Wireguard Server) -> px-par-fr (jump, Paris) -> sites
 ```
 
 **The jump file.** Any WireGuard file with one peer and an IPv4 address works:
-it's the client side of the jump, since this server connects to the jump as a
+it's the client side of the jump, since the Wireguard Server connects to the jump as a
 client. Each is one key: use it on one of *your* servers only.
 
 **Proton VPN** is a good source of jumps in many cities. At
