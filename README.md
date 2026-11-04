@@ -12,33 +12,18 @@ free VPN service; the server connects to it as one WARP "device"), and through
 a **jump**: another WireGuard server you add, such as a VPN provider's server
 in another city (Proton VPN works well) or a second server of your own.
 
-A **client** is a device (your laptop, say). It gets one **tunnel config**
-per way out, named `[warp.][<jump>.]<device>`:
+Each device picks where its traffic comes out, and whether through WARP:
 
-| config | traffic goes | sites see |
+| | without WARP | through WARP |
 |---|---|---|
-| `laptop` | out of this server | the server's IP: a plain, fast VPN |
-| `warp.laptop` | out of this server, through Cloudflare WARP | a Cloudflare IP near the server |
-| `par-fr.laptop` | out of the `par-fr` jump | the jump's IP |
-| `warp.par-fr.laptop` | out of the `par-fr` jump, through WARP | a Cloudflare IP near the jump (Paris, say) |
+| **this server** | the server's IP: a plain, fast VPN | a Cloudflare IP near the server |
+| **a jump** | the jump's IP | a Cloudflare IP near the jump (Paris, say) |
 
-Install the configs you want on the device and turn on one at a time: picking
-a tunnel picks the exit. `wgt client` commands use these names; the files add
-the server's name in front, so `warp.laptop` on boba is
-`boba.warp.laptop.conf`.
+A device gets a tunnel for each combination you give it and switches between
+them in its WireGuard app; nothing is switched on the server (see
+[Exits and config names](#exits-and-config-names)).
 
-```bash
-wgt client add laptop                          # laptop and warp.laptop
-wgt client add laptop --exit host,par-fr       # ...plus par-fr.laptop and warp.par-fr.laptop
-wgt client add phone --warp on                 # only warp.phone (--warp off: only phone)
-wgt client add warp.par-fr.tablet              # exactly that one config
-```
-
-Nothing is switched on the server: a config's name fixes its way out. To move
-one, rename it (`wgt client rename warp.laptop laptop`); its keys stay, so the
-device's tunnel keeps working.
-
-**Bring your own WARP.** A device on a plain config can run WARP itself,
+**Bring your own WARP.** A device on a tunnel without WARP can run WARP itself,
 inside its tunnel to this server (for a Mac:
 [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels)' warped
 tunnels). Sites still see a Cloudflare IP near the server or jump, but the
@@ -427,7 +412,7 @@ stops handshaking is restarted; a WARP inside it that does gets a new source
 port, then a restart of the WARP alone.
 
 Configs get their exit when they're added: see
-[Choosing exits](#choosing-exits).
+[Exits and config names](#exits-and-config-names).
 
 ### Manage clients
 
@@ -445,7 +430,8 @@ wgt client rename laptop work-laptop             # same keys and address; its co
 wgt client remove laptop
 ```
 
-Each command takes a config name (`warp.laptop`, `par-fr.laptop`). Leave it out on
+Each command takes a config name (`warp.laptop`, `par-fr.laptop`; see
+[Exits and config names](#exits-and-config-names)). Leave it out on
 `rotate`, `remove`, `disable`, `enable`, `show` or `share` to pick from a
 numbered list (`wgt client` alone is `list`). Changes apply live; other configs
 stay connected.
@@ -467,32 +453,46 @@ Each config gets its own keypair, a preshared key and the next free address.
 Its config is written to `/etc/wireguard/clients/<server>.<name>.conf` (e.g.
 `dengar.warp.laptop.conf`), so configs from different servers don't collide.
 
-#### Choosing exits
+#### Exits and config names
 
-A config's name is `[warp.][<jump>.]<device>` (see the table in
-[Overview](#overview)). `add <device>` makes a plain and a `warp.` config for
-each exit; it asks which exit(s) when jumps exist, or take them with `--exit`
-(`host` is the WireGuard server itself; `--exit host,par-fr` covers both), and
-`--warp on|off` keeps only one of the pair. Adding a jump makes no configs:
-each device gets one when you add it. Through
-`wgt-ctl`, `add` first offers to push jump configs you've staged in
-`local/exits/<server>/` but not yet added, so they show up in that menu:
+A client is a device; it gets one tunnel config per combination of exit and
+WARP (see [Overview](#overview)), and the config's name says which:
+`[warp.][<jump>.]<device>`.
+
+| config | traffic goes | sites see |
+|---|---|---|
+| `laptop` | out of this server | the server's IP |
+| `warp.laptop` | out of this server, through Cloudflare WARP | a Cloudflare IP near the server |
+| `par-fr.laptop` | out of the `par-fr` jump | the jump's IP |
+| `warp.par-fr.laptop` | out of the `par-fr` jump, through WARP | a Cloudflare IP near the jump |
+
+`wgt client` commands use these names. The files add the server's name in
+front, so `warp.laptop` on boba is `boba.warp.laptop.conf`.
+
+`add <device>` makes the plain and the `warp.` config for each exit. It asks
+which exit(s) when jumps exist, or take them with `--exit` (`host` is this
+server; `--exit host,par-fr` covers both); `--warp on|off` keeps only one of
+each pair, and a full config name adds just that one. Adding a jump makes no
+configs: each device gets one when you add it. Through `wgt-ctl`, `add` first
+offers to push jump configs you've staged in `local/exits/<server>/` but not
+yet added, so they show up in that menu:
 
 ```bash
-wgt client add laptop --exit host,par-fr          # laptop, warp.laptop, par-fr.laptop, warp.par-fr.laptop
+wgt client add laptop                             # laptop, warp.laptop
+wgt client add laptop --exit host,par-fr          # ...plus par-fr.laptop, warp.par-fr.laptop
 wgt client add mac --exit par-fr --warp off       # only par-fr.mac (e.g. the Mac runs its own WARP)
 wgt client add warp.par-fr.tablet                 # exactly that one
 wgt client rename warp.par-fr.tablet par-fr.tablet   # same keys; now without WARP, live
 ```
 
-Each config is its own WireGuard peer with its own key and address
-(`dengar.warp.par-fr.laptop.conf`, whose `# exit:` line says the same in
-words). Import the ones you want on the device and switch exits by switching
-tunnels in the WireGuard app. `list` and `wgt-ctl clients` show each config
-with its EXIT (`host:Atlanta`, the server's location, or `jump:Paris, France`)
-and WARP (on/off) columns. The
-Android app only takes tunnel names up to 15 characters, so rename longer ones
-when importing there (`add` reminds you).
+Each config is its own WireGuard peer with its own key and address (its
+`# exit:` line says where it goes in words). Import the ones you want on the
+device and switch exits by switching tunnels in the WireGuard app. A config's
+name fixes its way out: to move one, rename it; its keys stay, so the device's
+tunnel keeps working. `list` and `wgt-ctl clients` show each config with its
+EXIT (`host:Atlanta`, the server's location, or `jump:Paris, France`) and WARP
+(on/off) columns. The Android app only takes tunnel names up to 15
+characters, so rename longer ones when importing there (`add` reminds you).
 
 #### Getting a config onto a device
 
