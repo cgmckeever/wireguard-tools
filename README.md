@@ -431,7 +431,7 @@ jump watchdog (every 10s) brings it up when a client handshakes and takes it
 down after 5 minutes with none, so an idle jump holds no connection. A device
 switching to a jump's tunnel waits about 10-15 seconds the first time. While a
 jump is down, or broken, its clients are blocked, never sent out another way.
-The jump's WARP only runs while a WARP-on client needs it. A jump tunnel that
+The jump's WARP is only started when a WARP-on client needs it. A jump tunnel that
 stops handshaking is restarted; a WARP inside it that does gets a new source
 port, then a restart of the WARP alone.
 

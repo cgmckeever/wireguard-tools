@@ -48,11 +48,12 @@ def warp(ctx: Ctx) -> None:
 
 def exits(ctx: Ctx) -> None:
     """A jump is up only while one of its clients has handshaked within
-    EXIT_IDLE seconds: brought up when one does, taken down when none has. An
-    up exit whose WARP has had no handshake for WATCHDOG_STALE seconds gets a
-    new source port, then a restart. Skips the run while wireguard-tools is
-    changing things (its lock), and an exit that is being checked (its hold
-    file)."""
+    EXIT_IDLE seconds: brought up when one does (its WARP too only if an
+    active client has WARP on), taken down when none has. A jump tunnel silent
+    for WATCHDOG_STALE seconds is restarted; a WARP inside a healthy one gets a
+    new source port, then a restart of the WARP alone. Skips the run while
+    wireguard-tools is changing things (its lock), and a jump that is being
+    checked (its hold file)."""
     if not ctx.snap.exits or not ops.try_lock(ctx):
         return
     try:
