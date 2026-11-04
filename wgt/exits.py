@@ -40,11 +40,14 @@ def active_clients(snap: store.Snapshot, code: str, handshakes: Dict[str, int], 
 
 def state(ctx: Ctx, e: store.Exit) -> str:
     """up (both tunnels), "up, no WARP" (the jump tunnel alone: only WARP-off
-    clients active), or idle."""
+    clients active), "partly up" (its WARP alone: broken, the watchdog fixes
+    it), or idle."""
     px, wx = live.if_exists(ctx.runner, e.px), live.if_exists(ctx.runner, e.wx)
     if px and wx:
         return "up"
-    return "up, no WARP" if px else "idle"
+    if px:
+        return "up, no WARP"
+    return "partly up" if wx else "idle"
 
 
 def needs_wx(ctx: Ctx, e: store.Exit) -> bool:
@@ -425,7 +428,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
             except WgtError as err:
                 res.result("FAIL", f"jump {e.code}: could not bring it up ({err})")
         elif act > 0:
-            res.result("FAIL", f"jump {e.code}: down while {act} client(s) are active "
+            res.result("FAIL", f"jump {e.code}: not (fully) up while {act} client(s) are active "
                                "(the watchdog brings it up within 10s)")
         else:
             res.result("PASS", f"jump {e.code}: idle, no active clients (comes up when one connects; "

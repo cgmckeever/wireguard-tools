@@ -69,12 +69,23 @@ def test_hold_file_skips_city(make):
 def test_stale_city_new_port_then_restart(make):
     ctx = make({"ip link show dev px-par-fr": UP, "ip link show dev wx-par-fr": UP,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN,
-                "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n")})
+                "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n"),
+                "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 5}\n")})   # the jump itself is fine
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW - 10}\n")
     watchdog.exits(ctx)
     assert "wg set wx-par-fr listen-port 0" in ctx.runner.calls
     started = os.path.join(ctx.paths.run_dir, f"{EXIT_WATCHDOG}.par-fr")
     Path(started).write_text(str(NOW - 600))    # the new port didn't help for a while
+    watchdog.exits(ctx)
+    assert "systemctl restart wg-quick@wx-par-fr" in ctx.runner.calls   # its WARP alone: the jump is fine
+
+
+def test_dead_jump_restarts_whole(make):
+    ctx = make({"ip link show dev px-par-fr": UP, "ip link show dev wx-par-fr": UP,
+                "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN,
+                "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n"),
+                "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n")})
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW - 10}\n")
     watchdog.exits(ctx)
     assert "systemctl restart wg-quick@px-par-fr wg-quick@wx-par-fr" in ctx.runner.calls
 
@@ -146,7 +157,8 @@ def test_warp_off_jump_client_needs_only_the_jump_tunnel(make):
 def test_warp_off_jump_with_dead_warp_left_alone(make):
     """Only WARP-off clients active, jump tunnel up, its WARP down: nothing to do."""
     ctx = make({"ip link show dev px-nyc-us": UP, "ip link show dev wx-nyc-us": DOWN,
-                "ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN})
+                "ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
+                "wg show px-nyc-us latest-handshakes": (0, f"K\t{NOW - 5}\n")})
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'nyc-us.phone')}\t{NOW - 30}\n")
     watchdog.exits(ctx)
     assert not any(c.startswith("systemctl") for c in ctx.runner.calls)
@@ -169,3 +181,30 @@ def test_probe_keeps_a_jump_tunnel_in_use(make, monkeypatch):
     calls = ctx.runner.calls
     assert "systemctl stop wg-quick@wx-nyc-us" in calls
     assert not any(c.startswith("systemctl stop") and "px-nyc-us" in c for c in calls)
+
+
+@pytest.mark.parametrize("need_wx,px_hs,wx_hs,port_tried,want", [
+    (False, NOW - 999, 0, False, watchdog.RESTART_JUMP),      # WARP-off only: a dead jump is restarted
+    (False, NOW - 5, 0, False, None),                         # WARP-off only, jump healthy
+    (True, NOW - 999, NOW - 999, False, watchdog.RESTART_JUMP),   # jump dead: restart it, not just WARP
+    (True, NOW - 5, NOW - 999, False, watchdog.NEW_PORT),     # jump fine, WARP silent: new port
+    (True, NOW - 5, NOW - 999, True, watchdog.RESTART),       # ... then restart WARP alone
+])
+def test_decide_jump_health(need_wx, px_hs, wx_hs, port_tried, want):
+    assert watchdog.decide(True, True, True, NOW, NOW - 999, wx_hs, port_tried, need_wx, px_hs) == want
+
+
+def test_silent_warp_restarts_only_its_warp(make, tmp_path):
+    """par-fr's WARP is silent after a new port but the jump tunnel is fine:
+    only wx-par-fr restarts, so WARP-off clients on the jump keep their path."""
+    ctx = make({"ip link show dev px-par-fr": UP, "ip link show dev wx-par-fr": UP,
+                "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN,
+                "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 5}\n"),
+                "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 999}\n")})
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (
+        0, f"{pub(ctx, 'par-fr.mbp-1')}\t{NOW - 30}\n")
+    Path(ctx.paths.exit_marker("par-fr")).write_text(str(NOW - 999))
+    Path(ctx.paths.exit_port_marker("par-fr")).write_text("")
+    watchdog.exits(ctx)
+    assert "systemctl restart wg-quick@wx-par-fr" in ctx.runner.calls
+    assert not any(c.startswith("systemctl restart") and "px-par-fr" in c for c in ctx.runner.calls)

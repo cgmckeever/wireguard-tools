@@ -26,7 +26,7 @@ Each client picks two things:
 wgt client add phone                                 # host, WARP on
 wgt client add laptop --exit host,par-fr             # two tunnels: host and the par-fr jump
 wgt client add mac --exit par-fr --warp off          # the jump's IP (or bring your own WARP, below)
-wgt client warp mac on                               # switch later, live
+wgt client warp par-fr.mac on                        # switch later, live
 ```
 
 `wgt warp on|off` is the server-wide switch for WARP (on by default); a
@@ -369,9 +369,8 @@ outage blocks clients rather than letting them leak out through the VPS's own
 IP. With it off, clients' IPv6 goes out the server's own IPv6; a server
 without public IPv6 gives clients IPv4 only while WARP is off.
 
-This is the server's default. One client can have WARP off whatever it says
-(`wgt client warp <name> off`, or `--warp off` at `client add`); jump clients
-use their jump's WARP unless they have it off themselves.
+This is the server-wide default; a client can have WARP off regardless (see
+[Choosing a client's exit](#choosing-a-clients-exit)).
 
 ### Jumps
 
@@ -422,7 +421,7 @@ Cloudflare's data centre: CDG is Paris). Adding the same code again replaces
 its config.
 
 ```bash
-wgt jump list              # jumps: state (up/idle), clients, endpoint
+wgt jump list              # jumps: state (up, up without WARP, idle), clients, endpoint
 wgt jump test              # bring each one up and check it
 wgt jump remove par-fr     # refused while clients use it
 ```
@@ -431,8 +430,10 @@ wgt jump remove par-fr     # refused while clients use it
 jump watchdog (every 10s) brings it up when a client handshakes and takes it
 down after 5 minutes with none, so an idle jump holds no connection. A device
 switching to a jump's tunnel waits about 10-15 seconds the first time. While a
-jump is down, or broken, its clients are blocked, never sent out another way;
-an up jump whose WARP stops handshaking is restarted.
+jump is down, or broken, its clients are blocked, never sent out another way.
+The jump's WARP only runs while a WARP-on client needs it. A jump tunnel that
+stops handshaking is restarted; a WARP inside it that does gets a new source
+port, then a restart of the WARP alone.
 
 Clients choose their exit when they're added: see
 [Choosing a client's exit](#choosing-a-clients-exit).
@@ -542,12 +543,12 @@ wgt rollback --purge  # ...and delete keys, clients, WARP accounts and jumps
 default route never changed, `wg0` is listening, forwarding is on, the WARP
 rule is there exactly once (WARP on) or absent (off), every NAT/firewall rule
 exists exactly once, the services start at boot in the right order, the WARP
-watchdog timer is running, and whether any client has connected. With WARP
-off, WARP problems are warnings. Clients with WARP off and no jump: their
-`main` and blackhole rules. For each jump: its routing (blackhole fallbacks,
+watchdog timer is running, the `main` and blackhole rules of clients with
+WARP off and no jump, and whether any client has connected. With WARP off,
+WARP problems are warnings. For each jump: its routing (blackhole fallbacks,
 one rule per client address, to the right table for its WARP setting), the
-jump watchdog, and, if the jump is up, both its handshakes and a WARP trace
-through it.
+jump watchdog, and, if it's up, its handshakes and a WARP trace through it
+(only the jump tunnel's handshake while it runs without WARP).
 
 #### Moving to a new server (or rebuilding)
 
@@ -689,9 +690,9 @@ written aren't rendered again until `wgt setup` runs. With `wgt-ctl`:
    Setup restarts `wg0` only if its settings changed, not for comment-only
    changes.
 
-New commands and flags (here: `wgt jump`, `client warp`, `--warp`, `--exit
-host`) only work on a server once it has pulled; `wgt-ctl`'s own steps
-(`jump-add`, `clients`) also work with servers not yet updated.
+A new `wgt` command or flag works on a server only once that server has
+pulled; `wgt-ctl`'s own steps (`jump-add`, `clients`) stick to commands every
+version knows.
 
 On a single server without `wgt-ctl`: `git -C /opt/wireguard-tools pull --ff-only
 && wgt test`, then `wgt setup --yes` if the change touched templates or how

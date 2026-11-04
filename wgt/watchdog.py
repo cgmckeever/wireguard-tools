@@ -62,22 +62,27 @@ def exits(ctx: Ctx) -> None:
 
 
 # What the exit watchdog does to one jump on a run.
-UP, NEW_PORT, RESTART, DOWN = "up", "new port", "restart", "down"
+UP, NEW_PORT, RESTART, RESTART_JUMP, DOWN = "up", "new port", "restart", "restart jump", "down"
 
 
 def decide(active: bool, px_up: bool, wx_up: bool, now: int, started_at: int, wx_last_hs: int,
-           port_tried: bool, need_wx: bool = True) -> Optional[str]:
+           port_tried: bool, need_wx: bool = True, px_last_hs: Optional[int] = None) -> Optional[str]:
     """The exit watchdog's rule for one jump, from what it sees (None: leave it).
 
     - In use but not up (its WARP only counts if an active client needs it,
       <need_wx>: WARP-off clients use the jump tunnel alone): bring it up.
-    - In use, up for over WATCHDOG_STALE, and its WARP needed but silent that
-      long: first a new source port (Cloudflare sometimes drops one flow), then
-      a restart.
+    - In use, up for over WATCHDOG_STALE, and the jump tunnel itself silent
+      that long (<px_last_hs>; it keeps alive every 25s): restart the jump.
+    - Its WARP needed but silent that long: first a new source port
+      (Cloudflare sometimes drops one flow), then a restart of the WARP alone
+      (the jump tunnel is fine, and may carry WARP-off clients).
     - Not in use but (partly) up: take it down."""
     if active:
         if not px_up or (need_wx and not wx_up):
             return UP
+        settled = now - started_at > WATCHDOG_STALE
+        if settled and px_last_hs is not None and now - px_last_hs > WATCHDOG_STALE:
+            return RESTART_JUMP
         if not need_wx:
             return None
         if now - started_at > WATCHDOG_STALE and now - wx_last_hs > WATCHDOG_STALE:
@@ -106,16 +111,21 @@ def _exits(ctx: Ctx) -> None:
         users = jumps.active_clients(ctx.snap, e.code, hs, now)
         active = bool(users)
         need_wx = any(not ctx.snap.warp_off(c.name) for c in users)
-        # Touch the jump tunnel only when it must: WARP-off clients ride it alone.
-        px_up = live.if_exists(r, e.px)
-        direct_live = px_up and any(ctx.snap.warp_off(c.name) for c in users)
-        wx_up = live.if_exists(r, e.wx)
+        px_up, wx_up = live.if_exists(r, e.px), live.if_exists(r, e.wx)
         started_marker, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
         wx_last_hs = live.newest_hs(r, e.wx) if active and px_up and wx_up else 0
+        px_last_hs = live.newest_hs(r, e.px) if active and px_up else None
         action = decide(active, px_up, wx_up, now, read_marker(started_marker), wx_last_hs, os.path.exists(port_marker),
-                        need_wx)
+                        need_wx, px_last_hs)
         stale = f"no WARP handshake for over {WATCHDOG_STALE}s"
-        units = [e.units[1]] if direct_live else (e.units if need_wx else [e.units[0]])
+        # Touch only what must change: WARP-off clients ride the jump tunnel alone.
+        px_unit, wx_unit = e.units
+        if action == UP:
+            units = [wx_unit] if px_up else ([px_unit, wx_unit] if need_wx else [px_unit])
+        elif action == RESTART_JUMP:
+            units = [px_unit, wx_unit] if need_wx or wx_up else [px_unit]
+        else:
+            units = [wx_unit]
         if action == UP:
             # restart, not start: a unit can be "active" with its link gone.
             if r.ok(["systemctl", "restart", *units]):
@@ -132,7 +142,13 @@ def _exits(ctx: Ctx) -> None:
             remove_markers(port_marker)
             if r.ok(["systemctl", "restart", *units]):
                 write_marker(started_marker, str(now))
-                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {stale} after a new port; restarted")
+                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {stale} after a new port; its WARP restarted")
+        elif action == RESTART_JUMP:
+            remove_markers(port_marker)
+            if r.ok(["systemctl", "restart", *units]):
+                write_marker(started_marker, str(now))
+                log_event(ctx, EXIT_WATCHDOG,
+                          f"jump {e.code}: jump tunnel silent for over {WATCHDOG_STALE}s; restarted")
         elif action == DOWN:
             idle = f"no client handshake in the last {EXIT_IDLE}s"
             if jumps.down(ctx, e, check=False):
