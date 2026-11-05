@@ -410,13 +410,25 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
         new = text
         for key, value in want.items():
             new = re.sub(rf"(?m)^{key} = .*$", f"{key} = {value}".replace("\\", "\\\\"), new)
+        changed = new != text   # a setting a device uses: re-send
+        new = with_server_address(new, render.server_address(ctx.cfg))
         if new != text:
             ctx.files.write(conf, 0o600, new)
-        if (new != text or src != conf) and c.name not in stale:
+        if (changed or src != conf) and c.name not in stale:
             stale.append(c.name)
     if stale:
         ctx.out.warn(f"client configs changed (now {ctx.cfg.SERVER_NAME}.<client>.conf at {endpoint}); re-send them "
                      f"(wgt client share/show --qr): {' '.join(stale)}")
+
+
+def with_server_address(text: str, addr: str) -> str:
+    """The config with its "# server-address:" header line set to <addr>
+    (added before [Interface] in configs written before the line existed).
+    A comment: devices don't need it re-sent."""
+    line = f"# server-address: {addr}"
+    if re.search(r"(?m)^# server-address:.*$", text):
+        return re.sub(r"(?m)^# server-address:.*$", line, text)
+    return re.sub(r"(?m)^\[Interface\]", line + "\n[Interface]", text, count=1)
 
 
 def _move_to_current_name(ctx: Ctx, name: str, conf: str, old_name: str) -> str:

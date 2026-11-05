@@ -321,3 +321,12 @@ def test_warp_rotate_refused_changes_nothing(make_ctx, rotating):
 def test_warp_rotate_unknown_jump(make_ctx, rotating):
     with pytest.raises(WgtError, match="no jump 'xx-yy'"):
         srv.cmd_warp(make_ctx(), ["rotate", "xx-yy"])
+
+
+def test_with_server_address_adds_and_refreshes():
+    old = "# wireguard-tools client: a on s\n# exit: x\n[Interface]\nPrivateKey = K\n"
+    added = srv.with_server_address(old, "10.8.0.1/32")
+    assert added == ("# wireguard-tools client: a on s\n# exit: x\n# server-address: 10.8.0.1/32\n"
+                     "[Interface]\nPrivateKey = K\n")
+    assert srv.with_server_address(added, "10.9.0.1/32").count("# server-address:") == 1
+    assert "10.9.0.1/32" in srv.with_server_address(added, "10.9.0.1/32")
