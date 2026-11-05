@@ -59,7 +59,7 @@ RESERVED = ("init", "clients", "summary", "all", "help", "list")
 SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.join(RESERVED)})"
 # The wgt commands (anything else after a server word is a mistake, not a command).
 WGT_COMMANDS = ("setup", "summary", "status", "test", "log", "backup", "restore", "rollback", "client",
-                "jump", "exit", "tunnel")
+                "jump", "exit", "tunnel", "warp")
 _TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:\[\]-]+$")
 _DIR = re.compile(r"^/[A-Za-z0-9._/-]+$")
 _BRANCH = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")

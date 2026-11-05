@@ -373,6 +373,23 @@ so re-cloning the tools keeps them); `backup <dir>` writes elsewhere. Each
 `backup` also prunes old archives and file copies. A backup holds private keys
 (it's created mode 600); keep it somewhere safe.
 
+### Rotate WARP accounts
+
+The server's WARP account (and each jump's) is made once at setup. To get new
+keys and a new Cloudflare identity, register a fresh one:
+
+```bash
+wgt warp rotate            # this server's own WARP
+wgt warp rotate par-fr     # a jump's WARP
+wgt warp rotate all        # this server's and every jump's
+```
+
+The new account is registered first, so if Cloudflare refuses, nothing
+changes. Then it replaces the old one (backed up like any changed file), the
+WARP tunnel restarts, and a trace checks traffic still leaves through WARP.
+`warp.` configs pause for a few seconds; device configs don't change, so
+there's nothing to re-send. Plain configs aren't affected.
+
 ### Moving to a new server (or rebuilding)
 
 ```bash
@@ -455,6 +472,7 @@ and `branch`:
 
 ```bash
 wgt-ctl all test
+wgt-ctl all warp rotate all            # new WARP accounts everywhere
 wgt-ctl all pull
 wgt-ctl all backup
 ```
