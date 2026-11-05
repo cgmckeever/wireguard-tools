@@ -99,14 +99,13 @@ isn't an anonymity tool.
 
 ## Server management
 
-Everything in this part runs on a server, as root: `wgt …`. From your own
-machine, `wgt-ctl <server> …` runs the same commands (see
-[Fleet management](#fleet-management)).
+Everything in this part runs on one server, logged in as root: `wgt …`.
+[Fleet management](#fleet-management) then runs these same commands on all
+your servers from your own machine.
 
 ### Set up a server
 
-Install as in [Quick start](#quick-start), or from your own machine with
-`wgt-ctl init`, which does it all over SSH ([Adding a server](#adding-a-server)).
+Install as in [Quick start](#quick-start), then:
 
 ```bash
 wgt setup --name dengar              # typical: just name it
@@ -149,7 +148,7 @@ rotated with `wgt client rotate`).
 The first setup asks for the client subnet, offering a random
 `10.<1-10>.<1-10>.0/24` that doesn't overlap a route the server already has
 (`Client subnet [10.4.5.0/24]:`; Enter takes it). `--subnet` sets your own
-instead; `--yes` or `--dry-run` skip the question and take the random one.
+instead; `--yes` or `--dry-run` skip the question and take the offer.
 
 Each run lists the settings and where each came from (flag, env, entered,
 saved, default, detected, random), shows what changed since the last setup,
@@ -225,9 +224,7 @@ tunnels in the WireGuard app. The Android app only takes tunnel names up to 15
 characters, so rename longer ones when importing there (`add` reminds you).
 
 Adding a jump makes no configs: a device gets a jump's configs when you add it
-with that `--exit`. Through `wgt-ctl`, `add` first offers to push jump configs
-you've staged in `local/exits/<server>/` but not yet added, so they show up in
-its menu.
+with that `--exit`.
 
 A config's name fixes its way out. To change it, rename the config; its keys
 stay, so the device's tunnel keeps working:
@@ -290,12 +287,15 @@ send them only to that device's owner.
 
 #### Bring your own WARP
 
-A device on a plain config can run WARP itself, inside its tunnel to this
-server (for a Mac:
-[wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels)' warped
-tunnels). Sites still see a Cloudflare IP near the server or jump, but the
-WARP account is the device's own and the Wireguard Server only carries encrypted WARP.
-Add such a device with `--warp off`.
+Instead of the Wireguard Server's WARP, a device can run its own: it connects
+with a plain config, then runs WARP inside that tunnel. Sites still see a
+Cloudflare IP near the Wireguard Server (or the jump), but the WARP account is
+the device's, and the Wireguard Server only ever sees encrypted WARP traffic.
+
+Such a device needs only plain configs, so add it with `--warp off`
+(`wgt client add mac --warp off`). On a Mac,
+[wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels) sets this
+up as its "warped" tunnels.
 
 ### Jumps
 
@@ -330,15 +330,6 @@ scp paris.conf root@<server>:                     # from your machine, first
 wgt jump add par-fr paris.conf --label "Paris, France"
 wgt jump add par-fr - --label "Paris, France" < paris.conf    # or read it from stdin
 ```
-
-Or from your machine with `wgt-ctl`: save the jump file as
-`local/exits/<server>/<any name>.conf` and run `wgt-ctl boba jump-add`. That's
-`wgt-ctl`'s own command: it uploads the file and runs `wgt jump add` for you.
-Pick the file by number (or `all`). The first time it sees a file it asks what
-it is ("Paris, France") and suggests a code from the name and the file's
-country tag if it has one (Proton's `FR#252` gives `par-fr`); the answer is
-kept in `local/exits/details.tsv`. The copy on the server starts with
-`# exit par-fr: Paris, France` and `# local file: paris.conf`.
 
 `jump add` registers a separate WARP account for the jump, wires its routing
 into `wg0` live (devices stay connected), and checks the result:
@@ -386,7 +377,7 @@ so re-cloning the tools keeps them); `backup <dir>` writes elsewhere. Each
 
 ```bash
 # old server
-wgt backup                          # or, from your machine: wgt-ctl <old> backup
+wgt backup
 
 # your machine: fetch it, then put it on the new server (or use wormhole send/receive)
 scp root@<old>:/var/backups/wireguard-tools/wireguard-tools.*.tar.gz .
@@ -455,6 +446,7 @@ wgt-ctl boba branch some-branch        # switch its checkout
 wgt-ctl boba forget                    # drop it from local/servers; the server is untouched
 wgt-ctl boba remove                    # tear it down: rollback --purge, delete its checkout,
                                        #   wgcf and backup archives, then forget it (asks for its name)
+wgt-ctl boba move [--to <address>]     # rebuild it from its backup, elsewhere or in place (below)
 ```
 
 **Every server: `wgt-ctl all COMMAND`.** Runs on each server in turn; one
@@ -487,7 +479,7 @@ your machine.
 
 ### Adding a server
 
-`init` logs in as root and, on first contact, shows the server's host key for
+`wgt-ctl init` does the [Quick start](#quick-start) install over SSH. It logs in as root and, on first contact, shows the server's host key for
 you to check against your provider's console. If only a password works it
 offers `ssh-copy-id`. It then installs git, clones the same repository your
 local checkout came from (its `origin`) and
@@ -495,10 +487,67 @@ runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
 passed to setup. The server is added to the list only once setup finishes. A
 server already running these tools is adopted under its saved name instead.
 
+Its subnet question offers the next free subnet in order (`10.1.1.0/24`,
+`10.1.2.0/24`, ...) that none of your other servers uses, instead of a random
+one, so your servers' subnets never overlap.
+
+### Adding jumps from your machine
+
+Keep your jump files on your machine and let `wgt-ctl` put them on servers:
+save one as `local/exits/<server>/<any name>.conf`, then
+
+```bash
+wgt-ctl boba jump-add                  # pick it by number (or: all)
+```
+
+`jump-add` uploads the file and runs [`wgt jump add`](#jumps) there. The first
+time it sees a file it asks what it is ("Paris, France") and suggests a code
+from the file name and its country tag if it has one (Proton's `FR#252` gives
+`par-fr`); the answer is kept in `local/exits/details.tsv`. The copy on the
+server starts with `# exit par-fr: Paris, France` and
+`# local file: paris.conf`. `wgt-ctl boba client add` also offers to push
+staged jump files that aren't on the server yet, so they show up in its exit
+menu.
+
+### Moving or rebuilding a server
+
+`move` rebuilds a server from its own backup, on a new machine or in place,
+optionally changing settings on the way (anything after `--` goes to setup):
+
+```bash
+wgt-ctl dengar move --to 203.0.113.50                              # to a new machine
+wgt-ctl dengar move --to 203.0.113.50 -- --endpoint vpn.example.com
+wgt-ctl dengar move                                                # rebuild in place, fresh checkout
+```
+
+1. Back up the server and fetch the archive to `local/backups/<server>/`.
+2. Prepare the new machine: log in, install, clone; no setup yet. (In place:
+   re-clone after step 3.)
+3. Bring the server down: `wgt rollback`, keys kept (in place: `--purge`).
+   Its devices are cut off from here until step 4 finishes; both can't run at
+   once, as they'd share the WARP account and jump keys.
+4. Restore the backup there (`wgt restore`), which runs setup with your flags:
+   same keys, configs, jumps and WARP account.
+5. Run `wgt test` and `wgt tunnel test`.
+6. Point the server's line in `local/servers` at the new machine, and tear
+   wireguard-tools off the old one (asked; `--yes` doesn't ask).
+
+If step 4 or 5 fails, the list still points at the old machine, which is down
+but intact: `move` offers to bring it back (`wgt setup` there). In place, the
+fetched archive is the way back (`wgt restore` it once the cause is fixed).
+It asks you to type the server's name before step 1 unless `--yes`.
+
+**Use a hostname as the endpoint.** With an IP endpoint, a move to a new IP
+rewrites every config, and each device needs its config again (same keys).
+With `--endpoint vpn.example.com`, configs name the hostname, so after a move
+you only point that DNS record at the new IP and devices need nothing. Switch
+an existing server once with `wgt setup --endpoint vpn.example.com` (configs
+are re-sent once), or during the move itself, as above.
+
 ### Private files
 
 Private files stay on your machine under `local/`: jump configs in
-`exits/<server>/` (see [Jumps](#jumps)), the table that
+`exits/<server>/` (see [Adding jumps from your machine](#adding-jumps-from-your-machine)), the table that
 names them in `exits/details.tsv`, and archives fetched by `backup` in
 `backups/<server>/` (they hold private keys).
 

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import random
 import re
-from typing import Optional
+from typing import List, Optional
 
 from .errors import WgtError
 
@@ -47,6 +48,29 @@ def random_subnet6() -> str:
     return str(canon_subnet6(f"fd{h[0:2]}:{h[2:6]}:{h[6:10]}::/64"))
 
 
+def _routed(net: str, routes: str) -> bool:
+    """A route in <routes> already points into 10.a.b (<net>)."""
+    return bool(re.search(r"(^|[^0-9.])" + re.escape(net) + r"\.", routes, re.M))
+
+
+def next_free_subnet(routes: str, used: List[str]) -> str:
+    """The first 10.<1-10>.<1-10>.0/24, in order, that no route points into
+    and that overlaps none of <used> (the other servers' subnets, from
+    wgt-ctl init); a random one if all are taken."""
+    taken = []
+    for u in used:
+        try:
+            taken.append(ipaddress.ip_network(u.strip(), strict=False))
+        except ValueError:
+            continue
+    for a in range(1, 11):
+        for b in range(1, 11):
+            cand = ipaddress.ip_network(f"10.{a}.{b}.0/24")
+            if not _routed(f"10.{a}.{b}", routes) and not any(cand.overlaps(t) for t in taken):
+                return str(cand)
+    return random_subnet(routes)
+
+
 def random_subnet(routes: str, rng: Optional[random.Random] = None) -> str:
     """A random 10.<1-10>.<1-10>.0/24 that no route in <routes> (the output of
     `ip -4 route show table all`) already points into."""
@@ -54,6 +78,6 @@ def random_subnet(routes: str, rng: Optional[random.Random] = None) -> str:
     net = ""
     for _ in range(20):
         net = f"10.{rng.randrange(10) + 1}.{rng.randrange(10) + 1}"
-        if not re.search(r"(^|[^0-9.])" + re.escape(net) + r"\.", routes, re.M):
+        if not _routed(net, routes):
             break
     return f"{net}.0/24"

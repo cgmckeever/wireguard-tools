@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from . import clients, ops, store, units
 from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, Paths
+from .ctx import VALUE_FLAGS
 from .errors import WgtError
 from .system import write_private
 
@@ -127,5 +128,17 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     ops.release_lock(ctx)
     ctx.out.log("Setting up")
     ctx.out.info("if setup stops, fix the cause and run 'wgt setup' (the restored files stay in place)")
-    cmd = [units.wgt_command(ctx)] + (["--yes"] if ctx.args.yes else []) + ["setup"]
+    cmd = [units.wgt_command(ctx)] + (["--yes"] if ctx.args.yes else []) + ["setup"] + setup_flags(ctx)
     os.execv(cmd[0], cmd)
+
+
+def setup_flags(ctx: Ctx) -> List[str]:
+    """The setting flags given to restore (--endpoint, --port, --location...),
+    passed on to the setup it runs, so a restore can change them."""
+    flags: List[str] = []
+    for flag, key in VALUE_FLAGS.items():
+        if key in ctx.args.settings:
+            flags += [flag, ctx.args.settings[key]]
+    if ctx.args.location:
+        flags += ["--location", ctx.args.location]
+    return flags

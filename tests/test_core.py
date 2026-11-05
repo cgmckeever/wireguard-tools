@@ -252,3 +252,19 @@ def test_client_table_per_cell():
     assert rules.client_table(snap, host_w) == "" and rules.client_table(snap, city_w) == "201"
     assert rules.client_table(snap, host) == "main" and rules.client_table(snap, city) == "231"
     assert [c.name for c in snap.direct_clients()] == ["a"]
+
+
+def test_next_free_subnet():
+    # in order, skipping the fleet's subnets (any size) and the server's own routes
+    assert net.next_free_subnet("", []) == "10.1.1.0/24"
+    assert net.next_free_subnet("", ["10.1.1.0/24", "10.1.2.0/24"]) == "10.1.3.0/24"
+    assert net.next_free_subnet("10.1.1.0/24 dev eth1", ["10.1.2.0/23"]) == "10.1.4.0/24"
+    assert net.next_free_subnet("", ["192.168.250.0/24", "junk"]) == "10.1.1.0/24"
+
+
+def test_fleet_subnets_pick_next_free():
+    c = resolve({}, {"WGT_FLEET_SUBNETS": "10.1.1.0/24,10.2.10.0/24"}, {})
+    assert c.subnet_defaulted and c.values["WG_SUBNET"] == "10.1.2.0/24"
+    assert c.sources["WG_SUBNET"] == "next free in the fleet"
+    saved = resolve({}, {"WGT_FLEET_SUBNETS": "10.1.1.0/24"}, {"WG_SUBNET": "10.9.9.0/24"})
+    assert saved.values["WG_SUBNET"] == "10.9.9.0/24"   # a saved subnet stays

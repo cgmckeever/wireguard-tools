@@ -18,6 +18,8 @@ from .const import (
 )
 from .errors import WgtError
 
+FLEET_SUBNETS_ENV = "WGT_FLEET_SUBNETS"   # set by wgt-ctl init: the other servers' subnets, comma-separated
+
 _IFNAME = re.compile(r"[A-Za-z0-9_-]{1,15}")
 _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,32}")
 _SUBNET4 = re.compile(r"([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})")
@@ -166,7 +168,8 @@ class Config:
 def resolve(flags: Mapping[str, str], env: Mapping[str, str], saved: Mapping[str, str],
             hostname: str = "wg", routes: str = "", paths: Optional[Paths] = None) -> Config:
     """Combine the sources: flag > environment > saved > default. WARP is never
-    read from the environment. An empty subnet becomes a random one."""
+    read from the environment. An empty subnet becomes a random one, or with
+    wgt-ctl init (which passes the other servers' subnets) the next free one."""
     values: Dict[str, str] = {}
     sources: Dict[str, str] = {}
     keys = list(CONFIG_KEYS) + ["ENDPOINT"]
@@ -180,7 +183,11 @@ def resolve(flags: Mapping[str, str], env: Mapping[str, str], saved: Mapping[str
         else:
             values[k] = ""
     subnet_defaulted = not values["WG_SUBNET"]
-    if subnet_defaulted:
+    fleet = [u for u in env.get(FLEET_SUBNETS_ENV, "").split(",") if u.strip()]
+    if subnet_defaulted and fleet:
+        values["WG_SUBNET"] = net.next_free_subnet(routes, fleet)
+        sources["WG_SUBNET"] = "next free in the fleet"
+    elif subnet_defaulted:
         values["WG_SUBNET"] = net.random_subnet(routes)
         sources["WG_SUBNET"] = "random"
     for k, d in DEFAULTS.items():

@@ -112,3 +112,71 @@ def test_client_name_skips_flag_values():
     assert ctl.client_name(["add", "--warp", "off", "par-fr.mac"]) == "par-fr.mac"
     assert ctl.client_name(["add", "mac", "--warp", "off"]) == "mac"
     assert ctl.client_name(["add", "--allowed-ips", "10.0.0.0/8", "--yes"]) == ""
+
+
+def test_parse_move():
+    opts, setup, sure = ctl._parse_move(["--to", "9.9.9.9", "--yes", "--", "--endpoint", "vpn.example.com"])
+    assert opts["--to"] == "9.9.9.9" and sure and setup == ["--endpoint", "vpn.example.com"]
+    assert ctl._parse_move([]) == ({"--to": "", "--user": "", "--branch": "main"}, [], False)
+    with pytest.raises(WgtError):
+        ctl._parse_move(["--bogus"])
+
+
+def test_set_target_keeps_checkout(local):
+    ctl.set_target("boba", "root@9.9.9.9")
+    assert [(s.name, s.target, s.dir) for s in ctl.servers()] == [
+        ("dengar", "root@1.2.3.4", ctl.DEF_DIR), ("boba", "root@9.9.9.9", "/srv/wgt")]
+
+
+@pytest.fixture
+def mover(local, monkeypatch):
+    """do_move with nothing remote: ssh/scp recorded; <fail> names a step whose ssh fails."""
+    calls = []
+    state = {"fail": ""}
+
+    def fake_ssh(target, command, **kw):
+        calls.append((target, command))
+        return (1 if state["fail"] and state["fail"] in command else 0), ""
+    monkeypatch.setattr(ctl, "ssh", fake_ssh)
+    monkeypatch.setattr(ctl, "scp", lambda src, dest: calls.append(("scp", dest)) or True)
+    monkeypatch.setattr(ctl, "fetch_backup", lambda s: "/tmp/wireguard-tools.dengar.x.tar.gz")
+    monkeypatch.setattr(ctl, "_login", lambda t: None)
+    monkeypatch.setattr(ctl, "_probe", lambda t, a: {})
+    monkeypatch.setattr(ctl, "_install", lambda t, b: calls.append((t, "install")))
+    monkeypatch.setattr(ctl, "teardown", lambda t, d: calls.append((t, "teardown")) or 0)
+    monkeypatch.setattr(ctl.ui, "have_tty", lambda: False)
+    return calls, state
+
+
+def test_move_to_new_machine(mover):
+    calls, _ = mover
+    s = ctl.find("dengar")
+    assert ctl.do_move(s, ["--to", "9.9.9.9", "--yes", "--", "--endpoint", "vpn.example.com"]) == 0
+    steps = [(t, c.split(";")[0]) for t, c in calls]
+    assert steps.index(("root@9.9.9.9", "install")) < steps.index(("root@1.2.3.4", f"{s.wgt} rollback --yes"))
+    restore = next(c for t, c in calls if "restore" in c)
+    assert "--endpoint vpn.example.com" in restore
+    assert calls[-1] == ("root@1.2.3.4", "teardown")
+    assert ctl.find("dengar").target == "root@9.9.9.9"
+
+
+def test_move_failed_restore_keeps_list(mover):
+    calls, state = mover
+    state["fail"] = "restore"
+    assert ctl.do_move(ctl.find("dengar"), ["--to", "9.9.9.9", "--yes"]) == 1
+    assert ctl.find("dengar").target == "root@1.2.3.4"        # still the old machine
+    assert not any(c == "teardown" for _, c in calls)
+
+
+def test_move_in_place_purges_and_reclones(mover):
+    calls, _ = mover
+    s = ctl.find("dengar")
+    assert ctl.do_move(s, ["--yes"]) == 0
+    cmds = [c for _, c in calls]
+    assert f"{s.wgt} rollback --purge --yes" in cmds and "install" in cmds
+    assert not any(c == "teardown" for c in cmds)
+
+
+def test_move_needs_default_checkout(mover):
+    with pytest.raises(WgtError):
+        ctl.do_move(ctl.find("boba"), ["--yes"])

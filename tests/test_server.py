@@ -258,3 +258,11 @@ def test_setup_restarts_wg0_only_on_drift(make_ctx, monkeypatch):
     monkeypatch.setattr(checks.Tests, "wg0_drift", lambda self: ["ip WARP rule"])
     srv.restart_if_drifted(ctx)
     assert "systemctl restart wg-quick@wg0" in ctx.runner.changes()
+
+
+def test_restore_passes_setting_flags_to_setup(make_ctx):
+    from wgt import backup
+    ctx = make_ctx(argv=["--endpoint", "vpn.example.com", "--port", "51821", "--location", "Paris"])
+    flags = backup.setup_flags(ctx)
+    assert flags[flags.index("--endpoint") + 1] == "vpn.example.com"
+    assert flags[flags.index("--port") + 1] == "51821" and flags[-2:] == ["--location", "Paris"]

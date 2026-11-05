@@ -10,6 +10,10 @@ One server:
   wgt-ctl SERVER forget [--yes]         drop it from local/servers (the server is untouched)
   wgt-ctl SERVER remove [--yes]         tear wireguard-tools off it (rollback --purge, delete its
                                         checkout, wgcf and archives), then forget it
+  wgt-ctl SERVER move [--to ADDRESS] [--user U] [--branch B] [--yes] [-- setup flags]
+                                        rebuild it from its own backup, on a new machine or in
+                                        place: backup, down, restore (with the setup flags), test,
+                                        then (--to) point the list at it and tear the old one down
 
 Every server, in turn:
   wgt-ctl all <wgt command> | pull | backup | branch <b>
@@ -37,6 +41,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from . import render, store, ui
+from .config import FLEET_SUBNETS_ENV
 from .ctx import VALUE_FLAGS
 from .errors import WgtError
 from .system import Out
@@ -202,6 +207,19 @@ def cmd_list(quick: bool = False) -> None:
     print("")
 
 
+def fleet_subnets() -> List[str]:
+    """The client subnets of the servers already in local/servers, so a new
+    one is offered the next free subnet instead of a random one (unreachable
+    servers are skipped)."""
+    used = []
+    for s in servers():
+        rc, o = ssh(s.target, "sed -n 's/^WG_SUBNET=//p' /etc/wireguard/wg-tools.state 2>/dev/null | tail -n 1",
+                    batch=True, capture=True)
+        if rc == 0 and o.strip():
+            used.append(o.strip())
+    return used
+
+
 def cmd_init(argv: List[str]) -> None:
     """Set up a new server (or adopt one already running these tools) and add it to the list."""
     opts, setup_args = _parse_init(argv)
@@ -215,8 +233,10 @@ def cmd_init(argv: List[str]) -> None:
         _adopt(name, saved, target)
         return
     _install(target, opts["--branch"])
+    used = fleet_subnets()
+    env = f"{FLEET_SUBNETS_ENV}={q(','.join(used))} " if used else ""
     out.log(f"Running wgt setup --name {name} on {address}")
-    rc, _ = ssh(target, f"{DEF_DIR}/bin/wgt setup --name {q(name)} {q(*setup_args)}", tty=True)
+    rc, _ = ssh(target, f"{env}{DEF_DIR}/bin/wgt setup --name {q(name)} {q(*setup_args)}", tty=True)
     if rc != 0:
         raise WgtError(f"setup did not finish; fix the cause and re-run: wgt-ctl init --address {address} "
                        f"--name {name} --user {opts['--user']} --branch {opts['--branch']}")
@@ -439,22 +459,26 @@ def do_ssh(s: Server, args: List[str]) -> int:
 def do_backup(s: Server, args: List[str]) -> int:
     """wgt backup there, then fetch the archive into local/backups/<server>/."""
     no_args("backup", args)
+    local = fetch_backup(s)
+    out.info(f"{s.name}: {local} (private keys inside; restore with wgt restore)")
+    return 0
+
+
+def fetch_backup(s: Server) -> str:
+    """wgt backup there; the archive fetched into local/backups/<server>/ (its path here)."""
     rc, o = ssh(s.target, f"{s.wgt} backup --yes >/dev/null || exit 1; "
                           "ls -t /var/backups/wireguard-tools/wireguard-tools.*.tar.gz 2>/dev/null | head -n 1",
                 capture=True)
     archive = o.strip()
     if rc != 0 or not archive:
-        out.error(f"{s.name}: backup failed")
-        return 1
+        raise WgtError(f"{s.name}: backup failed")
     ensure_local()
     d = private_dir(os.path.join(LOCAL, "backups", s.name))
     if not scp(f"{s.target}:{archive}", d + "/"):
-        out.error(f"{s.name}: fetching {archive} failed")
-        return 1
+        raise WgtError(f"{s.name}: fetching {archive} failed")
     local = os.path.join(d, os.path.basename(archive))
     os.chmod(local, 0o600)
-    out.info(f"{s.name}: {local} (private keys inside; restore with wgt restore)")
-    return 0
+    return local
 
 
 YES = ("--yes", "-y")
@@ -490,18 +514,24 @@ def do_remove(s: Server, args: List[str]) -> int:
         if ui.ask(f"    Type the server's name ({s.name}) to remove it: ") != s.name:
             out.info("kept")
             return 0
-    d = shlex.quote(s.dir)
-    # set -e: if rollback fails, nothing is deleted and the server stays listed.
-    rc, _ = ssh(s.target, f"""set -e
+    if teardown(s.target, s.dir) != 0:
+        raise WgtError(f"teardown failed on {s.name}; it stays in {LIST} - fix the cause and re-run")
+    return do_forget(s, ["--yes"])
+
+
+def teardown(target: str, checkout: str) -> int:
+    """rollback --purge there, then delete the checkout, the wgt link, wgcf
+    and the backup archives. set -e: if rollback fails, nothing is deleted."""
+    if checkout.rstrip("/").count("/") < 2:
+        raise WgtError(f"refusing to delete checkout '{checkout}' (too close to /)")
+    d = shlex.quote(checkout)
+    return ssh(target, f"""set -e
         if [ -x {d}/bin/wgt ]; then {d}/bin/wgt rollback --purge --yes; fi
         rm -rf {d} /var/backups/wireguard-tools
         rm -f /usr/local/bin/wgcf /usr/local/sbin/wgt
-        echo "    removed {s.dir}, /usr/local/sbin/wgt, /usr/local/bin/wgcf and /var/backups/wireguard-tools"
+        echo "    removed {checkout}, /usr/local/sbin/wgt, /usr/local/bin/wgcf and /var/backups/wireguard-tools"
         echo "    (packages left installed)"
-        """, tty=True)
-    if rc != 0:
-        raise WgtError(f"teardown failed on {s.name} (exit {rc}); it stays in {LIST} - fix the cause and re-run")
-    return do_forget(s, ["--yes"])
+        """, tty=True)[0]
 
 
 def do_forget(s: Server, args: List[str]) -> int:
@@ -516,6 +546,145 @@ def do_forget(s: Server, args: List[str]) -> int:
         f.write("\n".join(lines) + "\n")
     out.info(f"forgot '{s.name}'; its local/exits/{s.name} and local/backups/{s.name} stay")
     return 0
+
+
+# --- move / rebuild ---
+
+def _parse_move(args: List[str]) -> Tuple[Dict[str, str], List[str], bool]:
+    """move's options, what follows `--` (setup flags for the restore), and --yes."""
+    opts = {"--to": "", "--user": "", "--branch": "main"}
+    sure = False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            return opts, args[i + 1:], sure
+        if a in YES:
+            sure = True
+            i += 1
+            continue
+        if a not in opts:
+            raise WgtError(f"unknown option: {a} (usage: wgt-ctl <server> move [--to ADDRESS] [--user U] "
+                           "[--branch B] [--yes] [-- setup flags])")
+        if i + 1 >= len(args):
+            raise WgtError(f"move: {a} needs a value")
+        opts[a] = args[i + 1]
+        i += 2
+    return opts, [], sure
+
+
+def set_target(name: str, target: str) -> None:
+    """Point a server's line in local/servers at a new login (its checkout dir stays)."""
+    lines = []
+    for line in (store.read_text(LIST) or "").splitlines():
+        f = line.split()
+        if f and f[0] == name:
+            line = f"{name:<10} {target}" + (f" {f[2]}" if len(f) > 2 else "")
+        lines.append(line)
+    with open(LIST, "w") as fh:
+        fh.write("\n".join(lines) + "\n")
+
+
+def do_move(s: Server, args: List[str]) -> int:
+    """Rebuild a server from its own backup, on a new machine (--to) or in
+    place, with setup flags after `--` (e.g. -- --endpoint vpn.example.com):
+    back up and fetch; prepare the new machine; bring the old one down; restore
+    there; test. Passed: the server list points at the new machine and the old
+    one is torn down (asked). Failed: the old one can be brought back."""
+    opts, setup_args, sure = _parse_move(args)
+    if s.dir != DEF_DIR:
+        raise WgtError(f"move needs the checkout at {DEF_DIR} (this one is {s.dir})")
+    if not _BRANCH.match(opts["--branch"]):
+        raise WgtError(f"bad branch name: {opts['--branch']}")
+    user = opts["--user"] or s.target.split("@", 1)[0]
+    in_place = not opts["--to"]
+    new = s.target if in_place else f"{user}@{opts['--to']}"
+    if not _TARGET.match(new):
+        raise WgtError(f"bad --user or --to: {new}")
+    if not in_place and new == s.target:
+        raise WgtError("--to is this server's own address; leave it out to rebuild in place")
+    how = "rebuild it in place" if in_place else f"move it to {new}"
+    out.log(f"{s.name}: {how}" + (f", with setup {' '.join(setup_args)}" if setup_args else ""))
+    steps = ["back up and fetch the archive here",
+             "re-clone the checkout (after step 3)" if in_place else "prepare the new machine (install, no setup)",
+             f"bring {s.name} down" + (" and purge it" if in_place else " (rollback; keys kept)"),
+             "restore it" + ("" if in_place else " on the new machine"),
+             "wgt test and wgt tunnel test",
+             "done" if in_place else "point the server list at it; tear the old machine down (asked)"]
+    for i, step in enumerate(steps, 1):
+        out.info(f"{i}. {step}")
+    out.warn(f"{s.name}'s devices are cut off from step 3 until step 4 finishes")
+    if not sure:
+        needs_terminal("move")
+        if ui.ask(f"    Type the server's name ({s.name}) to go ahead: ") != s.name:
+            out.info("nothing changed")
+            return 0
+
+    out.log(f"1. Backing up {s.name}")
+    archive = fetch_backup(s)
+    out.info(f"saved: {archive}")
+
+    if not in_place:
+        out.log(f"2. Preparing {new}")
+        _login(new)
+        facts = _probe(new, opts["--to"])
+        if facts.get("saved"):
+            raise WgtError(f"{new} is already set up as '{facts['saved']}'; tear it down first "
+                           f"(nothing has changed on {s.name})")
+        _install(new, opts["--branch"])
+
+    out.log(f"3. Bringing {s.name} down")
+    down = f"{s.wgt} rollback --purge --yes" if in_place else f"{s.wgt} rollback --yes"
+    if ssh(s.target, down, tty=True)[0] != 0:
+        raise WgtError(f"rollback failed on {s.name}; it may be half down - bring it back with: "
+                       f"wgt-ctl {s.name} setup --yes")
+    if in_place:
+        if ssh(s.target, f"rm -rf {DEF_DIR}")[0] != 0:
+            raise WgtError(f"could not remove {DEF_DIR}; restore by hand: wgt restore <{archive}>")
+        _install(new, opts["--branch"])
+
+    out.log("4. Restoring" + ("" if in_place else f" on {new}"))
+    remote = f"/root/{os.path.basename(archive)}"
+    if not scp(archive, f"{new}:{remote}"):
+        return _move_failed(s, in_place, archive, "upload failed")
+    rc, _ = ssh(new, f"{DEF_DIR}/bin/wgt restore {q(remote)} --yes {q(*setup_args)}; rc=$?; "
+                     f"rm -f {q(remote)}; exit $rc", tty=True)
+    if rc != 0:
+        return _move_failed(s, in_place, archive, f"restore failed (exit {rc})")
+
+    out.log("5. Testing")
+    tested = ssh(new, f"{DEF_DIR}/bin/wgt test && {DEF_DIR}/bin/wgt tunnel test", tty=True)[0]
+    if tested != 0:
+        return _move_failed(s, in_place, archive, "tests failed")
+
+    if in_place:
+        out.log(f"{s.name} rebuilt")
+        return 0
+    set_target(s.name, new)
+    out.log(f"6. {s.name} is now {new} in {LIST}")
+    out.info(f"the old machine ({s.target}) is down, its keys kept")
+    if sure or ui.yes(f"Tear wireguard-tools off the old machine ({s.target}) now?", default=True):
+        if teardown(s.target, s.dir) != 0:
+            out.warn(f"teardown failed on {s.target}; run there: wgt rollback --purge")
+    else:
+        out.info(f"later: ssh {s.target} wgt rollback --purge (it shares WARP and jump keys with the new one)")
+    return 0
+
+
+def _move_failed(s: Server, in_place: bool, archive: str, why: str) -> int:
+    """A move stopped after the old server went down: say how to recover, and
+    offer to bring the old machine back (a move to a new one only)."""
+    out.error(f"{s.name}: {why}")
+    if in_place:
+        out.info(f"the backup is here: {archive}; once the cause is fixed, on {s.name}: wgt restore <archive> "
+                 f"(wgt rollback --purge first if it got part-way)")
+        return 1
+    out.info(f"the old machine ({s.target}) is down but intact; the new one is left as it is to look at")
+    if ui.have_tty() and ui.yes("Bring the old machine back up now (wgt setup there)?", default=True):
+        ssh(s.target, f"{s.wgt} setup --yes", tty=True)
+    else:
+        out.info(f"bring it back with: wgt-ctl {s.name} setup --yes")
+    return 1
 
 
 # --- jumps from local files ---
@@ -689,7 +858,7 @@ def do_exit_add(s: Server, args: List[str]) -> int:
 
 
 CTL = {"pull": do_pull, "backup": do_backup, "jump-add": do_exit_add, "exit-add": do_exit_add, "ssh": do_ssh,
-       "branch": do_branch, "forget": do_forget, "remove": do_remove}
+       "branch": do_branch, "forget": do_forget, "remove": do_remove, "move": do_move}
 ALL_OK = ("pull", "backup", "branch")   # ctl commands that take "all" (every wgt command does)
 
 
