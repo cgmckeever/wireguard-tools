@@ -362,6 +362,7 @@ configs are blocked, never sent out another way.
 
 ```bash
 wgt test              # PASS/FAIL checks; non-zero exit on any FAIL
+wgt tunnel test       # every way out (each exit, with and without WARP), traced through Cloudflare
 wgt summary           # at a glance: one line per fact, says what is wrong
 wgt status            # settings (and any not running yet), interfaces, configs, routes, rules
 wgt log [N]           # its changes, both watchdogs and the tunnels: last lines, then follows (Ctrl-C stops; --no-follow just prints)
@@ -374,7 +375,7 @@ wgt rollback --purge  # ...and delete keys, configs, WARP accounts and jumps
 `test` checks WARP (up, handshaking, and actually used by `warp.` configs but
 not by the server itself), every routing, NAT and firewall rule (each exactly
 once), the services and watchdogs, and each jump's routing, plus its
-handshakes and a WARP trace through it if it's up.
+handshakes and a trace through it with and without WARP if it's up.
 
 Backups go in `/var/backups/wireguard-tools/` (mode 700, outside the checkout,
 so re-cloning the tools keeps them); `backup <dir>` writes elsewhere. Each

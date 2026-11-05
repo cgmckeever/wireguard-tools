@@ -144,9 +144,20 @@ def wait_hs(ctx: Ctx, e: store.Exit, seconds: int = 10) -> None:
         time.sleep(1)
 
 
-def trace(ctx: Ctx, e: store.Exit) -> str:
-    """"ip=... colo=... loc=... warp=..." through an exit's WARP ("" if no answer)."""
-    return live.trace_summary(live.trace(ctx.runner, "--interface", e.wx))
+def trace(ctx: Ctx, e: store.Exit, ifc: str = "") -> str:
+    """"ip=... colo=... loc=... warp=..." through an exit's WARP, or through
+    <ifc> (its jump tunnel: the plain path) ("" if no answer)."""
+    return live.trace_summary(live.trace(ctx.runner, "--interface", ifc or e.wx))
+
+
+def plain_check(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
+    """Traffic through the jump tunnel alone (what plain jump configs use)
+    leaves from the jump, not through WARP."""
+    tr = trace(ctx, e, e.px)
+    if tr and not live.is_warp_trace(tr):
+        res.result("PASS", f"jump {e.code}: plain traffic exits through the jump ({tr})")
+    else:
+        res.result("FAIL", f"jump {e.code}: no plain trace through {e.px} ({tr or 'no answer'})")
 
 
 @contextlib.contextmanager
@@ -359,6 +370,41 @@ def cmd_test(ctx: Ctx, words: List[str]) -> int:
     return results.report(ctx, res)
 
 
+def path_result(res: results.Results, label: str, warp: bool, tr: str) -> None:
+    """One way out: <tr> (a trace summary) must answer, with WARP or without."""
+    ok = bool(tr) and live.is_warp_trace(tr) == warp
+    res.result("PASS" if ok else "FAIL", f"{label:<22} {'warp' if warp else 'plain':<6} {tr or 'no answer'}")
+
+
+def cmd_tunnel_test(ctx: Ctx, words: List[str]) -> int:
+    """wgt tunnel test: every way out a config can take (each exit, with and
+    without WARP), traced through Cloudflare. Idle jumps are brought up for it
+    and taken down again."""
+    ops.no_more_words(words, "wgt tunnel test")
+    ops.take_lock(ctx)
+    ctx.out.log("Tunnel tests")
+    res = results.Results(out=ctx.out.line)
+    loc = store.state_get(ctx.snap.state, "LOCATION")
+    host = f"host:{loc}" if loc else "host"
+    path_result(res, host, False, live.trace_summary(live.trace(ctx.runner)))
+    path_result(res, host, True, live.trace_summary(live.trace(ctx.runner, "--interface", ctx.cfg.WARP_IF)))
+    for e in ctx.snap.exits:
+        label = f"jump:{e.label or e.code}"
+        try:
+            with probing(ctx, e):
+                path_result(res, label, False, trace(ctx, e, e.px))
+                path_result(res, label, True, trace(ctx, e))
+        except WgtError as err:
+            res.result("FAIL", f"{label:<22} could not bring it up ({err})")
+    return results.report(ctx, res)
+
+
+def cmd_tunnel(ctx: Ctx, words: List[str]) -> Optional[int]:
+    """wgt tunnel <command>: only test for now."""
+    ops.require_setup(ctx)
+    return ops.dispatch(ctx, "tunnel", words, {"test": cmd_tunnel_test})
+
+
 def cmd_exit(ctx: Ctx, words: List[str]) -> Optional[int]:
     """wgt jump (or exit, the old name) <command>: dispatch; no command means list."""
     ops.require_setup(ctx)
@@ -396,9 +442,10 @@ def tunnel_checks(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
     for kind, ifc in (("jump", e.px), ("WARP", e.wx)):
         res.check(f"jump {e.code}: {kind} tunnel {ifc} handshake within {WATCHDOG_STALE}s",
                   live.hs_recent(ctx.runner, ifc, WATCHDOG_STALE, ctx.clock()))
+    plain_check(ctx, res, e)
     tr = trace(ctx, e)
     if live.is_warp_trace(tr):
-        res.result("PASS", f"jump {e.code}: traffic exits through WARP ({tr})")
+        res.result("PASS", f"jump {e.code}: WARP traffic exits through WARP ({tr})")
     else:
         res.result("FAIL", f"jump {e.code}: no WARP trace through {e.wx} ({tr or 'no answer'})")
 
@@ -421,6 +468,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
             res.check(f"jump {e.code}: jump tunnel {e.px} handshake within {WATCHDOG_STALE}s "
                       "(only WARP-off clients active; its WARP idle)",
                       live.hs_recent(r, e.px, WATCHDOG_STALE, ctx.clock()))
+            plain_check(ctx, res, e)
         elif bring_up or is_up(ctx, e):
             try:
                 with probing(ctx, e):

@@ -208,3 +208,33 @@ def test_silent_warp_restarts_only_its_warp(make, tmp_path):
     watchdog.exits(ctx)
     assert "systemctl restart wg-quick@wx-par-fr" in ctx.runner.calls
     assert not any(c.startswith("systemctl restart") and "px-par-fr" in c for c in ctx.runner.calls)
+
+
+@pytest.mark.parametrize("trace, kind", [
+    ("ip=79.127.134.84\ncolo=CDG\nloc=FR\nwarp=off\n", "PASS"),   # out of the jump, plain
+    ("ip=104.28.1.1\ncolo=CDG\nloc=FR\nwarp=on\n", "FAIL"),       # WARP on the plain path
+    ("", "FAIL"),                                                  # no answer
+])
+def test_jump_plain_trace(make_ctx, monkeypatch, trace, kind):
+    from wgt import exits, results
+    monkeypatch.setattr(time, "sleep", lambda s: None)   # trace retries an empty answer
+    ctx = make_ctx(answers={"curl -fsS --max-time 10 --interface px-par-fr*": (0, trace)})
+    e = next(x for x in ctx.snap.exits if x.code == "par-fr")
+    got = []
+    exits.plain_check(ctx, results.Results(out=got.append), e)
+    assert got[0].split()[0] == kind
+
+
+def test_tunnel_test_without_jumps(make_ctx, monkeypatch, tmp_path):
+    """Every way out is traced; with no jumps, just the host's two."""
+    from wgt import exits
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    ctx = make_ctx(case="basic", answers={
+        "curl -fsS --max-time 10 --interface warp*": (0, "ip=104.28.1.1\ncolo=ATL\nwarp=on\n"),
+        "curl -fsS --max-time 10 https*": (0, "ip=192.0.2.1\nloc=US\nwarp=off\n")})
+    got = []
+    ctx.out.line = lambda text="": got.append(text)
+    assert exits.cmd_tunnel_test(ctx, []) == 0
+    rows = [g for g in got if g.strip().startswith(("PASS", "FAIL"))]
+    assert len(rows) == 2 and all(r.split()[0] == "PASS" for r in rows)
+    assert "plain" in rows[0] and "warp" in rows[1].split()[2]

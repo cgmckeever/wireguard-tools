@@ -32,6 +32,7 @@ Cloudflare WARP. The device picks one at a time.
          (add: per exit, <device> and warp.<device> (--warp on|off: one); a full config
           name adds just that; rotate, remove, disable, enable, show, share: none picks)
   jump   list | add <code> <wg.conf|-> [--label NAME] | remove [code] | test   (old name: exit)
+  tunnel test                every way out (each exit, with and without WARP), traced
 
 Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
   --force             setup: reinstall wgcf, regenerate the WARP profile, take over
@@ -106,6 +107,7 @@ COMMANDS = {
     "summary": ("checks", "cmd_summary"),
     "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
     "client": ("clients", "cmd_client"), "jump": ("exits", "cmd_exit"), "exit": ("exits", "cmd_exit"),
+    "tunnel": ("exits", "cmd_tunnel"),
     "watchdog": ("watchdog", "cmd_watchdog"), "debug": ("cli", "cmd_debug"),
 }
 
