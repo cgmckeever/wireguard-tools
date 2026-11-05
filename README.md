@@ -219,7 +219,9 @@ the next free address. Its file is
 `/etc/wireguard/clients/<server>.<config>.conf`: the server's name goes in
 front, so `warp.laptop` on boba is `boba.warp.laptop.conf` and files from
 different servers don't collide. A `# exit:` line inside says where it goes in
-words. Import the ones you want on the device and switch exits by switching
+words, and a `# server-address:` line gives the Wireguard Server's own
+tunnel addresses (for tools that read configs, such as wireguard-tunnels'
+warped carriers). Import the ones you want on the device and switch exits by switching
 tunnels in the WireGuard app. The Android app only takes tunnel names up to 15
 characters, so rename longer ones when importing there (`add` reminds you).
 
