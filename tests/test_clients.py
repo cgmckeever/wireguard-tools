@@ -92,11 +92,12 @@ def test_list_shows_configs_by_device(make_ctx, capsys):
     ctx = make_ctx()
     names = clients.print_clients(ctx, numbered=True)
     out = capsys.readouterr().out.splitlines()
-    assert out[0].split()[1:4] == ["CONFIG", "EXIT", "WARP"]
+    assert out[0].split()[1:5] == ["DEVICE", "CONFIG", "EXIT", "WARP"]
     # grouped by device: the host's configs first, then the jumps'
     assert names == ["mbp-1", "warp.par-fr.mbp-1", "nyc-us.phone", "warp.par-fr.tv"]
-    rows = {line.split()[1]: line for line in out[1:]}
-    assert rows["mbp-1"].split()[2:4] == ["host", "off"]
+    rows = {line.split()[2]: line for line in out[1:]}
+    assert rows["warp.par-fr.tv"].split()[1] == "tv"
+    assert rows["mbp-1"].split()[3:5] == ["host", "off"]
     assert "Paris, France" in rows["warp.par-fr.mbp-1"] and " on " in rows["warp.par-fr.mbp-1"]
 
 

@@ -238,7 +238,7 @@ wgt client rename warp.par-fr.tablet par-fr.tablet   # now without WARP, live
 #### Other client commands
 
 ```bash
-wgt client list                        # each config: exit, WARP, address, static address, last seen, traffic, allowed IPs
+wgt client list                        # each config: device, exit, WARP, address, static address, last seen, traffic, allowed IPs
 wgt client show laptop                 # config with keys redacted
 wgt client show laptop --qr            # QR code again (phones: WireGuard app → scan)
 wgt client share laptop                # send the config via magic-wormhole (one-time code)
