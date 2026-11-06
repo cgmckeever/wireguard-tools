@@ -34,9 +34,20 @@ DIRECT_STOP_PRIO = 9501      # WARP-off host clients: blackhole after their main
 JUMP_MTU = 1420
 EXIT_IDLE = 300              # seconds without a client handshake before an exit goes down
 
+# Static device addresses: one number per device, the same on every server.
+DEVICE_NET = "10.9.8.0/24"
+DEVICE_SERVER = 1            # the server itself
+DEVICE_CTL_FIRST, DEVICE_CTL_LAST = 2, 127          # handed out by wgt-ctl, counting up
+DEVICE_DIRECT_FIRST, DEVICE_DIRECT_LAST = 128, 254  # handed out by `wgt client add`, counting down
+DEVICE_ACTIVE = 180          # seconds since a handshake for a config to count as in use
+DEVICE_CHAIN = "WGT-DEVICES"       # nat: a static address -> the config in use
+DEVICE_SOURCE_CHAIN = "WGT-DEVICE-SRC"  # nat: a sender's config address -> its static address
+DEVICE_RULE_PRIO = 9300      # before every client rule: no config in use means unreachable, not a way out
+
 LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes
 WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
+DEVICE_WATCHDOG = "wg-tools-device-watchdog"
 EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a jump
 WATCHDOG_STALE = 180         # seconds without a WARP handshake before it acts
 
@@ -105,6 +116,10 @@ class Paths:
         return self.wg("wgcf")
 
     @property
+    def device_db(self) -> str:
+        return self.wg("devices.db")
+
+    @property
     def exit_dir(self) -> str:
         return self.wg("exits")
 
@@ -171,6 +186,11 @@ class Paths:
 
     def unit_file(self, name: str) -> str:
         return os.path.join(self.systemd_dir, name)
+
+
+def device_ip(number: int) -> str:
+    """A device's static address."""
+    return DEVICE_NET.rsplit(".", 1)[0] + f".{number}"
 
 
 # The settings table (setup's review, status): key, label, default. A row with

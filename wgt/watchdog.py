@@ -1,5 +1,5 @@
-"""The two watchdogs, run by systemd timers as `wgt watchdog warp` (every 30s)
-and `wgt watchdog exits` (every 10s). Each run is quick and changes only
+"""The watchdogs, run by systemd timers as `wgt watchdog warp` (every 30s),
+`wgt watchdog exits` and `wgt watchdog devices` (every 10s). Each run is quick and changes only
 what it must; what it does is logged to the journal (`wgt log`)."""
 
 from __future__ import annotations
@@ -7,9 +7,10 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, List, Optional
 
+from . import devices as static
 from . import exits as jumps
 from . import live, ops
-from .const import EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
+from .const import DEVICE_WATCHDOG, EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 from .system import journal, read_marker, remove_markers, write_marker
 
@@ -158,12 +159,26 @@ def _exits(ctx: Ctx) -> None:
                 log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {idle}, but taking it down failed")
 
 
+def devices(ctx: Ctx) -> None:
+    """Point each device's static address at the config it's using. Skips the
+    run while wireguard-tools is changing things (its lock)."""
+    if not ops.try_lock(ctx):
+        return
+    try:
+        for msg in static.sync(ctx):
+            log_event(ctx, DEVICE_WATCHDOG, msg)
+    finally:
+        ops.release_lock(ctx)
+
+
 def cmd_watchdog(ctx: Ctx, words: List[str]) -> None:
-    """wgt watchdog warp|exits: one pass, run by the systemd timers."""
+    """wgt watchdog warp|exits|devices: one pass, run by the systemd timers."""
     which = words[0] if words else ""
     if which == "warp":
         warp(ctx)
     elif which == "exits":
         exits(ctx)
+    elif which == "devices":
+        devices(ctx)
     else:
-        raise WgtError("usage: wgt watchdog warp|exits (run by the systemd timers)")
+        raise WgtError("usage: wgt watchdog warp|exits|devices (run by the systemd timers)")

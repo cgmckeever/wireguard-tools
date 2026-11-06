@@ -15,7 +15,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING, List, Optional
 
-from . import live, net, ops, render, rules, store, system, ui, units
+from . import devices, live, net, ops, render, rules, store, system, ui, units
 from .const import MIB
 from .errors import WgtError
 
@@ -233,7 +233,7 @@ def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
         rx_b, tx_b = tx.get(cl.pub, (0, 0))
         rows.append(ui.ClientRow(cl.name, exit_short(cl.name), cl.ip, seen,
                                  f"{rx_b // MIB}/{tx_b // MIB}", cl.allowed.replace(",", ", "),
-                                 exit_label(ctx, cl.name)))
+                                 exit_label(ctx, cl.name), devices.static_of(ctx, cl.name)))
     return rows
 
 
@@ -317,6 +317,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         if code not in uniq:
             uniq.append(code)
     endpoint = ops.resolve_endpoint(ctx, save=False)
+    devices.ensure_number(ctx, base)
     planned: List[str] = []
     for code in uniq:
         for warp in warps:
@@ -417,6 +418,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     # forget: the file, its change copies and its backup record (nothing for rollback to restore).
     ctx.files.forget(client_conf(ctx, name))
     ctx.files.forget(ctx.paths.psk(name))
+    devices.drop_if_unused(ctx, store.device_of(name))
 
 
 def cmd_rename(ctx: Ctx, words: List[str]) -> None:
@@ -432,6 +434,14 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     valid_name(new)
     ops.take_lock(ctx)
     ops.require_server(ctx)
+    rename_config(ctx, old, new)
+    old_device, new_device = store.device_of(old), store.device_of(new)
+    if old_device != new_device:
+        devices.config_renamed(ctx, old_device, new_device)
+
+
+def rename_config(ctx: Ctx, old: str, new: str) -> None:
+    """Rename one config (the lock is held); its device's number is the caller's."""
     c = ctx.snap.client(old)
     if c is None:
         raise WgtError(f"no client '{old}' (see: wgt client list)")
@@ -623,6 +633,41 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
 def cmd_client(ctx: Ctx, words: List[str]) -> Optional[int]:
     """wgt client <command>: dispatch; no command means list."""
     return ops.dispatch(ctx, "client", words, CLIENT_COMMANDS)
+
+
+def cmd_device_rename(ctx: Ctx, words: List[str]) -> None:
+    """Rename a device: every config of it (exits and WARP stay), and its static
+    number with them. Keys and addresses don't change."""
+    usage = "wgt device rename <device> <new-device>"
+    if len(words) != 2:
+        raise WgtError(f"usage: {usage}")
+    old, new = words
+    valid_name(new)
+    if store.device_of(old) != old or store.device_of(new) != new:
+        raise WgtError(f"a device name has no prefix (usage: {usage})")
+    ops.take_lock(ctx)
+    ops.require_server(ctx)
+    configs = ctx.snap.device_clients(old)
+    if not configs:
+        raise WgtError(f"no device '{old}' (see: wgt client list)")
+    if ctx.snap.device_clients(new):
+        raise WgtError(f"a device '{new}' already exists")
+    missing = [c.name for c in configs if store.read_text(client_conf(ctx, c.name)) is None]
+    if missing:   # checked first: a rename stopped half way couldn't be re-run ('<new>' would exist)
+        raise WgtError(f"no config file for {' '.join(missing)}: nothing renamed")
+    number = ctx.snap.device_number(old)
+    for c in configs:
+        code, warp, _ = store.split_name(c.name)
+        rename_config(ctx, c.name, store.config_name(code, warp, new))
+    if number is not None:
+        ops.set_device(ctx, old, None)
+        ops.set_device(ctx, new, number)
+
+
+def cmd_device(ctx: Ctx, words: List[str]) -> Optional[int]:
+    """wgt device <command>: dispatch; no command means list."""
+    return ops.dispatch(ctx, "device", words,
+                        {"list": devices.cmd_list, "set": devices.cmd_set, "rename": cmd_device_rename})
 
 
 CLIENT_COMMANDS = {

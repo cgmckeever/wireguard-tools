@@ -81,8 +81,8 @@ def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[i
 
 # --- the clients table (wgt client list, wgt-ctl clients) ---
 
-CLIENT_FMT = "{:<24} {:<22} {:<4} {:<15} {:<14} {:<12} {}"
-CLIENT_HEAD = ("CONFIG", "EXIT", "WARP", "ADDRESS", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
+CLIENT_FMT = "{:<24} {:<22} {:<4} {:<15} {:<13} {:<14} {:<12} {}"
+CLIENT_HEAD = ("CONFIG", "EXIT", "WARP", "ADDRESS", "STATIC", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
 
 
 class ClientRow(NamedTuple):
@@ -95,16 +95,17 @@ class ClientRow(NamedTuple):
     traffic: str       # "rx/tx" MiB
     allowed: str       # "0.0.0.0/0, ::/0"
     exit_label: str = ""   # the jump's full name ("Paris, France")
+    static: str = ""       # the device's static address
 
     def tsv(self) -> str:
         return "\t".join(self)
 
     @classmethod
     def from_tsv(cls, line: str) -> ClientRow:
-        return cls(*(line.split("\t") + [""] * 7)[:7])
+        return cls(*(line.split("\t") + [""] * 8)[:8])
 
     def cells(self) -> Sequence[str]:
         """The table's columns: the config, where it exits (the jump's full
         name), and whether through WARP."""
         return (self.name, self.exit_label or self.exit, "on" if name_warp(self.name) else "off",
-                self.ip, self.seen, self.traffic, self.allowed)
+                self.ip, self.static, self.seen, self.traffic, self.allowed)

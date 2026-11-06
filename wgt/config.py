@@ -3,6 +3,7 @@ and the checks and derived values (subnet maths, IPv6, file paths)."""
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional
@@ -11,6 +12,7 @@ from . import net
 from .const import (
     CONFIG_KEYS,
     DEFAULTS,
+    DEVICE_NET,
     EXIT_MAX,
     EXIT_PTABLE_BASE,
     EXIT_TABLE_BASE,
@@ -124,6 +126,8 @@ class Config:
         if net.int2ip(self.net_int) != base:
             raise WgtError(f"{subnet} is not a network address "
                            f"(did you mean {net.int2ip(self.net_int)}/{self.pfx}?)")
+        if ipaddress.ip_network(subnet).overlaps(ipaddress.ip_network(DEVICE_NET)):
+            raise WgtError(f"subnet {subnet} overlaps {DEVICE_NET}, the devices' static addresses")
         self.server_ip = net.int2ip(self.net_int + 1)
         self.first_host = self.net_int + 2
         self.last_host = self.net_int + (1 << (32 - self.pfx)) - 2

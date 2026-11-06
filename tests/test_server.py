@@ -323,10 +323,10 @@ def test_warp_rotate_unknown_jump(make_ctx, rotating):
         srv.cmd_warp(make_ctx(), ["rotate", "xx-yy"])
 
 
-def test_with_server_address_adds_and_refreshes():
+def test_with_device_network_adds_and_replaces_server_address():
     old = "# wireguard-tools client: a on s\n# exit: x\n[Interface]\nPrivateKey = K\n"
-    added = srv.with_server_address(old, "10.8.0.1/32")
-    assert added == ("# wireguard-tools client: a on s\n# exit: x\n# server-address: 10.8.0.1/32\n"
-                     "[Interface]\nPrivateKey = K\n")
-    assert srv.with_server_address(added, "10.9.0.1/32").count("# server-address:") == 1
-    assert "10.9.0.1/32" in srv.with_server_address(added, "10.9.0.1/32")
+    want = "# wireguard-tools client: a on s\n# exit: x\n# device-network: 10.9.8.0/24\n[Interface]\nPrivateKey = K\n"
+    assert srv.with_device_network(old) == want
+    assert srv.with_device_network(want) == want
+    swapped = old.replace("[Interface]", "# server-address: 10.8.0.1/32, fd00::1/128\n[Interface]")
+    assert srv.with_device_network(swapped) == want

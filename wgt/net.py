@@ -10,6 +10,8 @@ from typing import List, Optional
 
 from .errors import WgtError
 
+SUBNET_OCTETS = range(200, 256)   # picked subnets: high in 10.x, away from home and office LANs
+
 
 def ip2int(ip: str) -> int:
     m = re.fullmatch(r"([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})", ip)
@@ -54,8 +56,8 @@ def _routed(net: str, routes: str) -> bool:
 
 
 def next_free_subnet(routes: str, used: List[str]) -> str:
-    """The first 10.<1-10>.<1-10>.0/24, in order, that no route points into
-    and that overlaps none of <used> (the other servers' subnets, from
+    """The first 10.<200-255>.<200-255>.0/24, in order, that no route points
+    into and that overlaps none of <used> (the other servers' subnets, from
     wgt-ctl init); a random one if all are taken."""
     taken = []
     for u in used:
@@ -63,8 +65,8 @@ def next_free_subnet(routes: str, used: List[str]) -> str:
             taken.append(ipaddress.ip_network(u.strip(), strict=False))
         except ValueError:
             continue
-    for a in range(1, 11):
-        for b in range(1, 11):
+    for a in SUBNET_OCTETS:
+        for b in SUBNET_OCTETS:
             cand = ipaddress.ip_network(f"10.{a}.{b}.0/24")
             if not _routed(f"10.{a}.{b}", routes) and not any(cand.overlaps(t) for t in taken):
                 return str(cand)
@@ -72,12 +74,12 @@ def next_free_subnet(routes: str, used: List[str]) -> str:
 
 
 def random_subnet(routes: str, rng: Optional[random.Random] = None) -> str:
-    """A random 10.<1-10>.<1-10>.0/24 that no route in <routes> (the output of
-    `ip -4 route show table all`) already points into."""
+    """A random 10.<200-255>.<200-255>.0/24 that no route in <routes> (the output
+    of `ip -4 route show table all`) already points into."""
     rng = rng or random.Random()
     net = ""
     for _ in range(20):
-        net = f"10.{rng.randrange(10) + 1}.{rng.randrange(10) + 1}"
+        net = f"10.{rng.choice(SUBNET_OCTETS)}.{rng.choice(SUBNET_OCTETS)}"
         if not _routed(net, routes):
             break
     return f"{net}.0/24"

@@ -21,6 +21,7 @@ def local(tmp_path, monkeypatch):
     monkeypatch.setattr(ctl, "LOCAL", str(tmp_path))
     monkeypatch.setattr(ctl, "LIST", str(tmp_path / "servers"))
     monkeypatch.setattr(ctl, "LINKS", str(tmp_path / "details.tsv"))
+    monkeypatch.setattr(ctl, "DEVICES", str(tmp_path / "devices"))
     (tmp_path / "servers").write_text("# comment\ndengar  root@1.2.3.4\nboba root@5.6.7.8 /srv/wgt\n")
     (tmp_path / "details.tsv").write_text("boba\tparis.france.conf\tpar-fr\tParis, France\n")
     return tmp_path
@@ -180,3 +181,124 @@ def test_move_in_place_purges_and_reclones(mover):
 def test_move_needs_default_checkout(mover):
     with pytest.raises(WgtError):
         ctl.do_move(ctl.find("boba"), ["--yes"])
+
+
+# --- static device numbers across the fleet ---
+
+def answers_from(monkeypatch, held, calls=None):
+    """The servers answer `device list --tsv` from <held> (server -> device ->
+    number); a server not in it doesn't answer. `device set/rename` go to <calls>."""
+    def fake_ssh(target, cmd, **kw):
+        name = {"root@1.2.3.4": "dengar", "root@5.6.7.8": "boba"}[target]
+        if name not in held:
+            return 1, ""
+        return 0, "".join(f"{d}\t{'' if n is None else n}\n" for d, n in held[name].items())
+    monkeypatch.setattr(ctl, "ssh", fake_ssh)
+    seen = [] if calls is None else calls
+    monkeypatch.setattr(ctl, "do_wgt", lambda s, args: seen.append((s.name, args)) or 0)
+    return seen
+
+
+def test_add_takes_the_next_low_number_and_remembers_it(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {"mac": 2}, "boba": {"mac": 2}})
+    assert ctl.on("boba", "client", ["add", "phone", "--yes"]) == 0
+    assert calls == [("boba", ["client", "add", "phone", "--yes", "--device-number", "3"])]
+    assert (local / "devices").read_text().splitlines()[1:] == ["mac 2", "phone 3"]
+
+
+def test_add_reuses_the_number_the_fleet_has_for_the_device(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {"mac": 2, "phone": 5}, "boba": {"mac": 2}})
+    ctl.on("boba", "client", ["add", "warp.phone", "--yes"])
+    assert calls[0][1][-2:] == ["--device-number", "5"]
+
+
+def test_add_uses_local_devices_for_a_server_that_is_down(local, monkeypatch):
+    (local / "devices").write_text("phone 9\n")
+    calls = answers_from(monkeypatch, {"boba": {}})
+    ctl.on("boba", "client", ["add", "phone", "--yes"])
+    assert calls[0][1][-2:] == ["--device-number", "9"]
+    assert "removed" not in (local / "devices").read_text()   # dengar might still have it
+
+
+def test_add_leaves_the_number_off_a_server_that_cannot_take_it(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {}})          # boba: not updated yet
+    ctl.on("boba", "client", ["add", "phone", "--yes"])
+    assert "--device-number" not in calls[0][1]
+
+
+def test_add_all_numbers_each_server_that_answers(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {}})
+    assert ctl.on("all", "client", ["add", "phone", "--yes"]) == 0
+    assert calls == [("dengar", ["client", "add", "phone", "--yes", "--device-number", "2"]),
+                     ("boba", ["client", "add", "phone", "--yes"])]
+
+
+def test_add_keeps_a_number_given_by_hand(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {}, "boba": {}})
+    ctl.on("boba", "client", ["add", "phone", "--device-number", "40"])
+    assert calls[0][1] == ["client", "add", "phone", "--device-number", "40"]
+
+
+def test_a_removed_device_is_flagged_and_its_number_not_reused(local, monkeypatch):
+    (local / "devices").write_text("old 7\n")
+    calls = answers_from(monkeypatch, {"dengar": {}, "boba": {}})
+    ctl.on("boba", "client", ["add", "phone", "--yes"])
+    assert calls[0][1][-1] == "8"
+    assert "old 7 removed " in (local / "devices").read_text()
+
+
+def test_devices_sync_gives_one_number_on_every_server(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {"mac": None}, "boba": {"mac": None}})
+    assert ctl.main(["devices", "sync"]) == 0
+    assert calls == [("dengar", ["device", "set", "mac", "2"]), ("boba", ["device", "set", "mac", "2"])]
+
+
+def test_devices_fix_sets_every_holder_and_refuses_a_taken_number(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {"mac": 2, "tv": 3}, "boba": {"mac": 200}})
+    assert ctl.main(["devices", "fix", "mac", "3"]) == 1    # tv's
+    assert calls == []
+    assert ctl.main(["devices", "fix", "mac", "9"]) == 0
+    assert calls == [("dengar", ["device", "set", "mac", "9"]), ("boba", ["device", "set", "mac", "9"])]
+    assert "mac 9" in (local / "devices").read_text().splitlines()
+
+
+def test_devices_forget_refuses_while_a_server_might_have_it(local, monkeypatch):
+    (local / "devices").write_text("old 7 removed 2026-01-01\n")
+    answers_from(monkeypatch, {"boba": {}})
+    assert ctl.main(["devices", "forget", "old"]) == 1      # dengar didn't answer
+    answers_from(monkeypatch, {"dengar": {"old": 7}, "boba": {}})
+    assert ctl.main(["devices", "forget", "old"]) == 1      # still on dengar
+    answers_from(monkeypatch, {"dengar": {}, "boba": {}})
+    assert ctl.main(["devices", "forget", "old"]) == 0
+    assert "old" not in (local / "devices").read_text().replace("# wgt-ctl", "")
+
+
+def test_rename_everywhere(local, monkeypatch):
+    (local / "devices").write_text("phone 5\n")
+    calls = answers_from(monkeypatch, {"dengar": {"phone": 5}, "boba": {"mac": 2}})
+    assert ctl.on("all", "client", ["rename", "phone", "pixel"]) == 0
+    assert calls == [("dengar", ["device", "rename", "phone", "pixel"])]   # only where it is
+    assert (local / "devices").read_text().splitlines()[1:] == ["pixel 5"]
+
+
+def test_rename_everywhere_refuses_config_names_clashes_and_a_missing_server(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {"phone": 5, "pixel": 6}, "boba": {}})
+    with pytest.raises(WgtError, match="device names"):
+        ctl.on("all", "client", ["rename", "warp.phone", "warp.pixel"])
+    with pytest.raises(WgtError, match="already exists"):
+        ctl.on("all", "client", ["rename", "phone", "pixel"])
+    answers_from(monkeypatch, {"boba": {"phone": 5}}, calls)
+    with pytest.raises(WgtError, match="nothing renamed"):
+        ctl.on("all", "client", ["rename", "phone", "pixel"])
+    assert calls == []
+
+
+def test_rename_everywhere_force_can_be_finished_later(local, monkeypatch):
+    (local / "devices").write_text("phone 5\n")
+    calls = answers_from(monkeypatch, {"boba": {"phone": 5}})
+    assert ctl.on("all", "client", ["rename", "phone", "pixel", "--force"]) == 0
+    calls.clear()
+    answers_from(monkeypatch, {"dengar": {"phone": 5}, "boba": {"pixel": 5}}, calls)
+    assert ctl.on("all", "client", ["rename", "phone", "pixel"]) == 0
+    assert calls == [("dengar", ["device", "rename", "phone", "pixel"])]
+    assert (local / "devices").read_text().splitlines()[1:] == ["pixel 5"]

@@ -15,3 +15,7 @@ ip6tables|filter|FORWARD|-i wg0 -o eth0 -j ACCEPT
 ip6tables|filter|FORWARD|-i eth0 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 ip6tables|mangle|FORWARD|-o eth0 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 iptables|filter|INPUT|-p udp --dport 51820 -j ACCEPT
+iptables|nat|PREROUTING|-d 10.9.8.0/24 -i wg0 -j WGT-DEVICES
+iptables|nat|OUTPUT|-d 10.9.8.0/24 -j WGT-DEVICES
+iptables|nat|POSTROUTING|-o wg0 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC
+iptables|filter|FORWARD|-i wg0 -o wg0 -m conntrack --ctstate DNAT -j ACCEPT

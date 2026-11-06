@@ -17,7 +17,7 @@ import time
 from typing import TYPE_CHECKING, List, Optional
 
 from . import checks, exits, host, live, net, ops, render, results, rules, store, ui, units, warp
-from .const import CONFIG_KEYS, EXIT_WATCHDOG, MARKER, WATCHDOG
+from .const import CONFIG_KEYS, DEVICE_NET, DEVICE_WATCHDOG, EXIT_WATCHDOG, MARKER, WATCHDOG
 from .errors import WgtError
 from .system import settings_of, write_private
 
@@ -411,7 +411,7 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
         for key, value in want.items():
             new = re.sub(rf"(?m)^{key} = .*$", f"{key} = {value}".replace("\\", "\\\\"), new)
         changed = new != text   # a setting a device uses: re-send
-        new = with_server_address(new, render.server_address(ctx.cfg))
+        new = with_device_network(new)
         if new != text:
             ctx.files.write(conf, 0o600, new)
         if (changed or src != conf) and c.name not in stale:
@@ -421,13 +421,15 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
                      f"(wgt client share/show --qr): {' '.join(stale)}")
 
 
-def with_server_address(text: str, addr: str) -> str:
-    """The config with its "# server-address:" header line set to <addr>
-    (added before [Interface] in configs written before the line existed).
-    A comment: devices don't need it re-sent."""
-    line = f"# server-address: {addr}"
-    if re.search(r"(?m)^# server-address:.*$", text):
-        return re.sub(r"(?m)^# server-address:.*$", line, text)
+def with_device_network(text: str) -> str:
+    """The config with its "# device-network:" header line, added before
+    [Interface] in configs written before the line existed, and without the
+    "# server-address:" line it replaced. A comment: a device only needs it
+    re-sent to have it swept into a warped carrier (wireguard-tunnels)."""
+    text = re.sub(r"(?m)^# server-address:.*\n", "", text)
+    line = f"# device-network: {DEVICE_NET}"
+    if re.search(r"(?m)^# device-network:.*$", text):
+        return re.sub(r"(?m)^# device-network:.*$", line, text)
     return re.sub(r"(?m)^\[Interface\]", line + "\n[Interface]", text, count=1)
 
 
@@ -575,7 +577,12 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
         restart_if_drifted(ctx)
     guard_default_route(ctx)
     units.write_watchdog(ctx)
+    units.write_device_watchdog(ctx)
     exits.sync(ctx)
+    unnumbered = [d for d in ctx.snap.device_names() if ctx.snap.device_number(d) is None]
+    if unnumbered:
+        ctx.out.info(f"no static address yet: {' '.join(unnumbered)} "
+                     "(wgt-ctl devices sync, or here: wgt device set <device>)")
     ctx.out.line()
     ctx.out.info(f"REMINDER: open UDP {ctx.cfg.WG_PORT} in your VPS provider's firewall / security group.")
     ctx.out.info("Next: wgt client add <device> (makes <device> and warp.<device>)")
@@ -613,7 +620,7 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
 def _stop_everything(ctx: Ctx) -> None:
     """The watchdogs first (they'd bring things back), then jumps, wg0, warp."""
     r, cfg = ctx.runner, ctx.cfg
-    timers = [f"{name}.timer" for name in (WATCHDOG, EXIT_WATCHDOG)
+    timers = [f"{name}.timer" for name in (WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG)
               if os.path.exists(ctx.paths.unit_file(f"{name}.timer"))]
     if timers:
         r.run(["systemctl", "disable", "--now", *timers], check=False)
@@ -635,12 +642,13 @@ def _remove_rules(ctx: Ctx) -> None:
 
 
 def _remove_units(ctx: Ctx) -> None:
-    """wg0's boot-order drop-in and both watchdog timers."""
+    """wg0's boot-order drop-in and the watchdog timers."""
     cfg, files = ctx.cfg, ctx.files
     files.restore_original(cfg.dropin, remove_new=True)
     files.remove_empty_dir(cfg.dropin_dir)
     units.remove_timer(ctx, WATCHDOG)
     units.remove_timer(ctx, EXIT_WATCHDOG)
+    units.remove_timer(ctx, DEVICE_WATCHDOG)
     files.remove(ctx.paths.warp_marker)
     ctx.runner.run(["systemctl", "daemon-reload"])
 
@@ -669,7 +677,7 @@ def _purge(ctx: Ctx) -> None:
         text = store.read_text(path)
         if text is not None and MARKER in text:
             files.remove(path)
-    files.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.state, p.backup_map, p.exit_db)
+    files.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.state, p.backup_map, p.exit_db, p.device_db)
     for d in (p.wgcf_dir, p.client_dir, p.psk_dir, p.exit_dir):
         files.remove_tree(d)
     files.remove(p.wgt_link)

@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from . import clients, exits, host, live, ops, results, rules, store, ui
-from .const import DIRECT_STOP_PRIO, EXIT_RULE_PRIO, RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
+from .const import DEVICE_WATCHDOG, DIRECT_STOP_PRIO, EXIT_RULE_PRIO, RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -242,6 +242,7 @@ class Tests:
         res.check(f"wg-quick@{c.WG_IF} ordered after (and wants) wg-quick@{c.WARP_IF}", self.boot_order_ok())
         res.check("WARP watchdog timer enabled and running",
                   live.timer_on(r, WATCHDOG))
+        res.check("device watchdog timer enabled and running", live.timer_on(r, DEVICE_WATCHDOG))
         if self.ctx.snap.exits:
             exits.run_tests(self.ctx, res, bring_up=False)
         if any(ts > 0 for ts in live.handshakes(r, c.WG_IF).values()):

@@ -22,8 +22,15 @@ Per client, then, the way out is exit (host | jump) x WARP (on | off):
   host       RT_TABLE (the WARP switch)    main (this server's IP)
   jump       client table 200+n (wx)       jump table 230+n (px)
 
+Static device addresses (DEVICE_NET; see devices.py): wg0 holds the network's
+first address, so the server's own connections to a device use it. The fixed
+part is here: the nat chains and what leads to them, forwarding for that
+traffic, and a rule making an address with no config in use unreachable rather
+than a packet for a way out. The chains' rules are the device watchdog's.
+
 Every line is idempotent, and "down" is the exact inverse of "up" in reverse
-order. The text matches the bash version byte for byte (wg0.conf embeds it)."""
+order. The rest of the text matches the bash version byte for byte (wg0.conf
+embeds it)."""
 
 from __future__ import annotations
 
@@ -32,6 +39,10 @@ from typing import Iterable, List, Sequence, Tuple
 from .config import Config
 from .const import (
     BLACKHOLE_METRIC,
+    DEVICE_CHAIN,
+    DEVICE_NET,
+    DEVICE_RULE_PRIO,
+    DEVICE_SOURCE_CHAIN,
     DIRECT_STOP_PRIO,
     EXIT_MARK_BASE,
     EXIT_MARK_PRIO,
@@ -113,7 +124,24 @@ def ipt_rules(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[IptRule]:
             if cmd == "iptables" or out_if not in v4_only:
                 found += ipt_rules_for(cfg, cmd, out_if)
     found.append(("iptables", "filter", "INPUT", f"-p udp --dport {cfg.WG_PORT} -j ACCEPT"))
-    return found
+    return found + device_ipt_rules(cfg)
+
+
+def device_ipt_rules(cfg: Config) -> List[IptRule]:
+    """What leads to the device chains, and forwarding for that traffic only
+    (ctstate DNAT: devices still can't reach each other's config addresses).
+    Written in `iptables -S` order: live.ipt_count compares the text."""
+    wg = cfg.WG_IF
+    return [
+        ("iptables", "nat", "PREROUTING", f"-d {DEVICE_NET} -i {wg} -j {DEVICE_CHAIN}"),
+        ("iptables", "nat", "OUTPUT", f"-d {DEVICE_NET} -j {DEVICE_CHAIN}"),
+        ("iptables", "nat", "POSTROUTING", f"-o {wg} -m conntrack --ctstate DNAT -j {DEVICE_SOURCE_CHAIN}"),
+        ("iptables", "filter", "FORWARD", f"-i {wg} -o {wg} -m conntrack --ctstate DNAT -j ACCEPT"),
+    ]
+
+
+def device_rule(cfg: Config) -> str:
+    return f"iif {cfg.WG_IF} to {DEVICE_NET} priority {DEVICE_RULE_PRIO} unreachable"
 
 
 def ipt_rules_via(cfg: Config, out_if: str, v4_only: bool = False) -> List[IptRule]:
@@ -238,7 +266,10 @@ def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
             out.append(f"{f} route replace blackhole default metric {BLACKHOLE_METRIC} table {rt}")
         if cfg.warp_on:
             out += warp_rule_cmds(cfg, True)
+        out += [f"iptables -t nat -N {c} 2>/dev/null || true" for c in (DEVICE_CHAIN, DEVICE_SOURCE_CHAIN)]
         out += ipt_cmds(ipt_rules(cfg, pub_if, snap.exits), up=True)
+        spec = device_rule(cfg)
+        out.append(f"while ip rule del {spec} 2>/dev/null; do :; done; ip rule add {spec}")
         for e in snap.exits:
             out += exit_hook_cmds(cfg, snap, e, up=True)
         for c in snap.direct_clients():
@@ -248,7 +279,11 @@ def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
             out += client_rule_cmds(cfg, snap, c, up=False)
         for e in reversed(snap.exits):
             out += exit_hook_cmds(cfg, snap, e, up=False)
+        out.append(f"while ip rule del {device_rule(cfg)} 2>/dev/null; do :; done")
         out += ipt_cmds(reversed(ipt_rules(cfg, pub_if, snap.exits)), up=False)
+        for chain in (DEVICE_SOURCE_CHAIN, DEVICE_CHAIN):
+            out.append(f"iptables -t nat -F {chain} 2>/dev/null || true")
+            out.append(f"iptables -t nat -X {chain} 2>/dev/null || true")
         out += list(reversed(warp_rule_cmds(cfg, False)))
         for f in reversed(cfg.families()):
             out.append(f"{f} route del blackhole default metric {BLACKHOLE_METRIC} table {rt} 2>/dev/null || true")

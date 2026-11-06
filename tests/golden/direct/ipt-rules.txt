@@ -7,3 +7,7 @@ iptables|filter|FORWARD|-i wg1 -o ens3 -j ACCEPT
 iptables|filter|FORWARD|-i ens3 -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 iptables|mangle|FORWARD|-o ens3 -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu
 iptables|filter|INPUT|-p udp --dport 51999 -j ACCEPT
+iptables|nat|PREROUTING|-d 10.9.8.0/24 -i wg1 -j WGT-DEVICES
+iptables|nat|OUTPUT|-d 10.9.8.0/24 -j WGT-DEVICES
+iptables|nat|POSTROUTING|-o wg1 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC
+iptables|filter|FORWARD|-i wg1 -o wg1 -m conntrack --ctstate DNAT -j ACCEPT

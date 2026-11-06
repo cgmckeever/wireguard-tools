@@ -22,12 +22,21 @@ No server:
   wgt-ctl [list]                        the servers: branch@commit (or unreachable), jumps staged
   wgt-ctl summary                       every server at a glance (wgt summary on each)
   wgt-ctl clients                       every client on every server
+  wgt-ctl devices                       each device's static address, and what doesn't line up
+  wgt-ctl devices sync                  give numbers to devices that have none (the same on every server)
+  wgt-ctl devices fix <device> <n>      set a device's number on every server that has it
+  wgt-ctl devices forget <device>       delete a removed device's line (its number can be reused)
   wgt-ctl init [--address A] [--name N] [--user U] [--branch B] [-- setup flags]
                                         set up a new server (or adopt one already running these tools)
 
 Leave SERVER out of a server command to pick one from the list. Private
 files stay under local/ (untracked): servers, exits/<server>/*.conf (jump
-WireGuard configs, any name), exits/details.tsv (which file is which jump), backups/."""
+WireGuard configs, any name), exits/details.tsv (which file is which jump),
+devices (each device's static number), backups/.
+
+`wgt-ctl SERVER client add` gives a device its fleet-wide number, and
+`wgt-ctl all client rename <device> <new> [--force]` renames a whole device on
+every server (--force: even with a server unreachable; re-run it to finish)."""
 
 from __future__ import annotations
 
@@ -37,11 +46,13 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
-from . import render, store, ui
+from . import fleet, render, store, ui
 from .config import FLEET_SUBNETS_ENV
+from .const import DEVICE_DIRECT_LAST, device_ip
 from .ctx import VALUE_FLAGS
 from .errors import WgtError
 from .system import Out
@@ -49,17 +60,18 @@ from .system import Out
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOCAL = os.path.join(ROOT, "local")
 LIST = os.path.join(LOCAL, "servers")
+DEVICES = os.path.join(LOCAL, "devices")               # each device's static number (fleet.py)
 LINKS = os.path.join(LOCAL, "exits", "details.tsv")   # server, local file, code, full name (tab-separated)
 DEF_DIR = "/opt/wireguard-tools"
 INBOX = "/etc/wireguard/exits/incoming"
 # Host keys must already be known (whatever ~/.ssh/config says); only init's
 # first login asks, so you can check the key against your provider's console.
 SSH_OPTS = ["-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15", "-o", "StrictHostKeyChecking=yes"]
-RESERVED = ("init", "clients", "summary", "all", "help", "list")
+RESERVED = ("init", "clients", "devices", "summary", "all", "help", "list")
 SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.join(RESERVED)})"
 # The wgt commands (anything else after a server word is a mistake, not a command).
 WGT_COMMANDS = ("setup", "summary", "status", "test", "log", "backup", "restore", "rollback", "client",
-                "jump", "exit", "tunnel", "warp")
+                "device", "jump", "exit", "tunnel", "warp")
 _TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:\[\]-]+$")
 _DIR = re.compile(r"^/[A-Za-z0-9._/-]+$")
 _BRANCH = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
@@ -396,7 +408,9 @@ def cmd_summary() -> int:
 
 
 def cmd_clients() -> None:
-    """Every client on every server in one table."""
+    """Every client on every server in one table, then what doesn't line up
+    about their static addresses (what it read also updates local/devices)."""
+    seen: Dict[str, Dict[str, Optional[int]]] = {}
     fmt = "  {:<10} " + ui.CLIENT_FMT
     print("")
     print(fmt.format("SERVER", *ui.CLIENT_HEAD))
@@ -409,11 +423,196 @@ def cmd_clients() -> None:
             continue
         rows = sorted((ui.ClientRow.from_tsv(line) for line in o.splitlines() if line),
                       key=lambda row: store.device_key(row.name))
+        seen[s.name] = {store.device_of(row.name): int(row.static.rsplit(".", 1)[1]) if row.static else None
+                        for row in rows}
         if not rows:
             print(f"  {s.name:<10} (no clients)")
         for row in rows:
             print(fmt.format(s.name, *row.cells()))
     print("")
+    ensure_local()
+    entries = refresh_entries(seen, len(seen) == len(servers()))
+    print_problems(entries, seen)
+
+
+# --- static device numbers ---
+
+def read_entries() -> Dict[str, fleet.Entry]:
+    return fleet.parse(store.read_text(DEVICES))
+
+
+def write_entries(entries: Dict[str, fleet.Entry]) -> None:
+    fd = os.open(DEVICES, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(fleet.format_entries(entries))
+
+
+def refresh_entries(seen: fleet.Seen, complete: bool) -> Dict[str, fleet.Entry]:
+    """local/devices updated with what the servers answered."""
+    before = read_entries()
+    entries = fleet.merge(before, seen, complete, time.strftime("%Y-%m-%d"))
+    if entries != before:
+        write_entries(entries)
+    return entries
+
+
+def sweep() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str]]:
+    """Every server's devices and numbers, and the servers that didn't answer
+    (unreachable, or running a version without static addresses)."""
+    seen: Dict[str, Dict[str, Optional[int]]] = {}
+    missed = []
+    for s in servers():
+        rc, o = ssh(s.target, f"{s.wgt} device list --tsv", batch=True, capture=True)
+        if rc != 0:
+            missed.append(s.name)
+            continue
+        seen[s.name] = {}
+        for line in o.splitlines():
+            device, _, number = line.partition("\t")
+            if device:
+                seen[s.name][device] = int(number) if number.isdigit() else None
+    return seen, missed
+
+
+def print_problems(entries: Dict[str, fleet.Entry], seen: fleet.Seen) -> None:
+    for line in fleet.problems(entries, seen):
+        out.warn(line)
+
+
+def numbered_add(args: List[str]) -> Tuple[List[str], Optional[List[str]]]:
+    """`client add` words with the device's fleet-wide number, and the servers
+    that take it (None: leave the words alone). A server that can't be reached
+    is covered by local/devices."""
+    device = store.device_of(client_name(args))
+    if not device or "--device-number" in args or any(a.startswith("--device-number=") for a in args):
+        return args, None
+    ensure_local()
+    seen, missed = sweep()
+    entries = refresh_entries(seen, not missed)
+    if missed:
+        out.info(f"not read for the static number (local/devices covers them): {', '.join(missed)}")
+    known = entries.get(device)
+    number = known.number if known else fleet.next_low(entries)
+    if not known:
+        entries[device] = fleet.Entry(number)
+        write_entries(entries)
+    return args + ["--device-number", str(number)], list(seen)
+
+
+def without_number(args: List[str]) -> List[str]:
+    """`client add` words for a server without static addresses yet."""
+    i = args.index("--device-number")
+    return args[:i] + args[i + 2:]
+
+
+def rename_everywhere(args: List[str]) -> int:
+    """`all client rename <device> <new>`: the whole device, on every server."""
+    force = "--force" in args
+    words = [a for a in args if a != "--force"]
+    if len(words) != 2:
+        raise WgtError("usage: wgt-ctl all client rename <device> <new-device> [--force]")
+    old, new = words
+    if "." in old or "." in new:
+        raise WgtError("all client rename takes device names; a config's way out is per server "
+                       "(wgt-ctl <server> client rename <config> <new>)")
+    seen, missed = sweep()
+    if missed and not force:
+        raise WgtError(f"no answer from {', '.join(missed)}: nothing renamed. Run again when they're back, or "
+                       "--force and re-run it later to finish")
+    clash = [name for name, devices in seen.items() if old in devices and new in devices]
+    if clash:
+        raise WgtError(f"'{new}' already exists next to '{old}' on {', '.join(clash)}: nothing renamed")
+    holders = [s for s in servers() if old in seen.get(s.name, {})]
+    if not holders and not any(new in devices for devices in seen.values()):
+        raise WgtError(f"no device '{old}' on any server")
+    rc = 0
+    for s in holders:
+        out.log(s.name)
+        rc = do_wgt(s, ["device", "rename", old, new]) or rc
+    ensure_local()
+    entries = read_entries()
+    if old in entries and rc == 0:
+        moved = entries.pop(old)
+        entries.setdefault(new, moved)
+        write_entries(entries)
+    return rc
+
+
+def cmd_devices(args: List[str]) -> int:
+    """wgt-ctl devices [sync | fix <device> <n> | forget <device>]."""
+    ensure_local()
+    verb = args[0] if args else "list"
+    if verb == "forget" and len(args) == 2:
+        return _devices_forget(args[1])
+    if verb == "fix" and len(args) == 3 and args[2].isdigit() and 2 <= int(args[2]) <= DEVICE_DIRECT_LAST:
+        return _devices_fix(args[1], int(args[2]))
+    if not (verb in ("list", "sync") and len(args) <= 1):
+        raise WgtError("usage: wgt-ctl devices [sync | fix <device> <number 2-254> | forget <device>]")
+    seen, missed = sweep()
+    entries = refresh_entries(seen, not missed)
+    rc = _devices_sync(entries, seen) if verb == "sync" else 0
+    if verb == "sync":
+        seen, missed = sweep()
+        entries = refresh_entries(seen, not missed)
+    print("")
+    print(f"  {'DEVICE':<32} {'STATIC':<14} SERVERS")
+    for device, e in sorted(entries.items(), key=lambda kv: kv[1].number):
+        where = [server for server in sorted(seen) if device in seen[server]]
+        print(f"  {device:<32} {device_ip(e.number):<14} " + (f"removed {e.removed}" if e.removed else " ".join(where)))
+    print("")
+    print_problems(entries, seen)
+    for name in missed:
+        out.warn(f"{name} didn't answer (unreachable, or not updated: wgt-ctl {name} pull)")
+    return rc
+
+
+def _devices_sync(entries: Dict[str, fleet.Entry], seen: fleet.Seen) -> int:
+    """Give devices without a number theirs, on each server that has them."""
+    rc = 0
+    for s in servers():
+        for device, number in seen.get(s.name, {}).items():
+            if number is not None:
+                continue
+            if device not in entries:
+                entries[device] = fleet.Entry(fleet.next_low(entries))
+                write_entries(entries)
+            rc = do_wgt(s, ["device", "set", device, str(entries[device].number)]) or rc
+    return rc
+
+
+def _devices_fix(device: str, number: int) -> int:
+    seen, missed = sweep()
+    entries = refresh_entries(seen, not missed)
+    owner = next((d for d, e in entries.items() if e.number == number and d != device), "")
+    if owner:
+        raise WgtError(f"{device_ip(number)} belongs to '{owner}' (wgt-ctl devices fix {owner} <another>, or "
+                       f"forget it if it's removed)")
+    holders = [s for s in servers() if device in seen.get(s.name, {})]
+    if not holders:
+        raise WgtError(f"no device '{device}' on the servers that answered")
+    rc = 0
+    for s in holders:
+        rc = do_wgt(s, ["device", "set", device, str(number)]) or rc
+    if rc == 0:
+        entries[device] = fleet.Entry(number)
+        write_entries(entries)
+    for name in missed:
+        out.warn(f"{name} didn't answer: it still has the old number (run this again when it's back)")
+    return rc
+
+
+def _devices_forget(device: str) -> int:
+    seen, missed = sweep()
+    entries = refresh_entries(seen, not missed)
+    if device not in entries:
+        raise WgtError(f"no device '{device}' in {DEVICES}")
+    if any(device in devices for devices in seen.values()):
+        raise WgtError(f"'{device}' is still on a server (wgt-ctl <server> client remove <config>)")
+    if missed:
+        raise WgtError(f"no answer from {', '.join(missed)}, which may still have '{device}'")
+    del entries[device]
+    write_entries(entries)
+    return 0
 
 
 # --- per-server commands ---
@@ -868,18 +1067,24 @@ def on(sel: str, cmd: str, args: List[str]) -> int:
     fn = CTL.get(cmd)
     if fn is None and cmd not in WGT_COMMANDS:
         raise WgtError(f"unknown command: {cmd} (see: wgt-ctl help)")
+    numbered_on: Optional[List[str]] = None
     if sel == "all":
         if fn and cmd not in ALL_OK:
             raise WgtError(f"'{cmd}' takes one server, not all")
         if not servers():
             raise WgtError("no servers yet (add one: wgt-ctl init)")
+        if cmd == "client" and args[:1] == ["rename"]:
+            return rename_everywhere(args[1:])
+        if cmd == "client" and args[:1] == ["add"]:
+            args, numbered_on = numbered_add(args)
         if cmd == "log" and "--no-follow" not in args:
             args = args + ["--no-follow"]   # following one server would block the rest
         rc = 0
         for s in servers():
             out.log(s.name)
             try:
-                r = fn(s, args) if fn else do_wgt(s, [cmd] + args)
+                words = without_number(args) if numbered_on is not None and s.name not in numbered_on else args
+                r = fn(s, words) if fn else do_wgt(s, [cmd] + words)
             except (WgtError, OSError) as e:
                 out.error(str(e))
                 r = 1
@@ -889,6 +1094,9 @@ def on(sel: str, cmd: str, args: List[str]) -> int:
     s = find(sel) if sel else pick()
     if cmd == "client" and args[:1] == ["add"]:
         offer_staged_exits(s, args)
+        args, numbered_on = numbered_add(args)
+        if numbered_on is not None and s.name not in numbered_on:
+            args = without_number(args)
     return fn(s, args) if fn else do_wgt(s, [cmd] + args)
 
 
@@ -912,6 +1120,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if first == "clients":
             cmd_clients()
             return 0
+        if first == "devices":
+            return cmd_devices(rest)
         if first == "all" or first.isdigit() or any(s.name == first for s in servers()):
             if not rest:
                 raise WgtError(f"usage: wgt-ctl {first} <command> (see: wgt-ctl help)")

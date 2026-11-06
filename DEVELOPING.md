@@ -26,10 +26,12 @@ wgt/                      the package (Python 3.8+, standard library only)
   server.py               setup, rollback (setup's inverse)
   backup.py               backup, restore (archive checks)
   clients.py              client commands, the clients table (and QR, share)
+  devices.py              static device addresses: numbers, `wgt device`, the watchdog's NAT rules
+  fleet.py                local/devices: wgt-ctl's record of each device's number (pure: no ssh, no files)
   exits.py                `wgt jump` (alias `exit`): bringing a jump up/down, probing it
   checks.py               test, status, summary
   results.py              PASS/FAIL counts shared by `test` and `jump test`
-  watchdog.py             both watchdogs (the jump watchdog's rule is the pure `decide`)
+  watchdog.py             the watchdogs (the jump watchdog's rule is the pure `decide`)
   ui.py                   ages, prompts, numbered menus, the clients table's columns
 bin/wgt, bin/wgt-ctl      launchers (put the checkout on sys.path and call main)
 templates/                client config and systemd unit templates
@@ -51,7 +53,8 @@ A **client** is a device; each of its **configs** is one clients.db entry
 (one peer, key and address) named `[warp.][<jump>.]<device>`
 (`store.split_name` / `config_name`). The name is the only record of a
 config's exit and WARP: no switch, no side file. Code still says "client" for
-an entry (`store.Client`, `clients.py`, `clients.db`).
+an entry (`store.Client`, `clients.py`, `clients.db`). A device's static number
+is per device, not per config, so it lives in `devices.db`.
 
 ## Conventions
 

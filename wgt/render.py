@@ -10,7 +10,7 @@ from typing import Callable, List, Optional, Tuple
 
 from . import rules
 from .config import Config
-from .const import JUMP_MTU, MARKER, TEMPLATE_DIR
+from .const import DEVICE_NET, DEVICE_SERVER, JUMP_MTU, MARKER, TEMPLATE_DIR, device_ip
 from .errors import WgtError
 from .store import Exit, Snapshot, client_exit
 
@@ -50,6 +50,7 @@ def render_wg_conf(cfg: Config, snap: Snapshot, pub_if: str, psk: Callable[[str]
     disabled one leaves just a comment)."""
     p = cfg.paths
     addr = f"{cfg.server_ip}/{cfg.pfx}" + (f", {cfg.p6}::1/64" if cfg.ipv6 else "")
+    addr += f", {device_ip(DEVICE_SERVER)}/{DEVICE_NET.split('/')[1]}"
     out: List[str] = [
         f"{MARKER} (WARP {cfg.WARP}); peers are rebuilt from {p.client_db} (use wgt client)",
         "[Interface]",
@@ -213,15 +214,8 @@ def render_client_conf(cfg: Config, snap: Snapshot, name: str, ip: str, private_
         NAME=name, SERVER_NAME=cfg.SERVER_NAME, EXIT=exit_desc(snap, name), PRIVATE_KEY=private_key,
         ADDRESS=cfg.client_addrs(ip).replace(",", ", ", 1), DNS=cfg.WG_DNS, MTU=cfg.WG_MTU,
         SERVER_PUBLIC_KEY=server_pub, PRESHARED_KEY=psk, ENDPOINT=f"{endpoint}:{cfg.WG_PORT}",
-        ALLOWED_IPS=allowed.replace(",", ", "), SERVER_ADDRESS=server_address(cfg),
+        ALLOWED_IPS=allowed.replace(",", ", "), DEVICE_NETWORK=DEVICE_NET,
     )
-
-
-def server_address(cfg: Config) -> str:
-    """The server's own tunnel addresses (on wg0), for a config's
-    "# server-address:" line: other tools (wireguard-tunnels' warped carriers)
-    read it to keep the server reachable through the tunnel."""
-    return f"{cfg.server_ip}/32" + (f", {cfg.p6}::1/128" if cfg.ipv6 else "")
 
 
 # --- sysctl and the systemd drop-in ---

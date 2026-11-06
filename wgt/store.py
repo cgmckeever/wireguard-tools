@@ -5,6 +5,7 @@ switched over with their files unchanged; keep them compatible):
   clients.db         "name ip public-key allowed-ips" (no private keys)
   clients.disabled   one name per line
   exits.db           "code idx label..."
+  devices.db         "device number" (the device's static address)
   wg-tools.backups   "path<TAB>original-copy|NEW"
 
 Reading is pure; writes return the new text, and system.Files writes it."""
@@ -15,7 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
 
-from .const import EXIT_MAX
+from .const import DEVICE_CTL_FIRST, DEVICE_DIRECT_FIRST, DEVICE_DIRECT_LAST, EXIT_MAX
 from .errors import WgtError
 
 if TYPE_CHECKING:
@@ -25,6 +26,7 @@ Reader = Callable[[str], Optional[str]]
 
 CLIENTS_HEADER = "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
 EXITS_HEADER = "# wireguard-tools jumps: code idx label (wgt jump add)"
+DEVICES_HEADER = "# wireguard-tools devices: device number (its static address)"
 
 _EXIT_CODE = re.compile(r"[a-z][a-z0-9-]{0,4}[a-z0-9]")
 _CLIENT_BASE = re.compile(r"[A-Za-z0-9_-]{1,32}")
@@ -261,6 +263,49 @@ def put_exit(text: Optional[str], code: str, entry: Optional[Exit] = None) -> st
     return "\n".join([EXITS_HEADER, *lines]) + "\n"
 
 
+# --- devices ---
+
+@dataclass
+class Device:
+    """A devices.db entry: a device (all its configs) and its static number."""
+
+    name: str
+    number: int
+
+
+def valid_device_number(number: int) -> bool:
+    return DEVICE_CTL_FIRST <= number <= DEVICE_DIRECT_LAST
+
+
+def parse_devices(text: Optional[str]) -> List[Device]:
+    """devices.db entries; a bad number is refused."""
+    out = []
+    for line in _entries(text):
+        f = line.split()
+        if len(f) != 2 or not _CLIENT_BASE.fullmatch(f[0]) or not f[1].isdigit() \
+                or not valid_device_number(int(f[1])):
+            raise WgtError(f"devices.db: bad line (want 'device number', number "
+                           f"{DEVICE_CTL_FIRST}-{DEVICE_DIRECT_LAST}): {line}")
+        out.append(Device(f[0], int(f[1])))
+    return out
+
+
+def put_device(text: Optional[str], name: str, number: Optional[int] = None) -> str:
+    """devices.db with <name> removed, optionally added back with <number>."""
+    entries = [d for d in parse_devices(text) if d.name != name]
+    if number is not None:
+        entries.append(Device(name, number))
+    return "\n".join([DEVICES_HEADER, *(f"{d.name} {d.number}" for d in entries)]) + "\n"
+
+
+def next_direct_number(devices: Iterable[Device]) -> Optional[int]:
+    """The number a `wgt client add` takes: below the lowest in the direct
+    range (None if that runs out)."""
+    used = [d.number for d in devices if d.number >= DEVICE_DIRECT_FIRST]
+    number = min(used) - 1 if used else DEVICE_DIRECT_LAST
+    return number if number >= DEVICE_DIRECT_FIRST else None
+
+
 # --- backup record ---
 
 def backup_orig(text: Optional[str], path: str) -> str:
@@ -301,6 +346,7 @@ class Snapshot:
     clients: List[Client]
     disabled: List[str]
     exits: List[Exit]
+    devices: List[Device] = field(default_factory=list)
 
     def client(self, name: str) -> Optional[Client]:
         return next((c for c in self.clients if c.name == name), None)
@@ -310,6 +356,18 @@ class Snapshot:
 
     def exit_clients(self, code: str) -> List[Client]:
         return [c for c in self.clients if client_exit(c.name) == code]
+
+    def device_number(self, name: str) -> Optional[int]:
+        """Device <name>'s static number (None if it has none)."""
+        return next((d.number for d in self.devices if d.name == name), None)
+
+    def device_clients(self, name: str) -> List[Client]:
+        """Device <name>'s configs."""
+        return [c for c in self.clients if device_of(c.name) == name]
+
+    def device_names(self) -> List[str]:
+        """Every device with a config, in clients.db order."""
+        return list(dict.fromkeys(device_of(c.name) for c in self.clients))
 
     def is_disabled(self, name: str) -> bool:
         return name in self.disabled
@@ -332,6 +390,7 @@ def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
         clients=parse_clients(read(paths.client_db)),
         disabled=parse_disabled(read(paths.disabled_db)),
         exits=parse_exits(read(paths.exit_db)),
+        devices=parse_devices(read(paths.device_db)),
     )
 
 

@@ -126,7 +126,7 @@ be set as an environment variable (flag > env > saved > default).
 | `--location "<place>"` | | its city, looked up once (ipinfo.io) | where the Wireguard Server is, shown as `host:<place>` in client lists |
 | `--dns <ip>` | `WG_DNS` | `1.1.1.1` | DNS server given to devices |
 | `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new configs (per config on `add`/`rotate`); `"10.4.5.0/24, fd…::/64"` (your subnets) for VPN-network only |
-| `--subnet <cidr>` | `WG_SUBNET` | random `10.<1-10>.<1-10>.0/24` | devices' IPv4 network (server is `.1`); first setup asks, Enter takes the random one |
+| `--subnet <cidr>` | `WG_SUBNET` | random `10.<200-255>.<200-255>.0/24` | devices' IPv4 network (server is `.1`); first setup asks, Enter takes the random one |
 | `--subnet6 <cidr>` | `WG_SUBNET6` | random `fd…::/64` | devices' IPv6 network; `off` disables IPv6 for devices |
 | `--mtu <bytes>` | `WG_MTU` | `1280` | tunnel MTU for server and devices (1280 minimum, at most `--warp-mtu`) |
 | *Rarely needed:* | | | |
@@ -146,8 +146,8 @@ rotated with `wgt client rotate`).
 #### Prompts
 
 The first setup asks for the client subnet, offering a random
-`10.<1-10>.<1-10>.0/24` that doesn't overlap a route the server already has
-(`Client subnet [10.4.5.0/24]:`; Enter takes it). `--subnet` sets your own
+`10.<200-255>.<200-255>.0/24` that doesn't overlap a route the server already has
+(`Client subnet [10.214.237.0/24]:`; Enter takes it). `--subnet` sets your own
 instead; `--yes` or `--dry-run` skip the question and take the offer.
 
 Each run lists the settings and where each came from (flag, env, entered,
@@ -219,9 +219,9 @@ the next free address. Its file is
 `/etc/wireguard/clients/<server>.<config>.conf`: the server's name goes in
 front, so `warp.laptop` on boba is `boba.warp.laptop.conf` and files from
 different servers don't collide. A `# exit:` line inside says where it goes in
-words, and a `# server-address:` line gives the Wireguard Server's own
-tunnel addresses (for tools that read configs, such as wireguard-tunnels'
-warped carriers). Import the ones you want on the device and switch exits by switching
+words, and a `# device-network:` line gives the network of the [static
+addresses](#static-device-addresses) (for tools that read configs, such as
+wireguard-tunnels' warped carriers). Import the ones you want on the device and switch exits by switching
 tunnels in the WireGuard app. The Android app only takes tunnel names up to 15
 characters, so rename longer ones when importing there (`add` reminds you).
 
@@ -238,7 +238,7 @@ wgt client rename warp.par-fr.tablet par-fr.tablet   # now without WARP, live
 #### Other client commands
 
 ```bash
-wgt client list                        # each config: exit, WARP, address, last seen, traffic, allowed IPs
+wgt client list                        # each config: exit, WARP, address, static address, last seen, traffic, allowed IPs
 wgt client show laptop                 # config with keys redacted
 wgt client show laptop --qr            # QR code again (phones: WireGuard app → scan)
 wgt client share laptop                # send the config via magic-wormhole (one-time code)
@@ -266,6 +266,44 @@ tab-separated rows instead).
 Nothing on the device changes: its tunnel just gets no handshake (with a
 full-tunnel config, no internet until its tunnel is switched off). `enable`
 puts it back; the same config works, nothing to re-send.
+
+#### Static device addresses
+
+A config's address depends on which config it is, so it changes when a device
+switches exits. A device's **static address** doesn't: each device has one
+number, and `10.9.8.<number>` reaches it whichever of its configs it's using.
+The server itself is `10.9.8.1`, on every server.
+
+```bash
+ssh 10.9.8.1                           # from a device: this server
+ssh 10.9.8.4                           # from a device or the server: that device
+wgt device list                        # each device and its static address (--tsv for scripts)
+wgt device set laptop 42               # give it this number (none given: the next free one)
+wgt device rename laptop work-laptop   # every config of it, and its number; keys and addresses stay
+```
+
+`wgt client add` gives a new device its number, and removing its last config
+frees it. A device added with `wgt` directly gets a number counting down from
+254, without knowing about your other servers. One added through `wgt-ctl`
+gets a number counting up from 2, the same on every server (see
+[Commands](#commands)). `wgt setup` lists devices that don't have a number yet;
+`wgt-ctl devices sync` gives them theirs, and a device needs no new config for it.
+
+Every 10s, the device watchdog points each static address at the config with
+the newest handshake in the last 180s. Good to know:
+
+- **A device that's off isn't reachable.** With no recent handshake the address
+  answers "unreachable" rather than reaching the device's last config.
+- **Switching exits moves new connections only.** A connection already open
+  stays on the old config until it times out, so reconnect (SSH, for example).
+- **The other side sees a static address too.** A connection through a static
+  address appears to come from the sender's static address, or from
+  `10.9.8.1` if the server made it, so firewall rules on a device can rely on it.
+- **IPv4 only.**
+- **Split tunnels:** a config with a narrower `--allowed-ips` needs
+  `10.9.8.0/24` added before it can use these addresses. Warped carriers get
+  it from the `# device-network:` line once wireguard-tunnels' sweep reads it.
+- **A server's subnet can't overlap `10.9.8.0/24`;** setup refuses one that does.
 
 #### Getting a config onto a device
 
@@ -477,22 +515,33 @@ wgt-ctl all test
 wgt-ctl all warp rotate all            # new WARP accounts everywhere
 wgt-ctl all pull
 wgt-ctl all backup
+wgt-ctl all client rename phone pixel  # a whole device, on every server that has it (--force: with a server down)
 ```
+
+`wgt-ctl SERVER client add <device>` (or `all`) checks the other servers first,
+so a device gets the same [static address](#static-device-addresses) everywhere.
+`all client rename` takes device names and renames nothing unless every server
+answers; with `--force` it goes ahead, and running it again later finishes the
+servers it missed.
 
 **No server.** Overviews of every server, and adding a new one:
 
 ```bash
 wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump configs staged
 wgt-ctl summary                        # every server at a glance (wgt summary on each, side by side)
-wgt-ctl clients                        # every config on every server: exit, last seen, traffic
+wgt-ctl clients                        # every config on every server: exit, static address, last seen, traffic
+wgt-ctl devices                        # each device's static address and servers, and what doesn't line up
+wgt-ctl devices sync                   # give numbers to devices that have none, the same on every server
+wgt-ctl devices fix phone 12           # set a device's number on every server that has it
+wgt-ctl devices forget old-phone       # delete a removed device's line, so its number can be used again
 wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
 wgt-ctl init --address 1.2.3.4 --name lando --user root --branch main -- --port 51821
 ```
 
 Leave `SERVER` out of a server command (`wgt-ctl status`) to pick one from the
 list; `wgt-ctl summary` with no server is the overview of all of them. Because
-these words come first, a server can't be named `init`, `clients`, `summary`,
-`all`, `help` or `list`; a name is up to 32 of `A-Za-z0-9_-`, starting with a
+these words come first, a server can't be named `init`, `clients`, `devices`,
+`summary`, `all`, `help` or `list`; a name is up to 32 of `A-Za-z0-9_-`, starting with a
 letter. `scp` commands printed
 through `wgt-ctl` use the login from `local/servers`, so you can paste them on
 your machine.
@@ -507,8 +556,8 @@ runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
 passed to setup. The server is added to the list only once setup finishes. A
 server already running these tools is adopted under its saved name instead.
 
-Its subnet question offers the next free subnet in order (`10.1.1.0/24`,
-`10.1.2.0/24`, ...) that none of your other servers uses, instead of a random
+Its subnet question offers the next free subnet in order (`10.200.200.0/24`,
+`10.200.201.0/24`, ...) that none of your other servers uses, instead of a random
 one, so your servers' subnets never overlap.
 
 ### Adding jumps from your machine
@@ -568,8 +617,14 @@ are re-sent once), or during the move itself, as above.
 
 Private files stay on your machine under `local/`: jump configs in
 `exits/<server>/` (see [Adding jumps from your machine](#adding-jumps-from-your-machine)), the table that
-names them in `exits/details.tsv`, and archives fetched by `backup` in
-`backups/<server>/` (they hold private keys).
+names them in `exits/details.tsv`, each device's static number in `devices`,
+and archives fetched by `backup` in `backups/<server>/` (they hold private keys).
+
+`devices` is refreshed whenever `wgt-ctl` reads the servers, and covers a server
+that's unreachable when you add a device. A device that's gone from every server
+keeps its line, marked `removed <date>`, and its number isn't handed out again,
+so an old SSH config can't reach a new machine by accident. Adding the device
+back brings the number back.
 
 ### Updating servers
 
@@ -693,6 +748,16 @@ port (`wg set warp listen-port 0`, no restart) and logs it (`wgt log`).
 `status` shows the last time it acted. `wgt setup` also restarts `wg0` if its
 live rules have drifted from `wg0.conf`.
 
+**Static addresses.** A config's own address stays what routing goes by, so a
+[static address](#static-device-addresses) is only a forward. `wg0` also holds
+`10.9.8.1/24`. Two NAT chains do the rest: `WGT-DEVICES` sends each static
+address to the config in use, and `WGT-DEVICE-SRC` shows a sender as its own
+static address. `wg0`'s `PostUp` creates them and what leads to them; the rules
+inside them belong to `wgt watchdog devices`. Forwarding between devices is
+allowed only for this traffic, so they still can't reach each other's config
+addresses. A rule at priority 9300 makes a static address with no config in
+use unreachable, so its packets never leave through a way out.
+
 **Rules in one place.** All routing/NAT/firewall rules live in `wg0.conf`'s
 `PostUp`/`PostDown`, generated from one list so `PostDown` and `rollback` undo
 exactly what `PostUp` did. Forward rules are inserted at the top so ufw/Docker
@@ -720,6 +785,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/server.key`, `server.pub` | server keypair |
 | `/etc/wireguard/clients.db` | one line per config: `name address public-key allowed-ips`, no private keys |
 | `/etc/wireguard/clients.disabled` | names of disabled configs |
+| `/etc/wireguard/devices.db` | each device's static number: `device number` |
 | `/etc/wireguard/psk/<name>.psk` | per-config preshared keys |
 | `/etc/wireguard/clients/<server>.<name>.conf` | config files (the only copy of each one's private key) |
 | `/etc/wireguard/wg-tools.state` | saved settings (including the location), recorded default route |
@@ -730,6 +796,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a jump's WireGuard config as given (any provider; the file name is historical) and its own WARP account |
 | `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a jump's tunnel and the WARP tunnel inside it |
 | `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | jump watchdog (runs `wgt watchdog exits` every 10s: jumps up on demand) |
+| `/etc/systemd/system/wg-tools-device-watchdog.{service,timer}` | device watchdog (runs `wgt watchdog devices` every 10s: static addresses follow the config in use) |
 | `/usr/local/sbin/wgt` | link to the checkout's `bin/wgt` |
 
 Secrets are mode 600 in 700 directories. Before any file is changed, a
@@ -746,7 +813,7 @@ These files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
 |----------|---------|
 | `client.conf.tmpl` | each `/etc/wireguard/clients/<server>.<name>.conf` |
 | `wg-quick-after-warp.conf.tmpl` | the systemd drop-in that starts `wg0` after `warp` |
-| `watchdog.service.tmpl`, `warp-watchdog.timer.tmpl`, `exit-watchdog.timer.tmpl` | the watchdogs' systemd units |
+| `watchdog.service.tmpl`, `warp-watchdog.timer.tmpl`, `exit-watchdog.timer.tmpl`, `device-watchdog.timer.tmpl` | the watchdogs' systemd units |
 
 Edit them to change what every new config gets (e.g. `PersistentKeepalive`).
 Changes apply to configs added or rotated afterwards. Every placeholder must

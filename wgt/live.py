@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from .const import TRACE_URL
 from .system import Runner
@@ -138,6 +138,14 @@ def ipt_count(r: Runner, cmd: str, tbl: str, chain: str, rule: str) -> int:
         pat += f"-p {m.group(1)} (-m {m.group(1)} )?" if m else re.escape(part)
     rx = re.compile("^" + pat + "$")
     return sum(1 for line in r.query([cmd, "-t", tbl, "-S", chain]).splitlines() if rx.match(line))
+
+
+def ipt_chain(r: Runner, table: str, chain: str) -> Optional[List[str]]:
+    """IPv4 chain <chain>'s rules, without "-A <chain> " (None if it doesn't exist)."""
+    text = r.query(["iptables", "-t", table, "-S", chain])
+    if f"-N {chain}" not in text:
+        return None
+    return [line[len(f"-A {chain} "):] for line in text.splitlines() if line.startswith(f"-A {chain} ")]
 
 
 def ipv6_global_addr(r: Runner, ifc: str) -> str:

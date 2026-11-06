@@ -223,6 +223,13 @@ def _write_exits(ctx: Ctx, code: str, entry: Optional[store.Exit]) -> None:
     ctx.reload()
 
 
+def set_device(ctx: Ctx, name: str, number: Optional[int]) -> None:
+    """Give device <name> a static <number>, or none; reloads ctx.snap."""
+    db = ctx.paths.device_db
+    ctx.files.write(db, 0o600, store.put_device(ctx.files.read(db), name, number))
+    ctx.reload()
+
+
 # --- command words ---
 
 Command = Callable[..., Optional[int]]   # (ctx, words) -> exit status or None

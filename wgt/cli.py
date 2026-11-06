@@ -31,6 +31,8 @@ Cloudflare WARP. The device picks one at a time.
          rename <old> <new> | disable <config> | enable <config> | remove <config>
          (add: per exit, <device> and warp.<device> (--warp on|off: one); a full config
           name adds just that; rotate, remove, disable, enable, show, share: none picks)
+  device list [--tsv] | set <device> [number] | rename <device> <new>
+                             a device's static address 10.9.8.<number>, whichever config it's using
   jump   list | add <code> <wg.conf|-> [--label NAME] | remove [code] | test   (old name: exit)
   tunnel test                every way out (each exit, with and without WARP), traced
   warp rotate [host|<jump>|all]   new WARP account (keys, identity): this server's (default),
@@ -80,13 +82,13 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     wg-quick units (wg0, warp, each jump's tunnels). Like tail -f: the
     last [lines] (default 40), then new entries until Ctrl-C. With
     --no-follow, or when the output isn't a terminal, it prints and stops."""
-    from .const import EXIT_WATCHDOG, WATCHDOG
+    from .const import DEVICE_WATCHDOG, EXIT_WATCHDOG, WATCHDOG
     ops.no_more_words(words[1:], "wgt log [lines] [--no-follow]")
     count = words[0] if words else "40"
     if not count.isdigit():
         raise WgtError("usage: wgt log [lines] [--no-follow]")
     matches: List[str] = []
-    for tag in ("wg-tools", WATCHDOG, EXIT_WATCHDOG):
+    for tag in ("wg-tools", WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG):
         matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
     ifcs = [ctx.cfg.WG_IF, ctx.cfg.WARP_IF]
     for e in ctx.snap.exits:
@@ -108,7 +110,8 @@ COMMANDS = {
     "restore": ("backup", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
     "summary": ("checks", "cmd_summary"),
     "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
-    "client": ("clients", "cmd_client"), "jump": ("exits", "cmd_exit"), "exit": ("exits", "cmd_exit"),
+    "client": ("clients", "cmd_client"), "device": ("clients", "cmd_device"),
+    "jump": ("exits", "cmd_exit"), "exit": ("exits", "cmd_exit"),
     "tunnel": ("exits", "cmd_tunnel"), "warp": ("server", "cmd_warp"),
     "watchdog": ("watchdog", "cmd_watchdog"), "debug": ("cli", "cmd_debug"),
 }
@@ -153,8 +156,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
     """A watchdog run (every 10-30s from a timer): no host checks beyond root,
     no fact gathering, and any error is logged to the journal, not a traceback."""
-    from .const import EXIT_WATCHDOG, WATCHDOG
-    tag = WATCHDOG if rest[:1] == ["warp"] else EXIT_WATCHDOG
+    from .const import DEVICE_WATCHDOG, EXIT_WATCHDOG, WATCHDOG
+    tag = {"warp": WATCHDOG, "devices": DEVICE_WATCHDOG}.get((rest or [""])[0], EXIT_WATCHDOG)
     if os.geteuid() != 0 and os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
         raise WgtError("must run as root")
     quick = host.Facts(kernel_ipv6=os.path.exists("/proc/net/if_inet6"), has_ipv6=False,

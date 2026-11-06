@@ -7,7 +7,7 @@ import shutil
 from typing import TYPE_CHECKING, List
 
 from . import live, render, store
-from .const import EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
+from .const import DEVICE_WATCHDOG, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -65,6 +65,16 @@ def write_exit_watchdog(ctx: Ctx) -> None:
     write_timer(ctx, EXIT_WATCHDOG,
                 f"jump watchdog ({EXIT_WATCHDOG}.timer: jumps up while their clients are active, "
                 f"down after {EXIT_IDLE}s idle)", svc, timer)
+
+
+def write_device_watchdog(ctx: Ctx) -> None:
+    """The device watchdog: every 10s, `wgt watchdog devices`."""
+    svc = render.render_template("watchdog.service.tmpl",
+                                 WHAT="device watchdog (static addresses follow the config in use)",
+                                 COMMAND=f"{wgt_command(ctx)} watchdog devices", TIMEOUT="30")
+    timer = render.render_template("device-watchdog.timer.tmpl")
+    write_timer(ctx, DEVICE_WATCHDOG,
+                f"device watchdog ({DEVICE_WATCHDOG}.timer: static addresses follow the config in use)", svc, timer)
 
 
 def open_firewall(ctx: Ctx, outs: List[str]) -> None:

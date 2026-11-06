@@ -69,10 +69,17 @@ def test_canon_subnet6(value, want):
 
 def test_random_subnet_avoids_routes():
     # Half of the candidates are taken; the pick (20 tries, like the bash version) avoids them.
-    routes = "\n".join(f"10.{a}.{b}.0/24 dev x" for a in range(1, 6) for b in range(1, 11))
+    routes = "\n".join(f"10.{a}.{b}.0/24 dev x" for a in range(200, 228) for b in range(200, 256))
     for seed in range(50):
         s = net.random_subnet(routes, random.Random(seed))
-        assert int(s.split(".")[1]) > 5, s
+        assert int(s.split(".")[1]) >= 228, s
+
+
+def test_picked_subnets_stay_in_their_range():
+    # high in 10.x, so never the device network or a server subnet like 10.8.0.0/24
+    for seed in range(200):
+        _, a, b, _ = net.random_subnet("", random.Random(seed)).split(".")
+        assert 200 <= int(a) <= 255 and 200 <= int(b) <= 255
 
 
 def test_random_subnet6():
@@ -256,15 +263,15 @@ def test_client_table_per_cell():
 
 def test_next_free_subnet():
     # in order, skipping the fleet's subnets (any size) and the server's own routes
-    assert net.next_free_subnet("", []) == "10.1.1.0/24"
-    assert net.next_free_subnet("", ["10.1.1.0/24", "10.1.2.0/24"]) == "10.1.3.0/24"
-    assert net.next_free_subnet("10.1.1.0/24 dev eth1", ["10.1.2.0/23"]) == "10.1.4.0/24"
-    assert net.next_free_subnet("", ["192.168.250.0/24", "junk"]) == "10.1.1.0/24"
+    assert net.next_free_subnet("", []) == "10.200.200.0/24"
+    assert net.next_free_subnet("", ["10.200.200.0/24", "10.200.201.0/24"]) == "10.200.202.0/24"
+    assert net.next_free_subnet("10.200.200.0/24 dev eth1", ["10.200.202.0/23"]) == "10.200.201.0/24"
+    assert net.next_free_subnet("", ["192.168.250.0/24", "junk"]) == "10.200.200.0/24"
 
 
 def test_fleet_subnets_pick_next_free():
-    c = resolve({}, {"WGT_FLEET_SUBNETS": "10.1.1.0/24,10.2.10.0/24"}, {})
-    assert c.subnet_defaulted and c.values["WG_SUBNET"] == "10.1.2.0/24"
+    c = resolve({}, {"WGT_FLEET_SUBNETS": "10.200.200.0/24,10.2.10.0/24"}, {})
+    assert c.subnet_defaulted and c.values["WG_SUBNET"] == "10.200.201.0/24"
     assert c.sources["WG_SUBNET"] == "next free in the fleet"
     saved = resolve({}, {"WGT_FLEET_SUBNETS": "10.1.1.0/24"}, {"WG_SUBNET": "10.9.9.0/24"})
     assert saved.values["WG_SUBNET"] == "10.9.9.0/24"   # a saved subnet stays
