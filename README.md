@@ -317,7 +317,7 @@ wgt device set laptop 42               # give it this number, 2-254 (none given:
 wgt device rename laptop work-laptop   # every config of it, and its number; keys and addresses stay
 ```
 
-A number change applies within 10s and needs no new config, but anything
+A number change applies within 20s and needs no new config, but anything
 pointing at the old address must change. With several servers, use `wgt-ctl`
 instead: see [Static addresses across
 servers](#static-addresses-across-servers).
@@ -375,7 +375,7 @@ wgt client add nas --group home        # or when adding it
 | `home,server` | the internet, others in `home`, and the server |
 | `home,work` | the internet, and others in `home` or `work`; those two sets still can't reach each other |
 
-Changes apply within 10s and need no new config. Removing a shared group cuts open
+Changes apply within 20s and need no new config. Removing a shared group cuts open
 connections between those devices; a connection already open to the server stays
 until it ends.
 

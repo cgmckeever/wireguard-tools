@@ -227,7 +227,7 @@ def cmd_list(ctx: Ctx, words: List[str]) -> None:
 
 def cmd_set(ctx: Ctx, words: List[str]) -> None:
     """set <device> [number]: its static number (none given: the next from the
-    top of the range). Takes effect within 10s; the device needs no new config."""
+    top of the range). Takes effect within 20s; the device needs no new config."""
     usage = "wgt device set <device> [number]"
     if not words or len(words) > 2:
         raise WgtError(f"usage: {usage}")
@@ -256,7 +256,7 @@ def cmd_set(ctx: Ctx, words: List[str]) -> None:
 
 def cmd_group(ctx: Ctx, words: List[str]) -> None:
     """group [<device> <group,group>]: add a device to groups (none given: list
-    every device and its groups). Takes effect within 10s; no new config."""
+    every device and its groups). Takes effect within 20s; no new config."""
     if not words:
         cmd_list(ctx, [])
         return
@@ -271,7 +271,7 @@ def cmd_group(ctx: Ctx, words: List[str]) -> None:
 
 def cmd_ungroup(ctx: Ctx, words: List[str]) -> None:
     """ungroup <device> [group,group]: remove a device from these groups (none
-    given: all of them, which isolates it). Takes effect within 10s."""
+    given: all of them, which isolates it). Takes effect within 20s."""
     if len(words) not in (1, 2):
         raise WgtError("usage: wgt device ungroup <device> [group,group]")
     device = words[0]
