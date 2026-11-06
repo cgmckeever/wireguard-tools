@@ -24,8 +24,7 @@ Per client, then, the way out is exit (host | jump) x WARP (on | off):
 
 Static device addresses (DEVICE_NET; see devices.py): wg0 holds the network's
 first address, so the server's own connections to a device use it. The fixed
-part is here: the nat chains and what leads to them, forwarding between devices
-for that traffic only, and a rule making an address with no config in use unreachable rather
+part is here: the chains and what leads to them, and a rule making an address with no config in use unreachable rather
 than a packet for a way out. The chains' rules are the device watchdog's.
 
 Every line is idempotent, and "down" is the exact inverse of "up" in reverse
@@ -41,7 +40,10 @@ from .const import (
     BLACKHOLE_METRIC,
     DEVICE_CHAIN,
     DEVICE_NET,
+    DEVICE_PEER_CHAIN,
     DEVICE_RULE_PRIO,
+    DEVICE_SERVER,
+    DEVICE_SERVER_CHAIN,
     DEVICE_SOURCE_CHAIN,
     DIRECT_STOP_PRIO,
     EXIT_MARK_BASE,
@@ -50,6 +52,7 @@ from .const import (
     EXIT_RULE_PRIO,
     EXIT_TABLE_BASE,
     RULE_PRIO,
+    device_ip,
 )
 from .store import Client, Exit, Snapshot
 
@@ -127,24 +130,43 @@ def ipt_rules(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[IptRule]:
     return found + device_ipt_rules(cfg)
 
 
+def device_chains(cfg: Config) -> List[Tuple[str, str, str]]:
+    """The chains the device rules use: command, table, chain."""
+    found = [("iptables", "nat", DEVICE_CHAIN), ("iptables", "nat", DEVICE_SOURCE_CHAIN),
+             ("iptables", "filter", DEVICE_PEER_CHAIN), ("iptables", "filter", DEVICE_SERVER_CHAIN)]
+    if cfg.ipv6:
+        found.append(("ip6tables", "filter", DEVICE_SERVER_CHAIN))
+    return found
+
+
 def device_ipt_rules(cfg: Config) -> List[IptRule]:
-    """What leads to the device chains, and forwarding between devices for that
-    traffic only (ctstate DNAT, both directions): any other device-to-device
-    packet, by config address or over IPv6, is refused. The IPv4 refusal names
-    what it spares, so it works wherever it lands in the chain. Written in
-    `iptables -S` order: live.ipt_count compares the text."""
+    """What leads to the device chains. Everything between devices goes to the
+    peer chain, and everything for the server's tunnel addresses to the server
+    chain. Both end in a refusal, and the watchdog inserts what the groups allow
+    above it, so an empty chain refuses (replies to the server's own connections
+    pass). A device's traffic to the server's public IP isn't touched: that's
+    open to the internet anyway. Written in `iptables -S` order, the refusal
+    first as each rule goes in on top: live.ipt_count compares the text."""
     wg = cfg.WG_IF
+    established = "-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
     found: List[IptRule] = [
         ("iptables", "nat", "PREROUTING", f"-d {DEVICE_NET} -i {wg} -j {DEVICE_CHAIN}"),
         ("iptables", "nat", "OUTPUT", f"-d {DEVICE_NET} -j {DEVICE_CHAIN}"),
         ("iptables", "nat", "POSTROUTING", f"-o {wg} -m conntrack --ctstate DNAT -j {DEVICE_SOURCE_CHAIN}"),
-        ("iptables", "filter", "FORWARD", f"-i {wg} -o {wg} -m conntrack --ctstate DNAT -j ACCEPT"),
-        ("iptables", "filter", "FORWARD",
-         f"-i {wg} -o {wg} -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable"),
+        ("iptables", "filter", DEVICE_PEER_CHAIN, "-j REJECT --reject-with icmp-port-unreachable"),
+        ("iptables", "filter", "FORWARD", f"-i {wg} -o {wg} -j {DEVICE_PEER_CHAIN}"),
+        ("iptables", "filter", DEVICE_SERVER_CHAIN, "-j REJECT --reject-with icmp-port-unreachable"),
+        ("iptables", "filter", DEVICE_SERVER_CHAIN, established),
+        ("iptables", "filter", "INPUT", f"-d {cfg.server_ip}/32 -i {wg} -j {DEVICE_SERVER_CHAIN}"),
+        ("iptables", "filter", "INPUT", f"-d {device_ip(DEVICE_SERVER)}/32 -i {wg} -j {DEVICE_SERVER_CHAIN}"),
     ]
-    if cfg.ipv6:
-        found.append(("ip6tables", "filter", "FORWARD",
-                      f"-i {wg} -o {wg} -j REJECT --reject-with icmp6-port-unreachable"))
+    if cfg.ipv6:   # IPv6 has no static addresses: nothing passes between devices
+        found += [
+            ("ip6tables", "filter", "FORWARD", f"-i {wg} -o {wg} -j REJECT --reject-with icmp6-port-unreachable"),
+            ("ip6tables", "filter", DEVICE_SERVER_CHAIN, "-j REJECT --reject-with icmp6-port-unreachable"),
+            ("ip6tables", "filter", DEVICE_SERVER_CHAIN, established),
+            ("ip6tables", "filter", "INPUT", f"-d {cfg.p6}::1/128 -i {wg} -j {DEVICE_SERVER_CHAIN}"),
+        ]
     return found
 
 
@@ -274,7 +296,7 @@ def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
             out.append(f"{f} route replace blackhole default metric {BLACKHOLE_METRIC} table {rt}")
         if cfg.warp_on:
             out += warp_rule_cmds(cfg, True)
-        out += [f"iptables -t nat -N {c} 2>/dev/null || true" for c in (DEVICE_CHAIN, DEVICE_SOURCE_CHAIN)]
+        out += [f"{x} -t {t} -N {c} 2>/dev/null || true" for x, t, c in device_chains(cfg)]
         out += ipt_cmds(ipt_rules(cfg, pub_if, snap.exits), up=True)
         spec = device_rule(cfg)
         out.append(f"while ip rule del {spec} 2>/dev/null; do :; done; ip rule add {spec}")
@@ -289,9 +311,9 @@ def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
             out += exit_hook_cmds(cfg, snap, e, up=False)
         out.append(f"while ip rule del {device_rule(cfg)} 2>/dev/null; do :; done")
         out += ipt_cmds(reversed(ipt_rules(cfg, pub_if, snap.exits)), up=False)
-        for chain in (DEVICE_SOURCE_CHAIN, DEVICE_CHAIN):
-            out.append(f"iptables -t nat -F {chain} 2>/dev/null || true")
-            out.append(f"iptables -t nat -X {chain} 2>/dev/null || true")
+        for cmd, table, chain in reversed(device_chains(cfg)):
+            out.append(f"{cmd} -t {table} -F {chain} 2>/dev/null || true")
+            out.append(f"{cmd} -t {table} -X {chain} 2>/dev/null || true")
         out += list(reversed(warp_rule_cmds(cfg, False)))
         for f in reversed(cfg.families()):
             out.append(f"{f} route del blackhole default metric {BLACKHOLE_METRIC} table {rt} 2>/dev/null || true")

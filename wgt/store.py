@@ -5,7 +5,7 @@ switched over with their files unchanged; keep them compatible):
   clients.db         "name ip public-key allowed-ips" (no private keys)
   clients.disabled   one name per line
   exits.db           "code idx label..."
-  devices.db         "device number" (the device's static address)
+  devices.db         "device number [groups]" (its static address; who it can reach)
   wg-tools.backups   "path<TAB>original-copy|NEW"
 
 Reading is pure; writes return the new text, and system.Files writes it."""
@@ -26,7 +26,7 @@ Reader = Callable[[str], Optional[str]]
 
 CLIENTS_HEADER = "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
 EXITS_HEADER = "# wireguard-tools jumps: code idx label (wgt jump add)"
-DEVICES_HEADER = "# wireguard-tools devices: device number (its static address)"
+DEVICES_HEADER = "# wireguard-tools devices: device number [group,group] (its static address, who it can reach)"
 
 _EXIT_CODE = re.compile(r"[a-z][a-z0-9-]{0,4}[a-z0-9]")
 _CLIENT_BASE = re.compile(r"[A-Za-z0-9_-]{1,32}")
@@ -271,6 +271,22 @@ class Device:
 
     name: str
     number: int
+    groups: Tuple[str, ...] = ()
+
+    def line(self) -> str:
+        return f"{self.name} {self.number}" + (f" {','.join(self.groups)}" if self.groups else "")
+
+
+_GROUP = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}")
+
+
+def parse_groups(word: str) -> Tuple[str, ...]:
+    """A comma list of group names, each once, in the order given; a bad name is refused."""
+    groups = tuple(dict.fromkeys(g.strip() for g in word.split(",") if g.strip()))
+    bad = [g for g in groups if not _GROUP.fullmatch(g)]
+    if bad or not groups:
+        raise WgtError(f"a group name is 1-32 of [A-Za-z0-9_-], starting with a letter: '{word}'")
+    return groups
 
 
 def valid_device_number(number: int) -> bool:
@@ -282,20 +298,28 @@ def parse_devices(text: Optional[str]) -> List[Device]:
     out = []
     for line in _entries(text):
         f = line.split()
-        if len(f) != 2 or not _CLIENT_BASE.fullmatch(f[0]) or not f[1].isdigit() \
+        if len(f) not in (2, 3) or not _CLIENT_BASE.fullmatch(f[0]) or not f[1].isdigit() \
                 or not valid_device_number(int(f[1])):
-            raise WgtError(f"devices.db: bad line (want 'device number', number "
+            raise WgtError(f"devices.db: bad line (want 'device number [groups]', number "
                            f"{DEVICE_CTL_FIRST}-{DEVICE_DIRECT_LAST}): {line}")
-        out.append(Device(f[0], int(f[1])))
+        try:
+            groups = parse_groups(f[2]) if len(f) == 3 else ()
+        except WgtError as e:
+            raise WgtError(f"devices.db: bad line ({e}): {line}") from e
+        out.append(Device(f[0], int(f[1]), groups))
     return out
 
 
-def put_device(text: Optional[str], name: str, number: Optional[int] = None) -> str:
-    """devices.db with <name> removed, optionally added back with <number>."""
-    entries = [d for d in parse_devices(text) if d.name != name]
+def put_device(text: Optional[str], name: str, number: Optional[int] = None,
+               groups: Optional[Tuple[str, ...]] = None) -> str:
+    """devices.db with <name> removed, optionally added back with <number> and
+    <groups> (None: the ones it has)."""
+    found = parse_devices(text)
+    had = next((d.groups for d in found if d.name == name), ())
+    entries = [d for d in found if d.name != name]
     if number is not None:
-        entries.append(Device(name, number))
-    return "\n".join([DEVICES_HEADER, *(f"{d.name} {d.number}" for d in entries)]) + "\n"
+        entries.append(Device(name, number, had if groups is None else groups))
+    return "\n".join([DEVICES_HEADER, *(d.line() for d in entries)]) + "\n"
 
 
 def next_direct_number(devices: Iterable[Device]) -> Optional[int]:
@@ -360,6 +384,10 @@ class Snapshot:
     def device_number(self, name: str) -> Optional[int]:
         """Device <name>'s static number (None if it has none)."""
         return next((d.number for d in self.devices if d.name == name), None)
+
+    def device_groups(self, name: str) -> Tuple[str, ...]:
+        """Device <name>'s groups (none: isolated)."""
+        return next((d.groups for d in self.devices if d.name == name), ())
 
     def device_clients(self, name: str) -> List[Client]:
         """Device <name>'s configs."""

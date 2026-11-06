@@ -42,6 +42,9 @@ DEVICE_DIRECT_FIRST, DEVICE_DIRECT_LAST = 128, 254  # handed out by `wgt client 
 DEVICE_ACTIVE = 180          # seconds since a handshake for a config to count as in use
 DEVICE_CHAIN = "WGT-DEVICES"       # nat: a static address -> the config in use
 DEVICE_SOURCE_CHAIN = "WGT-DEVICE-SRC"  # nat: a sender's config address -> its static address
+DEVICE_PEER_CHAIN = "WGT-PEERS"    # filter: which devices may reach each other (none listed: refused)
+DEVICE_SERVER_CHAIN = "WGT-SERVER" # filter: which devices may reach the server's tunnel addresses
+SERVER_GROUP = "server"      # the group that reaches the server, and not the others in it
 DEVICE_RULE_PRIO = 9300      # before every client rule: no config in use means unreachable, not a way out
 
 LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes

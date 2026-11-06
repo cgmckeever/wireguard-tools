@@ -76,15 +76,21 @@ def test_device_rules_read_back_exactly_once(server, make_ctx):
     """Their text must be how `iptables -S` prints them, or wgt test fails and
     setup restarts wg0 every time (live.ipt_count compares the text)."""
     ctx = make_ctx()
-    wg = server.cfg.WG_IF
+    wg, ip = server.cfg.WG_IF, server.cfg.server_ip
     printed = [f"-A PREROUTING -d 10.9.8.0/24 -i {wg} -j WGT-DEVICES",
                "-A OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES",
                f"-A POSTROUTING -o {wg} -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC",
-               f"-A FORWARD -i {wg} -o {wg} -m conntrack --ctstate DNAT -j ACCEPT",
-               f"-A FORWARD -i {wg} -o {wg} -m conntrack ! --ctstate DNAT -j REJECT "
-               "--reject-with icmp-port-unreachable"]
+               "-A WGT-PEERS -j REJECT --reject-with icmp-port-unreachable",
+               f"-A FORWARD -i {wg} -o {wg} -j WGT-PEERS",
+               "-A WGT-SERVER -j REJECT --reject-with icmp-port-unreachable",
+               "-A WGT-SERVER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+               f"-A INPUT -d {ip}/32 -i {wg} -j WGT-SERVER",
+               f"-A INPUT -d 10.9.8.1/32 -i {wg} -j WGT-SERVER"]
     if server.cfg.ipv6:
-        printed.append(f"-A FORWARD -i {wg} -o {wg} -j REJECT --reject-with icmp6-port-unreachable")
+        printed += [f"-A FORWARD -i {wg} -o {wg} -j REJECT --reject-with icmp6-port-unreachable",
+                    "-A WGT-SERVER -j REJECT --reject-with icmp6-port-unreachable",
+                    "-A WGT-SERVER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT",
+                    f"-A INPUT -d {server.cfg.p6}::1/128 -i {wg} -j WGT-SERVER"]
     found = rules.device_ipt_rules(server.cfg)
     assert len(found) == len(printed)
     for line, (x, t, c, rule) in zip(printed, found):
@@ -92,15 +98,16 @@ def test_device_rules_read_back_exactly_once(server, make_ctx):
         assert live.ipt_count(ctx.runner, x, t, c, rule) == 1
 
 
-def test_only_static_address_traffic_passes_between_devices(server):
-    """The refusal spares DNATed traffic by itself, so rule order can't matter,
-    and IPv6, which has no static addresses, is refused outright."""
-    wg = server.cfg.WG_IF
-    forward = [(x, rule) for x, t, c, rule in rules.device_ipt_rules(server.cfg) if (t, c) == ("filter", "FORWARD")]
-    assert ("iptables", f"-i {wg} -o {wg} -m conntrack ! --ctstate DNAT -j REJECT "
-                        "--reject-with icmp-port-unreachable") in forward
-    assert (("ip6tables", f"-i {wg} -o {wg} -j REJECT --reject-with icmp6-port-unreachable") in forward) \
-        == server.cfg.ipv6
+def test_chains_refuse_until_the_watchdog_allows(server):
+    """Refusal first, as rules go in on top: an empty chain fails closed. The
+    server's public IP isn't caught: only its tunnel addresses are."""
+    found = rules.device_ipt_rules(server.cfg)
+    in_chain = [r for x, _, c, r in found if x == "iptables" and c == "WGT-SERVER"]
+    assert in_chain[0].startswith("-j REJECT") and "ESTABLISHED" in in_chain[1]
+    assert [r for x, _, c, r in found if x == "iptables" and c == "WGT-PEERS"][0].startswith("-j REJECT")
+    inputs = [r for x, _, c, r in found if x == "iptables" and c == "INPUT"]
+    assert len(inputs) == 2 and all(f"-i {server.cfg.WG_IF} -j WGT-SERVER" in r for r in inputs)
+    assert not any("ctstate DNAT -j ACCEPT" in r for x, t, c, r in found if c == "FORWARD")
 
 
 def test_wgt_test_checks_the_device_watchdog_timer(make_ctx, capsys, monkeypatch):
@@ -417,3 +424,117 @@ def test_problems_says_what_to_run():
 
 def test_device_ip():
     assert device_ip(4) == "10.9.8.4"
+
+
+# --- groups ---
+
+def _in_groups(ctx, **groups):
+    """<ctx> with every config enabled (the fixture disables tv's), and devices in groups."""
+    with open(ctx.paths.disabled_db, "w", encoding="utf-8"):
+        pass
+    ctx.reload()
+    for device, word in groups.items():
+        if ctx.snap.device_number(device) is None:
+            devices.cmd_set(ctx, [device])
+        devices.cmd_group(ctx, [device, word])
+    return ctx
+
+
+def test_no_groups_means_isolated(make_ctx):
+    ctx = make_ctx()
+    devices.cmd_set(ctx, ["mbp-1", "4"])
+    devices.cmd_set(ctx, ["tv", "5"])
+    assert devices.peer_rules(ctx.snap) == [] and devices.server_sources(ctx.snap) == []
+
+
+def test_sharing_a_group_allows_static_traffic_both_ways_only(make_ctx):
+    ctx = _in_groups(make_ctx(), tv="home")
+    devices.cmd_set(ctx, ["mbp-1", "4"])
+    assert devices.peer_rules(ctx.snap) == []
+    devices.cmd_group(ctx, ["mbp-1", "home"])
+    found = devices.peer_rules(ctx.snap)
+    tv = ctx.snap.client("warp.par-fr.tv").ip
+    mac = ctx.snap.client("mbp-1").ip
+    assert f"-s {tv}/32 -d {mac}/32 -m conntrack --ctstate DNAT -j ACCEPT" in found
+    assert f"-s {mac}/32 -d {tv}/32 -m conntrack --ctstate DNAT -j ACCEPT" in found
+    assert all("--ctstate DNAT" in rule for rule in found)
+
+
+def test_a_device_in_two_groups_bridges_nothing(make_ctx):
+    ctx = _in_groups(make_ctx(), tv="home", phone="work")
+    devices.cmd_set(ctx, ["mbp-1", "4"])
+    devices.cmd_group(ctx, ["mbp-1", "home,work"])
+    tv = ctx.snap.client("warp.par-fr.tv").ip
+    phone = ctx.snap.client("nyc-us.phone").ip
+    found = " ".join(devices.peer_rules(ctx.snap))
+    assert f"-s {tv}/32 -d {phone}/32" not in found and f"-s {phone}/32 -d {tv}/32" not in found
+    assert f"-s {tv}/32" in found and f"-s {phone}/32" in found
+
+
+def test_the_server_group_reaches_the_server_not_each_other(make_ctx):
+    ctx = _in_groups(make_ctx(), tv="server", phone="server")
+    assert devices.peer_rules(ctx.snap) == []
+    assert {c.name for c in devices.server_sources(ctx.snap)} == {"warp.par-fr.tv", "nyc-us.phone"}
+
+
+def test_ungroup_one_or_all(make_ctx):
+    ctx = _in_groups(make_ctx(), tv="home,work,server")
+    devices.cmd_ungroup(ctx, ["tv", "work"])
+    assert ctx.snap.device_groups("tv") == ("home", "server")
+    devices.cmd_ungroup(ctx, ["tv"])
+    assert ctx.snap.device_groups("tv") == ()
+    assert ctx.snap.device_number("tv") is not None
+
+
+def test_client_add_takes_groups_and_they_survive_a_new_number_and_a_rename(make_ctx):
+    ctx = make_ctx(argv=["--group", "home,server"])
+    clients.cmd_add(ctx, ["ipad"])
+    assert ctx.snap.device_groups("ipad") == ("home", "server")
+    devices.cmd_set(ctx, ["ipad", "77"])
+    assert ctx.snap.device_groups("ipad") == ("home", "server")
+    clients.cmd_device_rename(ctx, ["ipad", "tablet"])
+    assert ctx.snap.device_groups("tablet") == ("home", "server") and ctx.snap.device_number("tablet") == 77
+
+
+def test_a_new_device_starts_isolated(make_ctx):
+    ctx = make_ctx()
+    clients.cmd_add(ctx, ["ipad"])
+    assert ctx.snap.device_groups("ipad") == ()
+
+
+def test_bad_group_names_are_refused():
+    for word in ("", ",", "a b", "-x", "a" * 33):
+        with pytest.raises(WgtError):
+            store.parse_groups(word)
+    assert store.parse_groups("home, work,home") == ("home", "work")
+
+
+def test_devices_db_keeps_groups():
+    text = store.put_device(None, "tv", 5, ("home", "server"))
+    assert store.parse_devices(text)[0] == store.Device("tv", 5, ("home", "server"))
+    assert store.parse_devices(store.put_device(text, "tv", 6))[0].groups == ("home", "server")
+    assert text.splitlines()[1] == "tv 5 home,server"
+
+
+def test_tsv_gives_groups_as_a_third_column(make_ctx, again, capsys):
+    ctx = _in_groups(make_ctx(), tv="home,server")
+    capsys.readouterr()
+    devices.cmd_list(again(ctx, ["--tsv"]), [])
+    assert any(line.split("\t")[0] == "tv" and line.split("\t")[2:] == ["home,server"]
+               for line in capsys.readouterr().out.splitlines())
+
+
+def test_sync_inserts_allowed_above_the_refusal_and_removes_stale(make_ctx):
+    ctx = _in_groups(make_ctx(), tv="server")
+    tv = ctx.snap.client("warp.par-fr.tv").ip
+    r = ctx.runner
+    r.answers["iptables -t nat -S WGT-DEVICES"] = (0, "")
+    r.answers["iptables -t filter -S WGT-PEERS"] = (0, "-N WGT-PEERS\n-A WGT-PEERS -s 1.2.3.4/32 -j ACCEPT\n"
+                                                       "-A WGT-PEERS -j REJECT --reject-with icmp-port-unreachable\n")
+    r.answers["iptables -t filter -S WGT-SERVER"] = (0, "-N WGT-SERVER\n"
+                                                        "-A WGT-SERVER -j REJECT --reject-with icmp-port-unreachable\n")
+    devices.sync(ctx)
+    run = r.calls
+    assert f"iptables -t filter -I WGT-SERVER -s {tv}/32 -j ACCEPT" in run
+    assert "iptables -t filter -D WGT-PEERS -s 1.2.3.4/32 -j ACCEPT" in run
+    assert not any("-D WGT-PEERS -j REJECT" in c or "-D WGT-SERVER -j REJECT" in c for c in run)

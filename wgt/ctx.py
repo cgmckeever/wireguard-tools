@@ -22,7 +22,7 @@ VALUE_FLAGS = {
     "--wg-if": "WG_IF", "--warp-if": "WARP_IF", "--table": "RT_TABLE", "--allowed-ips": "CLIENT_ALLOWED_IPS",
     # Not settings, but they take a value:
     "--exit": "EXIT_CODES", "--label": "EXIT_LABEL", "--warp": "CLIENT_WARP", "--location": "LOCATION",
-    "--device-number": "DEVICE_NUMBER",
+    "--device-number": "DEVICE_NUMBER", "--group": "DEVICE_GROUPS",
 }
 BOOL_FLAGS = {
     "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--new-server-keys": "new_server_keys",
@@ -41,6 +41,7 @@ class Args:
     warp: str = ""              # client add --warp on|off|on,off ("" = both)
     location: str = ""          # setup --location: where this server is, for people
     device_number: str = ""     # client add: the device's static number (wgt-ctl passes the fleet's)
+    groups: str = ""            # client add --group: groups for the device
     dry_run: bool = False
     yes: bool = False
     force: bool = False
@@ -97,6 +98,8 @@ def _set(a: Args, flag: str, value: str) -> None:
         a.location = value.strip()
     elif key == "DEVICE_NUMBER":
         a.device_number = value
+    elif key == "DEVICE_GROUPS":
+        a.groups = value
     else:
         a.settings[key] = value
 

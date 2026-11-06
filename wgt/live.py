@@ -140,9 +140,9 @@ def ipt_count(r: Runner, cmd: str, tbl: str, chain: str, rule: str) -> int:
     return sum(1 for line in r.query([cmd, "-t", tbl, "-S", chain]).splitlines() if rx.match(line))
 
 
-def ipt_chain(r: Runner, table: str, chain: str) -> Optional[List[str]]:
-    """IPv4 chain <chain>'s rules, without "-A <chain> " (None if it doesn't exist)."""
-    text = r.query(["iptables", "-t", table, "-S", chain])
+def ipt_chain(r: Runner, table: str, chain: str, cmd: str = "iptables") -> Optional[List[str]]:
+    """Chain <chain>'s rules, without "-A <chain> " (None if it doesn't exist)."""
+    text = r.query([cmd, "-t", table, "-S", chain])
     if f"-N {chain}" not in text:
         return None
     return [line[len(f"-A {chain} "):] for line in text.splitlines() if line.startswith(f"-A {chain} ")]

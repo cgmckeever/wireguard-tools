@@ -26,7 +26,7 @@ wgt/                      the package (Python 3.8+, standard library only)
   server.py               setup, rollback (setup's inverse)
   backup.py               backup, restore (archive checks)
   clients.py              client commands, the clients table (and QR, share)
-  devices.py              static device addresses: numbers, `wgt device`, the watchdog's NAT rules
+  devices.py              static device addresses and groups: numbers, `wgt device`, the watchdog's rules
   fleet.py                local/devices: wgt-ctl's record of each device's number (pure: no ssh, no files)
   exits.py                `wgt jump` (alias `exit`): bringing a jump up/down, probing it
   checks.py               test, status, summary

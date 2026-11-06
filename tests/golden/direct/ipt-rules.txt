@@ -10,5 +10,9 @@ iptables|filter|INPUT|-p udp --dport 51999 -j ACCEPT
 iptables|nat|PREROUTING|-d 10.9.8.0/24 -i wg1 -j WGT-DEVICES
 iptables|nat|OUTPUT|-d 10.9.8.0/24 -j WGT-DEVICES
 iptables|nat|POSTROUTING|-o wg1 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC
-iptables|filter|FORWARD|-i wg1 -o wg1 -m conntrack --ctstate DNAT -j ACCEPT
-iptables|filter|FORWARD|-i wg1 -o wg1 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable
+iptables|filter|WGT-PEERS|-j REJECT --reject-with icmp-port-unreachable
+iptables|filter|FORWARD|-i wg1 -o wg1 -j WGT-PEERS
+iptables|filter|WGT-SERVER|-j REJECT --reject-with icmp-port-unreachable
+iptables|filter|WGT-SERVER|-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables|filter|INPUT|-d 10.8.0.1/32 -i wg1 -j WGT-SERVER
+iptables|filter|INPUT|-d 10.9.8.1/32 -i wg1 -j WGT-SERVER

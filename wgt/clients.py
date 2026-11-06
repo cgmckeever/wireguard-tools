@@ -318,6 +318,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
             uniq.append(code)
     endpoint = ops.resolve_endpoint(ctx, save=False)
     devices.ensure_number(ctx, base)
+    devices.ensure_groups(ctx, base)
     planned: List[str] = []
     for code in uniq:
         for warp in warps:
@@ -656,18 +657,20 @@ def cmd_device_rename(ctx: Ctx, words: List[str]) -> None:
     if missing:   # checked first: a rename stopped half way couldn't be re-run ('<new>' would exist)
         raise WgtError(f"no config file for {' '.join(missing)}: nothing renamed")
     number = ctx.snap.device_number(old)
+    groups = ctx.snap.device_groups(old)
     for c in configs:
         code, warp, _ = store.split_name(c.name)
         rename_config(ctx, c.name, store.config_name(code, warp, new))
     if number is not None:
         ops.set_device(ctx, old, None)
-        ops.set_device(ctx, new, number)
+        ops.set_device(ctx, new, number, groups)
 
 
 def cmd_device(ctx: Ctx, words: List[str]) -> Optional[int]:
     """wgt device <command>: dispatch; no command means list."""
     return ops.dispatch(ctx, "device", words,
-                        {"list": devices.cmd_list, "set": devices.cmd_set, "rename": cmd_device_rename})
+                        {"list": devices.cmd_list, "set": devices.cmd_set, "rename": cmd_device_rename,
+                         "group": devices.cmd_group, "ungroup": devices.cmd_ungroup})
 
 
 CLIENT_COMMANDS = {

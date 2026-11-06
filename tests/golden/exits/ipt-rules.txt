@@ -42,6 +42,13 @@ iptables|filter|INPUT|-p udp --dport 51820 -j ACCEPT
 iptables|nat|PREROUTING|-d 10.9.8.0/24 -i wg0 -j WGT-DEVICES
 iptables|nat|OUTPUT|-d 10.9.8.0/24 -j WGT-DEVICES
 iptables|nat|POSTROUTING|-o wg0 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC
-iptables|filter|FORWARD|-i wg0 -o wg0 -m conntrack --ctstate DNAT -j ACCEPT
-iptables|filter|FORWARD|-i wg0 -o wg0 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable
+iptables|filter|WGT-PEERS|-j REJECT --reject-with icmp-port-unreachable
+iptables|filter|FORWARD|-i wg0 -o wg0 -j WGT-PEERS
+iptables|filter|WGT-SERVER|-j REJECT --reject-with icmp-port-unreachable
+iptables|filter|WGT-SERVER|-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables|filter|INPUT|-d 10.2.10.1/32 -i wg0 -j WGT-SERVER
+iptables|filter|INPUT|-d 10.9.8.1/32 -i wg0 -j WGT-SERVER
 ip6tables|filter|FORWARD|-i wg0 -o wg0 -j REJECT --reject-with icmp6-port-unreachable
+ip6tables|filter|WGT-SERVER|-j REJECT --reject-with icmp6-port-unreachable
+ip6tables|filter|WGT-SERVER|-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+ip6tables|filter|INPUT|-d fdfc:cd08:368e::1/128 -i wg0 -j WGT-SERVER

@@ -4,6 +4,8 @@ ip route replace blackhole default metric 4096 table 101
 while ip rule del from 10.8.0.0/24 lookup 101 priority 10000 2>/dev/null; do :; done; ip rule add from 10.8.0.0/24 lookup 101 priority 10000
 iptables -t nat -N WGT-DEVICES 2>/dev/null || true
 iptables -t nat -N WGT-DEVICE-SRC 2>/dev/null || true
+iptables -t filter -N WGT-PEERS 2>/dev/null || true
+iptables -t filter -N WGT-SERVER 2>/dev/null || true
 iptables -t nat -C POSTROUTING -s 10.8.0.0/24 -o cf -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING -s 10.8.0.0/24 -o cf -j MASQUERADE
 iptables -t filter -C FORWARD -i wg1 -o cf -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg1 -o cf -j ACCEPT
 iptables -t filter -C FORWARD -i cf -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i cf -o wg1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
@@ -16,8 +18,12 @@ iptables -t filter -C INPUT -p udp --dport 51999 -j ACCEPT 2>/dev/null || iptabl
 iptables -t nat -C PREROUTING -d 10.9.8.0/24 -i wg1 -j WGT-DEVICES 2>/dev/null || iptables -t nat -I PREROUTING -d 10.9.8.0/24 -i wg1 -j WGT-DEVICES
 iptables -t nat -C OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES 2>/dev/null || iptables -t nat -I OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES
 iptables -t nat -C POSTROUTING -o wg1 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC 2>/dev/null || iptables -t nat -I POSTROUTING -o wg1 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC
-iptables -t filter -C FORWARD -i wg1 -o wg1 -m conntrack --ctstate DNAT -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg1 -o wg1 -m conntrack --ctstate DNAT -j ACCEPT
-iptables -t filter -C FORWARD -i wg1 -o wg1 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || iptables -t filter -I FORWARD -i wg1 -o wg1 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable
+iptables -t filter -C WGT-PEERS -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || iptables -t filter -I WGT-PEERS -j REJECT --reject-with icmp-port-unreachable
+iptables -t filter -C FORWARD -i wg1 -o wg1 -j WGT-PEERS 2>/dev/null || iptables -t filter -I FORWARD -i wg1 -o wg1 -j WGT-PEERS
+iptables -t filter -C WGT-SERVER -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || iptables -t filter -I WGT-SERVER -j REJECT --reject-with icmp-port-unreachable
+iptables -t filter -C WGT-SERVER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I WGT-SERVER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -t filter -C INPUT -d 10.8.0.1/32 -i wg1 -j WGT-SERVER 2>/dev/null || iptables -t filter -I INPUT -d 10.8.0.1/32 -i wg1 -j WGT-SERVER
+iptables -t filter -C INPUT -d 10.9.8.1/32 -i wg1 -j WGT-SERVER 2>/dev/null || iptables -t filter -I INPUT -d 10.9.8.1/32 -i wg1 -j WGT-SERVER
 while ip rule del iif wg1 to 10.9.8.0/24 priority 9300 unreachable 2>/dev/null; do :; done; ip rule add iif wg1 to 10.9.8.0/24 priority 9300 unreachable
 ip rule add from 10.8.0.2/32 priority 9501 blackhole 2>/dev/null || true
 ip rule add from 10.8.0.2/32 lookup main priority 9500 2>/dev/null || true

@@ -14,8 +14,10 @@ or a second server of your own, that the WireGuard Server connects to as a clien
 traffic leaves from there.
 
 A WireGuard network is a private network, like your home LAN: each config is a
-key to it, and devices on the same WireGuard Server can reach each other. Give
-configs only to your own devices and to people you'd let onto your LAN.
+key to it, so give configs only to your own devices and to people you'd let onto
+your LAN. Inside it, a device starts out isolated: it has the internet, but can't
+reach other devices or the WireGuard Server until you put it in a
+[group](#groups-who-can-reach-what).
 
 ### Terms
 
@@ -216,6 +218,7 @@ wgt client add warp.par-fr.tablet                 # a full config name: exactly 
 |---|---|
 | `--exit host\|<jump>[,…]` | which exit(s): `host` (the WireGuard Server) or a jump's code; one pair of configs per exit |
 | `--warp on\|off` | only the `warp.` config (`on`) or only the plain one (`off`); both by default |
+| `--group <group,group>` | add the device to these [groups](#groups-who-can-reach-what); with none it starts isolated |
 | `--allowed-ips "<cidrs>"` | this config's allowed IPs instead of the default (e.g. your subnets only, for a split tunnel) |
 | `--qr` / `--no-qr` | force or skip the QR code (also on `rotate` and `show`) |
 
@@ -298,17 +301,18 @@ puts it back; the same config works, nothing to re-send.
 A config's address belongs to that config, so a device's address changes when
 it switches configs. A **static address** doesn't: each device has a number, and
 `10.9.8.<number>` reaches it from the WireGuard Server it's connected to, and
-from other devices connected to that server, whichever of its configs is on.
-The server you're connected to is always `10.9.8.1`.
+from other devices on that server in the same [group](#groups-who-can-reach-what),
+whichever of its configs is on. The server you're connected to is always
+`10.9.8.1`.
 
 These addresses work within one WireGuard Server: a device connected to dengar
 can't reach one connected to boba. Keeping a device's number the same on every
 server just means there's only one to remember.
 
 ```bash
-ssh 10.9.8.1                           # from a device: the server it's connected to
-ssh 10.9.8.4                           # from the server or another device on it: the device numbered 4 (it must be running sshd)
-wgt device list                        # each device and its static address (--tsv for scripts)
+ssh 10.9.8.1                           # from a device in the server group: the server it's connected to
+ssh 10.9.8.4                           # from the server or a device sharing a group: the device numbered 4 (it must be running sshd)
+wgt device list                        # each device, its static address and groups (--tsv for scripts)
 wgt device set laptop 42               # give it this number, 2-254 (none given: the next free one)
 wgt device rename laptop work-laptop   # every config of it, and its number; keys and addresses stay
 ```
@@ -329,10 +333,8 @@ one. No config needs re-sending.
 Every 10s, a background timer (the device watchdog) points each static address
 at the config with the newest handshake in the last 180s. Good to know:
 
-- **Devices reach each other only through static addresses.** It's a private
-  network: any device on a WireGuard Server can connect to anything listening on
-  another device on it at its static address. Traffic between devices by config
-  address, or over IPv6, is refused.
+- **Devices reach each other only through static addresses.** Traffic between
+  devices by config address, or over IPv6, is refused.
 - **A device that's off isn't reachable.** With no handshake in 180s, connections
   to its address fail at once with "unreachable"; they aren't sent through its
   last config or out to the internet.
@@ -349,6 +351,43 @@ at the config with the newest handshake in the last 180s. Good to know:
   refuses one that does), and a device on a LAN using that range will clash.
 - **SSH host keys:** every server answers at `10.9.8.1`, so `ssh 10.9.8.1` warns
   that the host key changed when a device switches servers.
+
+#### Groups: who can reach what
+
+Every device starts with no groups, which means isolated: it has the internet but
+can't reach other devices or the server. Groups open that up. **Two devices can
+talk if they share a group**, and the special group **`server`** lets a device
+reach the server, and not the others in it.
+
+```bash
+wgt device group laptop home,server    # add it to groups
+wgt device ungroup laptop home         # remove it from one
+wgt device ungroup laptop              # remove it from all: isolated again
+wgt device group                       # every device and its groups
+wgt client add nas --group home        # or when adding it
+```
+
+| A device in | Can reach |
+|---|---|
+| no groups | the internet |
+| `server` | the internet and the server |
+| `home` | the internet and others in `home` |
+| `home,server` | the internet, others in `home`, and the server |
+| `home,work` | the internet, and others in `home` or `work`; those two sets still can't reach each other |
+
+Changes apply within 10s and need no new config. Removing a shared group cuts open
+connections between those devices; a connection already open to the server stays
+until it ends.
+
+- **Internet, jumps and WARP aren't affected.** Groups only cover traffic to other
+  devices and to the server.
+- **The server can always start a connection** to a device, and the device can
+  answer it.
+- **`server` covers the server's tunnel addresses** (`10.9.8.1`, and the first
+  address of its subnet, IPv4 and IPv6). Its public IP stays reachable as it is from
+  anywhere on the internet, so keep SSH keys on it.
+- **Groups are per server.** Unlike numbers, `wgt-ctl` doesn't keep them the same
+  across servers, so set them on each one: `wgt-ctl boba device group laptop home`.
 
 #### Bring your own WARP
 
@@ -734,8 +773,9 @@ configs are rendered.
   revoked (Proton does both): get a new jump file and add it again (same code).
   `wgt log` shows the watchdog bringing jumps up and down.
 - **A static address doesn't answer:** the device must be connected to the same
-  WireGuard Server as you, with a handshake in the last 180s (`wgt client list`).
-  Check its own firewall and sshd, and any narrower `AllowedIPs`.
+  WireGuard Server as you, with a handshake in the last 180s (`wgt client list`),
+  and share a [group](#groups-who-can-reach-what) with you (to reach the server,
+  be in `server`). Check its own firewall and sshd, and any narrower `AllowedIPs`.
 - **Handshake works but nothing loads:** the device's config is out of date
   (e.g. after a `--subnet` change) or its `Address` is mistyped; re-send it.
 - **Anything else:** `wgt status` (marks saved settings still
@@ -827,12 +867,17 @@ live rules have drifted from `wg0.conf`.
 `10.9.8.1/24`. Two NAT chains do the rest: `WGT-DEVICES` sends each static
 address to the config in use, and `WGT-DEVICE-SRC` shows a sender as its own
 static address. `wg0`'s `PostUp` creates them and what leads to them; the rules
-inside them belong to `wgt watchdog devices`. Forwarding between devices is
-allowed only for this traffic: anything else from `wg0` to `wg0` (by config
-address, or over IPv6) is rejected. A rule at priority 9300 makes a static address with no config in
+inside them belong to `wgt watchdog devices`. A rule at priority 9300 makes a static address with no config in
 use unreachable, so its packets never leave through a way out. Each client config
 has a `# device-network:` line naming this network, for tools that read configs:
 wireguard-tunnels adds it to the tunnels it narrows for WARP.
+
+**Groups.** Everything from `wg0` to `wg0` goes through `WGT-PEERS`, and everything
+from `wg0` to the server's tunnel addresses through `WGT-SERVER`. Both end in a
+rejection, and `wgt watchdog devices` inserts what the groups allow above it, so an
+empty chain refuses. `WGT-PEERS` only allows static-address traffic (ctstate DNAT),
+in both directions, between devices sharing a group. IPv6 between devices is
+always rejected.
 
 **Rules in one place.** All routing/NAT/firewall rules live in `wg0.conf`'s
 `PostUp`/`PostDown`, generated from one list so `PostDown` and `rollback` undo
@@ -861,7 +906,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/server.key`, `server.pub` | server keypair |
 | `/etc/wireguard/clients.db` | one line per config: `name address public-key allowed-ips`, no private keys |
 | `/etc/wireguard/clients.disabled` | names of disabled configs |
-| `/etc/wireguard/devices.db` | each device's static number: `device number` |
+| `/etc/wireguard/devices.db` | each device's static number and groups: `device number [group,group]` |
 | `/etc/wireguard/psk/<name>.psk` | per-config preshared keys |
 | `/etc/wireguard/clients/<server>.<name>.conf` | config files (each one's private key is kept only here, in change copies and in backup archives) |
 | `/etc/wireguard/wg-tools.state` | saved settings (including the location), recorded default route |

@@ -8,6 +8,9 @@ while ip rule del from 10.2.10.0/24 lookup 100 priority 10000 2>/dev/null; do :;
 while ip -6 rule del from fdfc:cd08:368e::/64 lookup 100 priority 10000 2>/dev/null; do :; done; ip -6 rule add from fdfc:cd08:368e::/64 lookup 100 priority 10000
 iptables -t nat -N WGT-DEVICES 2>/dev/null || true
 iptables -t nat -N WGT-DEVICE-SRC 2>/dev/null || true
+iptables -t filter -N WGT-PEERS 2>/dev/null || true
+iptables -t filter -N WGT-SERVER 2>/dev/null || true
+ip6tables -t filter -N WGT-SERVER 2>/dev/null || true
 iptables -t nat -C POSTROUTING -s 10.2.10.0/24 -o warp -j MASQUERADE 2>/dev/null || iptables -t nat -I POSTROUTING -s 10.2.10.0/24 -o warp -j MASQUERADE
 iptables -t filter -C FORWARD -i wg0 -o warp -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o warp -j ACCEPT
 iptables -t filter -C FORWARD -i warp -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i warp -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
@@ -52,9 +55,16 @@ iptables -t filter -C INPUT -p udp --dport 51820 -j ACCEPT 2>/dev/null || iptabl
 iptables -t nat -C PREROUTING -d 10.9.8.0/24 -i wg0 -j WGT-DEVICES 2>/dev/null || iptables -t nat -I PREROUTING -d 10.9.8.0/24 -i wg0 -j WGT-DEVICES
 iptables -t nat -C OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES 2>/dev/null || iptables -t nat -I OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES
 iptables -t nat -C POSTROUTING -o wg0 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC 2>/dev/null || iptables -t nat -I POSTROUTING -o wg0 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC
-iptables -t filter -C FORWARD -i wg0 -o wg0 -m conntrack --ctstate DNAT -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o wg0 -m conntrack --ctstate DNAT -j ACCEPT
-iptables -t filter -C FORWARD -i wg0 -o wg0 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o wg0 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable
+iptables -t filter -C WGT-PEERS -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || iptables -t filter -I WGT-PEERS -j REJECT --reject-with icmp-port-unreachable
+iptables -t filter -C FORWARD -i wg0 -o wg0 -j WGT-PEERS 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o wg0 -j WGT-PEERS
+iptables -t filter -C WGT-SERVER -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || iptables -t filter -I WGT-SERVER -j REJECT --reject-with icmp-port-unreachable
+iptables -t filter -C WGT-SERVER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -t filter -I WGT-SERVER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+iptables -t filter -C INPUT -d 10.2.10.1/32 -i wg0 -j WGT-SERVER 2>/dev/null || iptables -t filter -I INPUT -d 10.2.10.1/32 -i wg0 -j WGT-SERVER
+iptables -t filter -C INPUT -d 10.9.8.1/32 -i wg0 -j WGT-SERVER 2>/dev/null || iptables -t filter -I INPUT -d 10.9.8.1/32 -i wg0 -j WGT-SERVER
 ip6tables -t filter -C FORWARD -i wg0 -o wg0 -j REJECT --reject-with icmp6-port-unreachable 2>/dev/null || ip6tables -t filter -I FORWARD -i wg0 -o wg0 -j REJECT --reject-with icmp6-port-unreachable
+ip6tables -t filter -C WGT-SERVER -j REJECT --reject-with icmp6-port-unreachable 2>/dev/null || ip6tables -t filter -I WGT-SERVER -j REJECT --reject-with icmp6-port-unreachable
+ip6tables -t filter -C WGT-SERVER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || ip6tables -t filter -I WGT-SERVER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+ip6tables -t filter -C INPUT -d fdfc:cd08:368e::1/128 -i wg0 -j WGT-SERVER 2>/dev/null || ip6tables -t filter -I INPUT -d fdfc:cd08:368e::1/128 -i wg0 -j WGT-SERVER
 while ip rule del iif wg0 to 10.9.8.0/24 priority 9300 unreachable 2>/dev/null; do :; done; ip rule add iif wg0 to 10.9.8.0/24 priority 9300 unreachable
 ip route replace default dev px-par-fr table 231 2>/dev/null || true
 ip route replace blackhole default metric 4096 table 231

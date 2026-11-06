@@ -5,12 +5,20 @@ A config's own address stays what routing goes by (rules.py), so a static addres
 is only a forward: the device watchdog points it at the config with the newest
 recent handshake, and shows a sender as its own static address, which is what a
 warped carrier's AllowedIPs allows ("# device-network:" in client configs).
+
+Groups say who a device can reach. Two devices can talk if they share a group;
+the group "server" reaches the server instead of the others in it; a device with
+no groups reaches neither. The watchdog keeps the filter chains matching them.
+Groups are per server, unlike numbers: `device list --tsv` gives them as a third
+column, which is what wgt-ctl would read to keep them the same across servers.
+
 The numbers live in devices.db; wgt-ctl keeps them the same across servers
 (fleet.py). `wgt client add` alone can't see the other servers, so it counts down
 from the top of the range and wgt-ctl counts up from the bottom."""
 
 from __future__ import annotations
 
+from itertools import combinations
 from typing import TYPE_CHECKING, Dict, List, Mapping, Optional, Tuple
 
 from . import live, ops, store
@@ -19,7 +27,10 @@ from .const import (
     DEVICE_CHAIN,
     DEVICE_CTL_FIRST,
     DEVICE_DIRECT_LAST,
+    DEVICE_PEER_CHAIN,
+    DEVICE_SERVER_CHAIN,
     DEVICE_SOURCE_CHAIN,
+    SERVER_GROUP,
     device_ip,
 )
 from .errors import WgtError
@@ -78,6 +89,17 @@ def ensure_number(ctx: Ctx, device: str) -> None:
         ctx.out.info("(number picked on this server, not checked against any others: see wgt-ctl devices)")
 
 
+def ensure_groups(ctx: Ctx, device: str) -> None:
+    """`client add --group`: add the device to these groups."""
+    if not ctx.args.groups or ctx.snap.device_number(device) is None:
+        return
+    groups = store.parse_groups(ctx.args.groups)
+    have = ctx.snap.device_groups(device)
+    if not set(groups) <= set(have):
+        ops.set_device(ctx, device, ctx.snap.device_number(device), tuple(dict.fromkeys(have + groups)))
+    ctx.out.info(f"device '{device}': groups {','.join(ctx.snap.device_groups(device))}")
+
+
 def drop_if_unused(ctx: Ctx, device: str) -> None:
     """The device's last config is gone: so is its number."""
     if ctx.snap.device_number(device) is not None and not ctx.snap.device_clients(device):
@@ -88,6 +110,7 @@ def config_renamed(ctx: Ctx, old: str, new: str) -> None:
     """One config moved from device <old> to device <new>. The number follows
     if that was <old>'s last config and <new> has none."""
     number = ctx.snap.device_number(old)
+    groups = ctx.snap.device_groups(old)
     if ctx.snap.device_clients(old):
         if ctx.snap.device_number(new) is None:
             ensure_number(ctx, new)
@@ -96,7 +119,7 @@ def config_renamed(ctx: Ctx, old: str, new: str) -> None:
         ops.set_device(ctx, old, None)
     if ctx.snap.device_number(new) is None:
         if number is not None:
-            ops.set_device(ctx, new, number)
+            ops.set_device(ctx, new, number, groups)
         else:
             ensure_number(ctx, new)
 
@@ -120,6 +143,29 @@ def desired(snap: store.Snapshot, handshakes: Mapping[str, int], now: float) -> 
     return forwards, sources
 
 
+def peer_rules(snap: store.Snapshot) -> List[str]:
+    """Traffic through static addresses, both ways, between each pair of devices
+    sharing a group other than "server". ctstate DNAT: never by config address."""
+    found: List[str] = []
+    for a, b in combinations(snap.devices, 2):
+        if not (set(a.groups) & set(b.groups)) - {SERVER_GROUP}:
+            continue
+        for x in _enabled(snap, a.name):
+            for y in _enabled(snap, b.name):
+                found += [f"-s {x.ip}/32 -d {y.ip}/32 -m conntrack --ctstate DNAT -j ACCEPT",
+                          f"-s {y.ip}/32 -d {x.ip}/32 -m conntrack --ctstate DNAT -j ACCEPT"]
+    return found
+
+
+def server_sources(snap: store.Snapshot) -> List[store.Client]:
+    """The configs of devices in the "server" group."""
+    return [c for d in snap.devices if SERVER_GROUP in d.groups for c in _enabled(snap, d.name)]
+
+
+def _enabled(snap: store.Snapshot, device: str) -> List[store.Client]:
+    return [c for c in snap.device_clients(device) if not snap.is_disabled(c.name)]
+
+
 def sync(ctx: Ctx) -> List[str]:
     """Make the chains match desired(), new rules before old ones go, so a
     forward never disappears in between. Returns what changed, for the log.
@@ -139,7 +185,29 @@ def sync(ctx: Ctx) -> List[str]:
             if spec not in want and r.ok(["iptables", "-t", "nat", "-D", chain, *spec.split()]) \
                     and chain == DEVICE_CHAIN and spec.split()[1].split("/")[0] not in forwards:
                 log.append(f"{spec.split()[1].split('/')[0]}: no config in use")
+    _sync_allowed(ctx)
     return log
+
+
+def _sync_allowed(ctx: Ctx) -> None:
+    """Make the filter chains match the groups. What's allowed goes in above the
+    chain's own rules (the refusal at the end, which this leaves alone)."""
+    r, snap = ctx.runner, ctx.snap
+    servers = server_sources(snap)
+    wanted = [("iptables", DEVICE_PEER_CHAIN, peer_rules(snap)),
+              ("iptables", DEVICE_SERVER_CHAIN, [f"-s {c.ip}/32 -j ACCEPT" for c in servers])]
+    if ctx.cfg.ipv6:
+        wanted.append(("ip6tables", DEVICE_SERVER_CHAIN, [f"-s {ctx.cfg.ip6_of(c.ip)}/128 -j ACCEPT" for c in servers]))
+    for cmd, chain, want in wanted:
+        have = live.ipt_chain(r, "filter", chain, cmd)
+        if have is None:
+            continue
+        for spec in want:
+            if spec not in have:
+                r.ok([cmd, "-t", "filter", "-I", chain, *spec.split()])
+        for spec in have:
+            if spec.startswith("-s ") and spec not in want:
+                r.ok([cmd, "-t", "filter", "-D", chain, *spec.split()])
 
 
 # --- commands ---
@@ -149,10 +217,12 @@ def cmd_list(ctx: Ctx, words: List[str]) -> None:
     ops.no_more_words(words, "wgt device list [--tsv]")
     for device in ctx.snap.device_names():
         number = ctx.snap.device_number(device)
+        groups = ",".join(ctx.snap.device_groups(device))
         if ctx.args.tsv:
-            ctx.out.line(f"{device}\t{'' if number is None else number}")
+            ctx.out.line(f"{device}\t{'' if number is None else number}" + (f"\t{groups}" if groups else ""))
         else:
-            ctx.out.line(f"{device:<32} {'(none)' if number is None else device_ip(number)}")
+            ctx.out.line(f"{device:<32} {'(none)' if number is None else device_ip(number):<14} "
+                         f"{groups or 'isolated'}")
 
 
 def cmd_set(ctx: Ctx, words: List[str]) -> None:
@@ -182,3 +252,44 @@ def cmd_set(ctx: Ctx, words: List[str]) -> None:
         ctx.runner.step(f"Device '{device}': static address {device_ip(number)}",
                         f"wgt device set {device} {have if have is not None else '<number>'}")
         ops.set_device(ctx, device, number)
+
+
+def cmd_group(ctx: Ctx, words: List[str]) -> None:
+    """group [<device> <group,group>]: add a device to groups (none given: list
+    every device and its groups). Takes effect within 10s; no new config."""
+    if not words:
+        cmd_list(ctx, [])
+        return
+    if len(words) != 2:
+        raise WgtError("usage: wgt device group [<device> <group,group>]")
+    device, wanted = words[0], store.parse_groups(words[1])
+    number = _for_groups(ctx, device)
+    have = ctx.snap.device_groups(device)
+    ctx.runner.step(f"Device '{device}': add to {','.join(wanted)}", f"wgt device ungroup {device} {words[1]}")
+    ops.set_device(ctx, device, number, tuple(dict.fromkeys(have + wanted)))
+
+
+def cmd_ungroup(ctx: Ctx, words: List[str]) -> None:
+    """ungroup <device> [group,group]: remove a device from these groups (none
+    given: all of them, which isolates it). Takes effect within 10s."""
+    if len(words) not in (1, 2):
+        raise WgtError("usage: wgt device ungroup <device> [group,group]")
+    device = words[0]
+    number = _for_groups(ctx, device)
+    have = ctx.snap.device_groups(device)
+    leaving = store.parse_groups(words[1]) if len(words) == 2 else have
+    ctx.runner.step(f"Device '{device}': remove from {','.join(leaving) or 'no groups'}",
+                    f"wgt device group {device} {','.join(have)}" if have else "nothing to undo")
+    ops.set_device(ctx, device, number, tuple(g for g in have if g not in leaving))
+
+
+def _for_groups(ctx: Ctx, device: str) -> int:
+    """The number of a device about to change groups, under the lock."""
+    ops.take_lock(ctx)
+    ops.require_setup(ctx)
+    if not ctx.snap.device_clients(device):
+        raise WgtError(f"no device '{device}' (see: wgt client list)")
+    number = ctx.snap.device_number(device)
+    if number is None:
+        raise WgtError(f"'{device}' has no static address yet (wgt device set {device})")
+    return number

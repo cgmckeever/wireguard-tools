@@ -7,7 +7,7 @@ from __future__ import annotations
 import fcntl
 import os
 import time
-from typing import TYPE_CHECKING, Callable, Dict, List, Mapping, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Mapping, Optional, Tuple
 
 from . import live, render, store, ui
 from .const import MARKER
@@ -223,10 +223,11 @@ def _write_exits(ctx: Ctx, code: str, entry: Optional[store.Exit]) -> None:
     ctx.reload()
 
 
-def set_device(ctx: Ctx, name: str, number: Optional[int]) -> None:
-    """Give device <name> a static <number>, or none; reloads ctx.snap."""
+def set_device(ctx: Ctx, name: str, number: Optional[int], groups: Optional[Tuple[str, ...]] = None) -> None:
+    """Give device <name> a static <number>, or none, and <groups> (None: the
+    ones it has); reloads ctx.snap."""
     db = ctx.paths.device_db
-    ctx.files.write(db, 0o600, store.put_device(ctx.files.read(db), name, number))
+    ctx.files.write(db, 0o600, store.put_device(ctx.files.read(db), name, number, groups))
     ctx.reload()
 
 

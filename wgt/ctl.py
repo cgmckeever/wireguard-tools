@@ -468,7 +468,7 @@ def sweep() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str]]:
             continue
         seen[s.name] = {}
         for line in o.splitlines():
-            device, _, number = line.partition("\t")
+            device, number = (line.split("\t") + [""])[:2]   # groups may follow: per server, not read here
             if device:
                 seen[s.name][device] = int(number) if number.isdigit() else None
     return seen, missed
