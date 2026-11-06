@@ -10,67 +10,33 @@ A plain WireGuard server sends traffic out through its own IP. This one can
 also send it through [Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free VPN
 service; the server registers its own free WARP account), and through a
 **jump**: another server elsewhere, such as a Proton VPN server in Paris
-or a second server of your own, that the Wireguard Server connects to as a client, so
+or a second server of your own, that the WireGuard Server connects to as a client, so
 traffic leaves from there.
+
+A WireGuard network is a private network, like your home LAN: each config is a
+key to it, and devices on the same WireGuard Server can reach each other. Give
+configs only to your own devices and to people you'd let onto your LAN.
 
 ### Terms
 
 | Term | Means |
 |---|---|
-| **device** | a phone, laptop or router that connects to the server. The `wgt client` commands manage them: a client is a device |
-| **config** | one WireGuard tunnel for a device, with its own key and address. A device can have several; it picks its way out by turning on one of them in its WireGuard app |
-| **exit** | where a config's traffic leaves: **`host`** (the Wireguard Server) or a **jump**. (In file names, such as `exits.db` and `local/exits/`, "exit" means a jump, for historical reasons) |
+| **WireGuard Server** | the machine you ran `wgt setup` on. `host` is its name as an exit |
+| **device** | a phone, laptop or router that connects to a WireGuard Server. The `wgt client` commands manage its configs |
+| **config** | one WireGuard tunnel for a device, with its own key and address. A device can have several; it picks its way out by turning on one of them in its WireGuard app. Configs belong to one WireGuard Server: a device using two servers has configs on each |
+| **exit** | where a config's traffic leaves: **`host`** (the WireGuard Server) or a **jump**. |
 | **WARP / plain** | a `warp.` config's traffic also goes through Cloudflare WARP; a plain config's doesn't |
-| **jump file** | the WireGuard file a VPN provider gives you for a jump (the Wireguard Server's side of it), not a device config |
+| **jump file** | the WireGuard file that connects the WireGuard Server to a jump, from a VPN provider or your own server. It isn't a device config |
 
 A config's name says which way it goes: `[warp.][<jump>.]<device>`. For a
 device called `laptop` and a jump called `par-fr` (Paris):
 
 | config | traffic leaves | sites see |
 |---|---|---|
-| `laptop` | the Wireguard Server | the server's IP: a plain, fast VPN |
-| `warp.laptop` | the Wireguard Server, through WARP | a Cloudflare IP near the server |
+| `laptop` | the WireGuard Server | the server's IP: a plain, fast VPN |
+| `warp.laptop` | the WireGuard Server, through WARP | a Cloudflare IP near the server |
 | `par-fr.laptop` | the `par-fr` jump | the jump's IP |
 | `warp.par-fr.laptop` | the `par-fr` jump, through WARP | a Cloudflare IP near the jump (such as Paris) |
-
-A device gets the configs you choose when you add it. Switching between them
-happens only on the device; the server serves all of them at once.
-
-## Quick start
-
-On a fresh server, as root (`sudo -i`):
-
-```bash
-apt-get update && apt-get install -y git
-git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
-/opt/wireguard-tools/bin/wgt setup --name myvpn     # from then on, just: wgt ...
-```
-
-Setup installs everything else it needs (WireGuard, iptables, curl, qrencode,
-magic-wormhole, the WARP client) and links `/usr/local/sbin/wgt`.
-
-1. **Open UDP 51820** (or your `--port`) in your VPS provider's firewall or
-   security group. Setup opens it on the server itself (ufw or iptables) but
-   can't reach the provider's firewall; this is the usual reason devices can't
-   connect.
-2. **Add a device:** `wgt client add phone` makes two configs, `phone` (out
-   of the Wireguard Server) and `warp.phone` (out through WARP), and prints a QR code
-   for each. Scan one or both in the WireGuard app; with both, you switch
-   between them there.
-3. **Check it:** `wgt summary` (or `wgt test`).
-
-### Conventions
-
-- **`wgt`** runs as root on the server (`wgt help` lists everything).
-  **`wgt-ctl`** runs on your own machine and drives your servers over SSH:
-  `wgt-ctl <server> <any wgt command>`, plus setting up new servers, updates
-  and backups. See [Fleet management](#fleet-management).
-- Both are safe to re-run and back up every file before changing it. Anything
-  that changes a server takes **`--dry-run`** (show what would change, change
-  nothing) and **`--yes`** (`-y`, skip the step-by-step prompts).
-- Private keys are never printed except inside a config's QR code.
-- In this README, `dengar` and `boba` are example server names, and `<server>`
-  stands for yours.
 
 ### Why route through Cloudflare?
 
@@ -85,7 +51,7 @@ Cloudflare's network instead:
 - **Your provider sees one encrypted tunnel to Cloudflare** (or, through a
   jump, to the jump), not which sites your devices visit.
 - **IPv6 for devices even on an IPv4-only VPS**, through WARP's own IPv6.
-- **You pick the location.** WARP exits near where it's entered: the Wireguard Server,
+- **You pick the location.** WARP exits near where it's entered: the WireGuard Server,
   or a [jump](#jumps) in another city (sites see somewhere such as Paris),
   still looking like an ordinary Cloudflare user rather than a VPN.
 - **Fail closed:** if WARP or a jump goes down, its configs are blocked rather
@@ -97,6 +63,44 @@ traffic goes instead of your provider, and a few sites block WARP too (switch
 the device to its plain config for those). It hides your server, not you: it
 isn't an anonymity tool.
 
+## Quick start
+
+On a fresh server, as root (`sudo -i`):
+
+```bash
+apt-get update && apt-get install -y git
+git clone https://github.com/cgmckeever/wireguard-tools.git /opt/wireguard-tools
+/opt/wireguard-tools/bin/wgt setup --name myvpn     # from then on, just: wgt ...
+```
+
+Setup installs everything else it needs (WireGuard, iptables, curl, qrencode,
+magic-wormhole, the WARP client) and links `/usr/local/sbin/wgt`. It asks a few
+questions; Enter takes the default.
+
+1. **Open UDP 51820** (or your `--port`) in your VPS provider's firewall or
+   security group. Setup opens it on the server itself (ufw or iptables) but
+   can't reach the provider's firewall; this is the usual reason devices can't
+   connect.
+2. **Add a device:** `wgt client add phone` makes two configs, `phone` (out
+   of the WireGuard Server) and `warp.phone` (out through WARP), and prints a QR code
+   for each. Scan one or both in the WireGuard app; with both, you switch
+   between them there.
+3. **Check it:** `wgt summary` (or `wgt test`).
+
+### Conventions
+
+- **`wgt`** runs as root on the server (`wgt help` lists everything).
+  **`wgt-ctl`** runs on your own machine and drives your servers over SSH:
+  `wgt-ctl <server> <any wgt command>`, plus setting up new servers, updates
+  and backups. See [Fleet management](#fleet-management).
+- Setup is safe to re-run, and every file is backed up before it changes. `wgt`
+  commands that change a server take **`--dry-run`** (show what would change,
+  change nothing) and **`--yes`** (`-y`, skip the step-by-step prompts).
+  `wgt-ctl`'s own commands, such as `move` and `remove`, have no dry run.
+- Private keys are never printed except inside a config's QR code.
+- In this README, `dengar` and `boba` are example server names, and `<server>`
+  stands for yours.
+
 ## Server management
 
 Everything in this part runs on one server, logged in as root: `wgt …`.
@@ -105,7 +109,8 @@ your servers from your own machine.
 
 ### Set up a server
 
-Install as in [Quick start](#quick-start), then:
+[Quick start](#quick-start)'s last line is this command. Re-run it any time to
+change settings:
 
 ```bash
 wgt setup --name dengar              # typical: just name it
@@ -123,10 +128,10 @@ be set as an environment variable (flag > env > saved > default).
 | `--name <name>` | `SERVER_NAME` | short hostname | server name; config files are `<name>.<config>.conf` |
 | `--port <port>` | `WG_PORT` | `51820` | UDP port devices connect to |
 | `--endpoint <host-or-ip>` | `ENDPOINT` | detected public IPv4 | address written into configs (a hostname lets you move servers without re-sending configs) |
-| `--location "<place>"` | | its city, looked up once (ipinfo.io) | where the Wireguard Server is, shown as `host:<place>` in client lists |
+| `--location "<place>"` | | its city, looked up once (ipinfo.io) | where the WireGuard Server is, shown as `host:<place>` in client lists |
 | `--dns <ip>` | `WG_DNS` | `1.1.1.1` | DNS server given to devices |
-| `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | default for new configs (per config on `add`/`rotate`); `"10.4.5.0/24, fd…::/64"` (your subnets) for VPN-network only |
-| `--subnet <cidr>` | `WG_SUBNET` | random `10.<200-255>.<200-255>.0/24` | devices' IPv4 network (server is `.1`); first setup asks, Enter takes the random one |
+| `--allowed-ips <cidrs>` | `CLIENT_ALLOWED_IPS` | `0.0.0.0/0, ::/0` (all traffic) | which traffic a device sends through the tunnel, for new configs (or per config with `add`/`rotate`). Use your subnets (`"10.4.5.0/24, fd…::/64"`) to send only VPN traffic |
+| `--subnet <cidr>` | `WG_SUBNET` | random `10.<200-255>.<200-255>.0/24` | devices' IPv4 network (server is `.1`) |
 | `--subnet6 <cidr>` | `WG_SUBNET6` | random `fd…::/64` | devices' IPv6 network; `off` disables IPv6 for devices |
 | `--mtu <bytes>` | `WG_MTU` | `1280` | tunnel MTU for server and devices (1280 minimum, at most `--warp-mtu`) |
 | *Rarely needed:* | | | |
@@ -153,8 +158,8 @@ instead; `--yes` or `--dry-run` skip the question and take the offer.
 Each run lists the settings and where each came from (flag, env, entered,
 saved, default, detected, random), shows what changed since the last setup,
 and asks `Continue? [Y/n]` before changing anything. `--yes` skips the
-step-by-step prompts but not this final question, which is skipped only when
-there's no terminal (a script); `--dry-run` shows it and stops.
+step-by-step prompts but not this final question in a terminal. With no terminal
+(a script), setup needs `--yes` and doesn't ask; `--dry-run` shows it and stops.
 
 If the server name (`--name`) differs from the machine's hostname, setup then
 asks `Update hostname <current> to <name>? [Y/n]`. Yes sets it with
@@ -172,7 +177,7 @@ Setup runs in two stages:
    [Register WARP on another machine](#register-warp-on-another-machine).)
 2. **WireGuard server:** creates `wg0` with server keys, NAT for both ways out
    (WARP and the public interface), forwarding and systemd units, plus the
-   [WARP watchdog](#how-it-works). Jumps, if any, get their configs refreshed.
+   [watchdogs](#how-it-works). Jumps, if any, get their tunnel files refreshed.
 
 If WARP can't be set up, setup still finishes: plain configs work, `warp.`
 ones are blocked until it does; fix it and re-run setup.
@@ -181,9 +186,9 @@ To change a setting, re-run setup with the new flag, e.g.
 `wgt setup --port 51821`. A change that affects devices (`--name`,
 `--endpoint`, `--port`, `--dns`, `--mtu`, `--subnet`, `--subnet6`) rewrites
 their configs (renames the files for `--name`) and lists which to re-send
-(`wgt client share` or `show --qr`); keys don't change. An endpoint set as a
-hostname (`--endpoint vpn.example.com`) is never re-detected, so moving the
-server only means pointing that DNS name at it.
+(`wgt client share` or `show --qr`); keys don't change. For why a hostname is
+the better endpoint, see [Moving or rebuilding a
+server](#moving-or-rebuilding-a-server).
 
 Changing `--subnet` with configs present moves them: each keeps its host
 number and keys (`--subnet 192.168.250.0/24` turns `10.4.5.5` into
@@ -209,7 +214,7 @@ wgt client add warp.par-fr.tablet                 # a full config name: exactly 
 
 | Flag | Does |
 |---|---|
-| `--exit host\|<jump>[,…]` | which exit(s): `host` (the Wireguard Server) or a jump's code; one pair of configs per exit |
+| `--exit host\|<jump>[,…]` | which exit(s): `host` (the WireGuard Server) or a jump's code; one pair of configs per exit |
 | `--warp on\|off` | only the `warp.` config (`on`) or only the plain one (`off`); both by default |
 | `--allowed-ips "<cidrs>"` | this config's allowed IPs instead of the default (e.g. your subnets only, for a split tunnel) |
 | `--qr` / `--no-qr` | force or skip the QR code (also on `rotate` and `show`) |
@@ -219,14 +224,9 @@ the next free address. Its file is
 `/etc/wireguard/clients/<server>.<config>.conf`: the server's name goes in
 front, so `warp.laptop` on boba is `boba.warp.laptop.conf` and files from
 different servers don't collide. A `# exit:` line inside says where it goes in
-words, and a `# device-network:` line gives the network of the [static
-addresses](#static-device-addresses) (for tools that read configs, such as
-wireguard-tunnels' warped carriers). Import the ones you want on the device and switch exits by switching
+words. Import the ones you want on the device and switch exits by switching
 tunnels in the WireGuard app. The Android app only takes tunnel names up to 15
 characters, so rename longer ones when importing there (`add` reminds you).
-
-Adding a jump makes no configs: a device gets a jump's configs when you add it
-with that `--exit`.
 
 A config's name fixes its way out. To change it, rename the config; its keys
 stay, so the device's tunnel keeps working:
@@ -234,6 +234,27 @@ stay, so the device's tunnel keeps working:
 ```bash
 wgt client rename warp.par-fr.tablet par-fr.tablet   # now without WARP, live
 ```
+
+#### Getting a config onto a device
+
+| How | Command | Best for |
+|-----|---------|----------|
+| QR code | printed by `add`/`rotate`; again with `show --qr` | phones (WireGuard app → scan) |
+| Magic Wormhole | `share`; recipient runs `wormhole receive <code>` | a device you can't reach with SSH |
+| scp | `scp root@<server>:/etc/wireguard/clients/dengar.laptop.conf .` (`add` and `show` print the exact command; through `wgt-ctl`, it uses your `local/servers` login) | your own machines |
+
+`share` prints a one-time code (like `7-guitar-revenge-tidy`) and waits up to 10
+minutes. The file is encrypted end to end; a wrong guess at the code ends the
+transfer. The recipient needs magic-wormhole (`brew install magic-wormhole`,
+`apt install magic-wormhole`, `pipx install magic-wormhole`) and then imports
+the `.conf` into their WireGuard app.
+
+QR codes are inline images in iTerm2 and WezTerm (`QR_WIDTH=24` to resize,
+`QR_WIDTH=0` for text).
+
+Both the QR code and the wormhole transfer carry the config's private key, and
+a config is a key to your private network: send them only to that device's
+owner.
 
 #### Other client commands
 
@@ -245,13 +266,18 @@ wgt client share laptop                # send the config via magic-wormhole (one
 wgt client rotate laptop               # new keys, same address; old config stops working (--allowed-ips to change those too)
 wgt client disable laptop              # cut it off now; keys, config and address kept
 wgt client enable laptop               # let it back in with the same config
-wgt client rename laptop work-laptop   # same keys and address; its config keeps working
+wgt client rename warp.tablet tablet   # one config, a new name; same keys and address
 wgt client remove laptop
 ```
 
 Each command takes a config name. Leave it out on `rotate`, `remove`,
 `disable`, `enable`, `show` or `share` to pick from a numbered list (`wgt
 client` alone is `list`). Changes apply live; other configs stay connected.
+
+These commands act on one config, not the whole device: `wgt client disable
+phone` leaves `warp.phone` working. To cut off or remove a device, run the
+command for each of its configs. To rename a device, use `wgt device rename`;
+`wgt client rename laptop x` moves only that config, to a new device called `x`.
 
 `list` shows each config's EXIT (`host:Atlanta`, the server's
 [location](#settings), or `jump:Paris, France`) and WARP (on/off). In a
@@ -269,78 +295,75 @@ puts it back; the same config works, nothing to re-send.
 
 #### Static device addresses
 
-A config's address depends on which config it is, so it changes when a device
-switches exits. A device's **static address** doesn't: each device has one
-number, and `10.9.8.<number>` reaches it whichever of its configs it's using.
-The server itself is `10.9.8.1`, on every server.
+A config's address belongs to that config, so a device's address changes when
+it switches configs. A **static address** doesn't: each device has a number, and
+`10.9.8.<number>` reaches it from the WireGuard Server it's connected to, and
+from other devices connected to that server, whichever of its configs is on.
+The server you're connected to is always `10.9.8.1`.
+
+These addresses work within one WireGuard Server: a device connected to dengar
+can't reach one connected to boba. Keeping a device's number the same on every
+server just means there's only one to remember.
 
 ```bash
-ssh 10.9.8.1                           # from a device: this server
-ssh 10.9.8.4                           # from a device or the server: that device
+ssh 10.9.8.1                           # from a device: the server it's connected to
+ssh 10.9.8.4                           # from the server or another device on it: the device numbered 4 (it must be running sshd)
 wgt device list                        # each device and its static address (--tsv for scripts)
-wgt device set laptop 42               # give it this number (none given: the next free one)
+wgt device set laptop 42               # give it this number, 2-254 (none given: the next free one)
 wgt device rename laptop work-laptop   # every config of it, and its number; keys and addresses stay
 ```
 
+A number change applies within 10s and needs no new config, but anything
+pointing at the old address must change. With several servers, use `wgt-ctl`
+instead: see [Static addresses across
+servers](#static-addresses-across-servers).
+
 `wgt client add` gives a new device its number, and removing its last config
-frees it. A device added with `wgt` directly gets a number counting down from
-254, without knowing about your other servers. One added through `wgt-ctl`
-gets a number counting up from 2, the same on every server (see
-[Commands](#commands)). `wgt setup` lists devices that don't have a number yet;
-`wgt-ctl devices sync` gives them theirs, and a device needs no new config for it.
+frees it on that server. A device added with `wgt` directly gets a number
+counting down from 254, without knowing about your other servers. One added
+through `wgt-ctl` gets a number counting up from 2, the same on every server.
+Devices added before static addresses existed have no number yet: `wgt setup`
+lists them, and `wgt device set <device>` or `wgt-ctl devices sync` gives them
+one. No config needs re-sending.
 
-Every 10s, the device watchdog points each static address at the config with
-the newest handshake in the last 180s. Good to know:
+Every 10s, a background timer (the device watchdog) points each static address
+at the config with the newest handshake in the last 180s. Good to know:
 
-- **A device that's off isn't reachable.** With no recent handshake the address
-  answers "unreachable" rather than reaching the device's last config.
+- **Devices can reach each other.** It's a private network: any device on a
+  WireGuard Server can connect to anything listening on another device on it.
+- **A device that's off isn't reachable.** With no handshake in 180s, connections
+  to its address fail at once with "unreachable"; they aren't sent through its
+  last config or out to the internet.
 - **Switching exits moves new connections only.** A connection already open
   stays on the old config until it times out, so reconnect (SSH, for example).
 - **The other side sees a static address too.** A connection through a static
   address appears to come from the sender's static address, or from
   `10.9.8.1` if the server made it, so firewall rules on a device can rely on it.
 - **IPv4 only.**
-- **Split tunnels:** a config with a narrower `--allowed-ips` needs
-  `10.9.8.0/24` added before it can use these addresses. Warped carriers get
-  it from the `# device-network:` line once wireguard-tunnels' sweep reads it.
-- **A server's subnet can't overlap `10.9.8.0/24`;** setup refuses one that does.
-
-#### Getting a config onto a device
-
-| How | Command | Best for |
-|-----|---------|----------|
-| QR code | printed by `add`/`rotate`; again with `show --qr` | phones (WireGuard app → scan) |
-| Magic Wormhole | `share`; recipient runs `wormhole receive <code>` | sending it to someone else, no SSH needed |
-| scp | `scp root@<server>:/etc/wireguard/clients/dengar.laptop.conf .` (`add` and `show` print the exact command) | your own machines |
-
-`share` prints a one-time code (like `7-guitar-revenge-tidy`) and waits up to 10
-minutes. The file is encrypted end to end; a wrong guess at the code ends the
-transfer. The recipient needs magic-wormhole (`brew install magic-wormhole`,
-`apt install magic-wormhole`, `pipx install magic-wormhole`) and then imports
-the `.conf` into their WireGuard app.
-
-QR codes are inline images in iTerm2 and WezTerm (`QR_WIDTH=24` to resize,
-`QR_WIDTH=0` for text).
-
-Both the QR code and the wormhole transfer carry the config's private key:
-send them only to that device's owner.
+- **Split tunnels:** a config with a narrower `--allowed-ips` must also allow
+  `10.9.8.0/24`: edit the tunnel on the device, or run `wgt client rotate
+  <config> --allowed-ips "…, 10.9.8.0/24"` (new keys, so re-send it).
+- **The network is fixed.** A server's subnet can't overlap `10.9.8.0/24` (setup
+  refuses one that does), and a device on a LAN using that range will clash.
+- **SSH host keys:** every server answers at `10.9.8.1`, so `ssh 10.9.8.1` warns
+  that the host key changed when a device switches servers.
 
 #### Bring your own WARP
 
-Instead of the Wireguard Server's WARP, a device can run its own: it connects
+Instead of the WireGuard Server's WARP, a device can run its own: it connects
 with a plain config, then runs WARP inside that tunnel. Sites still see a
-Cloudflare IP near the Wireguard Server (or the jump), but the WARP account is
-the device's, and the Wireguard Server only ever sees encrypted WARP traffic.
+Cloudflare IP near the WireGuard Server (or the jump), but the WARP account is
+the device's, and the WireGuard Server only ever sees encrypted WARP traffic.
 
 Such a device needs only plain configs, so add it with `--warp off`
 (`wgt client add mac --warp off`). On a Mac,
 [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels) sets this
-up as its "warped" tunnels.
+up as its "warped" tunnels: WireGuard tunnels where WARP starts locally on the Mac.
 
 ### Jumps
 
 A jump is another server that configs can leave through instead of
-the Wireguard Server: a VPN provider's server in a city you pick, or a server of your own.
+the WireGuard Server: a VPN provider's server in a city you pick, or a server of your own.
 Each jump has a short code such as `par-fr`. Through `warp.par-fr.<device>`,
 the traffic goes into a WARP tunnel that itself runs inside the jump tunnel, so
 Cloudflare places it near the jump: sites see a Cloudflare IP there (fewer
@@ -348,13 +371,14 @@ CAPTCHAs and blocks than a VPN's own IPs), and the jump sees only encrypted
 WARP traffic. Through `par-fr.<device>`, sites see the jump's IP.
 
 ```
-warp.par-fr.phone: phone -> wg0 (the Wireguard Server) -> wx-par-fr (WARP) -> inside px-par-fr (jump, Paris) -> Cloudflare, Paris
-par-fr.phone:      phone -> wg0 (the Wireguard Server) -> px-par-fr (jump, Paris) -> sites
+warp.par-fr.phone: phone -> wg0 (the WireGuard Server) -> wx-par-fr (WARP) -> inside px-par-fr (jump, Paris) -> Cloudflare, Paris
+par-fr.phone:      phone -> wg0 (the WireGuard Server) -> px-par-fr (jump, Paris) -> sites
 ```
 
 **The jump file.** Any WireGuard file with one peer and an IPv4 address works:
-it's the client side of the jump, since the Wireguard Server connects to the jump as a
-client. Each is one key: use it on one of *your* servers only.
+it's the client side of the jump, since the WireGuard Server connects to the jump as a
+client. A jump file holds one WireGuard key, and a key can only be connected from
+one place, so use each file on only one of your servers.
 
 **Proton VPN** is a good source of jumps in many cities. At
 account.protonvpn.com: Downloads -> WireGuard configuration; platform Linux;
@@ -379,7 +403,7 @@ its jump file. It makes no device configs: add those with
 `wgt client add <device> --exit par-fr`.
 
 ```bash
-wgt jump list              # jumps: state (up, up without WARP, idle), configs, endpoint
+wgt jump list              # jumps: state (up, up without WARP, partly up, idle), configs, endpoint
 wgt jump test              # bring each one up and check it
 wgt jump remove par-fr     # refused while configs use it (no code: pick from a list)
 ```
@@ -396,7 +420,7 @@ wgt test              # PASS/FAIL checks; non-zero exit on any FAIL
 wgt tunnel test       # every way out (each exit, with and without WARP), traced through Cloudflare
 wgt summary           # at a glance: one line per fact, says what is wrong
 wgt status            # settings (and any not running yet), interfaces, configs, routes, rules
-wgt log [N]           # its changes, both watchdogs and the tunnels: last lines, then follows (Ctrl-C stops; --no-follow just prints)
+wgt log [N]           # its changes, the watchdogs and the tunnels: last lines, then follows (Ctrl-C stops; --no-follow just prints)
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
 wgt rollback          # stop everything, remove all rules, restore original files
@@ -415,22 +439,36 @@ so re-cloning the tools keeps them); `backup <dir>` writes elsewhere. Each
 
 ### Rotate WARP accounts
 
-The server's WARP account (and each jump's) is made once at setup. To get new
-keys and a new Cloudflare identity, register a fresh one:
+Rotate when WARP connections stop working, or when you want a new account for
+security. A server's WARP account is made at setup and each jump's at `jump add`;
+rotating registers a fresh one:
 
 ```bash
-wgt warp rotate            # this server's own WARP
+wgt warp rotate            # this server's own WARP (or: host)
 wgt warp rotate par-fr     # a jump's WARP
 wgt warp rotate all        # this server's and every jump's
 ```
 
-The new account is registered first, so if Cloudflare refuses, nothing
-changes. Then it replaces the old one (backed up like any changed file), the
-WARP tunnel restarts, and a trace checks traffic still leaves through WARP.
-`warp.` configs pause for a few seconds; device configs don't change, so
-there's nothing to re-send. Plain configs aren't affected.
+The new account is registered first, so if Cloudflare refuses, that account
+doesn't change (with `all`, the run stops there, and ones already rotated stay
+rotated). Then it replaces the old one (backed up like any changed file), the
+WARP tunnel restarts, and a trace checks traffic still leaves through WARP. Device
+configs don't change, so there's nothing to re-send.
+
+- **This server's WARP:** `warp.` configs pause for a few seconds. Plain configs
+  aren't affected.
+- **A jump's WARP:** the whole jump goes down, so both its `warp.` and plain
+  configs stop until the watchdog brings it back.
+
+If the trace fails, the new account stays and the command exits non-zero. To undo,
+restore the backed-up wgcf files ([Files](#files)), then run `wgt setup`. A server
+that needed [Register WARP on another machine](#register-warp-on-another-machine)
+will probably be refused here too.
 
 ### Moving to a new server (or rebuilding)
+
+With `wgt-ctl`, [`move`](#moving-or-rebuilding-a-server) does all of this. By
+hand:
 
 ```bash
 # old server
@@ -445,18 +483,17 @@ scp wireguard-tools.<host>.<date>.tar.gz root@<new>:
 ```
 
 `restore` brings over the server keys, every config (same keys, addresses and
-allowed IPs), the settings, the WARP account (so it doesn't need to register
-again) and the jumps, then runs setup. It won't overwrite a server that's
+allowed IPs), the settings, the static numbers, the WARP account (so it doesn't
+need to register again) and the jumps, then runs setup. It won't overwrite a server that's
 already set up (`rollback` or `rollback --purge` first).
 
 The new server records its own default route and public interface, and an IP
 endpoint is re-detected: if the address changed, configs are rewritten and
 listed for re-sending, as for any [endpoint change](#what-setup-does). With a
-hostname endpoint, point the DNS name at the new server and devices need
-nothing.
+[hostname endpoint](#moving-or-rebuilding-a-server), devices need nothing.
 
-Stop the old server once the new one works: both would be using the same WARP
-accounts and jump keys.
+Stop the old server (`wgt rollback`, keys kept) before restoring: both would be
+using the same WARP accounts and jump keys.
 
 ## Fleet management
 
@@ -467,9 +504,10 @@ servers over SSH. Clone this repository there too
 (`git clone https://github.com/cgmckeever/wireguard-tools.git ~/wireguard-tools`),
 then put its `bin/` on your PATH, or `alias wgt-ctl=~/wireguard-tools/bin/wgt-ctl`.
 It needs SSH as root to each server, with your key (`init` can set that up).
-The servers it knows are listed in `local/servers`, one per line: name, SSH
-login, and optionally the checkout directory (default `/opt/wireguard-tools`).
-Like everything under `local/`, it is untracked:
+The servers it knows are listed in `local/servers`, in your clone, one per line:
+name, SSH login, and optionally the checkout directory (default
+`/opt/wireguard-tools`). `wgt-ctl init` adds to it, also for a server that's
+already set up. Like everything under `local/`, it is git-ignored:
 
 ```
 dengar  root@203.0.113.10
@@ -497,13 +535,13 @@ and these run from your machine, against that server:
 ```bash
 wgt-ctl boba pull                      # git pull its checkout (fast-forward only)
 wgt-ctl boba backup                    # wgt backup there, fetched to local/backups/boba/
-wgt-ctl boba jump-add                  # push a WireGuard config from local/exits/boba/ as a jump
+wgt-ctl boba jump-add                  # push a jump file from local/exits/boba/ as a jump
 wgt-ctl boba ssh                       # log in (or: ssh <command>)
 wgt-ctl boba branch some-branch        # switch its checkout
 wgt-ctl boba forget                    # drop it from local/servers; the server is untouched
 wgt-ctl boba remove                    # tear it down: rollback --purge, delete its checkout,
                                        #   wgcf and backup archives, then forget it (asks for its name)
-wgt-ctl boba move [--to <address>]     # rebuild it from its backup, elsewhere or in place (below)
+wgt-ctl boba move [--to <address>]     # rebuild it from its backup, elsewhere or in place (also --user, --branch; below)
 ```
 
 **Every server: `wgt-ctl all COMMAND`.** Runs on each server in turn; one
@@ -518,8 +556,6 @@ wgt-ctl all backup
 wgt-ctl all client rename phone pixel  # a whole device, on every server that has it (--force: with a server down)
 ```
 
-`wgt-ctl SERVER client add <device>` (or `all`) checks the other servers first,
-so a device gets the same [static address](#static-device-addresses) everywhere.
 `all client rename` takes device names and renames nothing unless every server
 answers; with `--force` it goes ahead, and running it again later finishes the
 servers it missed.
@@ -527,24 +563,46 @@ servers it missed.
 **No server.** Overviews of every server, and adding a new one:
 
 ```bash
-wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump configs staged
+wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump files staged
 wgt-ctl summary                        # every server at a glance (wgt summary on each, side by side)
 wgt-ctl clients                        # every config on every server: device, exit, static address, last seen, traffic
-wgt-ctl devices                        # each device's static address and servers, and what doesn't line up
-wgt-ctl devices sync                   # give numbers to devices that have none, the same on every server
-wgt-ctl devices fix phone 12           # set a device's number on every server that has it
-wgt-ctl devices forget old-phone       # delete a removed device's line, so its number can be used again
+wgt-ctl devices                        # each device's number and servers, with warnings (below)
+wgt-ctl devices sync                   # give numbers to devices with none, the same on every server; doesn't correct mismatches
+wgt-ctl devices fix phone 12           # set a device's number (2-254) on every server that has it; also the fix for a mismatch
+wgt-ctl devices forget old-phone       # delete a removed device's line, so its number can be set again
 wgt-ctl init                           # new server: asks address + name, installs, runs setup, adds it
 wgt-ctl init --address 1.2.3.4 --name lando --user root --branch main -- --port 51821
 ```
 
 Leave `SERVER` out of a server command (`wgt-ctl status`) to pick one from the
-list; `wgt-ctl summary` with no server is the overview of all of them. Because
+list; `wgt-ctl summary` with no server is the overview of all of them.
+`wgt-ctl device ...` and `wgt-ctl client ...` (singular) are the `wgt` commands,
+so they pick a server first. Because
 these words come first, a server can't be named `init`, `clients`, `devices`,
-`summary`, `all`, `help` or `list`; a name is up to 32 of `A-Za-z0-9_-`, starting with a
-letter. `scp` commands printed
-through `wgt-ctl` use the login from `local/servers`, so you can paste them on
-your machine.
+`summary`, `all`, `help` or `list`; a name is up to 32 of `A-Za-z0-9_-`, starting
+with a letter.
+
+### Static addresses across servers
+
+`wgt-ctl SERVER client add <device>` (or `all`) checks the other servers first,
+so a device gets the same [static address](#static-device-addresses) everywhere.
+`wgt-ctl` keeps the numbers in `local/devices`, refreshed whenever it reads the
+servers, so a device still gets the right one when a server is unreachable.
+
+`wgt-ctl devices` warns about:
+
+| Warning | Fix |
+|---|---|
+| two devices claim the same number | `wgt-ctl devices fix <device> <another number>` |
+| a device has no number on a server | `wgt-ctl devices sync` |
+| a server's number differs from `local/devices`, such as after `wgt device set` there | `wgt-ctl devices fix <device> <number>` |
+
+A device that's gone from every server keeps its line, marked `removed <date>`,
+and `wgt-ctl` doesn't hand its number out again, so an old SSH config can't reach
+a new machine by accident. Adding the device through `wgt-ctl` brings the number
+back. New numbers always go above the highest on the list, so `devices forget` on
+a number in the middle only frees it for `devices fix`. A `wgt client add` run
+directly on a server uses its own range and can reuse a freed number there.
 
 ### Adding a server
 
@@ -558,12 +616,12 @@ server already running these tools is adopted under its saved name instead.
 
 Its subnet question offers the next free subnet in order (`10.200.200.0/24`,
 `10.200.201.0/24`, ...) that none of your other servers uses, instead of a random
-one, so your servers' subnets never overlap.
+one, so your servers' subnets don't overlap as long as all of them are reachable.
 
 ### Adding jumps from your machine
 
 Keep your jump files on your machine and let `wgt-ctl` put them on servers:
-save one as `local/exits/<server>/<any name>.conf`, then
+save one as `local/exits/<server>/<any name>.conf` (it's *staged* until pushed), then
 
 ```bash
 wgt-ctl boba jump-add                  # pick it by number (or: all)
@@ -571,75 +629,86 @@ wgt-ctl boba jump-add                  # pick it by number (or: all)
 
 `jump-add` uploads the file and runs [`wgt jump add`](#jumps) there. The first
 time it sees a file it asks what it is ("Paris, France") and suggests a code
-from the file name and its country tag if it has one (Proton's `FR#252` gives
-`par-fr`); the answer is kept in `local/exits/details.tsv`. The copy on the
-server starts with `# exit par-fr: Paris, France` and
-`# local file: paris.conf`. `wgt-ctl boba client add` also offers to push
+from that name and the file's country tag if it has one (Proton's `FR#252` gives
+`par-fr`); the answer is kept in `local/exits/details.tsv`. `wgt-ctl boba client add` also offers to push
 staged jump files that aren't on the server yet, so they show up in its exit
 menu.
 
 ### Moving or rebuilding a server
 
-`move` rebuilds a server from its own backup, on a new machine or in place,
-optionally changing settings on the way (anything after `--` goes to setup):
-
-```bash
-wgt-ctl dengar move --to 203.0.113.50                              # to a new machine
-wgt-ctl dengar move --to 203.0.113.50 -- --endpoint vpn.example.com
-wgt-ctl dengar move                                                # rebuild in place, fresh checkout
-```
-
-1. Back up the server and fetch the archive to `local/backups/<server>/`.
-2. Prepare the new machine: log in, install, clone; no setup yet. (In place:
-   re-clone after step 3.)
-3. Bring the server down: `wgt rollback`, keys kept (in place: `--purge`).
-   Its devices are cut off from here until step 4 finishes; both can't run at
-   once, as they'd share the WARP account and jump keys.
-4. Restore the backup there (`wgt restore`), which runs setup with your flags:
-   same keys, configs, jumps and WARP account.
-5. Run `wgt test` and `wgt tunnel test`.
-6. Point the server's line in `local/servers` at the new machine, and tear
-   wireguard-tools off the old one (asked; `--yes` doesn't ask).
-
-If step 4 or 5 fails, the list still points at the old machine, which is down
-but intact: `move` offers to bring it back (`wgt setup` there). In place, the
-fetched archive is the way back (`wgt restore` it once the cause is fixed).
-It asks you to type the server's name before step 1 unless `--yes`.
+`move` rebuilds a server from its own backup, on a new machine, or on the same
+one when you just want a fresh copy. Anything after `--` goes to setup.
 
 **Use a hostname as the endpoint.** With an IP endpoint, a move to a new IP
 rewrites every config, and each device needs its config again (same keys).
 With `--endpoint vpn.example.com`, configs name the hostname, so after a move
 you only point that DNS record at the new IP and devices need nothing. Switch
-an existing server once with `wgt setup --endpoint vpn.example.com` (configs
-are re-sent once), or during the move itself, as above.
+an existing server once with `wgt setup --endpoint vpn.example.com` (you re-send
+every config this one time), or during the move itself, as below.
+
+**A new machine** must be a fresh Debian or Ubuntu server you can SSH to as root,
+with UDP 51820 (or your `--port`) open in the provider's firewall. `move`'s tests
+only check outgoing traffic, so they won't catch a closed port: devices just fail
+to connect.
+
+```bash
+wgt-ctl dengar move --to 203.0.113.50                              # to a new machine
+wgt-ctl dengar move --to 203.0.113.50 -- --endpoint vpn.example.com
+wgt-ctl dengar move                                                # a fresh copy, on the same machine
+```
+
+1. Back up the server and fetch the archive to `local/backups/<server>/`.
+2. Prepare the new machine: log in, install, clone; no setup yet.
+3. Bring the old server down: `wgt rollback`, keys kept. Its devices are cut off
+   from here until step 4 finishes; both can't run at once, as they'd share the
+   WARP account and jump keys.
+4. Restore the backup on the new machine (`wgt restore`), which runs setup with
+   your flags: same keys, configs, jumps and WARP account.
+5. Run `wgt test` and `wgt tunnel test`.
+6. Point the server's line in `local/servers` at the new machine. It then asks
+   whether to tear wireguard-tools off the old machine, including its backup
+   archives (`--yes` tears it down without asking).
+
+Without `--to`, the same steps run on the same machine, except that step 3 also
+deletes its keys and configs (`rollback --purge`) and re-clones the checkout, so
+the fetched archive is the only way back.
+
+`move` asks you to type the server's name before step 1 unless `--yes`, though in
+a terminal setup's `Continue?` still appears in step 4, with devices down. It needs
+the checkout at `/opt/wireguard-tools`. `--user` sets the new machine's login, and
+`--branch` the branch to clone, which is `main` unless you say otherwise, even if
+the server was on another.
+
+**If step 4 or 5 fails,** the list still points at the old machine, which is down
+but intact, and `move` offers to bring it back (`wgt setup` there). The new machine
+is left as it is: run `wgt rollback --purge` on it before you retry, and as soon as
+you can if you brought the old one back, since they share accounts. Without `--to`,
+the archive on your machine is the way back: copy it to the server, run `wgt
+rollback --purge` if it got part-way, then `wgt restore` it.
 
 ### Private files
 
-Private files stay on your machine under `local/`: jump configs in
+Private files stay on your machine under `local/`: jump files in
 `exits/<server>/` (see [Adding jumps from your machine](#adding-jumps-from-your-machine)), the table that
-names them in `exits/details.tsv`, each device's static number in `devices`,
-and archives fetched by `backup` in `backups/<server>/` (they hold private keys).
-
-`devices` is refreshed whenever `wgt-ctl` reads the servers, and covers a server
-that's unreachable when you add a device. A device that's gone from every server
-keeps its line, marked `removed <date>`, and its number isn't handed out again,
-so an old SSH config can't reach a new machine by accident. Adding the device
-back brings the number back.
+names them in `exits/details.tsv`, each device's number in
+[`devices`](#static-addresses-across-servers), and archives fetched by `backup` in `backups/<server>/` (they hold private keys).
 
 ### Updating servers
 
 Servers run their checkout directly (the watchdog timers too, every few
-seconds), so new code runs as soon as it's pulled; but configs already
-written aren't rendered again until `wgt setup` runs. With `wgt-ctl`:
+seconds), so new code runs as soon as it's pulled; but files already generated
+don't change until `wgt setup` runs. With `wgt-ctl`:
 
-1. Check what would render differently on each server (read-only):
+1. Check which generated files would change on each server (read-only):
    `tools/render-diff.sh`. "identical" everywhere means a pull is all it takes.
 2. Try one server first: `wgt-ctl boba pull && wgt-ctl boba test`.
 3. Then the rest: `wgt-ctl all pull`.
 4. If step 1 showed differences (a template, `wgt/render.py` or `wgt/rules.py`
    change, new packages or units), apply them with `wgt-ctl all setup --yes`.
    Setup restarts `wg0` only if its settings changed, not for comment-only
-   changes.
+   changes. In a terminal it still asks `Continue?` once per server. It updates
+   existing client configs line by line, so a change to `client.conf.tmpl` only
+   reaches configs added or rotated afterwards.
 
 A new `wgt` command or flag works on a server only once that server has
 pulled.
@@ -660,8 +729,11 @@ configs are rendered.
   and TCP MSS is clamped; try the device's plain config to see if it's WARP's path.
 - **No internet through a jump:** `wgt jump test` says which layer
   fails. No jump handshake usually means the server was retired or the key
-  revoked (Proton does both): get a new config and add it again (same code).
+  revoked (Proton does both): get a new jump file and add it again (same code).
   `wgt log` shows the watchdog bringing jumps up and down.
+- **A static address doesn't answer:** the device must be connected to the same
+  WireGuard Server as you, with a handshake in the last 180s (`wgt client list`).
+  Check its own firewall and sshd, and any narrower `AllowedIPs`.
 - **Handshake works but nothing loads:** the device's config is out of date
   (e.g. after a `--subnet` change) or its `Address` is mistyped; re-send it.
 - **Anything else:** `wgt status` (marks saved settings still
@@ -722,7 +794,7 @@ NAT and forwarding rules exist for every way out; each only matches its own
 outgoing interface.
 
 **Jumps.** Each jump `<code>` (e.g. `par-fr`) has two tunnels: `px-<code>`,
-to the jump's WireGuard server, and `wx-<code>`, its own WARP tunnel running
+to the jump itself, and `wx-<code>`, its own WARP tunnel running
 inside it. Each jump has an index *n* (in `exits.db`). Its WARP table
 `200+n` holds a default route through `wx-<code>` and a blackhole fallback;
 one rule per `warp.` config address (`from 10.4.5.7 lookup 201`, priority 9500)
@@ -753,10 +825,10 @@ live rules have drifted from `wg0.conf`.
 `10.9.8.1/24`. Two NAT chains do the rest: `WGT-DEVICES` sends each static
 address to the config in use, and `WGT-DEVICE-SRC` shows a sender as its own
 static address. `wg0`'s `PostUp` creates them and what leads to them; the rules
-inside them belong to `wgt watchdog devices`. Forwarding between devices is
-allowed only for this traffic, so they still can't reach each other's config
-addresses. A rule at priority 9300 makes a static address with no config in
-use unreachable, so its packets never leave through a way out.
+inside them belong to `wgt watchdog devices`. A rule at priority 9300 makes a static address with no config in
+use unreachable, so its packets never leave through a way out. Each client config
+has a `# device-network:` line naming this network, for tools that read configs:
+wireguard-tunnels adds it to the tunnels it narrows for WARP.
 
 **Rules in one place.** All routing/NAT/firewall rules live in `wg0.conf`'s
 `PostUp`/`PostDown`, generated from one list so `PostDown` and `rollback` undo
@@ -787,13 +859,13 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/clients.disabled` | names of disabled configs |
 | `/etc/wireguard/devices.db` | each device's static number: `device number` |
 | `/etc/wireguard/psk/<name>.psk` | per-config preshared keys |
-| `/etc/wireguard/clients/<server>.<name>.conf` | config files (the only copy of each one's private key) |
+| `/etc/wireguard/clients/<server>.<name>.conf` | config files (each one's private key is kept only here, in change copies and in backup archives) |
 | `/etc/wireguard/wg-tools.state` | saved settings (including the location), recorded default route |
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1`, plus IPv6 forwarding (and `accept_ra = 2` on the public interface) when IPv6 is on |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
 | `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog (runs `wgt watchdog warp` every 30s) |
-| `/etc/wireguard/exits.db` | jumps: `code index label` |
-| `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a jump's WireGuard config as given (any provider; the file name is historical) and its own WARP account |
+| `/etc/wireguard/exits.db` | jumps: `code index label` (in file names such as this and `local/exits/`, "exit" means a jump, for historical reasons) |
+| `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a jump file as given (from anywhere; the file name is historical) and its own WARP account |
 | `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a jump's tunnel and the WARP tunnel inside it |
 | `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | jump watchdog (runs `wgt watchdog exits` every 10s: jumps up on demand) |
 | `/etc/systemd/system/wg-tools-device-watchdog.{service,timer}` | device watchdog (runs `wgt watchdog devices` every 10s: static addresses follow the config in use) |
