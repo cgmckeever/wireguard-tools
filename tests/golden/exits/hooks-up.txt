@@ -53,6 +53,8 @@ iptables -t nat -C PREROUTING -d 10.9.8.0/24 -i wg0 -j WGT-DEVICES 2>/dev/null |
 iptables -t nat -C OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES 2>/dev/null || iptables -t nat -I OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES
 iptables -t nat -C POSTROUTING -o wg0 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC 2>/dev/null || iptables -t nat -I POSTROUTING -o wg0 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC
 iptables -t filter -C FORWARD -i wg0 -o wg0 -m conntrack --ctstate DNAT -j ACCEPT 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o wg0 -m conntrack --ctstate DNAT -j ACCEPT
+iptables -t filter -C FORWARD -i wg0 -o wg0 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable 2>/dev/null || iptables -t filter -I FORWARD -i wg0 -o wg0 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable
+ip6tables -t filter -C FORWARD -i wg0 -o wg0 -j REJECT --reject-with icmp6-port-unreachable 2>/dev/null || ip6tables -t filter -I FORWARD -i wg0 -o wg0 -j REJECT --reject-with icmp6-port-unreachable
 while ip rule del iif wg0 to 10.9.8.0/24 priority 9300 unreachable 2>/dev/null; do :; done; ip rule add iif wg0 to 10.9.8.0/24 priority 9300 unreachable
 ip route replace default dev px-par-fr table 231 2>/dev/null || true
 ip route replace blackhole default metric 4096 table 231

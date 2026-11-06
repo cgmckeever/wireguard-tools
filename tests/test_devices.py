@@ -76,17 +76,31 @@ def test_device_rules_read_back_exactly_once(server, make_ctx):
     """Their text must be how `iptables -S` prints them, or wgt test fails and
     setup restarts wg0 every time (live.ipt_count compares the text)."""
     ctx = make_ctx()
-    printed = {("nat", "PREROUTING"): f"-A PREROUTING -d 10.9.8.0/24 -i {server.cfg.WG_IF} -j WGT-DEVICES",
-               ("nat", "OUTPUT"): "-A OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES",
-               ("nat", "POSTROUTING"): f"-A POSTROUTING -o {server.cfg.WG_IF} -m conntrack --ctstate DNAT "
-                                       "-j WGT-DEVICE-SRC",
-               ("filter", "FORWARD"): f"-A FORWARD -i {server.cfg.WG_IF} -o {server.cfg.WG_IF} -m conntrack "
-                                      "--ctstate DNAT -j ACCEPT"}
+    wg = server.cfg.WG_IF
+    printed = [f"-A PREROUTING -d 10.9.8.0/24 -i {wg} -j WGT-DEVICES",
+               "-A OUTPUT -d 10.9.8.0/24 -j WGT-DEVICES",
+               f"-A POSTROUTING -o {wg} -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC",
+               f"-A FORWARD -i {wg} -o {wg} -m conntrack --ctstate DNAT -j ACCEPT",
+               f"-A FORWARD -i {wg} -o {wg} -m conntrack ! --ctstate DNAT -j REJECT "
+               "--reject-with icmp-port-unreachable"]
+    if server.cfg.ipv6:
+        printed.append(f"-A FORWARD -i {wg} -o {wg} -j REJECT --reject-with icmp6-port-unreachable")
     found = rules.device_ipt_rules(server.cfg)
-    assert {(t, c) for _, t, c, _ in found} == set(printed)
-    for x, t, c, rule in found:
-        ctx.runner.answers[f"{x} -t {t} -S {c}"] = (0, printed[(t, c)] + "\n")
+    assert len(found) == len(printed)
+    for line, (x, t, c, rule) in zip(printed, found):
+        ctx.runner.answers[f"{x} -t {t} -S {c}"] = (0, line + "\n")
         assert live.ipt_count(ctx.runner, x, t, c, rule) == 1
+
+
+def test_only_static_address_traffic_passes_between_devices(server):
+    """The refusal spares DNATed traffic by itself, so rule order can't matter,
+    and IPv6, which has no static addresses, is refused outright."""
+    wg = server.cfg.WG_IF
+    forward = [(x, rule) for x, t, c, rule in rules.device_ipt_rules(server.cfg) if (t, c) == ("filter", "FORWARD")]
+    assert ("iptables", f"-i {wg} -o {wg} -m conntrack ! --ctstate DNAT -j REJECT "
+                        "--reject-with icmp-port-unreachable") in forward
+    assert (("ip6tables", f"-i {wg} -o {wg} -j REJECT --reject-with icmp6-port-unreachable") in forward) \
+        == server.cfg.ipv6
 
 
 def test_wgt_test_checks_the_device_watchdog_timer(make_ctx, capsys, monkeypatch):

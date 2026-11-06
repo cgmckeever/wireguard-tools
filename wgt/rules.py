@@ -24,8 +24,8 @@ Per client, then, the way out is exit (host | jump) x WARP (on | off):
 
 Static device addresses (DEVICE_NET; see devices.py): wg0 holds the network's
 first address, so the server's own connections to a device use it. The fixed
-part is here: the nat chains and what leads to them, forwarding for that
-traffic, and a rule making an address with no config in use unreachable rather
+part is here: the nat chains and what leads to them, forwarding between devices
+for that traffic only, and a rule making an address with no config in use unreachable rather
 than a packet for a way out. The chains' rules are the device watchdog's.
 
 Every line is idempotent, and "down" is the exact inverse of "up" in reverse
@@ -128,16 +128,24 @@ def ipt_rules(cfg: Config, pub_if: str, exits: Sequence[Exit]) -> List[IptRule]:
 
 
 def device_ipt_rules(cfg: Config) -> List[IptRule]:
-    """What leads to the device chains, and forwarding for that traffic only
-    (ctstate DNAT: devices still can't reach each other's config addresses).
-    Written in `iptables -S` order: live.ipt_count compares the text."""
+    """What leads to the device chains, and forwarding between devices for that
+    traffic only (ctstate DNAT, both directions): any other device-to-device
+    packet, by config address or over IPv6, is refused. The IPv4 refusal names
+    what it spares, so it works wherever it lands in the chain. Written in
+    `iptables -S` order: live.ipt_count compares the text."""
     wg = cfg.WG_IF
-    return [
+    found: List[IptRule] = [
         ("iptables", "nat", "PREROUTING", f"-d {DEVICE_NET} -i {wg} -j {DEVICE_CHAIN}"),
         ("iptables", "nat", "OUTPUT", f"-d {DEVICE_NET} -j {DEVICE_CHAIN}"),
         ("iptables", "nat", "POSTROUTING", f"-o {wg} -m conntrack --ctstate DNAT -j {DEVICE_SOURCE_CHAIN}"),
         ("iptables", "filter", "FORWARD", f"-i {wg} -o {wg} -m conntrack --ctstate DNAT -j ACCEPT"),
+        ("iptables", "filter", "FORWARD",
+         f"-i {wg} -o {wg} -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable"),
     ]
+    if cfg.ipv6:
+        found.append(("ip6tables", "filter", "FORWARD",
+                      f"-i {wg} -o {wg} -j REJECT --reject-with icmp6-port-unreachable"))
+    return found
 
 
 def device_rule(cfg: Config) -> str:

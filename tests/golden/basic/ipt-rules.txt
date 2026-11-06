@@ -19,3 +19,5 @@ iptables|nat|PREROUTING|-d 10.9.8.0/24 -i wg0 -j WGT-DEVICES
 iptables|nat|OUTPUT|-d 10.9.8.0/24 -j WGT-DEVICES
 iptables|nat|POSTROUTING|-o wg0 -m conntrack --ctstate DNAT -j WGT-DEVICE-SRC
 iptables|filter|FORWARD|-i wg0 -o wg0 -m conntrack --ctstate DNAT -j ACCEPT
+iptables|filter|FORWARD|-i wg0 -o wg0 -m conntrack ! --ctstate DNAT -j REJECT --reject-with icmp-port-unreachable
+ip6tables|filter|FORWARD|-i wg0 -o wg0 -j REJECT --reject-with icmp6-port-unreachable

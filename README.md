@@ -329,8 +329,10 @@ one. No config needs re-sending.
 Every 10s, a background timer (the device watchdog) points each static address
 at the config with the newest handshake in the last 180s. Good to know:
 
-- **Devices can reach each other.** It's a private network: any device on a
-  WireGuard Server can connect to anything listening on another device on it.
+- **Devices reach each other only through static addresses.** It's a private
+  network: any device on a WireGuard Server can connect to anything listening on
+  another device on it at its static address. Traffic between devices by config
+  address, or over IPv6, is refused.
 - **A device that's off isn't reachable.** With no handshake in 180s, connections
   to its address fail at once with "unreachable"; they aren't sent through its
   last config or out to the internet.
@@ -825,7 +827,9 @@ live rules have drifted from `wg0.conf`.
 `10.9.8.1/24`. Two NAT chains do the rest: `WGT-DEVICES` sends each static
 address to the config in use, and `WGT-DEVICE-SRC` shows a sender as its own
 static address. `wg0`'s `PostUp` creates them and what leads to them; the rules
-inside them belong to `wgt watchdog devices`. A rule at priority 9300 makes a static address with no config in
+inside them belong to `wgt watchdog devices`. Forwarding between devices is
+allowed only for this traffic: anything else from `wg0` to `wg0` (by config
+address, or over IPv6) is rejected. A rule at priority 9300 makes a static address with no config in
 use unreachable, so its packets never leave through a way out. Each client config
 has a `# device-network:` line naming this network, for tools that read configs:
 wireguard-tunnels adds it to the tunnels it narrows for WARP.
