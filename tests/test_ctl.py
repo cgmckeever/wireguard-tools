@@ -199,6 +199,16 @@ def answers_from(monkeypatch, held, calls=None):
     return seen
 
 
+def test_clients_table_has_server_device_config(local, monkeypatch, capsys):
+    row = "warp.par-fr.mbp-1\tpar-fr\t10.0.0.5\tnever\t0/0\t0.0.0.0/0\tjump:Paris\t10.9.8.4\n"
+    monkeypatch.setattr(ctl, "ssh", lambda target, cmd, **kw: (0, row if target == "root@1.2.3.4" else ""))
+    ctl.cmd_clients()
+    lines = capsys.readouterr().out.splitlines()
+    head = next(line for line in lines if "SERVER" in line)
+    assert head.split()[:3] == ["SERVER", "DEVICE", "CONFIG"]
+    assert next(line for line in lines if "dengar" in line).split()[:3] == ["dengar", "mbp-1", "warp.par-fr.mbp-1"]
+
+
 def test_add_takes_the_next_low_number_and_remembers_it(local, monkeypatch):
     calls = answers_from(monkeypatch, {"dengar": {"mac": 2}, "boba": {"mac": 2}})
     assert ctl.on("boba", "client", ["add", "phone", "--yes"]) == 0

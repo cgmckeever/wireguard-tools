@@ -529,7 +529,7 @@ servers it missed.
 ```bash
 wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump configs staged
 wgt-ctl summary                        # every server at a glance (wgt summary on each, side by side)
-wgt-ctl clients                        # every config on every server: exit, static address, last seen, traffic
+wgt-ctl clients                        # every config on every server: device, exit, static address, last seen, traffic
 wgt-ctl devices                        # each device's static address and servers, and what doesn't line up
 wgt-ctl devices sync                   # give numbers to devices that have none, the same on every server
 wgt-ctl devices fix phone 12           # set a device's number on every server that has it

@@ -411,9 +411,9 @@ def cmd_clients() -> None:
     """Every client on every server in one table, then what doesn't line up
     about their static addresses (what it read also updates local/devices)."""
     seen: Dict[str, Dict[str, Optional[int]]] = {}
-    fmt = "  {:<10} " + ui.CLIENT_FMT
+    fmt = "  {:<10} {:<16} " + ui.CLIENT_FMT
     print("")
-    print(fmt.format("SERVER", *ui.CLIENT_HEAD))
+    print(fmt.format("SERVER", "DEVICE", *ui.CLIENT_HEAD))
     for s in servers():
         rc, o = ssh(s.target, f"if [ -x {s.wgt} ]; then {s.wgt} client list --tsv; else exit {NO_WGT}; fi",
                     batch=True, capture=True)
@@ -428,7 +428,7 @@ def cmd_clients() -> None:
         if not rows:
             print(f"  {s.name:<10} (no clients)")
         for row in rows:
-            print(fmt.format(s.name, *row.cells()))
+            print(fmt.format(s.name, store.device_of(row.name), *row.cells()))
     print("")
     ensure_local()
     entries = refresh_entries(seen, len(seen) == len(servers()))
