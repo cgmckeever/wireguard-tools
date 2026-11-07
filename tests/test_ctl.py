@@ -503,3 +503,26 @@ def test_an_unreachable_server_isnt_one_with_no_jumps(monkeypatch):
     with pytest.raises(WgtError, match="can't reach"):
         jumpfiles.remote_exit_codes(remote.Server("boba", "root@boba"))
 
+
+def test_init_reads_the_state_file_as_wgt_does(monkeypatch):
+    """The last line for a key wins, and a key is whole: not WARP_MTU for WARP."""
+    state = "uid=0\nos=debian 12\ncheckout=1\nSERVER_NAME=old\nWARP_MTU=1280\nSERVER_NAME=boba\nSETUP_DONE=1\n"
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, state))
+    assert newserver.probe("root@h", "h") == {"uid": "0", "os": "debian 12", "checkout": "1",
+                                              "finished": "1", "saved": "boba"}
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, state.replace("SETUP_DONE=1\n", "")))
+    assert "finished" not in newserver.probe("root@h", "h")
+
+
+def test_fleet_subnets_read_each_servers_state(local, monkeypatch):
+    answers = {"root@1.2.3.4": (0, "WG_SUBNET=10.1.1.0/24\nWG_SUBNET=10.2.2.0/24\n"), "root@5.6.7.8": (255, "")}
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: answers[target])
+    assert newserver.fleet_subnets() == ["10.2.2.0/24"]
+
+
+def test_list_shows_staged_jumps_by_name(local, monkeypatch, capsys):
+    (local / "exits" / "boba").mkdir(parents=True)
+    for name in ("a.conf", "a-b.conf", "notes.txt"):
+        (local / "exits" / "boba" / name).write_text("")
+    remote.cmd_list(quick=True)
+    assert "jumps staged: a,a-b" in capsys.readouterr().out

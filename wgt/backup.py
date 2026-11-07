@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING, List, Optional
 
 from . import clients, ops, store, units
-from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, LEGACY_SETUP_DONE, SET_UP_KEYS, SETUP_DONE, Paths
+from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, LEGACY_SETUP_DONE, SET_UP_KEYS, SETUP_DONE, Paths, archive_name
 from .ctx import SETTING_FLAGS
 from .errors import WgtError
 from .system import write_private
@@ -84,7 +84,7 @@ def _is_ip(endpoint: str) -> bool:
 def prune_archives(ctx: Ctx, dest_dir: str, short_host: str) -> None:
     """Keep this host's KEEP_ARCHIVES newest: its names sort by date, while
     another host's (<dest_dir> may be shared) would sort anywhere."""
-    pattern = os.path.join(glob.escape(dest_dir), f"wireguard-tools.{glob.escape(short_host)}.*.tar.gz")
+    pattern = os.path.join(glob.escape(dest_dir), archive_name(glob.escape(short_host), "*"))
     archives = sorted(glob.glob(pattern))
     for stale in archives[: max(0, len(archives) - KEEP_ARCHIVES)]:
         os.remove(stale)
@@ -101,7 +101,7 @@ def cmd_backup(ctx: Ctx, words: List[str]) -> None:
         raise WgtError("nothing to back up")
     ops.take_lock(ctx)   # don't archive mid-change
     short_host = ctx.facts.hostname.split(".")[0]
-    archive = os.path.join(dest_dir, f"wireguard-tools.{short_host}.{time.strftime('%Y%m%d-%H%M%S')}.tar.gz")
+    archive = os.path.join(dest_dir, archive_name(short_host, time.strftime("%Y%m%d-%H%M%S")))
     ctx.runner.step(f"Back up {' '.join(sources)} to {archive}", f"rm {archive}")
     if not ctx.runner.dry_run:
         os.makedirs(dest_dir, mode=0o700, exist_ok=True)

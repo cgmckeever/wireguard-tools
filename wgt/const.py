@@ -118,6 +118,11 @@ KEEP_ARCHIVES = 10           # newest `backup` archives kept
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
 
 
+def archive_name(host: str, stamp: str) -> str:
+    """A `wgt backup` archive's file name (a "*" for either part makes a glob)."""
+    return f"wireguard-tools.{host}.{stamp}.tar.gz"
+
+
 def jump_source_name(code: str) -> str:
     """The file name of jump <code>'s config as given (any provider's: the name stays for running servers)."""
     return f"{code}.proton.conf"

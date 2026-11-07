@@ -7,6 +7,7 @@ import shlex
 from typing import Dict, List, Tuple
 
 from .. import store, ui
+from ..const import archive_name
 from ..errors import WgtError
 from . import newserver, remote
 from .remote import Server, out, q
@@ -23,7 +24,7 @@ def do_backup(s: Server, args: List[str]) -> int:
 def fetch_backup(s: Server) -> str:
     """wgt backup there; the archive fetched into local/backups/<server>/ (its path here)."""
     rc, o = remote.ssh(s.target, f"{s.wgt} backup --yes >/dev/null || exit 1; "
-                          f"ls -t {remote.REMOTE.backup_dir}/wireguard-tools.*.tar.gz 2>/dev/null | head -n 1",
+                          f"ls -t {remote.REMOTE.backup_dir}/{archive_name('*', '*')} 2>/dev/null | head -n 1",
                 capture=True)
     archive = o.strip()
     if rc != 0 or not archive:
@@ -92,25 +93,9 @@ def do_forget(s: Server, args: List[str]) -> int:
 
 def parse_move(args: List[str]) -> Tuple[Dict[str, str], List[str], bool]:
     """move's options, what follows `--` (setup flags for the restore), and --yes."""
-    opts = {"--to": "", "--user": "", "--branch": "main"}
-    sure = False
-    i = 0
-    while i < len(args):
-        a = args[i]
-        if a == "--":
-            return opts, args[i + 1:], sure
-        if a in remote.YES:
-            sure = True
-            i += 1
-            continue
-        if a not in opts:
-            raise WgtError(f"unknown option: {a} (usage: wgt-ctl <server> move [--to ADDRESS] [--user U] "
-                           "[--branch B] [--yes] [-- setup flags])")
-        if i + 1 >= len(args):
-            raise WgtError(f"move: {a} needs a value")
-        opts[a] = args[i + 1]
-        i += 2
-    return opts, [], sure
+    return remote.parse_opts("move", args, {"--to": "", "--user": "", "--branch": "main"},
+                             "usage: wgt-ctl <server> move [--to ADDRESS] [--user U] [--branch B] [--yes] "
+                             "[-- setup flags]", flags=remote.YES)
 
 
 def do_move(s: Server, args: List[str]) -> int:
@@ -182,13 +167,13 @@ def do_move(s: Server, args: List[str]) -> int:
     uploaded = f"/root/{os.path.basename(archive)}"
     if not remote.scp(archive, f"{new}:{uploaded}"):
         return _move_failed(s, in_place, archive, "upload failed")
-    rc, _ = remote.ssh(new, f"{remote.DEF_DIR}/bin/wgt restore {q(uploaded)} --yes {q(*setup_args)}; rc=$?; "
+    rc, _ = remote.ssh(new, f"{remote.DEF_WGT} restore {q(uploaded)} --yes {q(*setup_args)}; rc=$?; "
                      f"rm -f {q(uploaded)}; exit $rc", tty=True)
     if rc != 0:
         return _move_failed(s, in_place, archive, f"restore failed (exit {rc})")
 
     out.log("5. Testing")
-    tested = remote.ssh(new, f"{remote.DEF_DIR}/bin/wgt test && {remote.DEF_DIR}/bin/wgt tunnel test", tty=True)[0]
+    tested = remote.ssh(new, f"{remote.DEF_WGT} test && {remote.DEF_WGT} tunnel test", tty=True)[0]
     if tested != 0:
         return _move_failed(s, in_place, archive, "tests failed")
 
@@ -213,7 +198,7 @@ def _move_failed(s: Server, in_place: bool, archive: str, why: str) -> int:
     offer to bring the old machine back (a move to a new one only)."""
     out.error(f"{s.name}: {why}")
     if in_place:
-        wgt = f"{remote.DEF_DIR}/bin/wgt"
+        wgt = remote.DEF_WGT
         out.info(f"the backup is here: {archive}. Once the cause is fixed, on {s.name}: clone the tools to "
                  f"{remote.DEF_DIR} "
                  f"if they're gone, copy the archive there, then: {wgt} rollback --purge (if it got part-way); "

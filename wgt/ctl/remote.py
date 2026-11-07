@@ -10,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from .. import store, ui
 from ..const import Paths
@@ -33,6 +33,7 @@ LINKS = os.path.join(LOCAL, "exits", "details.tsv")   # server, local file, code
 
 
 DEF_DIR = "/opt/wireguard-tools"
+DEF_WGT = f"{DEF_DIR}/bin/wgt"
 
 
 REMOTE = Paths()                                       # where things are on a server
@@ -141,6 +142,17 @@ def pick() -> Server:
     return find(reply)
 
 
+def exits_dir(server: str) -> str:
+    """Where <server>'s jump configs wait to be pushed."""
+    return os.path.join(LOCAL, "exits", server)
+
+
+def staged(server: str) -> List[str]:
+    """<server>'s staged jump configs (local/exits/<server>/*.conf)."""
+    d = exits_dir(server)
+    return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".conf")) if os.path.isdir(d) else []
+
+
 def valid_server(name: str) -> bool:
     """A letter first (so it can't be mistaken for a list number), not a reserved word."""
     return (bool(re.match(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$", name))
@@ -194,15 +206,14 @@ def cmd_list(quick: bool = False) -> None:
         return
     print("")
     for i, s in enumerate(ss, 1):
-        d = os.path.join(LOCAL, "exits", s.name)
-        staged = ",".join(sorted(f[:-5] for f in os.listdir(d) if f.endswith(".conf"))) if os.path.isdir(d) else ""
+        jumps = ",".join(sorted(os.path.basename(f)[:-len(".conf")] for f in staged(s.name)))
         probe = ""
         if not quick:
             dq = shlex.quote(s.dir)
             rc, o = ssh(s.target, f"cd {dq} && b=$(git rev-parse --abbrev-ref HEAD) && c=$(git rev-parse --short HEAD) "
                                   "&& printf '%s@%s' \"$b\" \"$c\"", batch=True, capture=True)
             probe = o.strip() if rc == 0 else "unreachable"
-        note = f"jumps staged: {staged}" if staged else ""
+        note = f"jumps staged: {jumps}" if jumps else ""
         print(f"  {i:>2}) {s.name:<10} {s.target:<24} {probe:<22} {note}".rstrip())
     print("")
 
@@ -235,6 +246,29 @@ def only_yes(cmd: str, args: List[str]) -> bool:
     if set(args) - set(YES):
         raise WgtError(f"usage: wgt-ctl <server> {cmd} [--yes]")
     return any(a in YES for a in args)
+
+
+def parse_opts(cmd: str, args: List[str], opts: Dict[str, str], help_text: str,
+               flags: Sequence[str] = ()) -> Tuple[Dict[str, str], List[str], bool]:
+    """A command's options: <opts> (option -> default) with what was given, what follows
+    `--` (passed on), and whether any of <flags> came."""
+    flagged = False
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--":
+            return opts, args[i + 1:], flagged
+        if a in flags:
+            flagged = True
+            i += 1
+            continue
+        if a not in opts:
+            raise WgtError(f"unknown option: {a} ({help_text})")
+        if i + 1 >= len(args):
+            raise WgtError(f"{cmd}: {a} needs a value")
+        opts[a] = args[i + 1]
+        i += 2
+    return opts, [], flagged
 
 
 def needs_terminal(cmd: str) -> None:

@@ -91,12 +91,6 @@ def add_one_exit(s: Server, path: str) -> None:
         raise WgtError(f"jump add failed for {code}")
 
 
-def local_exit_files(s: Server) -> List[str]:
-    """This server's staged jump configs (local/exits/<server>/*.conf)."""
-    src = os.path.join(remote.LOCAL, "exits", s.name)
-    return sorted(os.path.join(src, f) for f in os.listdir(src) if f.endswith(".conf")) if os.path.isdir(src) else []
-
-
 def remote_exit_codes(s: Server) -> List[str]:
     """The jump codes the server has."""
     rc, o = remote.ssh(s.target, f"cat {remote.REMOTE.exit_db} 2>/dev/null; true", batch=True, capture=True)
@@ -127,7 +121,7 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
     if "--exit" in args or any(a.startswith("--exit=") for a in args) or "." in name \
             or any(a in remote.YES for a in args):
         return
-    files = local_exit_files(s)
+    files = remote.staged(s.name)
     if not files or not ui.have_tty():
         return
     on_server = remote_exit_codes(s)
@@ -146,8 +140,8 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
 
 def do_exit_add(s: Server, args: List[str]) -> int:
     """Push one of this server's local configs (by its number in the list) or all."""
-    src = os.path.join(remote.LOCAL, "exits", s.name)
-    files = local_exit_files(s)
+    src = remote.exits_dir(s.name)
+    files = remote.staged(s.name)
     if not files:
         raise WgtError(f"no configs in {src} (save WireGuard configs there, any name ending .conf)")
     os.chmod(src, 0o700)

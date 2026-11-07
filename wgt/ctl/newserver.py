@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 from typing import Dict, List, Tuple
 
-from .. import ui
+from .. import store, ui
 from ..config import FLEET_SUBNETS_ENV
 from ..const import SET_UP_KEYS
 from ..errors import WgtError
@@ -21,10 +20,10 @@ def fleet_subnets() -> List[str]:
     servers are skipped)."""
     used = []
     for s in remote.servers():
-        rc, o = remote.ssh(s.target, f"sed -n 's/^WG_SUBNET=//p' {remote.STATE_FILE} 2>/dev/null | tail -n 1",
-                    batch=True, capture=True)
-        if rc == 0 and o.strip():
-            used.append(o.strip())
+        rc, state = remote.ssh(s.target, f"cat {remote.STATE_FILE} 2>/dev/null; true", batch=True, capture=True)
+        subnet = store.state_get(state, "WG_SUBNET").strip()
+        if rc == 0 and subnet:
+            used.append(subnet)
     return used
 
 
@@ -46,7 +45,7 @@ def cmd_init(argv: List[str]) -> None:
     used = fleet_subnets()
     env = f"{FLEET_SUBNETS_ENV}={q(','.join(used))} " if used else ""
     out.log(f"Running wgt setup --name {name} on {address}")
-    rc, _ = remote.ssh(target, f"{env}{remote.DEF_DIR}/bin/wgt setup --name {q(name)} {q(*setup_args)}", tty=True)
+    rc, _ = remote.ssh(target, f"{env}{remote.DEF_WGT} setup --name {q(name)} {q(*setup_args)}", tty=True)
     if rc != 0:
         raise WgtError(f"setup did not finish, so it isn't on the list; fix the cause and re-run: "
                        f"wgt-ctl init --address {address} "
@@ -57,18 +56,9 @@ def cmd_init(argv: List[str]) -> None:
 
 def _parse_init(argv: List[str]) -> Tuple[Dict[str, str], List[str]]:
     """init's options, and what follows `--` (passed on to wgt setup)."""
-    opts = {"--address": "", "--name": "", "--user": "root", "--branch": "main"}
-    i = 0
-    while i < len(argv):
-        if argv[i] == "--":
-            return opts, argv[i + 1:]
-        if argv[i] not in opts:
-            raise WgtError(f"unknown option: {argv[i]} (see: wgt-ctl help)")
-        if i + 1 >= len(argv):
-            raise WgtError(f"init: {argv[i]} needs a value")
-        opts[argv[i]] = argv[i + 1]
-        i += 2
-    return opts, []
+    opts, setup_args, _ = remote.parse_opts("init", argv, {"--address": "", "--name": "", "--user": "root",
+                                                          "--branch": "main"}, "see: wgt-ctl help")
+    return opts, setup_args
 
 
 def _ask_identity(opts: Dict[str, str]) -> Tuple[str, str, str]:
@@ -111,15 +101,18 @@ def probe(target: str, address: str) -> Dict[str, str]:
     """What init needs to know about the server: uid, OS, an existing checkout,
     a saved server name, whether setup finished there (SET_UP_KEYS). Refuses
     non-root logins and unsupported systems."""
-    finished = "|".join(SET_UP_KEYS)
     rc, text = remote.ssh(target, f"""echo "uid=$(id -u)"
         . /etc/os-release 2>/dev/null && echo "os=$ID $VERSION_ID"
         [ -d {remote.DEF_DIR}/.git ] && echo checkout=1
-        grep -Eq "^({finished})=" {remote.STATE_FILE} 2>/dev/null && echo finished=1
-        sed -n "s/^SERVER_NAME=/saved=/p" {remote.STATE_FILE} 2>/dev/null | tail -n 1""", capture=True)
+        cat {remote.STATE_FILE} 2>/dev/null; true""", capture=True)
     if rc != 0:
         raise WgtError(f"cannot reach {target}")
-    facts = dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
+    facts = {k: v for k, v in (line.split("=", 1) for line in text.splitlines() if "=" in line)
+             if k in ("uid", "os", "checkout")}
+    if any(store.state_get(text, key) for key in SET_UP_KEYS):
+        facts["finished"] = "1"
+    if store.state_get(text, "SERVER_NAME"):
+        facts["saved"] = store.state_get(text, "SERVER_NAME")
     if facts.get("uid") != "0":
         raise WgtError("log in as root (wgt needs it): --user root")
     osname = facts.get("os", "")
@@ -170,5 +163,5 @@ def record(name: str, target: str) -> None:
     remote.ensure_local()
     with open(remote.LIST, "a") as f:
         f.write(f"{name:<10} {target}\n")
-    remote.private_dir(os.path.join(remote.LOCAL, "exits", name))
+    remote.private_dir(remote.exits_dir(name))
     out.log(f"Added '{name}' ({target}) to {remote.LIST}")
