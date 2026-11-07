@@ -13,6 +13,12 @@ CONFIG_KEYS = (
     "WG_DNS", "WG_IF", "WARP_IF", "RT_TABLE", "CLIENT_ALLOWED_IPS",
 )
 
+# All of them: ENDPOINT is saved separately (setup detects it, and a re-run keeps it).
+SETTING_KEYS = CONFIG_KEYS + ("ENDPOINT",)
+# The ones written into configs on devices (setup rewrites those: sync_client_configs),
+# so a change to one means re-sending them.
+CLIENT_CONFIG_KEYS = ("SERVER_NAME", "ENDPOINT", "WG_PORT", "WG_SUBNET", "WG_SUBNET6", "WG_DNS", "WG_MTU")
+
 # In the state file once setup has finished (rollback clears it). WARP is how
 # older versions said so; it goes at a server's next setup.
 SETUP_DONE = "SETUP_DONE"

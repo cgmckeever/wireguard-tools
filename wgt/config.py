@@ -10,12 +10,12 @@ from typing import Dict, List, Mapping, Optional
 
 from . import net, store
 from .const import (
-    CONFIG_KEYS,
     DEFAULTS,
     DEVICE_NET,
     EXIT_MAX,
     EXIT_PTABLE_BASE,
     EXIT_TABLE_BASE,
+    SETTING_KEYS,
     Paths,
 )
 from .errors import WgtError
@@ -74,7 +74,7 @@ class Config:
 
     def __getattr__(self, name: str) -> str:
         """Each setting reads as an attribute: cfg.WG_IF is values["WG_IF"].
-        The keys are CONFIG_KEYS and DEFAULTS in const.py (plus ENDPOINT)."""
+        The keys are SETTING_KEYS in const.py."""
         values = self.__dict__.get("values", {})
         if name in values:
             return values[name]
@@ -189,8 +189,7 @@ def resolve(flags: Mapping[str, str], env: Mapping[str, str], saved: Mapping[str
     wgt-ctl init (which passes the other servers' subnets) the next free one."""
     values: Dict[str, str] = {}
     sources: Dict[str, str] = {}
-    keys = list(CONFIG_KEYS) + ["ENDPOINT"]
-    for k in keys:
+    for k in SETTING_KEYS:
         if flags.get(k):
             values[k], sources[k] = flags[k], "flag"
         elif env.get(k):

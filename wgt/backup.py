@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from . import clients, ops, store, units
 from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, LEGACY_SETUP_DONE, SET_UP_KEYS, SETUP_DONE, Paths
-from .ctx import VALUE_FLAGS
+from .ctx import SETTING_FLAGS
 from .errors import WgtError
 from .system import write_private
 
@@ -179,7 +179,7 @@ def setup_flags(ctx: Ctx) -> List[str]:
     """The setup flags given to restore (--endpoint, --port, --location, --force...),
     passed on to the setup it runs, so a restore can change them."""
     flags = [flag for flag, on in (("--force", ctx.args.force), ("--new-server-keys", ctx.args.new_server_keys)) if on]
-    for flag, key in VALUE_FLAGS.items():
+    for flag, key in SETTING_FLAGS.items():
         if key in ctx.args.settings:
             flags += [flag, ctx.args.settings[key]]
     if ctx.args.location:

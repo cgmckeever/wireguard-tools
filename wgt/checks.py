@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 from . import clients, devices, exits, host, live, ops, results, rules, store, ui
 from .const import (
+    CLIENT_CONFIG_KEYS,
     DEVICE_SERVER,
     DEVICE_WATCHDOG,
     DIRECT_STOP_PRIO,
@@ -102,7 +103,7 @@ def settings_table(ctx: Ctx, running: bool = False, subnet_asked: bool = False) 
         rep.lines.append(line.rstrip(" "))
         if saved and saved != value:
             rep.changes.append(f"{label:<15} {saved} -> {value}")
-            if key in ("SERVER_NAME", "ENDPOINT", "WG_PORT", "WG_SUBNET", "WG_SUBNET6", "WG_DNS", "WG_MTU"):
+            if key in CLIENT_CONFIG_KEYS:
                 rep.changes_client_configs = True
     return rep
 

@@ -16,7 +16,7 @@ sys.path.insert(0, ROOT)
 
 from wgt import cli, store  # noqa: E402
 from wgt.config import resolve  # noqa: E402
-from wgt.const import CONFIG_KEYS, Paths  # noqa: E402
+from wgt.const import SETTING_KEYS, Paths  # noqa: E402
 from wgt.host import Facts  # noqa: E402
 from wgt.system import FakeRunner, Out  # noqa: E402
 
@@ -41,7 +41,7 @@ class Server:
         self.wg_dir = wg_dir or os.path.join(FIXTURES, case, "wg")
         self.paths = Paths(wg_dir=self.wg_dir)
         self.snap = store.load(self.paths)
-        saved = store.saved_settings(self.snap.state, list(CONFIG_KEYS) + ["ENDPOINT"])
+        saved = store.saved_settings(self.snap.state, SETTING_KEYS)
         self.cfg = resolve({}, {}, saved, paths=self.paths)
         self.cfg.finalize(kernel_ipv6=True)
         self.pub_if = store.state_get(self.snap.state, "PUB_IF")

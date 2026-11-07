@@ -7,23 +7,39 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Mapping, Optional
+from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from . import host, store
 from .config import Config, resolve
-from .const import CONFIG_KEYS, Paths
+from .const import SETTING_KEYS, Paths
 from .errors import WgtError
 from .system import Files, Out, Runner
 
 # Flags that set a setting, and the setting they set.
-VALUE_FLAGS = {
+SETTING_FLAGS = {
     "--name": "SERVER_NAME", "--subnet": "WG_SUBNET", "--subnet6": "WG_SUBNET6", "--port": "WG_PORT",
     "--mtu": "WG_MTU", "--warp-mtu": "WARP_MTU", "--dns": "WG_DNS", "--endpoint": "ENDPOINT",
     "--wg-if": "WG_IF", "--warp-if": "WARP_IF", "--table": "RT_TABLE", "--allowed-ips": "CLIENT_ALLOWED_IPS",
-    # Not settings, but they take a value:
-    "--exit": "EXIT_CODES", "--label": "EXIT_LABEL", "--warp": "CLIENT_WARP", "--location": "LOCATION",
-    "--device-number": "DEVICE_NUMBER", "--group": "DEVICE_GROUPS",
 }
+
+
+def _one_line(value: str) -> str:
+    return " ".join(value.split())
+
+
+def _warp_choice(value: str) -> str:
+    choice = value.replace(" ", "")
+    if choice not in ("on", "off", "on,off", "off,on", "both"):
+        raise WgtError(f"--warp takes on, off or on,off: '{value}'")
+    return choice
+
+
+# Flags that take a value but aren't settings: the Args field, and how to read it.
+ARG_FLAGS: Dict[str, Tuple[str, Callable[[str], str]]] = {
+    "--exit": ("exit_codes", str), "--label": ("exit_label", _one_line), "--warp": ("warp", _warp_choice),
+    "--location": ("location", _one_line), "--device-number": ("device_number", str), "--group": ("groups", str),
+}
+VALUE_FLAGS = (*SETTING_FLAGS, *ARG_FLAGS)
 BOOL_FLAGS = {
     "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--new-server-keys": "new_server_keys",
     "--purge": "purge", "--old-names": "old_names",
@@ -43,7 +59,7 @@ def settings_env(args: Args, cmd: str, environ: Mapping[str, str]) -> Mapping[st
     if cmd in SETTINGS_COMMANDS:
         return environ
     allowed = (CLIENT_SETTING,) if cmd == "client" else ()
-    for flag, key in VALUE_FLAGS.items():
+    for flag, key in SETTING_FLAGS.items():
         if key in args.settings and key not in allowed:
             raise WgtError(f"{flag} is a server setting: wgt setup {flag} <value>")
     return {}
@@ -104,24 +120,12 @@ def parse(argv: List[str]) -> Args:
 
 
 def _set(a: Args, flag: str, value: str) -> None:
-    """Store a value flag: --exit/--label/--warp on Args, the rest as settings."""
-    key = VALUE_FLAGS[flag]
-    if key == "CLIENT_WARP":
-        if value.replace(" ", "") not in ("on", "off", "on,off", "off,on", "both"):
-            raise WgtError(f"--warp takes on, off or on,off: '{value}'")
-        a.warp = value.replace(" ", "")
-    elif key == "EXIT_CODES":
-        a.exit_codes = value
-    elif key == "EXIT_LABEL":
-        a.exit_label = " ".join(value.split())
-    elif key == "LOCATION":
-        a.location = " ".join(value.split())
-    elif key == "DEVICE_NUMBER":
-        a.device_number = value
-    elif key == "DEVICE_GROUPS":
-        a.groups = value
+    """Store a value flag: a setting in a.settings, the others in their own field."""
+    if flag in SETTING_FLAGS:
+        a.settings[SETTING_FLAGS[flag]] = value
     else:
-        a.settings[key] = value
+        field_name, read = ARG_FLAGS[flag]
+        setattr(a, field_name, read(value))
 
 
 @dataclass
@@ -166,7 +170,7 @@ def load(args: Args, paths: Optional[Paths] = None, runner: Optional[Runner] = N
     runner.dry_run = runner.dry_run or args.dry_run
     facts = facts or host.gather(runner)
     snap = store.load(paths)
-    saved = store.saved_settings(snap.state, list(CONFIG_KEYS) + ["ENDPOINT"])
+    saved = store.saved_settings(snap.state, SETTING_KEYS)
     cfg = resolve(args.settings, os.environ if env is None else env, saved,
                   hostname=facts.hostname, routes=facts.routes4, paths=paths)
     cfg.finalize(kernel_ipv6=facts.kernel_ipv6)
