@@ -22,6 +22,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install ruff mypy
+      - run: pip install ruff==0.17.4 mypy
       - run: ruff check wgt tests
       - run: mypy                                # settings in pyproject.toml

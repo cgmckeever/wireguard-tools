@@ -214,9 +214,10 @@ class Tests:
                 if not any(line.split("\t")[0] + "\t" + line.split("\t")[-1].strip() == text
                            for line in seen.splitlines() if "\t" in line):
                     missing.append(f"{family} rule: {text}")
-            elif not (needs and not live.if_exists(r, needs)):
-                if not re.search(rf"^{re.escape(text)}( |$)", live.table(r, family, where), re.M):
-                    missing.append(f"{family} table {where}: {text}")
+            elif (not needs or live.if_exists(r, needs)) and not re.search(
+                rf"^{re.escape(text)}( |$)", live.table(r, family, where), re.M
+            ):
+                missing.append(f"{family} table {where}: {text}")
         return missing
 
     def peers_wrong(self) -> List[str]:

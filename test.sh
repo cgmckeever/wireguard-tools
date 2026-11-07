@@ -7,10 +7,12 @@
 #   ./test.sh all        lint, then the tests
 set -euo pipefail
 cd "$(dirname "$0")"
-if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c 'import pytest, ruff, mypy' 2>/dev/null; then
+RUFF=0.17.4     # also in pyproject.toml and .github/workflows/tests.yml
+if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c 'import pytest, ruff, mypy' 2>/dev/null \
+    || [ "$(.venv/bin/ruff --version)" != "ruff $RUFF" ]; then
     echo "==> Setting up .venv with pytest, ruff and mypy (first run only)"
     python3 -m venv .venv
-    .venv/bin/pip install -q pytest ruff mypy
+    .venv/bin/pip install -q pytest "ruff==$RUFF" mypy
 fi
 lint() {
     .venv/bin/ruff check wgt tests

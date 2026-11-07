@@ -2,6 +2,7 @@
 # install: servers run the checkout directly (bin/wgt), stdlib only.
 
 [tool.ruff]
+required-version = "==0.17.4"   # same as test.sh and CI: a new release can't turn main red with no code change
 target-version = "py38"     # the oldest Python a server may have; keeps --fix from using 3.9+ syntax
 line-length = 120
 
