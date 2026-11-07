@@ -9,15 +9,17 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import functools
 import os
+import re
 import shutil
 
 import pytest
 from conftest import FIXTURES
 from fakehost import Died, Host, Kernel
 
-from wgt import checks, cli, devices, host, ops, rules, store, system
-from wgt.const import Paths
+from wgt import checks, cli, devices, host, ops, render, rules, store, system, units
+from wgt.const import ALL_WATCHDOGS, EXIT_WATCHDOG, Paths
 from wgt.errors import WgtError
 from wgt.host import Facts
 
@@ -124,6 +126,11 @@ class World:
             found.extend(f"disabled line with no entry: {n}" for n in snap.disabled if n not in names)
             found.extend(f"number with no config: {d.name}" for d in snap.devices if not snap.device_clients(d.name))
             found.extend(f"access: {w}" for w in devices.access_wrong(ctx))
+            codes = {e.code for e in snap.exits}
+            for f in os.listdir(ctx.paths.exit_dir):
+                base = f.split(".")[0]
+                if base not in codes and base != "incoming":
+                    found.append(f"jump file with no jump: {f}")
         self.run(["status"], fn=at_rest)
         return found
 
@@ -167,6 +174,7 @@ JOURNEY = [
     (["client", "remove", "lon-gb.tv3"], hasnt("lon-gb.tv3")),
     (["client", "remove", "warp.lon-gb.tv3"], hasnt("warp.lon-gb.tv3")),
     (["jump", "remove", "lon-gb"], lambda s: not s.exit("lon-gb")),
+    (["client", "remove", "warp.par-fr.tv"], hasnt("warp.par-fr.tv")),   # a disabled one
 ]
 
 
@@ -292,6 +300,7 @@ _current: list = []
 
 def _ticking(real):
     """Writes count as steps too: a process can die between any two."""
+    @functools.wraps(real)
     def write(path, content, mode):
         if _current and _current[-1].host is not None:
             _current[-1].host.tick()
@@ -425,3 +434,186 @@ def test_a_failed_setup_leaves_the_databases_on_the_running_subnet(world, monkey
         world.run(["setup", "--subnet", "10.77.0.0/24"])
     assert store.read_text(world.paths.client_db) == before
     assert store.state_get(store.load(world.paths).state, "WG_SUBNET") != "10.77.0.0/24"
+
+
+# --- the life of a server ---
+
+def test_setup_installs_everything_it_says(world):
+    world.run(["setup"])
+
+    def units_written(ctx):
+        for path, content in units.unit_files(ctx):
+            assert store.read_text(path) == content, path
+        for e in ctx.snap.exits:
+            assert os.path.exists(ctx.paths.px_conf(e.code)) and os.path.exists(ctx.paths.wx_conf(e.code))
+    world.run(["status"], fn=units_written)
+
+
+def test_rollback_cleans_up_even_if_wg0_died_without_its_postdown(world):
+    world.run(["setup"])
+    world.kernel.links.discard("wg0")     # gone, with its rules still in place
+    world.run(["rollback"])
+    assert world.kernel.rules == [] and world.kernel.routes == set()
+    assert not [k for k, v in world.kernel.chains.items() if v]
+    calls = world.host.calls
+    assert not ops_is_set_up(world)
+    for name in ALL_WATCHDOGS:
+        assert any(c.startswith("systemctl disable --now") and f"{name}.timer" in c for c in calls), name
+    for e in ("par-fr", "nyc-us"):
+        assert any(f"wg-quick@px-{e}" in c and "stop" in c or f"px-{e}" in c and "down" in c for c in calls), e
+
+
+def ops_is_set_up(world):
+    return world.run(["status"], fn=ops.is_set_up)
+
+
+def test_rollback_restores_forwarding(world):
+    world.run(["setup"])
+    with open(world.paths.state, "a") as f:
+        f.write("ORIG_IP_FORWARD=0\n")
+    world.run(["rollback"])
+    assert "sysctl -q -w net.ipv4.ip_forward=0" in world.host.calls
+
+
+def test_ufw_follows_jumps_and_rollback(world, monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
+    world.kernel.ufw_active = True
+    world.run(["setup"])
+    assert "51820/udp" in world.kernel.ufw and "route wg0 warp" in world.kernel.ufw
+    world.run(world.words(["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"]))
+    assert any("px-lon-gb" in rule for rule in world.kernel.ufw)
+    world.run(["jump", "remove", "lon-gb"])
+    assert not any("lon-gb" in rule for rule in world.kernel.ufw)
+    world.run(["rollback"])
+    assert world.kernel.ufw == set()
+    assert not store.state_get(store.load(world.paths).state, "UFW")
+
+
+def test_the_jump_watchdog_runs_only_while_there_are_jumps(world):
+    world.run(["setup"])
+    timer = os.path.join(world.paths.systemd_dir, f"{EXIT_WATCHDOG}.timer")
+    assert os.path.exists(timer)
+    add_again = world.words(["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"])
+    for e in store.load(world.paths).exits:
+        world.free_the_jump(e.code)
+        world.run(["jump", "remove", e.code])
+    assert not os.path.exists(timer)
+    world.run(add_again)
+    assert os.path.exists(timer)
+
+
+def test_setup_with_a_new_port_and_subnet_leaves_nothing_of_the_old(world):
+    """wg0 stops with its old config first, or its PostDown wouldn't remove the old rules."""
+    world.run(["setup"])
+    world.run(["setup", "--port", "51999", "--subnet", "10.77.0.0/24"])
+    assert world.problems() == []
+    assert not any("10.8.0" in str(x) or "10.2.10" in str(x) for x in (world.kernel.rules, world.kernel.routes))
+    assert not [r for rows in world.kernel.chains.values() for r in rows if "--dport 51820" in r]
+
+
+def test_a_stopped_first_setup_doesnt_count_as_set_up(tmp_path, monkeypatch):
+    monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
+    done = False
+    for die_at in range(1, 400):
+        w = World(tmp_path / str(die_at), monkeypatch)
+        ops_state = store.read_text(w.paths.state) or ""
+        system.atomic_write.__wrapped__(w.paths.state, store.state_unset(ops_state, "WARP"), 0o600)
+        try:
+            w.run(["setup"], die_at=die_at)
+        except Died:
+            if ops_is_set_up_quiet(w):   # only with everything in place
+                last = os.path.join(w.paths.systemd_dir, f"{ALL_WATCHDOGS[2]}.timer")
+                assert os.path.exists(last) and "wg0" in w.kernel.links, f"killed at step {die_at}"
+            continue
+        done = True
+        assert ops_is_set_up_quiet(w)
+        break
+    assert done
+
+
+def ops_is_set_up_quiet(world):
+    world.host = None
+    return world.run(["status"], fn=ops.is_set_up)
+
+
+def test_a_patched_client_config_is_what_a_fresh_one_would_be(world):
+    """setup patches configs line by line, render writes them whole: they must agree."""
+    world.run(["client", "add", "zed", "--warp", "off"])
+    world.run(["setup", "--warp-mtu", "1400", "--mtu", "1300", "--dns", "9.9.9.9", "--endpoint", "vpn.example.com",
+               "--port", "51999"])
+
+    def compare(ctx):
+        c = ctx.snap.client("zed")
+        path = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, "zed")
+        text = store.read_text(path)
+        key = re.search(r"PrivateKey = (\S+)", text).group(1)
+        fresh = render.render_client_conf(ctx.cfg, ctx.snap, "zed", c.ip, key, "SERVERPUB=",
+                                          store.read_text(ctx.paths.psk("zed")).strip(),
+                                          ctx.cfg.ENDPOINT, c.allowed or "0.0.0.0/0, ::/0")
+        strip = lambda s: [x for x in s.splitlines() if not x.startswith("PublicKey")]   # noqa: E731
+        assert [x for x in strip(text) if x not in strip(fresh)] == []
+        assert [x for x in strip(fresh) if x not in strip(text)] == []
+    world.run(["setup"], fn=compare)
+
+
+@pytest.mark.parametrize("key,flag,value", [("WG_DNS", "--dns", "9.9.9.9"), ("WG_MTU", "--mtu", "1300"),
+                                            ("WG_PORT", "--port", "51999"), ("ENDPOINT", "--endpoint", "vpn.x.com"),
+                                            ("SERVER_NAME", "--name", "other"),
+                                            ("WG_SUBNET", "--subnet", "10.77.0.0/24")])
+def test_a_setting_devices_hold_says_they_need_new_configs(world, key, flag, value):
+    def told(ctx):
+        return checks.settings_table(ctx).changes_client_configs
+    assert world.run(["setup", flag, value, "--warp-mtu", "1400"], fn=told), key
+
+
+def test_backup_then_purge_then_restore_brings_the_same_server_back(world, monkeypatch):
+    """The whole way, through real tar."""
+    world.run(["setup"])
+    with open(world.paths.state, "a") as f:
+        f.write("UFW=1\n")
+    before = {n: store.read_text(p) for n, p in (("clients", world.paths.client_db), ("key", world.paths.server_key),
+                                                 ("exits", world.paths.exit_db), ("devices", world.paths.device_db))}
+    world.run(["backup"])
+    archive = next(os.path.join(world.paths.backup_dir, f) for f in os.listdir(world.paths.backup_dir)
+                   if f.endswith(".tar.gz"))
+    kept = os.path.join(world.tmp, "kept.tar.gz")
+    shutil.copy(archive, kept)
+    world.run(["rollback", "--purge"])
+    assert not os.path.exists(world.paths.client_db)
+
+    class Exec(Exception):
+        pass
+
+    def no_exec(path, args):
+        assert "setup" in args
+        raise Exec
+    monkeypatch.setattr(os, "execv", no_exec)
+    os.makedirs(world.paths.wg_dir, exist_ok=True)
+    with pytest.raises(Exec):
+        world.run(["restore", kept])
+    state = store.load(world.paths).state
+    for gone in ("UFW", "SETUP_DONE", "WARP", "DEFAULT_ROUTE"):
+        assert not store.state_get(state, gone), gone
+    assert not ops_is_set_up(world)
+    world.run(["setup"])
+    assert ops_is_set_up(world)
+    for name, path in (("clients", world.paths.client_db), ("key", world.paths.server_key),
+                       ("exits", world.paths.exit_db), ("devices", world.paths.device_db)):
+        assert store.read_text(path) == before[name], name
+    assert world.problems() == []
+
+
+def test_every_firewall_rule_going_missing_is_noticed(world):
+    def wanted(ctx):
+        return rules.ipt_rules(ctx.cfg, ctx.pub_if, ctx.snap.exits)
+    for cmd, table, chain, rule in world.run(["status"], fn=wanted):
+        rows = world.kernel.chains[(cmd, table, chain)]
+        at = rows.index(rule)
+        del rows[at]
+        assert world.run(["status"], fn=lambda ctx: checks.Tests(ctx).wg0_drift()), rule
+        rows.insert(at, rule)
+
+
+def test_status_and_log_cover_every_watchdog(world, capsys):
+    world.run(["setup"])
+    assert set(world.run(["status"], fn=checks.watchdogs)) == set(ALL_WATCHDOGS)

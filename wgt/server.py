@@ -19,15 +19,13 @@ from typing import TYPE_CHECKING, List, Optional
 
 from . import checks, exits, host, live, net, ops, render, results, rules, store, ui, units, warp
 from .const import (
+    ALL_WATCHDOGS,
     CONFIG_KEYS,
     DEVICE_NET,
-    DEVICE_WATCHDOG,
-    EXIT_WATCHDOG,
     LEGACY_SETUP_DONE,
     MARKER,
     SET_UP_KEYS,
     SETUP_DONE,
-    WARP_WATCHDOG,
 )
 from .errors import WgtError
 from .system import settings_of, write_private
@@ -668,7 +666,7 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
 def _stop_everything(ctx: Ctx) -> None:
     """The watchdogs first (they'd bring things back), then jumps, wg0, warp."""
     r, cfg = ctx.runner, ctx.cfg
-    timers = [f"{name}.timer" for name in (WARP_WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG)
+    timers = [f"{name}.timer" for name in ALL_WATCHDOGS
               if os.path.exists(ctx.paths.unit_file(f"{name}.timer"))]
     if timers:
         r.run(["systemctl", "disable", "--now", *timers], check=False)
@@ -694,9 +692,8 @@ def _remove_units(ctx: Ctx) -> None:
     cfg, files = ctx.cfg, ctx.files
     files.restore_original(cfg.dropin, remove_new=True)
     files.remove_empty_dir(cfg.dropin_dir)
-    units.remove_timer(ctx, WARP_WATCHDOG)
-    units.remove_timer(ctx, EXIT_WATCHDOG)
-    units.remove_timer(ctx, DEVICE_WATCHDOG)
+    for name in ALL_WATCHDOGS:
+        units.remove_timer(ctx, name)
     files.remove(ctx.paths.warp_marker)
     ctx.runner.run(["systemctl", "daemon-reload"])
 

@@ -57,6 +57,7 @@ LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes
 WARP_WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
 DEVICE_WATCHDOG = "wg-tools-device-watchdog"
+ALL_WATCHDOGS = (WARP_WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG)
 EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a jump
 WATCHDOG_STALE = 180         # seconds without a handshake before a watchdog acts on a tunnel
 

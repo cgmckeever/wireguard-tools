@@ -95,13 +95,13 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     wg-quick units (wg0, warp, each jump's tunnels). Like tail -f: the
     last [lines] (default 40), then new entries until Ctrl-C. With
     --no-follow, or when the output isn't a terminal, it prints and stops."""
-    from .const import DEVICE_WATCHDOG, EXIT_WATCHDOG, WARP_WATCHDOG
+    from .const import ALL_WATCHDOGS
     ops.no_more_words(words[1:], "wgt log [lines] [--no-follow]")
     count = words[0] if words else "40"
     if not count.isdigit():
         raise WgtError("usage: wgt log [lines] [--no-follow]")
     matches: List[str] = []
-    for tag in ("wg-tools", WARP_WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG):
+    for tag in ("wg-tools", *ALL_WATCHDOGS):
         matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
     ifcs = [ctx.cfg.WG_IF, ctx.cfg.WARP_IF]
     for e in ctx.snap.exits:

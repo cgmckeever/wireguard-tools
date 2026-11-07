@@ -13,6 +13,7 @@ import io
 import os
 import re
 import shutil
+import subprocess
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 from wgt.errors import WgtError
@@ -37,6 +38,8 @@ class Kernel:
         self.links: Set[str] = {"warp"}
         self.addrs: List[str] = []
         self.has_key = False
+        self.ufw_active = False
+        self.ufw: Set[str] = set()     # "<port>/udp" and "route <in> <out>"
 
     def view(self, chain_contents: bool = False) -> dict:
         """Comparable state. The device chains' rules are the watchdog's, not wg0.conf's."""
@@ -141,8 +144,28 @@ class Host(FakeRunner):
             return 0, line.split("=", 1)[1]
         if c.startswith("ip -4 -o addr show dev wg0"):
             return 0, "".join(f"5: wg0 inet {x} \n" for x in k.addrs if ":" not in x)
+        if a[0] == "tar":     # the real thing: backups and restores are what's being tested
+            return subprocess.run(a, capture_output=True, text=True).returncode, ""
+        if a[0] == "ufw":
+            return self._ufw(a)
+        if a[0] == "curl" and any("cdn-cgi/trace" in x for x in a):
+            return 0, f"ip=203.0.113.9\nwarp={'on' if '--interface' in a else 'off'}\n"
         if a[0] == "systemctl" and any(x.startswith("wg-quick@wg0") for x in a):
             return self._wg0_unit(a)
+        return 0, ""
+
+    def _ufw(self, a: List[str]) -> Tuple[int, str]:
+        k = self.kernel
+        if a[1] == "status":
+            return 0, "Status: active\n" if k.ufw_active else "Status: inactive\n"
+        if a[1:2] == ["allow"]:
+            k.ufw.add(a[2])
+        elif a[1:3] == ["delete", "allow"]:
+            k.ufw.discard(a[3])
+        elif a[1:3] == ["route", "allow"]:
+            k.ufw.add(f"route {a[5]} {a[8]}")
+        elif a[1:4] == ["route", "delete", "allow"]:
+            k.ufw.discard(f"route {a[6]} {a[9]}")
         return 0, ""
 
     def _wg0_unit(self, a: List[str]) -> Tuple[int, str]:
