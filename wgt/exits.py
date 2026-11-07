@@ -13,7 +13,7 @@ import sys
 import time
 from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
-from . import live, ops, render, results, rules, store, system, ui, units, warp
+from . import live, ops, render, results, rules, store, ui, units, warp
 from .const import EXIT_IDLE, EXIT_MAX, EXIT_WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 
@@ -106,13 +106,12 @@ def write_confs(ctx: Ctx, e: store.Exit) -> bool:
 
 def hold(ctx: Ctx, code: str) -> None:
     """Hold off the exit watchdog from <code> for a minute (while we check it)."""
-    if not ctx.runner.dry_run:
-        system.write_marker(ctx.paths.exit_hold(code))
+    ctx.files.write_marker(ctx.paths.exit_hold(code))
 
 
 def unhold(ctx: Ctx, code: str) -> None:
     """Let the exit watchdog manage <code> again."""
-    ctx.files.remove(ctx.paths.exit_hold(code))
+    ctx.files.remove_markers(ctx.paths.exit_hold(code))
 
 
 def up(ctx: Ctx, e: store.Exit) -> None:
@@ -130,9 +129,8 @@ def down(ctx: Ctx, e: store.Exit, check: bool = True) -> bool:
     for ifc in (e.wx, e.px):
         if live.if_exists(r, ifc):
             r.run(["ip", "link", "del", "dev", ifc], check=check)
-    for path in (ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code), ctx.paths.exit_hold(e.code)):
-        with contextlib.suppress(OSError):
-            ctx.files.remove(path)
+    ctx.files.remove_markers(ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code),
+                             ctx.paths.exit_hold(e.code))
     return not any_up(ctx, e)
 
 

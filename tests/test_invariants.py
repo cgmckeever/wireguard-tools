@@ -347,6 +347,17 @@ def test_a_dry_run_changes_nothing(world, argv):
     assert world.kernel.view(chain_contents=True) == running
 
 
+def test_a_dry_run_leaves_the_watchdogs_markers(world):
+    """Their notes for the next run: a dry run must neither write nor clear one."""
+    for path in (world.paths.warp_marker, world.paths.exit_marker("par-fr"), world.paths.exit_port_marker("par-fr")):
+        with open(path, "w") as f:
+            f.write("1\n")
+    before = file_contents(world.paths.run_dir)
+    for which in ("warp", "exits", "devices"):
+        world.run(["watchdog", which, "--dry-run"])
+    assert file_contents(world.paths.run_dir) == before
+
+
 # --- restarting ---
 
 def test_setup_restarting_wg0_asks_once_before_it_stops(world, monkeypatch):

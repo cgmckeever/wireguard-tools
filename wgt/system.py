@@ -50,12 +50,8 @@ def write_private(path: str, content: str) -> None:
 
 
 # --- marker files in /run (the watchdogs' and jump tests' small notes) ---
-# Written directly: they aren't configuration, so no backups and no dry-run.
-
-def write_marker(path: str, value: str = "") -> None:
-    with open(path, "w") as f:
-        f.write(value)
-
+# They aren't configuration, so no backups. Written and removed through Files
+# (write_marker, remove_markers), which a dry run leaves alone.
 
 def read_marker(path: str) -> int:
     """A marker's number (a timestamp), or 0 if it's missing or not a number."""
@@ -65,12 +61,6 @@ def read_marker(path: str) -> int:
     except OSError:
         return 0
     return int(value) if store.is_uint(value) else 0
-
-
-def remove_markers(*paths: str) -> None:
-    for path in paths:
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(path)
 
 
 def is_copy_of(name: str, base: str) -> bool:
@@ -373,6 +363,20 @@ class Files:
             return
         for p in targets:
             os.remove(p)
+
+    def write_marker(self, path: str, value: str = "") -> None:
+        """A note for a later run, in /run; a dry run leaves none."""
+        if self.runner.dry_run:
+            return
+        with open(path, "w") as f:
+            f.write(value)
+
+    def remove_markers(self, *paths: str) -> None:
+        """Remove notes (a dry run only says so). Never raises: the watchdogs must
+        finish their run, and a stale note only costs that one a wrong guess."""
+        for path in paths:
+            with contextlib.suppress(OSError):
+                self.remove(path)
 
     def remove_empty_dir(self, path: str) -> None:
         """Remove a directory if it exists and is empty; a dry run only says so."""

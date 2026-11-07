@@ -10,16 +10,10 @@ from typing import TYPE_CHECKING, List, Optional
 from . import devices, exits, live, ops, store
 from .const import DEVICE_WATCHDOG, EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WARP_WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
-from .system import journal, read_marker, remove_markers, write_marker
+from .system import journal, read_marker
 
 if TYPE_CHECKING:
     from .ctx import Ctx
-
-
-def _note(ctx: Ctx, path: str, value: str = "") -> None:
-    """A marker for the next run; a dry run leaves none."""
-    if not ctx.runner.dry_run:
-        write_marker(path, value)
 
 
 def log_event(ctx: Ctx, tag: str, msg: str) -> None:
@@ -35,17 +29,17 @@ def run_warp(ctx: Ctx) -> None:
     r, ifc = ctx.runner, ctx.cfg.WARP_IF
     marker = ctx.paths.warp_marker
     if not live.if_exists(r, ifc):
-        remove_markers(marker)
+        ctx.files.remove_markers(marker)
         return
     if live.hs_recent(r, ifc, WATCHDOG_STALE, ctx.clock()):
-        remove_markers(marker)
+        ctx.files.remove_markers(marker)
         return
     # Unhealthy: act on the second run in a row, so a just-started tunnel gets time.
     if not os.path.exists(marker):
-        _note(ctx, marker)
+        ctx.files.write_marker(marker)
         return
     old = live.listen_port(r, ifc)
-    remove_markers(marker)
+    ctx.files.remove_markers(marker)
     if r.attempt(["wg", "set", ifc, "listen-port", "0"]):
         log_event(ctx, WARP_WATCHDOG, f"{ifc}: no handshake for over {WATCHDOG_STALE}s; moved from port {old} to "
                               f"{live.listen_port(r, ifc)}")
@@ -126,7 +120,7 @@ def _exits_pass(ctx: Ctx) -> None:
         action = decide(active, px_up, wx_up, now, read_marker(started_marker), wx_last_hs, os.path.exists(port_marker),
                         need_wx, px_last_hs)
         if wx_last_hs and now - wx_last_hs <= WATCHDOG_STALE:
-            remove_markers(port_marker)   # recovered: the next silent spell starts with a new port again
+            ctx.files.remove_markers(port_marker)   # recovered: the next silent spell starts with a new port again
         _apply(ctx, e, action, _units_for(action, e, px_up, wx_up, need_wx), now)
 
 
@@ -150,19 +144,19 @@ def _apply(ctx: Ctx, e: store.Exit, action: Optional[str], units: List[str], now
     if action == UP:
         # restart, not start: a unit can be "active" with its link gone.
         if r.attempt(["systemctl", "restart", *units]):
-            _note(ctx, started_marker, str(now))
+            ctx.files.write_marker(started_marker, str(now))
             say("a client is active; brought up")
         else:
             say("a client is active, but bringing it up failed")
     elif action == NEW_PORT:
         if r.attempt(["wg", "set", e.wx, "listen-port", "0"]):
-            _note(ctx, started_marker, str(now))
-            _note(ctx, port_marker)
+            ctx.files.write_marker(started_marker, str(now))
+            ctx.files.write_marker(port_marker)
             say(f"{stale}; new source port")
     elif action in (RESTART, RESTART_JUMP):
-        remove_markers(port_marker)
+        ctx.files.remove_markers(port_marker)
         if r.attempt(["systemctl", "restart", *units]):
-            _note(ctx, started_marker, str(now))
+            ctx.files.write_marker(started_marker, str(now))
             say(f"{stale} after a new port; its WARP restarted" if action == RESTART
                 else f"jump tunnel silent for over {WATCHDOG_STALE}s; restarted")
     elif action == DOWN:

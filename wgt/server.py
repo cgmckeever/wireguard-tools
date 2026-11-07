@@ -715,7 +715,7 @@ def _remove_units(ctx: Ctx) -> None:
     files.remove_empty_dir(cfg.dropin_dir)
     for name in ALL_WATCHDOGS:
         units.remove_timer(ctx, name)
-    files.remove(ctx.paths.warp_marker)
+    files.remove_markers(ctx.paths.warp_marker)
     ctx.runner.run(["systemctl", "daemon-reload"])
 
 
