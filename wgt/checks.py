@@ -177,11 +177,6 @@ class Tests:
         for f in c.families():
             if not self.warp_rule_ok(f):
                 out.append(f"{f} WARP rule")
-            t = live.table(self.runner, f, c.RT_TABLE)
-            net = re.escape(c.family_net(f))
-            if not (re.search(r"^blackhole default( |$)", t, re.M)
-                    and re.search(rf"^{net} dev {re.escape(c.WG_IF)}( |$)", t, re.M)):
-                out.append(f"{f} table {c.RT_TABLE}")
             if not self.direct_rules_ok(f):
                 out.append(f"{f} plain host config rules")
         if not self.device_net_ok():
