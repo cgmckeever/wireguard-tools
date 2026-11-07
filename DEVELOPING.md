@@ -25,10 +25,10 @@ wgt/                      the package (Python 3.8+, standard library only)
   ops.py                  shared operations: lock, confirm, setup checks, state, endpoint, wg0.conf,
                           peers, the client/exit databases, subcommand dispatch
   warp.py, units.py       wgcf and WARP profiles; systemd units, watchdog timers, ufw
-  server.py               setup, rollback (setup's inverse)
+  server.py               setup, rollback (setup's inverse), wgt warp rotate
   backup.py               backup, restore (archive checks)
-  clients.py              client commands, the clients table (and QR, share)
-  devices.py              static device addresses and groups: numbers, `wgt device`, the watchdog's rules
+  clients.py              client commands, the clients table (and QR, share), `wgt device`'s table and rename
+  devices.py              static device addresses and groups: numbers, `wgt device`'s other verbs, the watchdog's rules
   fleet.py                local/devices: wgt-ctl's record of each device's number (pure: no ssh, no files)
   exits.py                `wgt jump` (alias `exit`): bringing a jump up/down, probing it
   checks.py               test, status, summary

@@ -54,7 +54,7 @@ def write_private(path: str, content: str) -> None:
     atomic_write(path, content, 0o600)
 
 
-# --- marker files in /run (the watchdogs' and exit tests' small notes) ---
+# --- marker files in /run (the watchdogs' and jump tests' small notes) ---
 # Written directly: they aren't configuration, so no backups and no dry-run.
 
 def write_marker(path: str, value: str = "") -> None:
@@ -79,8 +79,7 @@ def remove_markers(*paths: str) -> None:
 
 
 def is_copy_of(name: str, base: str) -> bool:
-    """True for <base>.<anything>.bak (a change copy), as the shell glob
-    "<base>.*.bak" matched; a plain <base>.bak someone made by hand is not one.
+    """True for <base>.<anything>.bak (a change copy); a plain <base>.bak someone made by hand is not one.
     A <base> containing glob characters matches nothing: those would be read
     as a pattern (and no file we manage has them)."""
     return fnmatch.fnmatchcase(name, base + ".*.bak") and not fnmatch.fnmatchcase(base, "*[*?[]*")
@@ -135,24 +134,22 @@ class Runner:
     """Runs commands. Changes (run/sh/attempt) only print under --dry-run;
     questions (query/ok) always run, so they must change nothing."""
 
-    def __init__(self, dry_run: bool = False, out: Optional[Out] = None, prog: str = "wgt"):
+    def __init__(self, dry_run: bool = False, out: Optional[Out] = None):
         self.dry_run = dry_run
         self.out = out or Out()
-        self.prog = prog
         self.current_step = "startup"
 
     # --- changes ---
 
-    def run(self, args: Sequence[str], check: bool = True, input: Optional[str] = None,
-            capture: bool = False) -> Tuple[int, str]:
+    def run(self, args: Sequence[str], check: bool = True) -> Tuple[int, str]:
         if self.dry_run:
             self.out.info("[dry-run] " + " ".join(args))
             return 0, ""
-        return self._exec(args, check=check, input=input, capture=capture)
+        return self._exec(args, check=check)
 
-    def sh(self, line: str, check: bool = True) -> int:
+    def sh(self, line: str) -> int:
         """A shell line (the rule lines are shell)."""
-        return self.run(["bash", "-c", line], check=check)[0]
+        return self.run(["bash", "-c", line])[0]
 
     def run_logged(self, args: Sequence[str], log: str, cwd: str, append: bool = False) -> bool:
         """Run a command in <cwd> with its output going to <log> (umask 077: it
@@ -223,7 +220,7 @@ class Runner:
         if undo:
             self.out.info(f"undo: {undo}")
         if not self.dry_run:
-            journal(self, LOG_TAG, f"{self.prog}: {what}")
+            journal(self, LOG_TAG, f"wgt: {what}")
 
 
 class FakeRunner(Runner):

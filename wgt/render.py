@@ -10,7 +10,7 @@ from typing import Callable, List, Optional, Tuple
 
 from . import rules
 from .config import Config
-from .const import DEVICE_NET, DEVICE_SERVER, JUMP_MTU, MARKER, TEMPLATE_DIR, device_ip
+from .const import DEVICE_NET, DEVICE_SERVER, JUMP_MTU, MARKER, TEMPLATE_DIR, device_ip, jump_source_name
 from .errors import WgtError
 from .store import Exit, Snapshot, client_exit, name_warp
 
@@ -21,7 +21,7 @@ _COMMENT_OR_BLANK = re.compile(r"^\s*(#|$)")
 
 def render_template(name: str, **values: str) -> str:
     """templates/<name> with each {{KEY}} replaced; an unfilled {{KEY}} is an
-    error. Ends with exactly one newline (as `printf '%s\\n' "$(<file)"`)."""
+    error. Ends with exactly one newline."""
     path = os.path.join(TEMPLATE_DIR, name)
     try:
         with open(path, encoding="utf-8") as f:
@@ -156,7 +156,7 @@ def render_jump_conf(raw: str, e: Exit) -> str:
     """px-<code>.conf from an imported jump config: its key, IPv4 address and
     peer only; Table = off, our MTU, no DNS, loose rp_filter, and the exit's
     jump table's default route (the blackhole stays when the tunnel goes)."""
-    out = [f"{MARKER} exit {e.code}: jump tunnel from exits/{e.code}.proton.conf; WARP inside it is wx-{e.code}"]
+    out = [f"{MARKER} exit {e.code}: jump tunnel from exits/{jump_source_name(e.code)}; WARP inside it is {e.wx}"]
     sec = ""
     for line in raw.splitlines():
         if re.match(r"^\s*\[Interface\]", line):
@@ -234,7 +234,7 @@ def sysctl_lines(cfg: Config, pub_if: str, has_ipv6: bool, accept_ra: Optional[s
     if not cfg.ipv6:
         return out
     out.append("net.ipv6.conf.all.forwarding = 1")
-    if has_ipv6 and accept_ra != "0":   # unreadable counts as "accepts", as before
+    if has_ipv6 and accept_ra != "0":   # unreadable counts as "accepts"
         out.append(f"{accept_ra_key(pub_if)} = 2")
     return out
 

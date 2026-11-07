@@ -238,11 +238,11 @@ class Tests:
     def run(self, scope: str = "all") -> results.Results:
         """Run the checks ("warp": only those WARP itself needs)."""
         r, c, res = self.runner, self.cfg, self.res
-        self.res.check(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_trace_on())
+        res.check(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_trace_on())
         if c.ipv6:
-            self.res.check(f"{c.WARP_IF}: IPv6 through {c.WARP_IF} shows warp=on", self.warp6_trace_on())
-        self.res.check(f"{c.WARP_IF}: handshake within {WATCHDOG_STALE}s",
-                        live.hs_recent(r, c.WARP_IF, WATCHDOG_STALE, self.ctx.clock()))
+            res.check(f"{c.WARP_IF}: IPv6 through {c.WARP_IF} shows warp=on", self.warp6_trace_on())
+        res.check(f"{c.WARP_IF}: handshake within {WATCHDOG_STALE}s",
+                  live.hs_recent(r, c.WARP_IF, WATCHDOG_STALE, self.ctx.clock()))
         res.check("server's own traffic is not tunneled (plain curl shows warp=off)",
                   live.trace_field(live.trace(r), "warp") == "off")
         res.check(f"default route unchanged since install ({store.state_get(self.ctx.snap.state, 'DEFAULT_ROUTE')})",
@@ -259,8 +259,8 @@ class Tests:
         for f in c.families():
             net = c.family_net(f)
             res.check(f"{f} rule: from {net} lookup {c.RT_TABLE} (exactly once)", self.warp_rule_ok(f))
-            self.res.check(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
-                            self.rt_table_ok(f))
+            res.check(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
+                      self.rt_table_ok(f))
             direct = len(self.ctx.snap.direct_clients())
             res.check(f"{f} rules: {direct} plain host config(s) leave via this server's IP "
                       "(main, then blackhole; no stale ones)", self.direct_rules_ok(f))
@@ -283,10 +283,9 @@ class Tests:
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             res.check(f"exactly once: {x} {t} {ch} {rule}", live.ipt_count(r, x, t, ch, rule) == 1)
         res.check(f"wg-quick@{c.WG_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WG_IF}"))
-        self.res.check(f"wg-quick@{c.WARP_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WARP_IF}"))
+        res.check(f"wg-quick@{c.WARP_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WARP_IF}"))
         res.check(f"wg-quick@{c.WG_IF} ordered after (and wants) wg-quick@{c.WARP_IF}", self.boot_order_ok())
-        res.check("WARP watchdog timer enabled and running",
-                  live.timer_on(r, WARP_WATCHDOG))
+        res.check("WARP watchdog timer enabled and running", live.timer_on(r, WARP_WATCHDOG))
         res.check("device watchdog timer enabled and running", live.timer_on(r, DEVICE_WATCHDOG))
         if self.ctx.snap.exits:
             exits.run_tests(self.ctx, res, bring_up=False)
@@ -338,7 +337,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
     out.info(f"last WARP port change: {live.last_event(r, WARP_WATCHDOG) or 'never'}")
     out.log("WARP handshake")
     if live.if_exists(r, c.WARP_IF):
-        out.info(f"{c.WARP_IF}: {ui.ago(live.newest_hs(r, c.WARP_IF))}")
+        out.info(f"{c.WARP_IF}: {ui.ago(live.newest_hs(r, c.WARP_IF), ctx.clock())}")
     if ctx.snap.exits:
         out.log("Jumps")
         exits.print_list(ctx)

@@ -9,12 +9,12 @@ import sys
 from typing import Callable, List, Optional
 
 from . import host, ops, render, rules, store
-from .const import ALL_WATCHDOGS, DEVICE_WATCHDOG, EXIT_WATCHDOG, WARP_WATCHDOG
+from .const import ALL_WATCHDOGS, DEVICE_ADDRESS_FORM, DEVICE_WATCHDOG, EXIT_WATCHDOG, WARP_WATCHDOG
 from .ctx import Args, Ctx, load, parse, settings_env
 from .errors import WgtError
 from .system import Out, Runner
 
-USAGE = """\
+USAGE = f"""\
 Usage: wgt [options] <command> ...
 
 A WireGuard server for your devices. Each device (client) gets tunnel configs
@@ -33,7 +33,7 @@ Cloudflare WARP. The device picks one at a time.
          (add: per exit, <device> and warp.<device> (--warp on|off: one); a full config
           name adds just that; rotate, remove, disable, enable, show, share: none picks)
   device list [--tsv] | set <device> [number] | rename <device> <new>
-                             a device's static address 10.9.8.<number>, whichever config it's using
+                             a device's static address {DEVICE_ADDRESS_FORM}, whichever config it's using
          group [<device> <group,group>] | ungroup <device> [group,group]
                              who it can reach: devices sharing a group; "server" reaches the server
                              and not the others in it; no groups: isolated
@@ -70,9 +70,9 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
     if target in ("all", "exits"):
         for e in ctx.snap.exits:
             raw = store.read_text(ctx.paths.jump_source(e.code)) or ""
-            pieces.append((f"px-{e.code}", render.render_jump_conf(raw, e)))
+            pieces.append((e.px, render.render_jump_conf(raw, e)))
             prof = store.read_text(ctx.paths.wgcf_profile(ctx.paths.exit_wgcf_dir(e.code))) or ""
-            pieces.append((f"wx-{e.code}", render.render_warp_conf(
+            pieces.append((e.wx, render.render_warp_conf(
                 ctx.cfg, prof, ctx.facts.has_ipv6, host.resolve4, table=rules.exit_wtable(e), mark=rules.exit_mark(e))))
     if target in ("all", "hooks"):
         down = rules.hook_cmds(ctx.cfg, ctx.snap, ctx.pub_if, up=False)
@@ -105,7 +105,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
         matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
     ifcs = [ctx.cfg.WG_IF, ctx.cfg.WARP_IF]
     for e in ctx.snap.exits:
-        ifcs += [f"px-{e.code}", f"wx-{e.code}"]
+        ifcs += [e.px, e.wx]
     for ifc in ifcs:
         matches += [f"_SYSTEMD_UNIT=wg-quick@{ifc}.service", "+", f"UNIT=wg-quick@{ifc}.service", "+"]
     follow = ctx.args.follow or (sys.stdout.isatty() and not ctx.args.no_follow)

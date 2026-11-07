@@ -14,10 +14,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional
 
-from .const import DEVICE_CTL_FIRST, DEVICE_CTL_LAST, device_ip
+from .const import DEVICE_ADDRESS_FORM, DEVICE_CTL_FIRST, DEVICE_CTL_LAST, device_ip
 from .errors import WgtError
 
-HEADER = "# wgt-ctl devices: device number [removed date] (static address 10.9.8.<number>)"
+HEADER = f"# wgt-ctl devices: device number [removed date] (static address {DEVICE_ADDRESS_FORM})"
 
 # server -> device -> its number there (None: it has none yet)
 Seen = Mapping[str, Mapping[str, Optional[int]]]

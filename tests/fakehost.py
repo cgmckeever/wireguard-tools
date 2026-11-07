@@ -72,20 +72,20 @@ class Host(FakeRunner):
         if self.die_at is not None and self.steps >= self.die_at:
             raise Died(f"step {self.steps}")
 
-    def run(self, args, check=True, input=None, capture=False):
+    def run(self, args, check=True):
         if not self.dry_run:
             self.tick()
-        return super().run(args, check, input, capture)
+        return super().run(args, check)
 
     def attempt(self, args):
         if not self.dry_run:
             self.tick()
         return super().attempt(args)
 
-    def sh(self, line, check=True):
+    def sh(self, line):
         if not self.dry_run:
             self.tick()
-        return super().sh(line, check)
+        return super().sh(line)
 
     def run_logged(self, args, log, cwd, append=False):
         if args[1:2] == ["register"]:

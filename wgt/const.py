@@ -42,6 +42,7 @@ EXIT_IDLE = 300              # seconds without a client handshake before an exit
 
 # Static device addresses: one number per device, the same on every server.
 DEVICE_NET = "10.9.8.0/24"
+DEVICE_ADDRESS_FORM = DEVICE_NET.rsplit(".", 1)[0] + ".<number>"   # for people: 10.9.8.<number>
 DEVICE_SERVER = 1            # the server itself
 DEVICE_CTL_FIRST, DEVICE_CTL_LAST = 2, 127          # handed out by wgt-ctl, counting up
 DEVICE_DIRECT_FIRST, DEVICE_DIRECT_LAST = 128, 254  # handed out by `wgt client add`, counting down
@@ -58,7 +59,7 @@ WARP_WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
 DEVICE_WATCHDOG = "wg-tools-device-watchdog"
 ALL_WATCHDOGS = (WARP_WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG)
-EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a jump
+EXIT_HOLD = 60               # seconds a hold file (jump test) keeps the watchdog off a jump
 WATCHDOG_STALE = 180         # seconds without a handshake before a watchdog acts on a tunnel
 
 MIB = 1024 * 1024
@@ -69,6 +70,11 @@ HOST_STATE_KEYS = ("DEFAULT_ROUTE", "PUB_IF", "ORIG_IP_FORWARD", "ORIG_IP6_FORWA
 KEEP_ARCHIVES = 10           # newest `backup` archives kept
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
+
+
+def jump_source_name(code: str) -> str:
+    """The file name of jump <code>'s config as given (any provider's: the name stays for running servers)."""
+    return f"{code}.proton.conf"
 
 
 @dataclass(frozen=True)
@@ -164,7 +170,7 @@ class Paths:
 
     def jump_source(self, code: str) -> str:
         """Jump <code>'s jump config as given (with its label comment)."""
-        return os.path.join(self.exit_dir, f"{code}.proton.conf")
+        return os.path.join(self.exit_dir, jump_source_name(code))
 
     def px_conf(self, code: str) -> str:
         return self.wg(f"px-{code}.conf")
@@ -187,7 +193,7 @@ class Paths:
         return self.exit_marker(code) + ".port"
 
     def exit_hold(self, code: str) -> str:
-        """While it exists, the exit watchdog leaves <code> up (exit test)."""
+        """While it exists, the exit watchdog leaves <code> up (jump test)."""
         return self.exit_marker(code) + ".hold"
 
     @property

@@ -33,7 +33,7 @@ def any_up(ctx: Ctx, e: store.Exit) -> bool:
 
 def active_clients(snap: store.Snapshot, code: str, handshakes: Dict[str, int], now: float) -> List[store.Client]:
     """The clients that keep exit <code> up: enabled, with a handshake within
-    EXIT_IDLE seconds. The one rule for `exit list`, `exit test` and the watchdog."""
+    EXIT_IDLE seconds. The one rule for `jump list`, `jump test` and the watchdog."""
     return [c for c in snap.exit_clients(code)
             if not snap.is_disabled(c.name) and handshakes.get(c.pub, 0) > 0 and now - handshakes[c.pub] <= EXIT_IDLE]
 
@@ -242,7 +242,7 @@ def pick_exit(ctx: Ctx, verb: str) -> str:
 
 
 def cmd_add(ctx: Ctx, words: List[str]) -> None:
-    """exit add <code> <wg.conf|->: import (or replace) a WireGuard
+    """jump add <code> <wg.conf|->: import (or replace) a WireGuard
     config as jump <code>, give it its own WARP registration, wire its
     routing into wg0 live, and check it end to end."""
     usage = 'wgt jump add <code> <wg.conf|-> [--label "Paris, France"]'
@@ -273,7 +273,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         os.makedirs(ctx.paths.exit_dir, mode=0o700, exist_ok=True)
     if not warp.register(ctx, ctx.paths.exit_wgcf_dir(code)):
         raise WgtError(f"could not register a WARP account for jump '{code}'")
-    # The stored copy carries its label as the first line (exit list, rollback).
+    # The stored copy carries its label as the first line, for whoever opens the file.
     body = "".join(line + "\n" for line in raw.splitlines() if not line.startswith(f"# exit {code}: "))
     ctx.files.write(ctx.paths.jump_source(code), 0o600, f"# exit {code}: {label}\n" + body)
     e = store.Exit(code, idx, label)
@@ -331,7 +331,7 @@ def _check_new(ctx: Ctx, e: store.Exit) -> None:
 
 
 def cmd_remove(ctx: Ctx, words: List[str]) -> None:
-    """exit remove <code>: refused while clients use it; removes its tunnels,
+    """jump remove <code>: refused while clients use it; removes its tunnels,
     routing, firewall rules, WARP account and jump config (and their copies)."""
     ops.no_more_words(words[1:], "wgt jump remove <code>")
     code = words[0] if words else pick_exit(ctx, "remove")
@@ -468,7 +468,7 @@ def tunnel_checks(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
 
 
 def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
-    """The jump checks; with <bring_up> (exit test) an idle exit is brought
+    """The jump checks; with <bring_up> (jump test) an idle exit is brought
     up for its tunnel checks and taken down again."""
     r = ctx.runner
     if not ctx.snap.exits:

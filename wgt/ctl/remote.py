@@ -61,9 +61,9 @@ RESERVED = ("init", "clients", "devices", "summary", "all", "help", "list")
 SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.join(RESERVED)} or a command's name)"
 
 
-# The wgt commands (anything else after a server word is a mistake, not a command).
 # wgt-ctl's own per-server commands.
 CTL_COMMANDS = ("pull", "backup", "jump-add", "ssh", "branch", "forget", "remove", "move")
+# The wgt commands (anything else after a server word is a mistake, not a command).
 WGT_COMMANDS = ("setup", "summary", "status", "test", "log", "backup", "restore", "rollback", "client",
                 "device", "jump", "exit", "tunnel", "warp")
 

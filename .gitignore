@@ -1,5 +1,5 @@
 
-# This machine's private files: server list, Proton exit configs (private
+# This machine's private files: server list, jump configs (private
 # keys). Never commit; see wgt-ctl in README.md.
 local/*
 !local/.gitkeep
