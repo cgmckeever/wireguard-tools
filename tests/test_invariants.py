@@ -18,7 +18,7 @@ import pytest
 from conftest import FIXTURES
 from fakehost import Died, Host, Kernel
 
-from wgt import checks, cli, devices, host, ops, render, rules, store, system, units
+from wgt import checks, cli, devices, host, ops, render, results, rules, store, system, units
 from wgt.const import ALL_WATCHDOGS, EXIT_WATCHDOG, Paths
 from wgt.errors import WgtError
 from wgt.host import Facts
@@ -612,6 +612,20 @@ def test_every_firewall_rule_going_missing_is_noticed(world):
         del rows[at]
         assert world.run(["status"], fn=lambda ctx: checks.Tests(ctx).wg0_drift()), rule
         rows.insert(at, rule)
+
+
+def test_wgt_test_fails_when_a_firewall_rule_is_missing(world):
+    def wanted(ctx):
+        return rules.ipt_rules(ctx.cfg, ctx.pub_if, ctx.snap.exits)[0]
+
+    def failures(ctx):
+        seen = []
+        checks.Tests(ctx, results.Results(out=seen.append)).run("all")
+        return [line for line in seen if "FAIL" in line]
+    cmd, table, chain, rule = world.run(["status"], fn=wanted)
+    without = len(world.run(["status"], fn=failures))
+    world.kernel.chains[(cmd, table, chain)].remove(rule)
+    assert len(world.run(["status"], fn=failures)) > without
 
 
 def test_status_and_log_cover_every_watchdog(world, capsys):
