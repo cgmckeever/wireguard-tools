@@ -8,7 +8,6 @@ import json
 import os
 import re
 import tempfile
-import urllib.request
 from typing import TYPE_CHECKING, Callable, List, Optional
 
 from . import host, render, store
@@ -107,7 +106,10 @@ def _install_binary(ctx: Ctx, data: bytes) -> bool:
 
 
 def _fetch(url: str, timeout: int) -> bytes:
-    """GET <url> (GitHub's API wants a User-Agent)."""
+    """GET <url> (GitHub's API wants a User-Agent). urllib is imported here, not at
+    the top: the watchdogs import this module and run every 10s, and it's most of
+    what importing them would cost."""
+    import urllib.request
     req = urllib.request.Request(url, headers={"User-Agent": "wireguard-tools"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return r.read()

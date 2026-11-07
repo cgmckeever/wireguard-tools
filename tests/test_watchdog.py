@@ -4,6 +4,8 @@ wg, ip and systemctl."""
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -280,3 +282,10 @@ def test_a_bad_database_reaches_the_watchdogs_log(make, monkeypatch):
     monkeypatch.setattr(system, "journal", lambda runner, tag, msg: logged.append((tag, msg)))
     assert cli.main(["watchdog", "devices"]) == 1
     assert logged and logged[0][0] == "wg-tools-device-watchdog" and "devices.db" in logged[0][1]
+
+
+def test_a_watchdog_run_doesnt_import_the_http_stack():
+    """They run every 10s; urllib is most of what importing them would cost."""
+    code = "import sys, wgt.cli, wgt.watchdog; sys.exit('urllib.request' in sys.modules)"
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    assert subprocess.run([sys.executable, "-c", code], cwd=root).returncode == 0

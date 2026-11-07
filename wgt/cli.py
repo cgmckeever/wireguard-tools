@@ -9,6 +9,7 @@ import sys
 from typing import Callable, List, Optional
 
 from . import host, ops, render, rules, store
+from .const import ALL_WATCHDOGS, DEVICE_WATCHDOG, EXIT_WATCHDOG, WARP_WATCHDOG
 from .ctx import Args, Ctx, load, parse, settings_env
 from .errors import WgtError
 from .system import Out, Runner
@@ -95,7 +96,6 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     wg-quick units (wg0, warp, each jump's tunnels). Like tail -f: the
     last [lines] (default 40), then new entries until Ctrl-C. With
     --no-follow, or when the output isn't a terminal, it prints and stops."""
-    from .const import ALL_WATCHDOGS
     ops.no_more_words(words[1:], "wgt log [lines] [--no-follow]")
     count = words[0] if words else "40"
     if not count.isdigit():
@@ -116,8 +116,9 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"cannot run journalctl: {e.strerror}") from None
 
 
-# command -> (module, function); a module is only imported when its command runs
-# (the watchdogs run every 10s and need little).
+# command -> (module, function); a module is only imported when its command runs.
+# The watchdogs run every 10s and still reach most modules (exits, warp, units), so
+# anything slow to import is imported where it's used: see warp._fetch.
 COMMANDS = {
     "setup": ("server", "cmd_setup"), "backup": ("backup", "cmd_backup"),
     "restore": ("backup", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
@@ -170,7 +171,6 @@ def main(argv: Optional[List[str]] = None) -> int:
 def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
     """A watchdog run (every 10-30s from a timer): no host checks beyond root,
     no fact gathering, and any error is logged to the journal, not a traceback."""
-    from .const import DEVICE_WATCHDOG, EXIT_WATCHDOG, WARP_WATCHDOG
     tag = {"warp": WARP_WATCHDOG, "devices": DEVICE_WATCHDOG}.get((rest or [""])[0], EXIT_WATCHDOG)
     if os.geteuid() != 0 and os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
         raise WgtError("must run as root")
