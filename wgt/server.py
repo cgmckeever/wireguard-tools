@@ -21,7 +21,6 @@ from . import checks, devices, exits, host, live, net, ops, render, results, rul
 from .const import (
     ALL_WATCHDOGS,
     CONFIG_KEYS,
-    DEVICE_NET,
     LEGACY_SETUP_DONE,
     MARKER,
     SET_UP_KEYS,
@@ -410,9 +409,6 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
     still under the server's previous name), pointed at the current
     endpoint, port, DNS and MTU, with its current addresses and allowed IPs.
     Keys are unchanged, so only the configs need re-sending."""
-    # Patched line by line rather than re-rendered: re-rendering needs each
-    # client's private key back out of its file, and any unrelated difference
-    # would mean every device needing its config re-sent.
     endpoint = f"{ctx.cfg.values['ENDPOINT']}:{ctx.cfg.WG_PORT}"
     stale: List[str] = []
     for c in ctx.snap.clients:
@@ -421,16 +417,9 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
         if not src:
             continue
         text = store.read_text(src) or ""
-        # Address as render_client_conf writes it: "ip/32, ip6/128".
-        want = {"Endpoint": endpoint, "Address": ctx.cfg.client_addrs(c.ip).replace(",", ", ", 1),
-                "DNS": ctx.cfg.WG_DNS, "MTU": ctx.cfg.WG_MTU}
-        if c.allowed:
-            want["AllowedIPs"] = c.allowed.replace(",", ", ")
-        new = text
-        for key, value in want.items():
-            new = re.sub(rf"(?m)^{key} = .*$", f"{key} = {value}".replace("\\", "\\\\"), new)
+        new = render.with_client_settings(ctx.cfg, text, c.ip, c.allowed, endpoint)
         changed = new != text   # a setting a device uses: re-send
-        new = with_device_network(new)
+        new = render.with_device_network(new)
         if new != text:
             ctx.files.write(conf, 0o600, new)
         if (changed or src != conf) and c.name not in stale:
@@ -438,18 +427,6 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
     if stale:
         ctx.out.warn(f"configs changed (now {ctx.cfg.SERVER_NAME}.<config>.conf at {endpoint}); re-send them "
                      f"(wgt client share/show --qr): {' '.join(stale)}")
-
-
-def with_device_network(text: str) -> str:
-    """The config with its "# device-network:" header line, added before
-    [Interface] in configs written before the line existed, and without the
-    "# server-address:" line it replaced. A comment: a device only needs it
-    re-sent to have it swept into a warped carrier (wireguard-tunnels)."""
-    text = re.sub(r"(?m)^# server-address:.*\n", "", text)
-    line = f"# device-network: {DEVICE_NET}"
-    if re.search(r"(?m)^# device-network:.*$", text):
-        return re.sub(r"(?m)^# device-network:.*$", line, text)
-    return re.sub(r"(?m)^\[Interface\]", line + "\n[Interface]", text, count=1)
 
 
 def _move_to_current_name(ctx: Ctx, name: str, conf: str, old_name: str) -> str:

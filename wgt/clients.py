@@ -151,7 +151,7 @@ def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, endpoint: str, old_
     if ctx.runner.dry_run:
         ctx.out.info(f"[dry-run] would generate a keypair + preshared key, write {conf} (mode 600),")
         ctx.out.info(f"[dry-run] and add the peer to {ctx.cfg.wg_conf} and live {ctx.cfg.WG_IF} "
-                     f"(AllowedIPs {allowed.replace(',', ', ')})")
+                     f"(AllowedIPs {render.spaced(allowed)})")
         return
     os.makedirs(ctx.paths.client_dir, mode=0o700, exist_ok=True)
     os.makedirs(ctx.paths.psk_dir, mode=0o700, exist_ok=True)
@@ -244,7 +244,7 @@ def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
         seen = "disabled" if ctx.snap.is_disabled(cl.name) else ui.ago(hs.get(cl.pub, 0), now)
         rx_b, tx_b = tx.get(cl.pub, (0, 0))
         rows.append(ui.ClientRow(cl.name, exit_short(cl.name), cl.ip, seen,
-                                 f"{rx_b // MIB}/{tx_b // MIB}", cl.allowed.replace(",", ", "),
+                                 f"{rx_b // MIB}/{tx_b // MIB}", render.spaced(cl.allowed),
                                  exit_label(ctx, cl.name), devices.static_of(ctx, cl.name)))
     return rows
 
@@ -496,12 +496,7 @@ def rename_config(ctx: Ctx, old: str, new: str) -> None:
     new_c = store.Client(new, c.ip, c.pub, c.allowed)
     ctx.runner.step(f"Rename '{old}' to '{new}' (same keys and address; {way_out(ctx, new)})",
                     f"wgt client rename {new} {old}")
-    # A function, not a string: a label's backslash isn't a regex escape.
-    client_line = f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}"
-    exit_line = f"# exit: {render.exit_desc(ctx.snap, new)}"
-    text = re.sub(r"(?m)^# wireguard-tools client: .*$", lambda _: client_line, text)
-    text = re.sub(r"(?m)^# exit: .*$", lambda _: exit_line, text)
-    ctx.files.write(newconf, 0o600, text)
+    ctx.files.write(newconf, 0o600, render.with_client_name(ctx.cfg, ctx.snap, text, new))
     ctx.files.write(ctx.paths.psk(new), 0o600, psk)
     old_down = rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False)
     old_table = rules.client_table(ctx.snap, c)

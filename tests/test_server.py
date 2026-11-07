@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from conftest import FIXTURES, KEYS, temp_paths
 
-from wgt import backup, cli, host, ops, store
+from wgt import backup, cli, host, ops, render, store
 from wgt import server as srv
 from wgt.errors import WgtError
 from wgt.host import Facts
@@ -324,10 +324,10 @@ def test_warp_rotate_unknown_jump(make_ctx, rotating):
 def test_with_device_network_adds_and_replaces_server_address():
     old = "# wireguard-tools client: a on s\n# exit: x\n[Interface]\nPrivateKey = K\n"
     want = "# wireguard-tools client: a on s\n# exit: x\n# device-network: 10.9.8.0/24\n[Interface]\nPrivateKey = K\n"
-    assert srv.with_device_network(old) == want
-    assert srv.with_device_network(want) == want
+    assert render.with_device_network(old) == want
+    assert render.with_device_network(want) == want
     swapped = old.replace("[Interface]", "# server-address: 10.8.0.1/32, fd00::1/128\n[Interface]")
-    assert srv.with_device_network(swapped) == want
+    assert render.with_device_network(swapped) == want
 
 
 # --- settings belong to setup; setup says when it's finished ---

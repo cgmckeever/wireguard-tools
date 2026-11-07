@@ -36,6 +36,16 @@ def render_template(name: str, **values: str) -> str:
     return out.rstrip("\n") + "\n"
 
 
+def spaced(cidrs: str) -> str:
+    """A comma list as configs write it, from how clients.db holds it: "a, b"."""
+    return cidrs.replace(",", ", ")
+
+
+def _address_text(cfg: Config, ip: str) -> str:
+    """A client's addresses as configs write them: "ip/32, ip6/128"."""
+    return spaced(cfg.client_addrs(ip))
+
+
 def _kv(line: str) -> Tuple[str, str]:
     """(key, value) of a "Key = value" line."""
     k = _KEY.sub("", line, count=1).lstrip()
@@ -71,7 +81,7 @@ def render_wg_conf(cfg: Config, snap: Snapshot, pub_if: str, psk: Callable[[str]
         key = psk(c.name)
         if key:
             text += f"PresharedKey = {key}\n"
-        text += f"AllowedIPs = {cfg.client_addrs(c.ip).replace(',', ', ', 1)}\n"
+        text += f"AllowedIPs = {_address_text(cfg, c.ip)}\n"
     return text
 
 
@@ -209,14 +219,53 @@ def exit_desc(snap: Snapshot, name: str) -> str:
 
 def render_client_conf(cfg: Config, snap: Snapshot, name: str, ip: str, private_key: str,
                        server_pub: str, psk: str, endpoint: str, allowed: str) -> str:
-    # Address is "ip/32, ip6/128": the same text sync_client_configs compares against.
     return render_template(
         "client.conf.tmpl",
         NAME=name, SERVER_NAME=cfg.SERVER_NAME, EXIT=exit_desc(snap, name), PRIVATE_KEY=private_key,
-        ADDRESS=cfg.client_addrs(ip).replace(",", ", ", 1), DNS=cfg.WG_DNS, MTU=cfg.WG_MTU,
+        ADDRESS=_address_text(cfg, ip), DNS=cfg.WG_DNS, MTU=cfg.WG_MTU,
         SERVER_PUBLIC_KEY=server_pub, PRESHARED_KEY=psk, ENDPOINT=f"{endpoint}:{cfg.WG_PORT}",
-        ALLOWED_IPS=allowed.replace(",", ", "), DEVICE_NETWORK=DEVICE_NET,
+        ALLOWED_IPS=spaced(allowed), DEVICE_NETWORK=DEVICE_NET,
     )
+
+
+# Existing configs are patched, not re-rendered: that would need each private key
+# back out of its file, and any unrelated difference would mean re-sending every
+# config to its device. These and templates/client.conf.tmpl must agree on the format.
+
+def _set_line(pattern: str, line: str, text: str) -> str:
+    """<line> in place of what <pattern> matches. A function, not a string: a label's
+    or a DNS name's backslash isn't a regex escape."""
+    return re.sub(pattern, lambda _: line, text)
+
+
+def with_client_settings(cfg: Config, text: str, ip: str, allowed: str, endpoint: str) -> str:
+    """A client config with the settings a device uses set to the current ones
+    (<endpoint> with its port; AllowedIPs left alone if <allowed> is empty)."""
+    want = {"Endpoint": endpoint, "Address": _address_text(cfg, ip), "DNS": cfg.WG_DNS, "MTU": cfg.WG_MTU}
+    if allowed:
+        want["AllowedIPs"] = spaced(allowed)
+    for key, value in want.items():
+        text = _set_line(rf"(?m)^{key} = .*$", f"{key} = {value}", text)
+    return text
+
+
+def with_client_name(cfg: Config, snap: Snapshot, text: str, name: str) -> str:
+    """A client config's comments for its new name (its way out is in the name)."""
+    header = f"# wireguard-tools client: {name} on {cfg.SERVER_NAME}"
+    text = _set_line(r"(?m)^# wireguard-tools client: .*$", header, text)
+    return _set_line(r"(?m)^# exit: .*$", f"# exit: {exit_desc(snap, name)}", text)
+
+
+def with_device_network(text: str) -> str:
+    """The config with its "# device-network:" header line, added before
+    [Interface] in configs written before the line existed, and without the
+    "# server-address:" line it replaced. A comment: a device only needs it
+    re-sent to have it swept into a warped carrier (wireguard-tunnels)."""
+    text = re.sub(r"(?m)^# server-address:.*\n", "", text)
+    line = f"# device-network: {DEVICE_NET}"
+    if re.search(r"(?m)^# device-network:.*$", text):
+        return _set_line(r"(?m)^# device-network:.*$", line, text)
+    return re.sub(r"(?m)^\[Interface\]", line + "\n[Interface]", text, count=1)
 
 
 # --- sysctl and the systemd drop-in ---
