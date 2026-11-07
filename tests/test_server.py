@@ -9,11 +9,10 @@ import tarfile
 from pathlib import Path
 
 import pytest
-from conftest import FIXTURES, KEYS
+from conftest import FIXTURES, KEYS, temp_paths
 
 from wgt import backup, cli, host, ops, store
 from wgt import server as srv
-from wgt.const import Paths
 from wgt.errors import WgtError
 from wgt.host import Facts
 from wgt.system import FakeRunner, Out
@@ -116,10 +115,8 @@ def test_rollback_purge_undoes_a_fresh_setup(tmp_path, monkeypatch):
     wgcf = root / "bin" / "wgcf"
     wgcf.write_text("#!/bin/sh\n")
     wgcf.chmod(0o755)
-    paths = Paths(wg_dir=str(root / "wg"), backup_dir=str(root / "backups"), lock_file=str(tmp_path / "lock"),
-                  run_dir=str(root / "run"), systemd_dir=str(root / "systemd"), sbin_dir=str(root / "sbin"),
-                  sysctl_file=str(root / "99-wg.conf"), wgcf_bin=str(wgcf), hosts_file=str(root / "hosts"),
-                  cloud_cfg_dir=str(root / "cloud"))
+    paths = temp_paths(root, lock_file=tmp_path / "lock", wgcf_bin=wgcf, sysctl_file=root / "99-wg.conf",
+                       backup_dir=root / "backups")
     route = "default via 192.0.2.1 dev eth0 proto static"
     facts = Facts(kernel_ipv6=True, has_ipv6=False, hostname="test", routes4="", default_route=route)
     answers = dict(KEYS, **{"ip -4 route show default": (0, route + "\n")})

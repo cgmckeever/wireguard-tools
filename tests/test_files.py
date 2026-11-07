@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from pathlib import Path
 
 import pytest
+from conftest import temp_paths
 
 from wgt import store
 from wgt.const import Paths
@@ -16,7 +18,7 @@ from wgt.system import FakeRunner, Files, Out, is_copy_of
 @pytest.fixture
 def files(tmp_path):
     def make(dry_run=False):
-        paths = Paths(wg_dir=str(tmp_path / "wg"), backup_dir=str(tmp_path / "bak"))
+        paths = temp_paths(tmp_path)
         os.makedirs(paths.wg_dir, exist_ok=True)
         return Files(paths, FakeRunner(dry_run=dry_run, out=Out()), clock=iter(range(1, 10 ** 6)).__next__)
     return make
@@ -98,3 +100,11 @@ def test_read_text_keeps_bytes(tmp_path):
     p = tmp_path / "x"
     p.write_bytes(b"caf\xe9\r\n")
     assert store.read_text(str(p)).endswith("\r\n")
+
+
+def test_temp_paths_moves_every_path(tmp_path):
+    """A field added to Paths must not leave a test pointed at the real system."""
+    moved = temp_paths(tmp_path)
+    for f in dataclasses.fields(Paths):
+        assert getattr(moved, f.name).startswith(str(tmp_path)), f.name
+        assert getattr(moved, f.name) != f.default, f.name

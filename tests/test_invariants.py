@@ -16,11 +16,11 @@ import shutil
 import signal
 
 import pytest
-from conftest import FIXTURES
+from conftest import FIXTURES, temp_paths
 from fakehost import Died, Host, Kernel
 
 from wgt import checks, cli, devices, exits, host, ops, render, results, rules, server, store, system, units
-from wgt.const import ALL_WATCHDOGS, EXIT_WATCHDOG, Paths
+from wgt.const import ALL_WATCHDOGS, EXIT_WATCHDOG
 from wgt.errors import WgtError
 from wgt.host import Facts
 
@@ -35,11 +35,7 @@ class World:
         self.tmp = str(tmp)
         wg = os.path.join(self.tmp, "wg")
         shutil.copytree(os.path.join(FIXTURES, case, "wg"), wg)
-        self.paths = Paths(wg_dir=wg, backup_dir=f"{self.tmp}/bak", lock_file=f"{self.tmp}/lock",
-                           run_dir=f"{self.tmp}/run", hosts_file=f"{self.tmp}/hosts",
-                           cloud_cfg_dir=f"{self.tmp}/cloud", systemd_dir=f"{self.tmp}/systemd",
-                           sbin_dir=f"{self.tmp}/sbin", sysctl_file=f"{self.tmp}/sysctl",
-                           wgcf_bin=f"{self.tmp}/wgcf")
+        self.paths = temp_paths(self.tmp)
         os.makedirs(self.paths.run_dir)
         with open(self.paths.server_pub, "w") as f:
             f.write("SERVERPUB=\n")
@@ -324,7 +320,8 @@ def _track_world(monkeypatch):
 
 # --- dry run ---
 
-def tree(top):
+def file_contents(top):
+    """Every file under <top> (the lock aside), path -> bytes."""
     found = {}
     for d, _, files in os.walk(top):
         for f in files:
@@ -344,9 +341,9 @@ def tree(top):
                                   ["watchdog", "devices"]], ids=" ".join)
 def test_a_dry_run_changes_nothing(world, argv):
     """Files (the run dir included), and the running state."""
-    before, running = tree(world.tmp), world.kernel.view(chain_contents=True)
+    before, running = file_contents(world.tmp), world.kernel.view(chain_contents=True)
     world.run([*argv, "--dry-run"])
-    assert tree(world.tmp) == before
+    assert file_contents(world.tmp) == before
     assert world.kernel.view(chain_contents=True) == running
 
 
@@ -685,11 +682,11 @@ def test_a_bad_name_deletes_nothing(world, monkeypatch, command, word):
     def asked(ctx, question, default_yes=False):
         raise AssertionError(f"reached a question: {question}")
     monkeypatch.setattr(ops, "confirm", asked)
-    before = tree(world.paths.wg_dir)
+    before = file_contents(world.paths.wg_dir)
     extra = ["new-name"] if command == ["device", "rename"] else []
     with pytest.raises(WgtError):
         world.run([*command, word, *extra])
-    assert tree(world.paths.wg_dir) == before
+    assert file_contents(world.paths.wg_dir) == before
 
 
 def test_setup_restores_group_access_when_it_restarts_wg0(world):

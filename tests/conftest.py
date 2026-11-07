@@ -3,7 +3,9 @@ a command would."""
 
 from __future__ import annotations
 
+import dataclasses
 import os
+import re
 import shutil
 import sys
 
@@ -21,6 +23,14 @@ from wgt.system import FakeRunner, Out  # noqa: E402
 FIXTURES = os.path.join(ROOT, "tests", "fixtures")
 GOLDEN = os.path.join(ROOT, "tests", "golden")
 CASES = sorted(os.listdir(FIXTURES))
+
+
+def temp_paths(root, **chosen) -> Paths:
+    """Paths with every field under <root> (wgcf_bin at <root>/wgcf, run_dir at <root>/run,
+    ... unless <chosen>), so a field added to Paths can't send a test to the real system."""
+    def where(name):
+        return str(chosen.get(name, os.path.join(str(root), re.sub(r"_(dir|file|bin)$", "", name))))
+    return Paths(**{f.name: where(f.name) for f in dataclasses.fields(Paths)})
 
 
 class Server:
@@ -90,11 +100,7 @@ def make_ctx(tmp_path):
             (wg / "wg0.conf").write_text("# Managed by wireguard-tools\n")
         run = tmp_path / "run"
         run.mkdir(exist_ok=True)
-        paths = Paths(wg_dir=str(wg), backup_dir=str(tmp_path / "bak"), lock_file=str(tmp_path / "lock"),
-                      run_dir=str(run), hosts_file=str(tmp_path / "hosts"),
-                      cloud_cfg_dir=str(tmp_path / "cloud.cfg.d"), systemd_dir=str(tmp_path / "systemd"),
-                      sbin_dir=str(tmp_path / "sbin"), sysctl_file=str(tmp_path / "99-wg.conf"),
-                      wgcf_bin=str(tmp_path / "wgcf"))
+        paths = temp_paths(tmp_path)
         base = {} if bare else KEYS
         runner = FakeRunner(dict(base, **(answers or {})), out=Out())
         facts = Facts(kernel_ipv6=True, has_ipv6=has_ipv6, hostname="boba", routes4="", default_route="")
