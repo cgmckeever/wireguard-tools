@@ -655,3 +655,43 @@ def test_client_add_with_a_group_applies_at_once(make_ctx):
     clients.cmd_add(ctx, ["newone"])
     ip = ctx.snap.client("newone").ip
     assert f"iptables -t filter -I WGT-SERVER -s {ip}/32 -j ACCEPT" in ctx.runner.calls
+
+
+def _in_server_group(make_ctx, **answers):
+    """mbp-1 in the server group, with its allow rules showing in the chain."""
+    ctx = _numbered(make_ctx(), "mbp-1")
+    devices.cmd_group(ctx, ["mbp-1", "server"])
+    rules_now = [f"-A WGT-SERVER -s {c.ip}/32 -j ACCEPT" for c in ctx.snap.device_clients("mbp-1")]
+    ctx.runner.answers.update(CHAINS, **_server_chain(*rules_now), **answers)
+    ctx.runner.calls.clear()
+    return ctx
+
+
+def test_removing_a_config_takes_its_access_at_once(make_ctx):
+    ctx = _in_server_group(make_ctx)
+    c = ctx.snap.client("warp.par-fr.mbp-1")
+    clients.cmd_remove(ctx, [c.name])
+    assert f"iptables -t filter -D WGT-SERVER -s {c.ip}/32 -j ACCEPT" in ctx.runner.calls
+
+
+def test_disabling_and_enabling_a_config_changes_its_access_at_once(make_ctx):
+    ctx = _in_server_group(make_ctx)
+    c = ctx.snap.client("warp.par-fr.mbp-1")
+    clients.cmd_disable(ctx, [c.name])
+    assert f"iptables -t filter -D WGT-SERVER -s {c.ip}/32 -j ACCEPT" in ctx.runner.calls
+    ctx.runner.answers.update(_server_chain())
+    ctx.runner.calls.clear()
+    clients.cmd_enable(ctx, [c.name])
+    assert f"iptables -t filter -I WGT-SERVER -s {c.ip}/32 -j ACCEPT" in ctx.runner.calls
+
+
+def test_moving_a_config_to_another_device_changes_its_access_at_once(make_ctx):
+    ctx = _in_server_group(make_ctx)
+    c = ctx.snap.client("warp.par-fr.mbp-1")
+    conf = Path(clients.client_conf(ctx, c.name))
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    conf.write_text("[Interface]\n")
+    Path(ctx.paths.psk(c.name)).parent.mkdir(parents=True, exist_ok=True)
+    Path(ctx.paths.psk(c.name)).write_text("PSK\n")
+    clients.cmd_rename(ctx, [c.name, "warp.par-fr.other"])
+    assert f"iptables -t filter -D WGT-SERVER -s {c.ip}/32 -j ACCEPT" in ctx.runner.calls

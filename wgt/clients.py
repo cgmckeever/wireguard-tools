@@ -406,7 +406,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ops.remove_client(ctx, name)
     if ctx.snap.is_disabled(name):
         ops.set_disabled(ctx, name, False)
-    # After rollback no mode is saved; the next setup rebuilds wg0.conf from clients.db.
+    # Not set up (after rollback): the next setup rebuilds wg0.conf from clients.db.
     if ops.is_set_up(ctx):
         ops.write_wg_conf(ctx)
     else:
@@ -421,6 +421,9 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ctx.files.forget(client_conf(ctx, name))
     ctx.files.forget(ctx.paths.psk(name))
     devices.drop_if_unused(ctx, store.device_of(name))
+    # Its address can be reused: a new config there mustn't inherit what this one was allowed.
+    if ops.is_set_up(ctx):
+        devices.apply_now(ctx)
 
 
 def cmd_rename(ctx: Ctx, words: List[str]) -> None:
@@ -440,6 +443,7 @@ def cmd_rename(ctx: Ctx, words: List[str]) -> None:
     old_device, new_device = store.device_of(old), store.device_of(new)
     if old_device != new_device:
         devices.config_renamed(ctx, old_device, new_device)
+        devices.apply_now(ctx)   # the config now has the other device's number and groups
 
 
 def rename_config(ctx: Ctx, old: str, new: str) -> None:
@@ -513,8 +517,10 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     elif disable:
         ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", c.pub, "remove"])
         ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other configs unaffected)")
+        devices.apply_now(ctx)
     else:
         ops.add_live_peer(ctx, name, c.pub, c.ip)
+        devices.apply_now(ctx)
 
 
 def cmd_disable(ctx: Ctx, words: List[str]) -> None:
