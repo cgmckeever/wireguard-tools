@@ -137,12 +137,12 @@ def _adopt(name: str, saved: str, target: str) -> None:
 
 
 def install_checkout(target: str, branch: str) -> None:
-    """git (if missing) and a checkout of <branch> at remote.DEF_DIR."""
+    """git and python3 (if missing) and a checkout of <branch> at remote.DEF_DIR."""
     url, d = remote.repo_url(), remote.DEF_DIR
-    out.log(f"Installing git and cloning {url} ({branch}) to {d}")
+    out.log(f"Installing git and python3, and cloning {url} ({branch}) to {d}")
     rc, _ = remote.ssh(target, f"""set -e
         export DEBIAN_FRONTEND=noninteractive
-        command -v git >/dev/null || {{ apt-get update -qq && apt-get install -y -qq git >/dev/null; }}
+        command -v git >/dev/null && command -v python3 >/dev/null || {{ apt-get update -qq && apt-get install -y -qq git python3 >/dev/null; }}
         if [ -d {remote.DEF_DIR}/.git ]; then
             git -C {d} fetch -q && git -C {d} checkout -q {q(branch)} && git -C {d} pull --ff-only -q
         else git clone -q -b {q(branch)} {q(url)} {d}; fi

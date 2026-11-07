@@ -213,7 +213,7 @@ def cmd_list(quick: bool = False) -> None:
             rc, o = ssh(s.target, f"cd {dq} && b=$(git rev-parse --abbrev-ref HEAD) && c=$(git rev-parse --short HEAD) "
                                   "&& printf '%s@%s' \"$b\" \"$c\"", batch=True, capture=True)
             probe = o.strip() if rc == 0 else "unreachable"
-        note = f"jumps staged: {jumps}" if jumps else ""
+        note = f"jump files staged: {jumps}" if jumps else ""
         print(f"  {i:>2}) {s.name:<10} {s.target:<24} {probe:<22} {note}".rstrip())
     print("")
 

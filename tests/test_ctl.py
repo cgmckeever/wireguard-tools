@@ -525,4 +525,4 @@ def test_list_shows_staged_jumps_by_name(local, monkeypatch, capsys):
     for name in ("a.conf", "a-b.conf", "notes.txt"):
         (local / "exits" / "boba" / name).write_text("")
     remote.cmd_list(quick=True)
-    assert "jumps staged: a,a-b" in capsys.readouterr().out
+    assert "jump files staged: a,a-b" in capsys.readouterr().out
