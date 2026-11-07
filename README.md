@@ -475,7 +475,7 @@ wgt log [N]           # its changes, the watchdogs and the tunnels: last lines, 
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
 wgt rollback          # stop everything, remove all rules, restore original files (a hostname setup changed stays)
-wgt rollback --purge  # ...and delete keys, configs, WARP accounts and jumps
+wgt rollback --purge  # ...and delete keys, configs, WARP accounts and jumps (backup archives stay)
 ```
 
 `test` checks WARP (up, handshaking, and actually used by `warp.` configs but

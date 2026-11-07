@@ -571,6 +571,17 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     asked = ask_subnet(ctx)
     ensure_subnet6(ctx)
     review_settings(ctx, asked)
+    # Confirmed, so finish whatever happens to the terminal: the session may be running
+    # through wg0, and dying between its stop and its start would leave it down.
+    hangup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        _apply_setup(ctx, old_name)
+    finally:
+        signal.signal(signal.SIGHUP, hangup)
+
+
+def _apply_setup(ctx: Ctx, old_name: str) -> None:
+    """Everything after the settings are confirmed."""
     # Refuse to take over a wg0.conf we didn't create, before saving or touching anything.
     ops.ensure_managed(ctx, ctx.cfg.wg_conf)
     refuse_interface_change(ctx)
@@ -593,11 +604,11 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     renumber_clients(ctx)
     save_config(ctx)
     sync_client_configs(ctx, old_name)
-    stopped = stop_before_rewrite(ctx)
-    # Stopped, a lost terminal must not stop us: the session may be running through wg0.
-    hangup = signal.signal(signal.SIGHUP, signal.SIG_IGN) if stopped and not ctx.runner.dry_run else None
+    was_up = ops.wg_up(ctx)
+    stopped = False
     changed = keys_changed
     try:
+        stopped = stop_before_rewrite(ctx)
         changed = ops.write_wg_conf(ctx) or keys_changed
         units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
     finally:
@@ -605,7 +616,7 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
             ctx.out.info(f"[dry-run] would then start wg-quick@{ctx.cfg.WG_IF} with the new config")
         else:
             try:
-                start_unit(ctx, ctx.cfg.WG_IF, changed, ask=not stopped)
+                start_unit(ctx, ctx.cfg.WG_IF, changed, ask=not was_up)
             except BaseException:
                 # Only if wg0 didn't come up: answering no to a restart leaves a
                 # running wg0 (and its rules) alone.
@@ -613,9 +624,6 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
                     ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
                     run_down_hooks(ctx)
                 raise
-            finally:
-                if hangup is not None:
-                    signal.signal(signal.SIGHUP, hangup)
     if not stopped and not changed and ops.wg_up(ctx):
         restart_if_drifted(ctx)
     guard_default_route(ctx)

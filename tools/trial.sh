@@ -86,6 +86,16 @@ sleep 20
 DESC="isolated again"; ok bash -c "! iptables -S WGT-SERVER | grep -- '-s ' | grep -q ACCEPT"
 DESC="wgt test after groups"; ok W test >/dev/null 2>&1
 
+echo "=== a lost terminal while setup stops wg0"
+bin/wgt setup --port 51821 --yes </dev/null >/root/trial-hangup.log 2>&1 &
+until ! systemctl is-active -q wg-quick@wg0 || ! kill -0 $! 2>/dev/null; do sleep 0.02; done
+pkill -HUP -f 'bin/wgt setup --port 51821'
+wait $!; rc=$?
+DESC="setup survives the hangup"; ok test "$rc" = 0
+DESC="wg0 is back on the new port"; ok test "$(wg show wg0 listen-port)" = 51821
+DESC="wgt test after the hangup"; ok W test >/dev/null 2>&1
+DESC="back to the old port"; ok W setup --port 51820 --yes >/dev/null 2>&1
+
 echo "=== backup, purge, restore"
 ip netns del dev
 keys_before=$(md5sum /etc/wireguard/server.key /etc/wireguard/clients/*.conf | md5sum)
@@ -94,6 +104,7 @@ archive=$(ls -t /var/backups/wireguard-tools/wireguard-tools.*.tar.gz | head -1)
 cp "$archive" /root/trial-archive.tgz
 W rollback --purge --yes >/dev/null 2>&1
 DESC="purge leaves no wg0"; ok bash -c '! ip link show wg0 >/dev/null 2>&1'
+rm -f "$archive"   # purge keeps archives (they're the way back): this one is the trial's
 DESC="restore succeeds"; ok W restore /root/trial-archive.tgz --yes >/root/trial-restore.log 2>&1
 DESC="same keys after restore"; ok test "$keys_before" = "$(md5sum /etc/wireguard/server.key /etc/wireguard/clients/*.conf | md5sum)"
 DESC="jump back"; ok bash -c 'bin/wgt jump list | grep -q par-fr'

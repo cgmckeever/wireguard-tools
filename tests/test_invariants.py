@@ -13,6 +13,7 @@ import functools
 import os
 import re
 import shutil
+import signal
 
 import pytest
 from conftest import FIXTURES
@@ -368,6 +369,46 @@ def test_setup_restarting_wg0_asks_once_before_it_stops(world, monkeypatch):
     world.run(["setup"])
     assert "wg0" in world.kernel.links
     assert all(up for q, up in asked if "wg0" in q), asked
+
+
+def _needing_a_restart(world):
+    conf = world.paths.wg("wg0.conf")
+    with open(conf) as f:
+        text = f.read()
+    with open(conf, "w") as f:
+        f.write(text.replace("ListenPort", "MTU = 1\nListenPort"))
+
+
+def test_a_lost_terminal_cant_stop_setup_while_wg0_stops(world, monkeypatch):
+    """The stop takes a second on a real server. Found live: a hangup in that second
+    killed setup before anything could bring wg0 back."""
+    _needing_a_restart(world)
+    during, real = [], Host._exec
+
+    def watching(self, args, check, input=None, capture=False):
+        if list(args[:2]) == ["systemctl", "stop"] and "wg-quick@wg0" in args:
+            during.append(signal.getsignal(signal.SIGHUP))
+        return real(self, args, check, input, capture)
+    monkeypatch.setattr(Host, "_exec", watching)
+    before = signal.getsignal(signal.SIGHUP)
+    world.run(["setup"])
+    assert during == [signal.SIG_IGN]
+    assert signal.getsignal(signal.SIGHUP) == before
+
+
+def test_setup_brings_wg0_back_if_stopping_it_fails_half_way(world, monkeypatch):
+    _needing_a_restart(world)
+    real = Host._exec
+
+    def half_stop(self, args, check, input=None, capture=False):
+        if list(args[:2]) == ["systemctl", "stop"] and "wg-quick@wg0" in args:
+            real(self, args, check, input, capture)
+            raise WgtError("systemctl stop failed")
+        return real(self, args, check, input, capture)
+    monkeypatch.setattr(Host, "_exec", half_stop)
+    with pytest.raises(WgtError):
+        world.run(["setup"])
+    assert "wg0" in world.kernel.links
 
 
 def test_setup_brings_wg0_back_if_the_firewall_step_fails(world, monkeypatch):
