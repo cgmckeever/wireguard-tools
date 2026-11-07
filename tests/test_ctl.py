@@ -409,7 +409,7 @@ def test_move_failed_rollback_in_place_says_how_to_recover(mover, monkeypatch):
 def test_move_enter_keeps_the_old_machine(mover, monkeypatch):
     calls, _ = mover
     monkeypatch.setattr(ui, "have_tty", lambda: True)
-    monkeypatch.setattr(ui, "ask", lambda prompt: "dengar" if "Type" in prompt else "")
+    monkeypatch.setattr(ui, "ask", lambda prompt, gone="": "dengar" if "Type" in prompt else "")
     assert rebuild.do_move(remote.find("dengar"), ["--to", "9.9.9.9"]) == 0
     assert not any(c == "teardown" for _, c in calls)
 
@@ -494,3 +494,12 @@ def test_the_scripts_sent_to_servers_are_valid_bash(local, monkeypatch):
     for script in sent:
         checked = subprocess.run(["bash", "-n", "-c", script], capture_output=True, text=True)
         assert checked.returncode == 0, checked.stderr + script
+
+
+def test_an_unreachable_server_isnt_one_with_no_jumps(monkeypatch):
+    from wgt.ctl import jumpfiles, remote
+    from wgt.errors import WgtError
+    monkeypatch.setattr(remote, "ssh", lambda *a, **k: (255, ""))
+    with pytest.raises(WgtError, match="can't reach"):
+        jumpfiles.remote_exit_codes(remote.Server("boba", "root@boba"))
+

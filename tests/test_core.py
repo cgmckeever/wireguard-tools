@@ -305,3 +305,26 @@ def test_values_sent_to_devices_are_checked(key, value):
 ])
 def test_values_sent_to_devices_can_be_normal(key, value):
     resolve({key: value}, {}, {"WG_SUBNET": "10.1.1.0/24"}).finalize(kernel_ipv6=False)
+
+
+def test_a_terminal_gone_at_a_question_is_no_even_when_enter_means_yes(monkeypatch):
+    """Otherwise a lost session renames the host, or brings an old server back."""
+    import builtins
+
+    from wgt import ui
+
+    def gone(*a, **k):
+        raise OSError("no terminal")
+    monkeypatch.setattr(builtins, "open", gone)
+    assert ui.yes("Rename?", default=True) is False
+
+
+@pytest.mark.parametrize("line, want", [("", False), ("\n", True), ("y\n", True), ("n\n", False)])
+def test_eof_isnt_enter(monkeypatch, line, want):
+    import builtins
+    import io
+
+    from wgt import ui
+    monkeypatch.setattr(builtins, "open", lambda path, mode="r": io.StringIO(line if mode == "r" else ""))
+    assert ui.yes("Rename?", default=True) is want
+

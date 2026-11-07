@@ -16,7 +16,7 @@ import shutil
 import subprocess
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from wgt.errors import WgtError
+from wgt.errors import CommandFailed
 from wgt.system import FakeRunner, Out
 
 BUILTIN = {"INPUT", "FORWARD", "OUTPUT", "PREROUTING", "POSTROUTING"}
@@ -101,7 +101,7 @@ class Host(FakeRunner):
         self.calls.append(" ".join(args))
         rc, stdout = self._answer(list(args), input)
         if check and rc != 0:
-            raise WgtError(f"command failed (exit {rc}): {' '.join(args)}")
+            raise CommandFailed(f"command failed (exit {rc}): {' '.join(args)}")
         return rc, stdout
 
     def _answer(self, a: List[str], input) -> Tuple[int, str]:

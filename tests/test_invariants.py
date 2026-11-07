@@ -19,7 +19,7 @@ import pytest
 from conftest import FIXTURES
 from fakehost import Died, Host, Kernel
 
-from wgt import checks, cli, devices, host, ops, render, results, rules, store, system, units
+from wgt import checks, cli, devices, exits, host, ops, render, results, rules, server, store, system, units
 from wgt.const import ALL_WATCHDOGS, EXIT_WATCHDOG, Paths
 from wgt.errors import WgtError
 from wgt.host import Facts
@@ -672,3 +672,149 @@ def test_wgt_test_fails_when_a_firewall_rule_is_missing(world):
 def test_status_and_log_cover_every_watchdog(world, capsys):
     world.run(["setup"])
     assert set(world.run(["status"], fn=checks.watchdogs)) == set(ALL_WATCHDOGS)
+
+
+# --- found by a review: what a real server's timing or a bad word can do ---
+
+@pytest.mark.parametrize("word", ["..", ".", "", "../..", "/etc", "par-fr/../.."])
+@pytest.mark.parametrize("command", [["jump", "remove"], ["exit", "remove"], ["client", "remove"], ["client", "rotate"],
+                                     ["client", "disable"], ["client", "enable"], ["device", "rename"],
+                                     ["warp", "rotate"]])
+def test_a_bad_name_deletes_nothing(world, monkeypatch, command, word):
+    """`jump remove ..` emptied /etc/wireguard without asking: the word named a directory."""
+    def asked(ctx, question, default_yes=False):
+        raise AssertionError(f"reached a question: {question}")
+    monkeypatch.setattr(ops, "confirm", asked)
+    before = tree(world.paths.wg_dir)
+    extra = ["new-name"] if command == ["device", "rename"] else []
+    with pytest.raises(WgtError):
+        world.run([*command, word, *extra])
+    assert tree(world.paths.wg_dir) == before
+
+
+def test_setup_restores_group_access_when_it_restarts_wg0(world):
+    """PostUp makes the chains empty; `wgt test` right after must not need the watchdog."""
+    world.run(["device", "group", "mbp-1", "server"])
+    world.run(["setup", "--port", "51999"])
+    assert world.run(["test"], fn=devices.access_wrong) == []
+
+
+def _postup_lines(world):
+    return [line[len("PostUp = "):].replace("%i", "wg0") for line in world.read_conf().splitlines()
+            if line.startswith("PostUp = ")]
+
+
+def test_a_watchdog_during_postup_doesnt_bury_allow_rules(world):
+    """Nothing locks a boot's or a manual restart's PostUp. The refusal goes in late, above
+    anything already there, and the allow rules below it would do nothing, for good."""
+    world.run(["device", "group", "mbp-1", "server"])
+    post = _postup_lines(world)
+    kernel = Kernel()
+    host = Host(kernel, world.paths.wg_dir)
+    kernel.links.add("wg0")
+    chains_made = max(i for i, line in enumerate(post) if " -N " in line)
+    for line in post[:chains_made + 1]:
+        host.shell_line(line)
+    world.kernel = kernel
+    world.run(["watchdog"], fn=devices.sync)
+    assert not [r for r in kernel.chains[("iptables", "filter", "WGT-SERVER")] if r.startswith("-s ")]
+    for line in post[chains_made + 1:]:
+        host.shell_line(line)
+    world.run(["watchdog"], fn=devices.sync)
+    rules_now = kernel.chains[("iptables", "filter", "WGT-SERVER")]
+    assert rules_now.index(next(r for r in rules_now if r.startswith("-s "))) \
+        < rules_now.index(next(r for r in rules_now if "-j REJECT" in r))
+    assert world.run(["test"], fn=devices.access_wrong) == []
+
+
+def test_allow_rules_already_below_the_refusal_are_noticed_and_moved(world):
+    world.run(["device", "group", "mbp-1", "server"])
+    chain = world.kernel.chains[("iptables", "filter", "WGT-SERVER")]
+    allowed = [r for r in chain if r.startswith("-s ")]
+    assert allowed
+    chain[:] = [r for r in chain if not r.startswith("-s ")] + allowed
+    assert any("below its refusal" in w for w in world.run(["test"], fn=devices.access_wrong))
+    world.run(["watchdog"], fn=devices.sync)
+    assert world.run(["test"], fn=devices.access_wrong) == []
+    assert chain.index(allowed[0]) < next(i for i, r in enumerate(chain) if "-j REJECT" in r)
+
+
+@pytest.mark.parametrize("failing", ["enable", "restart"])
+def test_setup_still_finishes_if_warps_unit_wont_start(world, monkeypatch, failing):
+    """The README's promise: plain configs work without WARP."""
+    real = Host._answer
+
+    def answer(self, args, input):
+        if list(args[:2]) == ["systemctl", failing] and "wg-quick@warp" in args:
+            return 1, ""
+        return real(self, args, input)
+    monkeypatch.setattr(Host, "_answer", answer)
+    if failing == "enable":
+        world.kernel.links.discard("warp")
+    world.run(["setup"])
+    assert "wg0" in world.kernel.links
+    assert store.state_get(store.read_text(world.paths.state), "SETUP_DONE") == "1"
+
+
+def test_answering_no_about_warp_still_stops_setup(world, monkeypatch):
+    world.kernel.links.discard("warp")
+
+    def no(ctx, question, default_yes=False):
+        if "warp" in question:
+            raise WgtError("aborted")
+    monkeypatch.setattr(ops, "confirm", no)
+    with pytest.raises(WgtError):
+        world.run(["setup"])
+
+
+def test_setup_keeps_going_if_a_jump_wont_restart(world, monkeypatch):
+    real = Host._answer
+
+    def answer(self, args, input):
+        if list(args[:2]) == ["systemctl", "restart"] and any("par-fr" in a for a in args):
+            return 1, ""
+        return real(self, args, input)
+    monkeypatch.setattr(Host, "_answer", answer)
+    monkeypatch.setattr(exits, "any_up", lambda ctx, e: True)
+    world.run(["setup"])
+    assert store.state_get(store.read_text(world.paths.state), "SETUP_DONE") == "1"
+    assert os.path.exists(world.paths.unit_file(f"{EXIT_WATCHDOG}.timer"))
+
+
+def test_removing_a_jump_removes_its_rotated_account_copies(world):
+    world.free_the_jump("par-fr")
+    world.run(["warp", "rotate", "par-fr"])
+    world.run(["jump", "remove", "par-fr"])
+    left = [os.path.join(d, f) for d, _, names in os.walk(world.paths.backup_dir) for f in names]
+    assert not [path for path in left if "par-fr" in path], left
+
+
+def test_a_restored_subnet_is_checked_against_this_hosts_routes(world):
+    """Saved in the archive, so it isn't new to the settings, but it is to the machine."""
+    def check(ctx):
+        ctx.facts.routes4 = f"{ctx.cfg.WG_SUBNET} dev ens4 proto kernel scope link src 10.0.0.9\n"
+        server.refuse_routed_subnet(ctx)
+    world.run(["setup"], fn=check)      # wg0 is up: the route is its own business
+    Host(world.kernel, world.paths.wg_dir).wg0_down(world.read_conf())
+    with pytest.raises(WgtError, match="already routes"):
+        world.run(["setup"], fn=check)
+
+
+@pytest.mark.parametrize("sig", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP])
+def test_nothing_interrupts_setup_between_wg0s_stop_and_start(world, monkeypatch, sig):
+    conf = world.paths.wg("wg0.conf")
+    with open(conf) as f:
+        text = f.read()
+    with open(conf, "w") as f:
+        f.write(text.replace("ListenPort", "MTU = 1\nListenPort"))
+    during, real = [], Host._exec
+
+    def watching(self, args, check, input=None, capture=False):
+        if list(args[:2]) == ["systemctl", "stop"] and "wg-quick@wg0" in args:
+            during.append(signal.getsignal(sig))
+        return real(self, args, check, input, capture)
+    monkeypatch.setattr(Host, "_exec", watching)
+    before = signal.getsignal(sig)
+    world.run(["setup"])
+    assert during == [signal.SIG_IGN]
+    assert signal.getsignal(sig) == before

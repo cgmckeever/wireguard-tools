@@ -59,7 +59,7 @@ def test_comment_only_change_needs_no_restart(make_ctx):
     ops.write_wg_conf(ctx)
     text = Path(ctx.cfg.wg_conf).read_text()
     Path(ctx.cfg.wg_conf).write_text(text.replace("(use wgt client)", "(an edited comment)"))
-    assert srv.stop_before_rewrite(ctx) is False            # wg0 is up, but only a comment differs
+    assert srv.restart_needed(ctx) is False            # wg0 is up, but only a comment differs
     assert ops.write_wg_conf(ctx) is False                  # rewritten, settings unchanged
     assert "(use wgt client)" in Path(ctx.cfg.wg_conf).read_text()
     assert not any("systemctl stop" in c for c in ctx.runner.changes())
@@ -511,3 +511,17 @@ def test_a_terminal_that_goes_away_doesnt_stop_a_command():
     out = Out(Gone(), Gone())
     out.info("still here")
     out.error("still here")
+
+
+@pytest.mark.parametrize("endpoint, is_ip", [("1.2.3.4", True), ("[2001:db8::1]", True), ("2001:db8::1", True),
+                                             ("cafe.de", False), ("dead.beef", False), ("vpn.example.com", False)])
+def test_restore_only_forgets_an_endpoint_that_is_an_address(endpoint, is_ip):
+    from wgt import backup
+    assert backup._is_ip(endpoint) is is_ip
+
+
+def test_a_vlans_sysctl_name_keeps_its_dot_out_of_the_path():
+    from wgt import render
+    assert render.accept_ra_key("eth0") == "net.ipv6.conf.eth0.accept_ra"
+    assert render.accept_ra_key("eth0.100") == "net.ipv6.conf.eth0/100.accept_ra"
+

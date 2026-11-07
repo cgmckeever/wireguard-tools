@@ -18,7 +18,7 @@ from typing import Callable, Dict, List, Optional, Sequence, TextIO, Tuple
 
 from . import store
 from .const import KEEP_CHANGES, LOG_TAG, Paths
-from .errors import WgtError
+from .errors import CommandFailed, WgtError
 
 _SECRET = re.compile(r"^(\s*(PrivateKey|PresharedKey)\s*=\s*).*$", re.M)
 
@@ -210,7 +210,8 @@ class Runner:
             raise WgtError(f"cannot run {args[0]}: {e.strerror}") from None
         if check and p.returncode != 0:
             why = (p.stderr or "").strip().splitlines()[-1:] if capture else []
-            raise WgtError(f"command failed (exit {p.returncode}): {' '.join(args)}" + (f": {why[0]}" if why else ""))
+            raise CommandFailed(f"command failed (exit {p.returncode}): {' '.join(args)}"
+                                + (f": {why[0]}" if why else ""))
         return p.returncode, p.stdout or ""
 
     # --- steps ---
@@ -248,7 +249,7 @@ class FakeRunner(Runner):
         if rc is None:
             rc, stdout = 0, ""
         if check and rc != 0:
-            raise WgtError(f"command failed (exit {rc}): {cmd}")
+            raise CommandFailed(f"command failed (exit {rc}): {cmd}")
         return rc, stdout or ""
 
     def run_logged(self, args: Sequence[str], log: str, cwd: str, append: bool = False) -> bool:

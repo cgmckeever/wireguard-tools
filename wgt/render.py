@@ -221,6 +221,11 @@ def render_client_conf(cfg: Config, snap: Snapshot, name: str, ip: str, private_
 
 # --- sysctl and the systemd drop-in ---
 
+def accept_ra_key(pub_if: str) -> str:
+    """Its sysctl name (a VLAN's dot would read as a separator: eth0/100)."""
+    return f"net.ipv6.conf.{pub_if.replace('.', '/')}.accept_ra"
+
+
 def sysctl_lines(cfg: Config, pub_if: str, has_ipv6: bool, accept_ra: Optional[str]) -> List[str]:
     """The forwarding sysctls. With IPv6 forwarding on, a host that gets its own
     IPv6 from router advertisements would stop accepting them (and lose its
@@ -230,7 +235,7 @@ def sysctl_lines(cfg: Config, pub_if: str, has_ipv6: bool, accept_ra: Optional[s
         return out
     out.append("net.ipv6.conf.all.forwarding = 1")
     if has_ipv6 and accept_ra != "0":   # unreadable counts as "accepts", as before
-        out.append(f"net.ipv6.conf.{pub_if}.accept_ra = 2")
+        out.append(f"{accept_ra_key(pub_if)} = 2")
     return out
 
 

@@ -31,17 +31,18 @@ def have_tty() -> bool:
         return False
 
 
-def ask(prompt: str) -> str:
-    """Read one line from the terminal ("" on EOF or no terminal). Opened
+def ask(prompt: str, gone: str = "") -> str:
+    """Read one line from the terminal (<gone> on EOF or no terminal). Opened
     separately for writing and reading: Python can't open /dev/tty "r+" in
     text mode (it isn't seekable), which used to make every prompt answer ""."""
     try:
         with open("/dev/tty", "w") as out, open("/dev/tty") as inp:
             out.write(prompt)
             out.flush()
-            return inp.readline().strip()
+            line = inp.readline()
+            return line.strip() if line else gone
     except OSError:
-        return ""
+        return gone
 
 
 def say(text: str) -> None:
@@ -54,8 +55,9 @@ def say(text: str) -> None:
 
 
 def yes(question: str, default: bool) -> bool:
-    """Ask a yes/no question ("    question [Y/n] "); Enter takes <default>."""
-    reply = ask(f"    {question} {'[Y/n]' if default else '[y/N]'} ").lower()
+    """Ask a yes/no question ("    question [Y/n] "); Enter takes <default>.
+    A terminal that went away (or Ctrl-D) isn't Enter: that's no."""
+    reply = ask(f"    {question} {'[Y/n]' if default else '[y/N]'} ", gone="n").lower()
     return default if not reply else reply.startswith("y")
 
 

@@ -571,13 +571,15 @@ def test_a_dry_run_sync_changes_no_firewall_rule(make_ctx):
 
 # --- group and number changes reach the firewall at once ---
 
-CHAINS = {"iptables -t filter -S WGT-PEERS": (0, "-N WGT-PEERS\n"),
+REFUSAL = "-j REJECT --reject-with icmp-port-unreachable"
+CHAINS = {"iptables -t filter -S WGT-PEERS": (0, f"-N WGT-PEERS\n-A WGT-PEERS {REFUSAL}\n"),
           "iptables -t nat -S WGT-DEVICES": (0, "-N WGT-DEVICES\n"),
           "iptables -t nat -S WGT-DEVICE-SRC": (0, "-N WGT-DEVICE-SRC\n")}
 
 
 def _server_chain(*rules_in_it):
-    return {"iptables -t filter -S WGT-SERVER": (0, "".join(f"{x}\n" for x in ("-N WGT-SERVER", *rules_in_it)))}
+    lines = ("-N WGT-SERVER", *rules_in_it, f"-A WGT-SERVER {REFUSAL}")
+    return {"iptables -t filter -S WGT-SERVER": (0, "".join(f"{x}\n" for x in lines))}
 
 
 def _numbered(ctx, device="tv", number=9):

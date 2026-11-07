@@ -4,6 +4,7 @@ jumps and settings, and setting a new server up from it."""
 from __future__ import annotations
 
 import glob
+import ipaddress
 import os
 import re
 import tarfile
@@ -69,6 +70,15 @@ def rebuild_backup_map(ctx: Ctx, keep_map: Optional[str], members: List[str]) ->
                 and name != ctx.paths.backup_map and os.path.isfile(name) and not store.backup_orig(backup_map, name):
             backup_map += f"{name}\tNEW\n"
     write_private(ctx.paths.backup_map, backup_map)
+
+
+def _is_ip(endpoint: str) -> bool:
+    """The old server's own address, not a hostname that happens to look like hex."""
+    try:
+        ipaddress.ip_address(endpoint.strip("[]"))
+        return True
+    except ValueError:
+        return False
 
 
 def prune_archives(ctx: Ctx, dest_dir: str, short_host: str) -> None:
@@ -150,7 +160,7 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     # Nor is this server set up until the setup below finishes.
     for k in HOST_STATE_KEYS + SET_UP_KEYS:
         ops.state_unset(ctx, k)
-    if re.match(r"^\[?[0-9a-fA-F:.]+\]?$", store.state_get(ctx.snap.state, "ENDPOINT")):
+    if _is_ip(store.state_get(ctx.snap.state, "ENDPOINT")):
         ops.state_unset(ctx, "ENDPOINT")
     rebuild_backup_map(ctx, keep_map, members)
     ctx.out.info("restored; configs: " + " ".join(c.name for c in store.load(ctx.paths).clients))

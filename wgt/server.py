@@ -17,7 +17,7 @@ import signal
 import time
 from typing import TYPE_CHECKING, List, Optional
 
-from . import checks, exits, host, live, net, ops, render, results, rules, store, ui, units, warp
+from . import checks, devices, exits, host, live, net, ops, render, results, rules, store, ui, units, warp
 from .const import (
     ALL_WATCHDOGS,
     CONFIG_KEYS,
@@ -27,7 +27,7 @@ from .const import (
     SET_UP_KEYS,
     SETUP_DONE,
 )
-from .errors import WgtError
+from .errors import CommandFailed, WgtError
 from .system import settings_of, write_private
 
 if TYPE_CHECKING:
@@ -128,7 +128,11 @@ def provision_warp(ctx: Ctx) -> bool:
     else:
         ops.ensure_managed(ctx, ctx.cfg.warp_conf)
         changed = ctx.files.write_config(ctx.cfg.warp_conf, 0o600, warp.render_profile(ctx, profile))
-    start_unit(ctx, ctx.cfg.WARP_IF, changed)
+    try:
+        start_unit(ctx, ctx.cfg.WARP_IF, changed)
+    except CommandFailed as e:
+        ctx.out.warn(f"WARP won't start: {e}")
+        return False
     guard_default_route(ctx)
     if ctx.runner.dry_run:
         ctx.out.log("Dry run: skipping WARP tests")
@@ -464,7 +468,7 @@ def _move_to_current_name(ctx: Ctx, name: str, conf: str, old_name: str) -> str:
 def write_sysctl(ctx: Ctx) -> None:
     """Persist and apply the forwarding sysctls."""
     pub = ctx.pub_if
-    accept_ra = live.sysctl(ctx.runner, f"net.ipv6.conf.{pub}.accept_ra") or None
+    accept_ra = live.sysctl(ctx.runner, render.accept_ra_key(pub)) or None
     lines = render.sysctl_lines(ctx.cfg, pub, ctx.facts.has_ipv6, accept_ra)
     # Remember accept_ra before we change it, so rollback can restore it.
     if any("accept_ra" in line for line in lines) and not store.state_get(ctx.snap.state, "ORIG_ACCEPT_RA"):
@@ -535,17 +539,16 @@ def refuse_interface_change(ctx: Ctx) -> None:
 def refuse_routed_subnet(ctx: Ctx) -> None:
     """A subnet the host already routes could cut off the way to it (SSH included)."""
     subnet = ctx.cfg.WG_SUBNET
-    if subnet == ctx.cfg.saved.get("WG_SUBNET"):
-        return
+    if subnet == ctx.cfg.saved.get("WG_SUBNET") and ops.wg_up(ctx):
+        return   # it's wg0's own route (a restored subnet is still new to this host)
     clash = net.routed_overlap(subnet, ctx.facts.routes4, ctx.cfg.saved.get("WG_IF") or ctx.cfg.WG_IF)
     if clash:
         raise WgtError(f"subnet {subnet} overlaps {clash}, which this host already routes; pick another")
 
 
-def stop_before_rewrite(ctx: Ctx) -> bool:
-    """wg0's config is about to change: stop wg0 with its current config first,
-    so its PostDown removes exactly the rules its PostUp added (old subnet, old
-    port). True if it was stopped."""
+def restart_needed(ctx: Ctx) -> bool:
+    """wg0 is running and its settings are about to change. Asks first: nothing
+    can be asked once it's down."""
     unit = f"wg-quick@{ctx.cfg.WG_IF}"
     current = ctx.files.read(ctx.cfg.wg_conf)
     if not ops.wg_up(ctx) or current is None or settings_of(current) == settings_of(ops.render_wg_conf(ctx)):
@@ -553,11 +556,17 @@ def stop_before_rewrite(ctx: Ctx) -> bool:
     ctx.runner.step(f"Restart {ctx.cfg.WG_IF} for its new config (clients reconnect in a few seconds)",
                     f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
     ops.confirm(ctx, f"Restart {ctx.cfg.WG_IF} now?")
+    return True
+
+
+def stop_before_rewrite(ctx: Ctx) -> None:
+    """Stop wg0 with its current config, so its PostDown removes exactly the rules
+    its PostUp added (old subnet, old port)."""
+    unit = f"wg-quick@{ctx.cfg.WG_IF}"
     if live.unit_active(ctx.runner, unit):
         ctx.runner.run(["systemctl", "stop", unit])
     else:
         ctx.runner.run(["wg-quick", "down", ctx.cfg.WG_IF])
-    return True
 
 
 # --- commands ---
@@ -573,11 +582,8 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     review_settings(ctx, asked)
     # Confirmed, so finish whatever happens to the terminal: the session may be running
     # through wg0, and dying between its stop and its start would leave it down.
-    hangup = signal.signal(signal.SIGHUP, signal.SIG_IGN)
-    try:
+    with ops.ignoring(signal.SIGHUP):
         _apply_setup(ctx, old_name)
-    finally:
-        signal.signal(signal.SIGHUP, hangup)
 
 
 def _apply_setup(ctx: Ctx, old_name: str) -> None:
@@ -605,27 +611,34 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
     save_config(ctx)
     sync_client_configs(ctx, old_name)
     was_up = ops.wg_up(ctx)
-    stopped = False
+    restarting = restart_needed(ctx)
     changed = keys_changed
-    try:
-        stopped = stop_before_rewrite(ctx)
-        changed = ops.write_wg_conf(ctx) or keys_changed
-        units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
-    finally:
-        if stopped and ctx.runner.dry_run:
-            ctx.out.info(f"[dry-run] would then start wg-quick@{ctx.cfg.WG_IF} with the new config")
-        else:
-            try:
-                start_unit(ctx, ctx.cfg.WG_IF, changed, ask=not was_up)
-            except BaseException:
-                # Only if wg0 didn't come up: answering no to a restart leaves a
-                # running wg0 (and its rules) alone.
-                if not ops.wg_up(ctx):
-                    ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
-                    run_down_hooks(ctx)
-                raise
-    if not stopped and not changed and ops.wg_up(ctx):
+    # From the stop until wg0 is back, nothing may end this: it would stay down.
+    with ops.ignoring(*((signal.SIGINT, signal.SIGTERM) if restarting and not ctx.runner.dry_run else ())):
+        try:
+            if restarting:
+                stop_before_rewrite(ctx)
+            changed = ops.write_wg_conf(ctx) or keys_changed
+            units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
+        finally:
+            if restarting and ctx.runner.dry_run:
+                ctx.out.info(f"[dry-run] would then start wg-quick@{ctx.cfg.WG_IF} with the new config")
+            else:
+                try:
+                    start_unit(ctx, ctx.cfg.WG_IF, changed, ask=not was_up)
+                except BaseException:
+                    # Only if wg0 didn't come up: answering no to a restart leaves a
+                    # running wg0 (and its rules) alone.
+                    if not ops.wg_up(ctx):
+                        ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
+                        run_down_hooks(ctx)
+                    raise
+    if not restarting and not changed and ops.wg_up(ctx):
         restart_if_drifted(ctx)
+    if ops.wg_up(ctx) and not ctx.runner.dry_run:
+        # wg0's PostUp made the device chains empty: don't leave them to the watchdog.
+        ctx.out.log("Static addresses and groups")
+        devices.apply_now(ctx)
     guard_default_route(ctx)
     units.write_watchdog(ctx)
     units.write_device_watchdog(ctx)
@@ -716,7 +729,7 @@ def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
     if fwd6:
         r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.all.forwarding={fwd6}"])
     if ra:
-        r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.{host.pub_if(state, ctx.facts)}.accept_ra={ra}"], check=False)
+        r.run(["sysctl", "-q", "-w", f"{render.accept_ra_key(host.pub_if(state, ctx.facts))}={ra}"], check=False)
 
 
 def _restore_host_files(ctx: Ctx) -> None:

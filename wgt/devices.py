@@ -221,13 +221,23 @@ def _allowed_chains(ctx: Ctx) -> List[Tuple[str, str, List[str]]]:
     return wanted
 
 
+def _refusal_at(have: List[str]) -> Optional[int]:
+    """Where a chain's refusal is: allow rules only work above it. None while
+    wg0's PostUp is still building the chain."""
+    return next((i for i, spec in enumerate(have) if "-j REJECT" in spec), None)
+
+
 def access_wrong(ctx: Ctx) -> List[str]:
-    """Allow rules running that the groups don't want, and ones they want that
-    aren't. Nothing if the chains aren't there (wgt test checks those)."""
+    """Allow rules running that the groups don't want, ones they want that aren't,
+    and ones below the refusal, which do nothing. Nothing if the chains aren't
+    there (wgt test checks those)."""
     wrong: List[str] = []
     for cmd, chain, want in _allowed_chains(ctx):
         have = live.ipt_chain(ctx.runner, "filter", chain, cmd)
         if have is not None:
+            refusal = _refusal_at(have)
+            if refusal is not None:
+                wrong += [f"{chain} has {s} below its refusal" for s in have[refusal:] if s.startswith("-s ")]
             have = [spec for spec in have if spec.startswith("-s ")]
             wrong += [f"{chain} lacks {s}" for s in want if s not in have]
             wrong += [f"{chain} still has {s}" for s in have if s not in want]
@@ -237,13 +247,20 @@ def access_wrong(ctx: Ctx) -> List[str]:
 def _sync_allowed(ctx: Ctx) -> List[str]:
     """Make the filter chains match the groups. What's allowed goes in above the
     chain's own rules (the refusal at the end, which this leaves alone). Returns
-    what failed: an allow rule that won't go away is a device keeping access."""
+    what failed: an allow rule that won't go away is a device keeping access.
+    A chain PostUp hasn't finished waits for the next pass: its refusal would go
+    in above anything added now. One found below the refusal moves above it."""
     failed: List[str] = []
     r = ctx.runner
     for cmd, chain, want in _allowed_chains(ctx):
         have = live.ipt_chain(r, "filter", chain, cmd)
-        if have is None:
+        refusal = None if have is None else _refusal_at(have)
+        if have is None or refusal is None:
             continue
+        for spec in have[refusal:]:
+            if spec.startswith("-s ") and not r.attempt([cmd, "-t", "filter", "-D", chain, *spec.split()]):
+                failed.append(f"{FAILED} remove from {chain}: {spec}")
+        have = have[:refusal]
         for spec in want:
             if spec not in have and not r.attempt([cmd, "-t", "filter", "-I", chain, *spec.split()]):
                 failed.append(f"{FAILED} add to {chain}: {spec}")

@@ -4,10 +4,12 @@ databases, and subcommand dispatch (verbs, leftover words)."""
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import os
+import signal
 import time
-from typing import TYPE_CHECKING, Callable, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Iterator, List, Mapping, Optional, Tuple
 
 from . import live, render, store, ui
 from .const import MARKER, SET_UP_KEYS
@@ -73,6 +75,17 @@ def release_lock(ctx: Ctx) -> None:
         fcntl.flock(ctx.lock_fd, fcntl.LOCK_UN)
         os.close(ctx.lock_fd)
         ctx.lock_fd = None
+
+
+@contextlib.contextmanager
+def ignoring(*signals: int) -> Iterator[None]:
+    """Keep going through these signals (commands started meanwhile inherit it)."""
+    before = [(s, signal.signal(s, signal.SIG_IGN)) for s in signals]
+    try:
+        yield
+    finally:
+        for s, handler in before:
+            signal.signal(s, handler)
 
 
 def confirm(ctx: Ctx, question: str, default_yes: bool = False) -> None:

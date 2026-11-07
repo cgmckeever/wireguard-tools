@@ -99,7 +99,9 @@ def local_exit_files(s: Server) -> List[str]:
 
 def remote_exit_codes(s: Server) -> List[str]:
     """The jump codes the server has."""
-    _, o = remote.ssh(s.target, f"cat {remote.REMOTE.exit_db} 2>/dev/null", batch=True, capture=True)
+    rc, o = remote.ssh(s.target, f"cat {remote.REMOTE.exit_db} 2>/dev/null; true", batch=True, capture=True)
+    if rc != 0:
+        raise WgtError(f"can't reach {s.name} to see its jumps")
     return [e.code for e in store.parse_exits(o)]
 
 

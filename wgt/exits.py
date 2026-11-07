@@ -202,8 +202,8 @@ def sync(ctx: Ctx) -> None:
         return
     ctx.out.log("Jumps: " + " ".join(e.code for e in ctx.snap.exits))
     for e in ctx.snap.exits:
-        if write_confs(ctx, e) and any_up(ctx, e):
-            ctx.runner.run(["systemctl", "restart", *e.units])
+        if write_confs(ctx, e) and any_up(ctx, e) and not ctx.runner.attempt(["systemctl", "restart", *e.units]):
+            ctx.out.warn(f"jump {e.code} didn't restart; the watchdog keeps trying (see: wgt log)")
     units.write_exit_watchdog(ctx)
 
 
@@ -335,6 +335,8 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     routing, firewall rules, WARP account and jump config (and their copies)."""
     ops.no_more_words(words[1:], "wgt jump remove <code>")
     code = words[0] if words else pick_exit(ctx, "remove")
+    if not store.valid_exit_code(code):   # it names a directory that gets deleted below
+        raise WgtError(f"no jump '{code}' (see: wgt jump list)")
     ops.take_lock(ctx)
     e = ctx.snap.exit(code)
     if e is None:
@@ -364,7 +366,12 @@ def _remove_jump_files(ctx: Ctx, code: str) -> None:
     ops.write_wg_conf(ctx)
     for path in (ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.jump_source(code)):
         ctx.files.forget(path)
-    ctx.files.remove_tree(ctx.paths.exit_wgcf_dir(code))
+    wgcf_dir = ctx.paths.exit_wgcf_dir(code)
+    if os.path.isdir(wgcf_dir):
+        for name in os.listdir(wgcf_dir):
+            ctx.files.forget(os.path.join(wgcf_dir, name))
+    ctx.files.remove_tree(wgcf_dir)
+    ctx.files.remove_tree(ctx.files.copies_dir(wgcf_dir))   # a rotated account's old keys
     if not ctx.snap.exits:
         units.remove_timer(ctx, EXIT_WATCHDOG)
         ctx.runner.run(["systemctl", "daemon-reload"])
