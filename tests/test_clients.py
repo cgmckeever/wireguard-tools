@@ -330,3 +330,11 @@ def test_rule_checks_split_by_warp(make_ctx):
     no_stop = v4.replace("9501:\tfrom 10.2.10.2 blackhole\n", "")
     ctx = make_ctx(answers={"ip rule show": (0, no_stop)})
     assert not checks.Tests(ctx).direct_rules_ok("ip")
+
+
+def test_a_digit_int_refuses_is_a_word_not_a_traceback(make_ctx, monkeypatch):
+    """"²" is a digit to str.isdigit, and int() raises on it: an answer like that at
+    the exit menu must read as a jump code, not crash."""
+    monkeypatch.setattr(clients.ui, "say", lambda text: None)
+    monkeypatch.setattr(clients.ui, "ask", lambda prompt: "²")
+    assert clients.pick_exits(make_ctx(), "tv") == ["²"]

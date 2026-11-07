@@ -79,7 +79,7 @@ def preflight(runner: Runner) -> None:
     osid = info.get("ID", "").strip('"')
     ver = info.get("VERSION_ID", "").strip('"')
     major = ver.split(".")[0]
-    if not major.isdigit():
+    if not store.is_uint(major):
         raise WgtError(f"unsupported OS: {osid} {ver or '<no version>'} (need Debian 11+ or Ubuntu 20.04+)")
     if osid == "debian" and int(major) < 11:
         raise WgtError(f"unsupported Debian {ver} (need 11+)")

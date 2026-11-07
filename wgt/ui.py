@@ -7,7 +7,7 @@ from __future__ import annotations
 import time
 from typing import List, NamedTuple, Optional, Sequence
 
-from .store import device_of, name_warp
+from .store import device_of, is_uint, name_warp
 
 
 def ago(ts: int, now: Optional[float] = None) -> str:
@@ -66,7 +66,7 @@ def pick_number(prompt: str, count: int) -> Optional[int]:
     reply = ask(prompt)
     if not reply:
         return None
-    if not reply.isdigit() or not 1 <= int(reply) <= count:
+    if not is_uint(reply) or not 1 <= int(reply) <= count:
         raise ValueError(reply)
     return int(reply)
 

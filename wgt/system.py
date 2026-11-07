@@ -42,11 +42,6 @@ def atomic_write(path: str, content: str, mode: int) -> None:
         raise
 
 
-def settings_of(text: str) -> list:
-    """A config's lines without comments and blank lines."""
-    return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
-
-
 def write_private(path: str, content: str) -> None:
     """A root-only file (mode 600), written atomically. Used where Files.write
     is deliberately skipped: the state file and server keys (no change copies
@@ -69,7 +64,7 @@ def read_marker(path: str) -> int:
             value = f.read().strip()
     except OSError:
         return 0
-    return int(value) if value.isdigit() else 0
+    return int(value) if store.is_uint(value) else 0
 
 
 def remove_markers(*paths: str) -> None:
@@ -364,7 +359,7 @@ class Files:
         only when it starts)."""
         old = self.read(path)
         self.write(path, mode, content)
-        return old is None or settings_of(old) != settings_of(content)
+        return old is None or store.entries(old) != store.entries(content)
 
     def remove(self, *paths: str) -> None:
         """Delete files (missing ones are fine); a dry run only says so."""

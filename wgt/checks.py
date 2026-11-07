@@ -21,7 +21,6 @@ from .const import (
     WATCHDOG_STALE,
     device_ip,
 )
-from .system import settings_of
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -275,7 +274,7 @@ class Tests:
         stale = devices.access_wrong(self.ctx)
         res.check("devices' firewall access matches their groups" + (f" ({'; '.join(stale[:3])})" if stale else ""),
                   not stale)
-        if settings_of(store.read_text(c.wg_conf) or "") != settings_of(ops.render_wg_conf(self.ctx)):
+        if store.entries(store.read_text(c.wg_conf)) != store.entries(ops.render_wg_conf(self.ctx)):
             res.result("WARN", f"{c.wg_conf} differs from what this version writes (apply: wgt setup)")
         orphans = [x.name for x in self.ctx.snap.clients if x.exit and self.ctx.snap.exit(x.exit) is None]
         res.check("every config's jump exists" + (f" (missing for: {' '.join(orphans)})" if orphans else ""),
@@ -438,7 +437,7 @@ def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
 
     hs = live.handshakes(r, c.WG_IF)
     in_use = [cl for cl in ctx.snap.clients if not ctx.snap.is_disabled(cl.name)]
-    recent = [cl for cl in in_use if hs.get(cl.pub, 0) > 0 and now - hs[cl.pub] <= 3600]
+    recent = [cl for cl in in_use if live.seen_within(hs, cl.pub, 3600, now)]
     text = f"{len(ctx.snap.clients)}"
     if ctx.snap.clients:
         text += f": {len(recent)} seen in the last hour"

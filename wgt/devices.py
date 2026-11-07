@@ -138,7 +138,7 @@ def desired(snap: store.Snapshot, handshakes: Mapping[str, int], now: float) -> 
         static = device_ip(d.number)
         configs = _enabled(snap, d.name)
         sources += [f"-s {c.ip}/32 -j SNAT --to-source {static}" for c in configs]
-        recent = [c for c in configs if handshakes.get(c.pub, 0) > 0 and now - handshakes[c.pub] <= DEVICE_ACTIVE]
+        recent = [c for c in configs if live.seen_within(handshakes, c.pub, DEVICE_ACTIVE, now)]
         if recent:
             newest = max(recent, key=lambda c: handshakes[c.pub])
             forwards[static] = f"-d {static}/32 -j DNAT --to-destination {newest.ip}"

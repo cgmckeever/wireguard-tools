@@ -45,8 +45,8 @@ def read_text(path: str) -> Optional[str]:
         raise WgtError(f"cannot read {path}: {e.strerror}") from None
 
 
-def _entries(text: Optional[str]) -> List[str]:
-    """Lines that aren't blank or comments."""
+def entries(text: Optional[str]) -> List[str]:
+    """Lines that aren't blank or comments: a database's entries, a config's settings."""
     if not text:
         return []
     return [line for line in text.splitlines() if line.strip() and not line.lstrip().startswith("#")]
@@ -186,7 +186,7 @@ def _is_ipv4(word: str) -> bool:
 def parse_clients(text: Optional[str]) -> List[Client]:
     """clients.db entries; one without a valid IPv4 address is refused."""
     out = []
-    for line in _entries(text):
+    for line in entries(text):
         f = line.split() + ["", "", ""]
         if not _is_ipv4(f[1]) or not f[2]:
             raise WgtError(f"clients.db: bad line (want 'name ip public-key [allowed-ips]'): {line}")
@@ -261,9 +261,9 @@ def parse_exits(text: Optional[str]) -> List[Exit]:
     """exits.db entries. A bad index is refused: tables derive from it (an
     out-of-range one could even name the main routing table)."""
     out = []
-    for line in _entries(text):
+    for line in entries(text):
         f = line.split()
-        if len(f) < 2 or not valid_exit_code(f[0]) or not re.fullmatch(r"[0-9]+", f[1]) \
+        if len(f) < 2 or not valid_exit_code(f[0]) or not is_uint(f[1]) \
                 or not 1 <= int(f[1]) <= EXIT_MAX:
             raise WgtError(f"exits.db: bad line (want 'code index label', index 1-{EXIT_MAX}): {line}")
         out.append(Exit(f[0], int(f[1]), " ".join(f[2:]), raw=line))
@@ -313,7 +313,7 @@ def parse_devices(text: Optional[str]) -> List[Device]:
     """devices.db entries; a bad number is refused, and so is a name or number
     used twice: one static address can only forward to one device."""
     out: List[Device] = []
-    for line in _entries(text):
+    for line in entries(text):
         f = line.split()
         if len(f) not in (2, 3) or not _CLIENT_BASE.fullmatch(f[0]) or not is_uint(f[1]) \
                 or not valid_device_number(int(f[1])):
@@ -392,6 +392,16 @@ class Snapshot:
     disabled: List[str]
     exits: List[Exit]
     devices: List[Device] = field(default_factory=list)
+
+    def host_label(self) -> str:
+        """This server as a way out, for people: host:<its location>."""
+        loc = state_get(self.state, "LOCATION")
+        return f"{HOST_EXIT}:{loc}" if loc else HOST_EXIT
+
+    def jump_label(self, code: str) -> str:
+        """A jump as a way out, for people: jump:<its label>."""
+        e = self.exit(code)
+        return f"jump:{(e.label if e else '') or code}"
 
     def client(self, name: str) -> Optional[Client]:
         return next((c for c in self.clients if c.name == name), None)

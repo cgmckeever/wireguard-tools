@@ -35,7 +35,7 @@ def active_clients(snap: store.Snapshot, code: str, handshakes: Dict[str, int], 
     """The clients that keep exit <code> up: enabled, with a handshake within
     EXIT_IDLE seconds. The one rule for `jump list`, `jump test` and the watchdog."""
     return [c for c in snap.exit_clients(code)
-            if not snap.is_disabled(c.name) and handshakes.get(c.pub, 0) > 0 and now - handshakes[c.pub] <= EXIT_IDLE]
+            if not snap.is_disabled(c.name) and live.seen_within(handshakes, c.pub, EXIT_IDLE, now)]
 
 
 def state(ctx: Ctx, e: store.Exit) -> str:
@@ -401,12 +401,11 @@ def cmd_tunnel_test(ctx: Ctx, words: List[str]) -> int:
     ops.take_lock(ctx)
     ctx.out.log("Tunnel tests")
     res = results.Results(out=ctx.out.line)
-    loc = store.state_get(ctx.snap.state, "LOCATION")
-    host = f"host:{loc}" if loc else "host"
+    host = ctx.snap.host_label()
     path_result(res, host, False, live.trace_summary(live.trace(ctx.runner)))
     path_result(res, host, True, live.trace_summary(live.trace(ctx.runner, "--interface", ctx.cfg.WARP_IF)))
     for e in ctx.snap.exits:
-        label = f"jump:{e.label or e.code}"
+        label = ctx.snap.jump_label(e.code)
         try:
             with probing(ctx, e):
                 path_result(res, label, False, trace(ctx, e, e.px))

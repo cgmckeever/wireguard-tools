@@ -139,7 +139,7 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
     sel = ui.ask("    Push one first, so the new client can use it? [number, Enter skips]: ")
     if not sel:
         return
-    if not sel.isdigit() or not 1 <= int(sel) <= len(staged):
+    if not store.is_uint(sel) or not 1 <= int(sel) <= len(staged):
         raise WgtError(f"no staged config {sel}")
     add_one_exit(s, staged[int(sel) - 1])
 
@@ -161,7 +161,7 @@ def do_exit_add(s: Server, args: List[str]) -> int:
         raise WgtError("nothing chosen")
     if sel == "all":
         picked = files
-    elif sel.isdigit() and 1 <= int(sel) <= len(files):
+    elif store.is_uint(sel) and 1 <= int(sel) <= len(files):
         picked = [files[int(sel) - 1]]
     else:
         raise WgtError(f"no config number '{sel}' (1-{len(files)}, or all)")

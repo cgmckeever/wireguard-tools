@@ -699,3 +699,9 @@ def test_moving_a_config_to_another_device_changes_its_access_at_once(make_ctx):
     Path(ctx.paths.psk(c.name)).write_text("PSK\n")
     clients.cmd_rename(ctx, [c.name, "warp.par-fr.other"])
     assert f"iptables -t filter -D WGT-SERVER -s {c.ip}/32 -j ACCEPT" in ctx.runner.calls
+
+
+def test_fleet_file_with_a_digit_int_refuses_is_a_bad_line():
+    """"²" passes str.isdigit and int() raises: an error to print, not a traceback."""
+    with pytest.raises(WgtError, match="bad line"):
+        fleet.parse("tv ²\n")

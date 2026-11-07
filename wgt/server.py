@@ -28,7 +28,7 @@ from .const import (
     SETUP_DONE,
 )
 from .errors import CommandFailed, WgtError
-from .system import settings_of, write_private
+from .system import write_private
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -198,7 +198,7 @@ def rotate_jump_warp(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
         exits.down(ctx, e)
     try:
         with exits.probing(ctx, e):
-            exits.path_result(res, f"jump:{e.label or e.code}", True, exits.trace(ctx, e))
+            exits.path_result(res, ctx.snap.jump_label(e.code), True, exits.trace(ctx, e))
     except WgtError as err:
         res.result("FAIL", f"jump {e.code}: could not bring it up ({err})")
 
@@ -551,7 +551,7 @@ def restart_needed(ctx: Ctx) -> bool:
     can be asked once it's down."""
     unit = f"wg-quick@{ctx.cfg.WG_IF}"
     current = ctx.files.read(ctx.cfg.wg_conf)
-    if not ops.wg_up(ctx) or current is None or settings_of(current) == settings_of(ops.render_wg_conf(ctx)):
+    if not ops.wg_up(ctx) or current is None or store.entries(current) == store.entries(ops.render_wg_conf(ctx)):
         return False   # down, new, or only comments differ: no restart needed
     ctx.runner.step(f"Restart {ctx.cfg.WG_IF} for its new config (clients reconnect in a few seconds)",
                     f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")

@@ -75,18 +75,18 @@ def pick_client(ctx: Ctx, verb: str) -> str:
 def pick_exits(ctx: Ctx, name: str) -> List[str]:
     """Ask which exit(s) a new client gets: codes, "host" (the WireGuard server itself) being the default."""
     codes = [e.code for e in ctx.snap.exits]
-    items = [f"{'host':<6} {ctx.cfg.SERVER_NAME} itself (default)"]
+    items = [f"{store.HOST_EXIT:<6} {ctx.cfg.SERVER_NAME} itself (default)"]
     items += [f"{e.code:<6} {e.label}" for e in ctx.snap.exits]
     ui.say("\n".join(["", f"  Exit for {name}:"] + [f"    {i + 1}) {it}" for i, it in enumerate(items)]) + "\n")
     reply = ui.ask("  Exit [Enter = 1 (host); several: 1,2]: ")
     if not reply:
-        return ["host"]
+        return [store.HOST_EXIT]
     out = []
     for part in reply.replace(",", " ").split():
-        if not part.isdigit():
+        if not store.is_uint(part):
             out.append(part)
         elif 1 <= int(part) <= len(items):
-            out.append("host" if int(part) == 1 else codes[int(part) - 2])
+            out.append(store.HOST_EXIT if int(part) == 1 else codes[int(part) - 2])
         else:
             raise WgtError(f"no exit number {part}")
     if not out:
@@ -120,7 +120,7 @@ def show_qr(ctx: Ctx, conf: str) -> None:
     width = os.environ.get("QR_WIDTH", "32")
     if not shutil.which("qrencode"):
         raise WgtError("qrencode not installed")
-    if not width.isdigit():
+    if not store.is_uint(width):
         raise WgtError(f"QR_WIDTH must be a number of terminal columns: '{width}'")
     ctx.out.warn("this QR code contains the device's private key")
     data = qr_data(store.read_text(conf) or "")
@@ -196,7 +196,7 @@ def apply_peer(ctx: Ctx, entry: store.Client, old_pub: str) -> None:
         ensure_jump_live(ctx, entry)
         ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, entry, up=True))
         if old_pub and (old_pub != entry.pub or disabled):
-            ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", old_pub, "remove"])
+            ops.remove_live_peer(ctx, old_pub)
     if disabled:
         ctx.out.info(f"'{entry.name}' is disabled; the new config works once enabled "
                      f"(wgt client enable {entry.name})")
@@ -214,7 +214,7 @@ def _drop_unknown_peers(ctx: Ctx) -> None:
     want = {c.pub for c in ctx.snap.clients if not ctx.snap.is_disabled(c.name)}
     for pub in live.peers(ctx.runner, ctx.cfg.WG_IF):
         if pub not in want:
-            ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "remove"])
+            ops.remove_live_peer(ctx, pub)
             ctx.out.info(f"removed a peer {ctx.cfg.WG_IF} shouldn't have")
 
 
@@ -251,18 +251,14 @@ def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
 
 def exit_short(name: str) -> str:
     """Where a config exits, as a code: its jump's, or host."""
-    return store.client_exit(name) or "host"
+    return store.client_exit(name) or store.HOST_EXIT
 
 
 def exit_label(ctx: Ctx, name: str) -> str:
     """Where a config exits, for people: host:<this server's location> or
     jump:<the jump's label> (given at jump add, e.g. "Paris, France")."""
     code = store.client_exit(name)
-    if not code:
-        loc = store.state_get(ctx.snap.state, "LOCATION")
-        return f"host:{loc}" if loc else "host"
-    e = ctx.snap.exit(code)
-    return f"jump:{(e.label if e else '') or code}"
+    return ctx.snap.jump_label(code) if code else ctx.snap.host_label()
 
 
 def way_out(ctx: Ctx, name: str) -> str:
@@ -309,7 +305,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         if exit_codes or ctx.args.warp:
             raise WgtError(f"'{name}' is a full config name: leave out --exit and --warp "
                            f"(or give the device, {base}, with them)")
-        exit_codes, warps = code0 or "host", [warp0]
+        exit_codes, warps = code0 or store.HOST_EXIT, [warp0]
     ops.take_lock(ctx)
     ops.require_server(ctx)
     if exit_codes:
@@ -317,7 +313,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     elif ctx.snap.exits and not ctx.args.yes and not ctx.runner.dry_run and ui.have_tty():
         codes = pick_exits(ctx, base)
     else:
-        codes = ["host"]
+        codes = [store.HOST_EXIT]
         if not ctx.snap.exits:
             ctx.out.info("no jumps on this server: its configs exit from this server "
                          "(add one: wgt jump add <code> <wg.conf>)")
@@ -335,7 +331,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     planned: List[str] = []
     for code in uniq:
         for warp in warps:
-            add_one(ctx, store.config_name("" if code == "host" else code, warp, base), planned, endpoint)
+            add_one(ctx, store.config_name("" if code == store.HOST_EXIT else code, warp, base), planned, endpoint)
     if ctx.snap.device_groups(base):
         devices.apply_now(ctx)   # its new configs get what its groups allow
 
@@ -425,7 +421,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
         ops.confirm(ctx, f"Remove {name}?")
         # Peer first, then its exit rules: no packet of it may fall back to the default exit.
         if ops.wg_up(ctx):
-            ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", c.pub, "remove"])
+            ops.remove_live_peer(ctx, c.pub)
             ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False))
         ops.remove_client(ctx, name)
     else:
@@ -558,7 +554,7 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     if not ops.wg_up(ctx):
         ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
     elif disable:
-        ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", c.pub, "remove"])
+        ops.remove_live_peer(ctx, c.pub)
         ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other configs unaffected)")
         devices.apply_now(ctx)
     else:

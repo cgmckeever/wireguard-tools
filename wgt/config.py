@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional
 
-from . import net
+from . import net, store
 from .const import (
     CONFIG_KEYS,
     DEFAULTS,
@@ -43,7 +43,7 @@ def valid_allowed_ips(value: str) -> bool:
 
 def _in_range(value: str, lo: int, hi: int) -> bool:
     """An integer of ASCII digits in [lo, hi]."""
-    return bool(re.fullmatch(r"[0-9]+", value)) and lo <= int(value) <= hi
+    return store.is_uint(value) and lo <= int(value) <= hi
 
 
 def short_hostname_name(hostname: str) -> str:

@@ -105,7 +105,7 @@ class World:
         def at_rest(ctx):
             tests = checks.Tests(ctx)
             found.extend(f"drift: {d}" for d in tests.wg0_drift())
-            if system.settings_of(self.read_conf()) != system.settings_of(ops.render_wg_conf(ctx)):
+            if store.entries(self.read_conf()) != store.entries(ops.render_wg_conf(ctx)):
                 found.append("wg0.conf isn't what this state renders")
             snap = ctx.snap
             names = {c.name for c in snap.clients}

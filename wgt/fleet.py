@@ -16,6 +16,7 @@ from typing import Dict, List, Mapping, Optional
 
 from .const import DEVICE_ADDRESS_FORM, DEVICE_CTL_FIRST, DEVICE_CTL_LAST, device_ip
 from .errors import WgtError
+from .store import is_uint
 
 HEADER = f"# wgt-ctl devices: device number [removed date] (static address {DEVICE_ADDRESS_FORM})"
 
@@ -35,7 +36,7 @@ def parse(text: Optional[str]) -> Dict[str, Entry]:
         f = line.split()
         if not f or f[0].startswith("#"):
             continue
-        if len(f) not in (2, 4) or not f[1].isdigit() or (len(f) == 4 and f[2] != "removed"):
+        if len(f) not in (2, 4) or not is_uint(f[1]) or (len(f) == 4 and f[2] != "removed"):
             raise WgtError(f"local/devices: bad line (want 'device number [removed date]'): {line}")
         out[f[0]] = Entry(int(f[1]), f[3] if len(f) == 4 else "")
     return out

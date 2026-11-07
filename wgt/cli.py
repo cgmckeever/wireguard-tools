@@ -98,7 +98,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     --no-follow, or when the output isn't a terminal, it prints and stops."""
     ops.no_more_words(words[1:], "wgt log [lines] [--no-follow]")
     count = words[0] if words else "40"
-    if not count.isdigit():
+    if not store.is_uint(count):
         raise WgtError("usage: wgt log [lines] [--no-follow]")
     matches: List[str] = []
     for tag in ("wg-tools", *ALL_WATCHDOGS):

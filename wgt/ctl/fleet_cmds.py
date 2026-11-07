@@ -7,7 +7,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from .. import fleet, store, ui
-from ..const import DEVICE_CTL_FIRST, DEVICE_DIRECT_LAST, device_ip
+from ..const import device_ip
 from ..ctx import VALUE_FLAGS
 from ..errors import WgtError
 from . import remote
@@ -71,7 +71,7 @@ def sweep() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str]]:
         for line in o.splitlines():
             device, number = (line.split("\t") + [""])[:2]   # groups may follow: per server, not read here
             if device:
-                seen[s.name][device] = int(number) if number.isdigit() else None
+                seen[s.name][device] = int(number) if store.is_uint(number) else None
     return seen, missed
 
 
@@ -151,8 +151,7 @@ def cmd_devices(args: List[str]) -> int:
     verb = args[0] if args else "list"
     if verb == "forget" and len(args) == 2:
         return _devices_forget(args[1])
-    if verb == "fix" and len(args) == 3 and args[2].isdigit() \
-            and DEVICE_CTL_FIRST <= int(args[2]) <= DEVICE_DIRECT_LAST:
+    if verb == "fix" and len(args) == 3 and store.is_uint(args[2]) and store.valid_device_number(int(args[2])):
         return _devices_fix(args[1], int(args[2]))
     if not (verb in ("list", "sync") and len(args) <= 1):
         raise WgtError("usage: wgt-ctl devices [sync | fix <device> <number 2-254> | forget <device>]")

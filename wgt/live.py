@@ -6,8 +6,9 @@ from __future__ import annotations
 
 import re
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Mapping, Optional, Tuple
 
+from . import store
 from .const import TRACE_URL
 from .system import Runner
 
@@ -21,7 +22,7 @@ def handshakes(r: Runner, ifc: str) -> Dict[str, int]:
     out: Dict[str, int] = {}
     for line in r.query(["wg", "show", ifc, "latest-handshakes"]).splitlines():
         f = line.split()
-        if len(f) >= 2 and f[1].isdigit():
+        if len(f) >= 2 and store.is_uint(f[1]):
             out[f[0]] = int(f[1])
     return out
 
@@ -36,9 +37,15 @@ def transfers(r: Runner, ifc: str) -> Dict[str, Tuple[int, int]]:
     out: Dict[str, Tuple[int, int]] = {}
     for line in r.query(["wg", "show", ifc, "transfer"]).splitlines():
         f = line.split()
-        if len(f) >= 3 and f[1].isdigit() and f[2].isdigit():
+        if len(f) >= 3 and store.is_uint(f[1]) and store.is_uint(f[2]):
             out[f[0]] = (int(f[1]), int(f[2]))
     return out
+
+
+def seen_within(handshakes: Mapping[str, int], pub: str, within: float, now: float) -> bool:
+    """<pub> has handshaked, no more than <within> seconds before <now>."""
+    last = handshakes.get(pub, 0)
+    return last > 0 and now - last <= within
 
 
 def newest_hs(r: Runner, ifc: str) -> int:

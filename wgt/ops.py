@@ -278,5 +278,9 @@ def add_live_peer(ctx: Ctx, name: str, pub: str, ip: str) -> None:
     ctx.out.info(f"peer live on {ctx.cfg.WG_IF} (other clients unaffected)")
 
 
+def remove_live_peer(ctx: Ctx, pub: str) -> None:
+    ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "remove"])
+
+
 def wg_up(ctx: Ctx) -> bool:
     return live.if_exists(ctx.runner, ctx.cfg.WG_IF)

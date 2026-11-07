@@ -37,6 +37,11 @@ def fetch_backup(s: Server) -> str:
     return local
 
 
+def _refuse_shallow(checkout: str) -> None:
+    if checkout.rstrip("/").count("/") < 2:
+        raise WgtError(f"refusing to delete checkout '{checkout}' (too close to /)")
+
+
 def do_remove(s: Server, args: List[str]) -> int:
     """Tear wireguard-tools off a server: rollback --purge (keys, clients,
     WARP accounts, jumps, rules, units; original files restored), then
@@ -44,8 +49,7 @@ def do_remove(s: Server, args: List[str]) -> int:
     Only after all that succeeds is it forgotten here. Asks for the server's
     name unless --yes."""
     sure = remote.only_yes("remove", args)
-    if s.dir.rstrip("/").count("/") < 2:
-        raise WgtError(f"refusing to delete checkout '{s.dir}' (too close to /)")
+    _refuse_shallow(s.dir)
     out.warn(f"this removes wireguard-tools from {s.name} ({s.target}): its keys, clients, WARP accounts, "
              f"jumps and backup archives, and {s.dir}. Its clients stop working. Irreversible "
              f"(want a copy first? wgt-ctl {s.name} backup)")
@@ -62,8 +66,7 @@ def do_remove(s: Server, args: List[str]) -> int:
 def teardown(target: str, checkout: str) -> int:
     """rollback --purge there, then delete the checkout, the wgt link, wgcf
     and the backup archives. set -e: if rollback fails, nothing is deleted."""
-    if checkout.rstrip("/").count("/") < 2:
-        raise WgtError(f"refusing to delete checkout '{checkout}' (too close to /)")
+    _refuse_shallow(checkout)
     d = shlex.quote(checkout)
     return remote.ssh(target, f"""set -e
         if [ -x {d}/bin/wgt ]; then {d}/bin/wgt rollback --purge --yes; fi
