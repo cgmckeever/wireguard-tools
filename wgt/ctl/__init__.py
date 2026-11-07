@@ -5,7 +5,7 @@ a name, a list number, or all; a few take no server (below).
 One server:
   wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
   wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to local/backups/SERVER/
-  wgt-ctl SERVER jump-add [n|all]       push a WireGuard config from local/exits/SERVER/ as a jump
+  wgt-ctl SERVER jump-add [n|all]       push a jump file from local/exits/SERVER/ as a jump
   wgt-ctl SERVER ssh [command] | branch <b>
   wgt-ctl SERVER forget [--yes]         drop it from local/servers (the server is untouched)
   wgt-ctl SERVER remove [--yes]         tear wireguard-tools off it (rollback --purge, delete its
@@ -19,7 +19,7 @@ Every server, in turn:
   wgt-ctl all <wgt command> | pull | backup | branch <b>
 
 No server:
-  wgt-ctl [list]                        the servers: branch@commit (or unreachable), jumps staged
+  wgt-ctl [list]                        the servers: branch@commit (or unreachable), jump files staged
   wgt-ctl summary                       every server at a glance (wgt summary on each)
   wgt-ctl clients                       every config on every server
   wgt-ctl devices                       each device's static address, and what doesn't line up
@@ -31,7 +31,7 @@ No server:
 
 Leave SERVER out of a server command to pick one from the list. Private
 files stay under local/ (untracked): servers, exits/<server>/*.conf (jump
-WireGuard configs, any name), exits/details.tsv (which file is which jump),
+files, any name), exits/details.tsv (which file is which jump),
 devices (each device's static number), backups/.
 
 `wgt-ctl SERVER client add` gives a device its fleet-wide number, and

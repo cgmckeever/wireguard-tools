@@ -25,14 +25,14 @@ Cloudflare WARP. The device picks one at a time.
   summary | status | test    at a glance / everything running / all checks
   log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops;
                              --no-follow, or piped: print and stop)
-  backup [dir] | restore <archive> | rollback [--purge]
+  backup [dir] | restore <archive> [--old-names] | rollback [--purge]
 
   client list [--tsv] | add <device> [--exit host|<jump>[,..]] [--warp on|off|on,off] [--allowed-ips ..] [--group ..]
          show <config> [--qr] | share <config> | rotate <config> [--allowed-ips ..]
          rename <old> <new> | disable <config> | enable <config> | remove <config>
          (add: per exit, <device> and warp.<device> (--warp on|off: one); a full config
           name adds just that; rotate, remove, disable, enable, show, share: none picks)
-  device list [--tsv] | set <device> [number] | rename <device> <new>
+  device list [--tsv] | set <device> [number] | rename <device> <new> [--force]
                              a device's static address {DEVICE_ADDRESS_FORM}, whichever config it's using
          group [<device> <group,group>] | ungroup <device> [group,group]
                              who it can reach: devices sharing a group; "server" reaches the server
@@ -44,7 +44,8 @@ Cloudflare WARP. The device picks one at a time.
 
 Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
   --force             setup: reinstall wgcf, regenerate the WARP profile, take over
-                      configs these tools didn't create
+                      configs these tools didn't create; device rename: finish one that stopped half way
+  --old-names         restore: an archive from before config names said WARP
   --new-server-keys   setup: new server keypair (every client must then be rotated)
 Settings (for setup and restore; --allowed-ips also on client): --name --subnet --subnet6 --port --mtu --warp-mtu --dns
   --endpoint --wg-if --warp-if --table --allowed-ips --location

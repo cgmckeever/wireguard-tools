@@ -1,6 +1,6 @@
 # Developing wireguard-tools
 
-How the code is laid out, the conventions it keeps, and how it is tested.
+How the code is laid out, the conventions it keeps, the templates, and how it is tested.
 README.md covers using it; [Updating servers](README.md#updating-servers)
 covers rolling a change out.
 
@@ -31,7 +31,7 @@ wgt/                      the package (Python 3.8+, standard library only)
   backup.py               backup, restore (archive checks)
   clients.py              client commands, the clients table (and QR, share), `wgt device`'s table and rename
   devices.py              static device addresses and groups: numbers, `wgt device`'s other verbs, the watchdog's rules
-  exits.py                `wgt jump` (alias `exit`): bringing a jump up/down, probing it
+  exits.py                `wgt jump` (alias `exit`) and `wgt tunnel test`: bringing a jump up/down, probing it
   checks.py               test, status, summary
   results.py              PASS/FAIL counts shared by `test` and `jump test`
   watchdog.py             the watchdogs (the jump watchdog's rule is the pure `decide`)
@@ -60,8 +60,8 @@ is per device, not per config, so it lives in `devices.db`.
 
 ## Conventions
 
-- Errors raise one `WgtError`, which prints `ERROR: ...` and exits 1. A
-  failure part-way through setup removes the wg0 rules it had applied.
+- Errors raise one `WgtError`, which prints `ERROR: ...` and exits 1. If wg0
+  won't come back during setup, the rules its failed start applied are removed.
 - Every change goes through `Runner` or `Files`, so it is dry-run aware and
   backed up first. `Runner.ok` and `query` are questions and always run: a change
   whose failure you handle yourself is `Runner.attempt`. Keys never reach a log
@@ -111,7 +111,37 @@ is per device, not per config, so it lives in `devices.db`.
 - In `wgt/ctl/`, call another module's functions as `remote.ssh(...)`, not by
   importing the name: that's what lets tests replace them.
 
+## Templates
+
+These files are rendered from `templates/`, filling `{{PLACEHOLDER}}`s:
+
+| Template | Becomes |
+|----------|---------|
+| `client.conf.tmpl` | each `/etc/wireguard/clients/<server>.<name>.conf` |
+| `wg-quick-after-warp.conf.tmpl` | the systemd drop-in that starts `wg0` after `warp` |
+| `watchdog.service.tmpl`, `watchdog.timer.tmpl` | each watchdog's systemd service and timer |
+
+Edit them to change what every new config gets (e.g. `PersistentKeepalive`).
+Changes apply to configs added or rotated afterwards. Keep every placeholder and
+each line's `Key = value` form: a placeholder the code doesn't know stops the
+command before anything is written, but a deleted one goes unnoticed (configs just
+lack that line), and setup can only update lines written that way. Edit them
+in your own copy of the repository (a fork) and push, not on a server: servers
+update with a fast-forward-only pull, which stops (and changes nothing) on
+local edits. `wg0.conf`, `warp.conf` and the jump tunnels (`px-`/`wx-<code>`)
+are built in code (`wgt/render.py`, `wgt/rules.py`), since their contents
+depend on the routing rules and the config list.
+
 ## Tests
+
+```bash
+./test.sh                  # all tests (first run sets up .venv with pytest, ruff, mypy); CI runs them on push
+./test.sh -k exit          # just the tests matching "exit" (any pytest option works)
+./test.sh lint             # ruff and mypy (settings in pyproject.toml)
+./test.sh all              # lint, then the tests
+tools/render-diff.sh       # read-only: what this checkout would render differently on each server
+tools/trial.sh <jump.conf> # on a throwaway server: the full cycle, back to clean (a jump in Paris)
+```
 
 - **Golden files.** `tests/golden/<case>/` holds the configs, hooks and rules
   rendered from each fixture server in `tests/fixtures/<case>/wg`. A change
