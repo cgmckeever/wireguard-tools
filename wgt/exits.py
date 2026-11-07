@@ -256,7 +256,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     raw = _read_jump(src)
     existing = ctx.snap.exit(code)
     label = (ctx.args.exit_label or (existing.label if existing else "") or render.peer_hint(raw) or code)
-    label = label.replace("\n", "").replace("\t", "")
+    label = " ".join(label.split())   # one line in exits.db, whatever the file's comment holds
     if existing is None:
         idx = free_idx(ctx)
         ctx.runner.step(f"Add jump '{code}' ({label}): {render.profile_endpoint(raw)} -> its own WARP",
@@ -338,7 +338,11 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ops.take_lock(ctx)
     e = ctx.snap.exit(code)
     if e is None:
-        raise WgtError(f"no jump '{code}' (see: wgt jump list)")
+        if not (os.path.exists(ctx.paths.jump_source(code)) or os.path.isdir(ctx.paths.exit_wgcf_dir(code))):
+            raise WgtError(f"no jump '{code}' (see: wgt jump list)")
+        ctx.out.info(f"finishing an earlier remove of jump '{code}'")
+        _remove_jump_files(ctx, code)
+        return
     users = " ".join(c.name for c in ctx.snap.exit_clients(code))
     if users:
         raise WgtError(f"configs use jump '{code}': {users}; remove them first (wgt client remove <config>)")
@@ -351,6 +355,12 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
         ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, up=False))
     units.close_firewall(ctx, rules.exit_ifs(e))
     ops.remove_exit(ctx, code)
+    _remove_jump_files(ctx, code)
+
+
+def _remove_jump_files(ctx: Ctx, code: str) -> None:
+    """A jump already out of exits.db: wg0.conf without it, its files and keys,
+    and the watchdog if it was the last. Safe to repeat."""
     ops.write_wg_conf(ctx)
     for path in (ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.jump_source(code)):
         ctx.files.forget(path)

@@ -26,7 +26,7 @@ VALUE_FLAGS = {
 }
 BOOL_FLAGS = {
     "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--new-server-keys": "new_server_keys",
-    "--purge": "purge",
+    "--purge": "purge", "--old-names": "old_names",
     "--follow": "follow", "-f": "follow", "--no-follow": "no_follow", "--tsv": "tsv",
 }
 
@@ -66,6 +66,7 @@ class Args:
     force: bool = False
     new_server_keys: bool = False
     purge: bool = False
+    old_names: bool = False     # restore: an archive from before config names said WARP
     follow: bool = False
     no_follow: bool = False
     tsv: bool = False
@@ -112,9 +113,9 @@ def _set(a: Args, flag: str, value: str) -> None:
     elif key == "EXIT_CODES":
         a.exit_codes = value
     elif key == "EXIT_LABEL":
-        a.exit_label = value
+        a.exit_label = " ".join(value.split())
     elif key == "LOCATION":
-        a.location = value.strip()
+        a.location = " ".join(value.split())
     elif key == "DEVICE_NUMBER":
         a.device_number = value
     elif key == "DEVICE_GROUPS":

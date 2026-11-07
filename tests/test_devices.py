@@ -49,7 +49,9 @@ def test_direct_numbers_count_down_and_ignore_wgt_ctls():
     assert store.next_direct_number([]) == 254
     assert store.next_direct_number([store.Device("a", 2)]) == 254
     assert store.next_direct_number([store.Device("a", 254), store.Device("b", 253)]) == 252
-    assert store.next_direct_number([store.Device("a", 128)]) is None
+    assert store.next_direct_number([store.Device("a", 128)]) == 254     # at the bottom: the highest free
+    every = [store.Device(f"d{n}", n) for n in range(128, 255)]
+    assert store.next_direct_number(every) is None
 
 
 # --- the subnet can't overlap the static network ---

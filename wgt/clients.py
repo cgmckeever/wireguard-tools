@@ -204,6 +204,18 @@ def apply_peer(ctx: Ctx, entry: store.Client, old_pub: str) -> None:
         ops.add_live_peer(ctx, entry.name, entry.pub, entry.ip)
     else:
         ctx.out.warn(f"{ctx.cfg.WG_IF} is not up; the peer is in {ctx.cfg.wg_conf} and loads when it starts")
+    if up:
+        _drop_unknown_peers(ctx)
+
+
+def _drop_unknown_peers(ctx: Ctx) -> None:
+    """clients.db decides who's connected. A rotate that stopped after saving has
+    lost the old key's name, and that key must not stay connected."""
+    want = {c.pub for c in ctx.snap.clients if not ctx.snap.is_disabled(c.name)}
+    for pub in live.peers(ctx.runner, ctx.cfg.WG_IF):
+        if pub not in want:
+            ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "remove"])
+            ctx.out.info(f"removed a peer {ctx.cfg.WG_IF} shouldn't have")
 
 
 def hand_over(ctx: Ctx, conf: str) -> None:
@@ -315,6 +327,8 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
             raise WgtError(f"no jump '{code}' on this server (see: wgt jump list)")
         if code not in uniq:
             uniq.append(code)
+    if ctx.args.groups:
+        store.parse_groups(ctx.args.groups)   # refused before anything is written
     endpoint = ops.resolve_endpoint(ctx, save=False)
     devices.ensure_number(ctx, base)
     devices.ensure_groups(ctx, base)
@@ -332,6 +346,9 @@ def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
     if existing:
         ctx.out.info(f"'{name}' already exists ({existing.ip}); config: {client_conf(ctx, name)}")
         ctx.out.info(f"use 'wgt client rotate {name}' to issue new keys")
+        # An earlier add may have stopped after saving it: finish that.
+        ops.write_wg_conf(ctx)
+        apply_peer(ctx, existing, "")
         return
     ip = next_free_ip(ctx, planned)
     ctx.runner.step(f"Add config '{name}' at {ip} ({way_out(ctx, name)})",
@@ -389,21 +406,30 @@ def removal_targets(name: str, directory: str) -> List[str]:
     return out
 
 
+def _left_behind(ctx: Ctx, name: str) -> bool:
+    """Files of a config that's no longer in clients.db: a remove that stopped."""
+    return bool(removal_targets(name, ctx.paths.client_dir)) or os.path.exists(ctx.paths.psk(name)) \
+        or ctx.snap.is_disabled(name) or f"\n# {name}\n" in (ctx.files.read(ctx.cfg.wg_conf) or "")
+
+
 def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     """Remove a client: peer (live and wg0.conf), routing rules, keys and config."""
     name = get_name(ctx, words, "remove")
     ops.take_lock(ctx)
     c = ctx.snap.client(name)
-    if c is None:
+    if c is None and not _left_behind(ctx, name):
         ctx.out.info(f"no config '{name}'")
         return
-    ctx.runner.step(f"Remove config '{name}' ({c.ip})", f"wgt client add {name} (issues new keys)")
-    ops.confirm(ctx, f"Remove {name}?")
-    # Peer first, then its exit rules: no packet of it may fall back to the default exit.
-    if ops.wg_up(ctx):
-        ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", c.pub, "remove"])
-        ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False))
-    ops.remove_client(ctx, name)
+    if c is not None:
+        ctx.runner.step(f"Remove config '{name}' ({c.ip})", f"wgt client add {name} (issues new keys)")
+        ops.confirm(ctx, f"Remove {name}?")
+        # Peer first, then its exit rules: no packet of it may fall back to the default exit.
+        if ops.wg_up(ctx):
+            ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", c.pub, "remove"])
+            ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False))
+        ops.remove_client(ctx, name)
+    else:
+        ctx.out.info(f"finishing an earlier remove of '{name}'")
     if ctx.snap.is_disabled(name):
         ops.set_disabled(ctx, name, False)
     # Not set up (after rollback): the next setup rebuilds wg0.conf from clients.db.
@@ -450,7 +476,15 @@ def rename_config(ctx: Ctx, old: str, new: str) -> None:
     """Rename one config (the lock is held); its device's number is the caller's."""
     c = ctx.snap.client(old)
     if c is None:
-        raise WgtError(f"no config '{old}' (see: wgt client list)")
+        moved = ctx.snap.client(new)
+        if moved is None:
+            raise WgtError(f"no config '{old}' (see: wgt client list)")
+        # An earlier rename stopped after saving: its old name's rules and files are left.
+        ctx.out.info(f"finishing an earlier rename of '{old}' to '{new}'")
+        was = store.Client(old, moved.ip, moved.pub, moved.allowed)
+        _after_rename(ctx, old, moved, rules.client_rule_cmds(ctx.cfg, ctx.snap, was, up=False),
+                      rules.client_table(ctx.snap, was))
+        return
     if ctx.snap.client(new):
         raise WgtError(f"a config '{new}' already exists")
     code = store.client_exit(new)
@@ -466,19 +500,28 @@ def rename_config(ctx: Ctx, old: str, new: str) -> None:
     new_c = store.Client(new, c.ip, c.pub, c.allowed)
     ctx.runner.step(f"Rename '{old}' to '{new}' (same keys and address; {way_out(ctx, new)})",
                     f"wgt client rename {new} {old}")
-    text = re.sub(r"(?m)^# wireguard-tools client: .*$",
-                  f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}", text)
-    text = re.sub(r"(?m)^# exit: .*$", f"# exit: {render.exit_desc(ctx.snap, new)}", text)
+    # A function, not a string: a label's backslash isn't a regex escape.
+    client_line = f"# wireguard-tools client: {new} on {ctx.cfg.SERVER_NAME}"
+    exit_line = f"# exit: {render.exit_desc(ctx.snap, new)}"
+    text = re.sub(r"(?m)^# wireguard-tools client: .*$", lambda _: client_line, text)
+    text = re.sub(r"(?m)^# exit: .*$", lambda _: exit_line, text)
     ctx.files.write(newconf, 0o600, text)
     ctx.files.write(ctx.paths.psk(new), 0o600, psk)
-    was_disabled = ctx.snap.is_disabled(old)
     old_down = rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False)
     old_table = rules.client_table(ctx.snap, c)
-    ops.remove_client(ctx, old)
-    ops.save_client(ctx, new_c)
-    if was_disabled:
-        ops.set_disabled(ctx, old, False)
+    # In this order, a stop at any point keeps a disabled config disabled.
+    if ctx.snap.is_disabled(old):
         ops.set_disabled(ctx, new, True)
+    ops.rename_client(ctx, old, new_c)
+    _after_rename(ctx, old, new_c, old_down, old_table)
+
+
+def _after_rename(ctx: Ctx, old: str, new_c: store.Client, old_down: List[str], old_table: str) -> None:
+    """The entry already has its new name: everything that follows from that. Safe to repeat."""
+    new = new_c.name
+    conf, newconf = client_conf(ctx, old), client_conf(ctx, new)
+    if ctx.snap.is_disabled(old):
+        ops.set_disabled(ctx, old, False)
     ops.write_wg_conf(ctx)
     # Moving between exits: the new exit's rules go in before the old ones come
     # out, so the client never falls back to the default exit in between.
@@ -502,15 +545,15 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     if c is None:
         raise WgtError(f"no config '{name}' (see: wgt client list)")
     if ctx.snap.is_disabled(name) == disable:
-        ctx.out.info(f"'{name}' is already {verb}d")
-        return
-    if disable:
-        ctx.runner.step(f"Disable config '{name}' ({c.ip}): cut off now; keys, config and address kept",
-                        f"wgt client enable {name}")
-        ops.confirm(ctx, f"Disable {name}?")
+        ctx.out.info(f"'{name}' is already {verb}d")   # still applied below: an earlier one may have stopped
     else:
-        ctx.runner.step(f"Enable config '{name}' ({c.ip}) with its existing config", f"wgt client disable {name}")
-    ops.set_disabled(ctx, name, disable)
+        if disable:
+            ctx.runner.step(f"Disable config '{name}' ({c.ip}): cut off now; keys, config and address kept",
+                            f"wgt client enable {name}")
+            ops.confirm(ctx, f"Disable {name}?")
+        else:
+            ctx.runner.step(f"Enable config '{name}' ({c.ip}) with its existing config", f"wgt client disable {name}")
+        ops.set_disabled(ctx, name, disable)
     ops.write_wg_conf(ctx)
     if not ops.wg_up(ctx):
         ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
@@ -656,10 +699,11 @@ def cmd_device_rename(ctx: Ctx, words: List[str]) -> None:
     ops.take_lock(ctx)
     ops.require_server(ctx)
     configs = ctx.snap.device_clients(old)
-    if not configs:
+    # --force finishes one that stopped half way: both names have configs, or only the new.
+    if not configs and not (ctx.args.force and ctx.snap.device_clients(new)):
         raise WgtError(f"no device '{old}' (see: wgt client list)")
-    if ctx.snap.device_clients(new):
-        raise WgtError(f"a device '{new}' already exists")
+    if ctx.snap.device_clients(new) and not ctx.args.force:
+        raise WgtError(f"a device '{new}' already exists (if a rename to it stopped half way, finish it with --force)")
     # Checked first: a rename stopped half way couldn't be re-run ('<new>' would exist).
     missing = [c.name for c in configs if store.read_text(client_conf(ctx, c.name)) is None]
     if missing:
@@ -667,14 +711,16 @@ def cmd_device_rename(ctx: Ctx, words: List[str]) -> None:
     missing = [c.name for c in configs if not (store.read_text(ctx.paths.psk(c.name)) or "").strip()]
     if missing:
         raise WgtError(f"no preshared key for {' '.join(missing)}: nothing renamed (rotate them first)")
-    number = ctx.snap.device_number(old)
-    groups = ctx.snap.device_groups(old)
     for c in configs:
         code, warp, _ = store.split_name(c.name)
         rename_config(ctx, c.name, store.config_name(code, warp, new))
-    if number is not None:
-        ops.set_device(ctx, old, None)
-        ops.set_device(ctx, new, number, groups)
+    for c in ctx.snap.device_clients(new) if ctx.args.force else []:   # ones the stopped run got to
+        code, warp, _ = store.split_name(c.name)
+        was = store.config_name(code, warp, old)
+        if _left_behind(ctx, was):
+            rename_config(ctx, was, c.name)
+    if ctx.snap.device_number(old) is not None:
+        ops.rename_device(ctx, old, new)
 
 
 def cmd_device(ctx: Ctx, words: List[str]) -> Optional[int]:

@@ -16,6 +16,12 @@ if TYPE_CHECKING:
     from .ctx import Ctx
 
 
+def _note(ctx: Ctx, path: str, value: str = "") -> None:
+    """A marker for the next run; a dry run leaves none."""
+    if not ctx.runner.dry_run:
+        write_marker(path, value)
+
+
 def log_event(ctx: Ctx, tag: str, msg: str) -> None:
     """Log a watchdog's action to the journal under its own tag."""
     journal(ctx.runner, tag, msg)
@@ -36,7 +42,7 @@ def run_warp(ctx: Ctx) -> None:
         return
     # Unhealthy: act on the second run in a row, so a just-started tunnel gets time.
     if not os.path.exists(marker):
-        write_marker(marker)
+        _note(ctx, marker)
         return
     old = live.listen_port(r, ifc)
     remove_markers(marker)
@@ -144,19 +150,19 @@ def _apply(ctx: Ctx, e: store.Exit, action: Optional[str], units: List[str], now
     if action == UP:
         # restart, not start: a unit can be "active" with its link gone.
         if r.attempt(["systemctl", "restart", *units]):
-            write_marker(started_marker, str(now))
+            _note(ctx, started_marker, str(now))
             say("a client is active; brought up")
         else:
             say("a client is active, but bringing it up failed")
     elif action == NEW_PORT:
         if r.attempt(["wg", "set", e.wx, "listen-port", "0"]):
-            write_marker(started_marker, str(now))
-            write_marker(port_marker)
+            _note(ctx, started_marker, str(now))
+            _note(ctx, port_marker)
             say(f"{stale}; new source port")
     elif action in (RESTART, RESTART_JUMP):
         remove_markers(port_marker)
         if r.attempt(["systemctl", "restart", *units]):
-            write_marker(started_marker, str(now))
+            _note(ctx, started_marker, str(now))
             say(f"{stale} after a new port; its WARP restarted" if action == RESTART
                 else f"jump tunnel silent for over {WATCHDOG_STALE}s; restarted")
     elif action == DOWN:

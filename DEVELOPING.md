@@ -94,6 +94,13 @@ is per device, not per config, so it lives in `devices.db`.
 - Server settings come only through `setup` and `restore` (`ctx.settings_env`):
   anywhere else one would reach wg0.conf without being saved. `--allowed-ips` on
   `wgt client` is the one exception.
+- Commands are safe to re-run after stopping anywhere: a re-run finishes the job
+  rather than saying "already done" or "no such config". A write that must not be
+  split is one write (`ops.rename_client`), and everything is validated before the
+  first write.
+- Nothing is asked once wg0 is stopped: whoever answers may be connected through it.
+- `wgt test` and setup's drift check read what wg0's hooks should have running from
+  the hooks themselves (`rules.hook_expectations`), so a new line is checked for free.
 - `SETUP_DONE` in the state file is written last and means setup finished; `WARP`
   there means the same on a server that hasn't re-run setup since. `wgt-ctl init`
   reads it to tell a server to adopt from one to finish.
@@ -122,6 +129,16 @@ is per device, not per config, so it lives in `devices.db`.
   system path moved there and a `FakeRunner` that records commands instead of
   running them. `tests/test_server.py` runs a whole `setup` then
   `rollback --purge` this way and checks nothing is left behind.
+- **What's true afterwards.** `tests/fakehost.py` is a host that changes as commands
+  run: routes, rules, firewall chains, peers, and wg0 going away when stopped.
+  `tests/test_invariants.py` uses it to check, after each command in a long journey,
+  that what's running is what booting wg0.conf gives, that PostDown leaves nothing
+  and that no file outlives its config; to kill each command at every step and check
+  a re-run finishes the job; and that a dry run changes nothing at all. **A new
+  command or kind of change goes in those lists, and a bug found by a review should
+  end as an invariant there**, not a one-off test. An unknown shell line fails the
+  fake, so a new hook can't go unnoticed. It only models what we understand `ip` and
+  `iptables` to do: `tools/trial.sh` remains the real check.
 - **Remote scripts.** ssh is faked, so `test_ctl.py` checks the real ssh options
   with `ssh -G` and the scripts sent to servers with `bash -n`.
 - **Live checks.** `tools/render-diff.sh` (read-only, every server) before a

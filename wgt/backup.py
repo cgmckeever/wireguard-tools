@@ -11,7 +11,7 @@ import time
 from typing import TYPE_CHECKING, List, Optional
 
 from . import clients, ops, store, units
-from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, SET_UP_KEYS, Paths
+from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, LEGACY_SETUP_DONE, SET_UP_KEYS, SETUP_DONE, Paths
 from .ctx import VALUE_FLAGS
 from .errors import WgtError
 from .system import write_private
@@ -37,6 +37,22 @@ def check_archive(archive: str, paths: Paths) -> List[str]:
     if paths.state not in members:
         raise WgtError(f"{archive} is not a wireguard-tools backup (no {paths.state} inside)")
     return members
+
+
+def _archive_state(archive: str, paths: Paths) -> str:
+    """The archive's wg-tools.state."""
+    with tarfile.open(archive, "r:gz") as t:
+        for m in t.getmembers():
+            if (m.name if m.name.startswith("/") else "/" + m.name) == paths.state:
+                member = t.extractfile(m)
+                return member.read().decode(errors="replace") if member else ""
+    return ""
+
+
+def old_name_meanings(state: str) -> bool:
+    """Set up before names carried WARP (NAMES=3, or the later SETUP_DONE)."""
+    return bool(store.state_get(state, LEGACY_SETUP_DONE)) and not store.state_get(state, "NAMES") \
+        and not store.state_get(state, SETUP_DONE)
 
 
 def rebuild_backup_map(ctx: Ctx, keep_map: Optional[str], members: List[str]) -> None:
@@ -106,7 +122,16 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"no such file: {words[0]}")
     members = check_archive(archive, ctx.paths)
     if ops.is_set_up(ctx):
-        raise WgtError("this server is already set up; run 'wgt rollback' (or 'rollback --purge') first")
+        raise WgtError("this server is already set up; run 'wgt rollback --purge' first")
+    # tar only adds, so a database the archive lacks would survive and mix with it.
+    p = ctx.paths
+    left = [path for path in (p.client_db, p.exit_db, p.device_db, p.disabled_db) if os.path.exists(path)]
+    if left:
+        raise WgtError(f"{' '.join(left)} would mix with the archive; run 'wgt rollback --purge' first")
+    if old_name_meanings(_archive_state(archive, p)) and not ctx.args.old_names:
+        raise WgtError(f"{archive} is from before config names said WARP: its configs named plainly (phone) "
+                       "used WARP then, and would leave straight out now. Rename them after restoring, "
+                       "and pass --old-names to go ahead")
     ops.take_lock(ctx)
     has_warp = ctx.paths.wgcf_account() in members
     has_exits = any(re.match(re.escape(ctx.paths.exit_dir) + r"/.*/wgcf-account\.toml$", m) for m in members)

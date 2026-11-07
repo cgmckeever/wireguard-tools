@@ -35,19 +35,35 @@ _SUBNET6 = re.compile(r"([0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4}::/64")
 
 
 def canon_subnet6(value: str) -> Optional[str]:
-    """Lowercase a "<groups>::/64" prefix and drop leading zeros, as ip(8)
-    prints it; None if it isn't one."""
+    """A "<groups>::/64" prefix as ip(8) and iptables print it (lowercase, no
+    leading or trailing zeros); None if it isn't one."""
     p = value.lower()
     if not _SUBNET6.fullmatch(p):
         return None
-    groups = p[: -len("::/64")].split(":")
-    return ":".join(format(int(g, 16), "x") for g in groups) + "::/64"
+    canon = str(ipaddress.IPv6Network(p))
+    return None if canon == "::/64" else canon
 
 
 def random_subnet6() -> str:
     """A new random ULA /64 (RFC 4193): fdXX:XXXX:XXXX::/64."""
     h = os.urandom(5).hex()
     return str(canon_subnet6(f"fd{h[0:2]}:{h[2:6]}:{h[6:10]}::/64"))
+
+
+def routed_overlap(subnet: str, routes: str, own_if: str) -> str:
+    """The first network in <routes> (`ip -4 route`) overlapping <subnet>, not
+    counting <own_if>'s; "" if none. The default route isn't one."""
+    want = ipaddress.ip_network(subnet)
+    for line in routes.splitlines():
+        fields = line.split()
+        if not fields or f"dev {own_if}" in line:
+            continue
+        try:
+            if want.overlaps(ipaddress.ip_network(fields[0], strict=False)):
+                return fields[0]
+        except ValueError:
+            continue   # default, or a "blackhole x" line
+    return ""
 
 
 def _routed(net: str, routes: str) -> bool:

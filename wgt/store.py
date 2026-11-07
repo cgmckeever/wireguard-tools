@@ -64,6 +64,8 @@ def state_get(text: Optional[str], key: str) -> str:
 
 
 def state_set(text: Optional[str], key: str, value: str) -> str:
+    if "\n" in value or "\r" in value:   # it would read back as another key
+        raise WgtError(f"a saved value can't span lines: {key}")
     lines = [line for line in (text or "").splitlines() if not line.startswith(key + "=")]
     lines.append(f"{key}={value}")
     return "\n".join(lines) + "\n"
@@ -327,6 +329,12 @@ def parse_devices(text: Optional[str]) -> List[Device]:
     return out
 
 
+def rename_device(text: Optional[str], old: str, new: str) -> str:
+    """devices.db with <old>'s line now <new>'s, in one write."""
+    d = next((x for x in parse_devices(text) if x.name == old), None)
+    return put_device(put_device(text, old), new, d.number, d.groups) if d else (text or "")
+
+
 def put_device(text: Optional[str], name: str, number: Optional[int] = None,
                groups: Optional[Tuple[str, ...]] = None) -> str:
     """devices.db with <name> removed, optionally added back with <number> and
@@ -340,11 +348,14 @@ def put_device(text: Optional[str], name: str, number: Optional[int] = None,
 
 
 def next_direct_number(devices: Iterable[Device]) -> Optional[int]:
-    """The number a `wgt client add` takes: below the lowest in the direct
-    range (None if that runs out)."""
-    used = [d.number for d in devices if d.number >= DEVICE_DIRECT_FIRST]
-    number = min(used) - 1 if used else DEVICE_DIRECT_LAST
-    return number if number >= DEVICE_DIRECT_FIRST else None
+    """The number a `wgt client add` takes: below the lowest in the direct range,
+    so a freed one isn't handed out again; once at the bottom, the highest free
+    (None if there's none left)."""
+    used = {d.number for d in devices if d.number >= DEVICE_DIRECT_FIRST}
+    below = min(used) - 1 if used else DEVICE_DIRECT_LAST
+    if below >= DEVICE_DIRECT_FIRST:
+        return below
+    return next((n for n in range(DEVICE_DIRECT_LAST, DEVICE_DIRECT_FIRST - 1, -1) if n not in used), None)
 
 
 # --- backup record ---

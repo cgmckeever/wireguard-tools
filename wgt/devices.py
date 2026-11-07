@@ -210,18 +210,37 @@ def apply_now(ctx: Ctx) -> None:
         ctx.out.info("applied")
 
 
-def _sync_allowed(ctx: Ctx) -> List[str]:
-    """Make the filter chains match the groups. What's allowed goes in above the
-    chain's own rules (the refusal at the end, which this leaves alone). Returns
-    what failed: an allow rule that won't go away is a device keeping access."""
-    failed: List[str] = []
-    r, snap = ctx.runner, ctx.snap
+def _allowed_chains(ctx: Ctx) -> List[Tuple[str, str, List[str]]]:
+    """What the groups allow, per filter chain: (command, chain, its allow rules)."""
+    snap = ctx.snap
     servers = server_sources(snap)
     wanted = [("iptables", DEVICE_PEER_CHAIN, peer_rules(snap)),
               ("iptables", DEVICE_SERVER_CHAIN, [f"-s {c.ip}/32 -j ACCEPT" for c in servers])]
     if ctx.cfg.ipv6:
         wanted.append(("ip6tables", DEVICE_SERVER_CHAIN, [f"-s {ctx.cfg.ip6_of(c.ip)}/128 -j ACCEPT" for c in servers]))
-    for cmd, chain, want in wanted:
+    return wanted
+
+
+def access_wrong(ctx: Ctx) -> List[str]:
+    """Allow rules running that the groups don't want, and ones they want that
+    aren't. Nothing if the chains aren't there (wgt test checks those)."""
+    wrong: List[str] = []
+    for cmd, chain, want in _allowed_chains(ctx):
+        have = live.ipt_chain(ctx.runner, "filter", chain, cmd)
+        if have is not None:
+            have = [spec for spec in have if spec.startswith("-s ")]
+            wrong += [f"{chain} lacks {s}" for s in want if s not in have]
+            wrong += [f"{chain} still has {s}" for s in have if s not in want]
+    return wrong
+
+
+def _sync_allowed(ctx: Ctx) -> List[str]:
+    """Make the filter chains match the groups. What's allowed goes in above the
+    chain's own rules (the refusal at the end, which this leaves alone). Returns
+    what failed: an allow rule that won't go away is a device keeping access."""
+    failed: List[str] = []
+    r = ctx.runner
+    for cmd, chain, want in _allowed_chains(ctx):
         have = live.ipt_chain(r, "filter", chain, cmd)
         if have is None:
             continue

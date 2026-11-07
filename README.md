@@ -147,7 +147,9 @@ to `wgt setup` and `wgt restore`, and other commands refuse them, except
 
 Example: `wgt setup --name dengar --port 51821 --endpoint vpn.example.com`.
 
-Setup also takes, for one run (not saved): `--force` (reinstall wgcf,
+A subnet this host already routes is refused, since it could cut off the way to
+the host, and `--wg-if` or `--warp-if` can't rename a running interface (`wgt
+rollback` first). Setup also takes, for one run (not saved): `--force` (reinstall wgcf,
 regenerate the WARP profile, take over configs these tools didn't create) and
 `--new-server-keys` (a new server keypair: every config stops working until
 rotated with `wgt client rotate`).
@@ -317,6 +319,7 @@ ssh 10.9.8.4                           # from the server or a device sharing a g
 wgt device list                        # each device, its static address and groups (--tsv for scripts)
 wgt device set laptop 42               # give it this number, 2-254 (none given: the next free one)
 wgt device rename laptop work-laptop   # every config of it, and its number; keys and addresses stay
+                                       # (--force finishes one that stopped half way)
 ```
 
 A number change applies at once and needs no new config, but anything
@@ -471,7 +474,7 @@ wgt status            # settings (and any not running yet), interfaces, configs,
 wgt log [N]           # its changes, the watchdogs and the tunnels: last lines, then follows (Ctrl-C stops; --no-follow just prints)
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
-wgt rollback          # stop everything, remove all rules, restore original files
+wgt rollback          # stop everything, remove all rules, restore original files (a hostname setup changed stays)
 wgt rollback --purge  # ...and delete keys, configs, WARP accounts and jumps
 ```
 
@@ -530,6 +533,12 @@ scp wireguard-tools.<host>.<date>.tar.gz root@<new>:
 # new server: install git and clone only (the first two lines of Quick start), do NOT run setup
 /opt/wireguard-tools/bin/wgt restore wireguard-tools.<host>.<date>.tar.gz
 ```
+
+`restore` needs a clean server: after `wgt rollback --purge`, or a new one, as what
+a plain rollback keeps would mix with the archive. An archive from before config
+names said WARP (before about 2026-11-06) is refused, because a config named plainly
+used WARP then and would leave straight out now: rename those after restoring, and
+pass `--old-names` to go ahead.
 
 `restore` brings over the server keys, every config (same keys, addresses and
 allowed IPs), the settings, the static numbers, the WARP account (so it doesn't

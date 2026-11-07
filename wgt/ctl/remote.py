@@ -8,6 +8,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
@@ -242,6 +243,16 @@ def needs_terminal(cmd: str) -> None:
         raise WgtError(f"{cmd} needs --yes without a terminal")
 
 
+def write_local(path: str, text: str, mode: int = 0o600) -> None:
+    """A file under local/, whole or not at all: the server list and numbers aren't
+    recoverable from anywhere else."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
 def set_target(name: str, target: str) -> None:
     """Point a server's line in local/servers at a new login (its checkout dir stays)."""
     lines = []
@@ -250,5 +261,4 @@ def set_target(name: str, target: str) -> None:
         if f and f[0] == name:
             line = f"{name:<10} {target}" + (f" {f[2]}" if len(f) > 2 else "")
         lines.append(line)
-    with open(LIST, "w") as fh:
-        fh.write("\n".join(lines) + "\n")
+    write_local(LIST, "\n".join(lines) + "\n")

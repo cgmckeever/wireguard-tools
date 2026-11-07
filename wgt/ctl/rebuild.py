@@ -82,8 +82,7 @@ def do_forget(s: Server, args: List[str]) -> int:
             out.info("kept")
             return 0
     lines = [line for line in (store.read_text(remote.LIST) or "").splitlines() if (line.split() or [""])[0] != s.name]
-    with open(remote.LIST, "w") as f:
-        f.write("\n".join(lines) + "\n")
+    remote.write_local(remote.LIST, "\n".join(lines) + "\n")
     out.info(f"forgot '{s.name}'; its local/exits/{s.name} and local/backups/{s.name} stay")
     return 0
 

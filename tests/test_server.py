@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from conftest import FIXTURES, KEYS
 
-from wgt import backup, cli, host, ops
+from wgt import backup, cli, host, ops, store
 from wgt import server as srv
 from wgt.const import Paths
 from wgt.errors import WgtError
@@ -418,3 +418,96 @@ def test_wgt_test_fails_without_the_static_address_rule(make_ctx):
     answers = {"ip -4 -o addr show dev wg0": (0, "85: wg0 inet 10.9.8.1/24 scope global wg0\n"),
                "ip rule show": (0, "")}
     assert not checks.Tests(make_ctx(answers=answers)).device_net_ok()
+
+
+# --- restore, and small things that reach running servers ---
+
+def _archive(tmp_path, state, *others):
+    path = tmp_path / "a.tar.gz"
+    wg = tmp_path / "src"
+    wg.mkdir(exist_ok=True)
+    (wg / "wg-tools.state").write_text(state)
+    with tarfile.open(path, "w:gz") as t:
+        t.add(wg / "wg-tools.state", arcname=others[0] if others else "x")
+    return str(path)
+
+
+@pytest.mark.parametrize("state,old", [("WARP=on\n", True), ("WARP=on\nNAMES=3\n", False),
+                                       ("SETUP_DONE=1\n", False), ("WG_PORT=1\n", False)])
+def test_old_archives_are_told_apart(state, old):
+    assert backup.old_name_meanings(state) is old
+
+
+def _unset_up(ctx):
+    ops.state_unset(ctx, "WARP")
+
+
+def test_restore_refuses_old_name_meanings_unless_told(make_ctx, tmp_path, monkeypatch):
+    ctx = make_ctx(argv=["restore"])
+    _unset_up(ctx)
+    for db in (ctx.paths.client_db, ctx.paths.exit_db, ctx.paths.device_db, ctx.paths.disabled_db):
+        if os.path.exists(db):
+            os.remove(db)
+    ctx.reload()
+    archive = _archive(tmp_path, "WARP=on\nWG_PORT=1\n", ctx.paths.state.lstrip("/"))
+    with pytest.raises(WgtError, match="--old-names"):
+        backup.cmd_restore(ctx, [archive])
+
+
+def test_restore_refuses_to_mix_with_what_rollback_kept(make_ctx, tmp_path):
+    ctx = make_ctx(argv=["restore"])
+    _unset_up(ctx)
+    archive = _archive(tmp_path, "SETUP_DONE=1\n", ctx.paths.state.lstrip("/"))
+    with pytest.raises(WgtError, match="rollback --purge"):
+        backup.cmd_restore(ctx, [archive])
+
+
+def test_a_routed_subnet_is_refused_and_the_saved_one_isnt(make_ctx):
+    ctx = make_ctx(argv=["--subnet", "192.0.2.0/25"])
+    ctx.facts.routes4 = "default via 192.0.2.1 dev eth0\n192.0.2.0/24 dev eth0 scope link\n10.8.0.0/24 dev wg0\n"
+    with pytest.raises(WgtError, match="already routes"):
+        srv.refuse_routed_subnet(ctx)
+    ctx = make_ctx(argv=["--subnet", "10.8.0.0/24"])
+    ctx.facts.routes4 = "10.8.0.0/24 dev wg0 scope link\n"
+    srv.refuse_routed_subnet(ctx)
+
+
+def test_rollback_puts_the_hosts_file_back(make_ctx, tmp_path, monkeypatch):
+    ctx = make_ctx()
+    hosts = Path(ctx.paths.hosts_file)
+    hosts.write_text("127.0.0.1 localhost\n127.0.1.1 oldname\n")
+    ctx.files.write(str(hosts), 0o644, "127.0.0.1 localhost\n127.0.1.1 dengar\n")
+    srv._restore_host_files(ctx)
+    assert "oldname" in hosts.read_text()
+
+
+def test_a_newline_cant_become_another_saved_key():
+    with pytest.raises(WgtError):
+        store.state_set("", "LOCATION", "Paris\nWG_PORT=9")
+
+
+def test_a_label_with_a_backslash_survives_a_rename(make_ctx):
+    from wgt import clients
+    ctx = make_ctx()
+    ops.save_exit(ctx, store.Exit("par-fr", ctx.snap.exit("par-fr").idx, r"Par\is"))
+    name = "warp.par-fr.mbp-1"
+    conf = Path(clients.client_conf(ctx, name))
+    conf.parent.mkdir(parents=True, exist_ok=True)
+    conf.write_text("# exit: x\n[Interface]\n")
+    Path(ctx.paths.psk(name)).parent.mkdir(parents=True, exist_ok=True)
+    Path(ctx.paths.psk(name)).write_text("PSK\n")
+    clients.cmd_rename(ctx, [name, "warp.par-fr.mbp-2"])
+    assert r"Par\is" in Path(clients.client_conf(ctx, "warp.par-fr.mbp-2")).read_text()
+
+
+def test_a_terminal_that_goes_away_doesnt_stop_a_command():
+    class Gone:
+        def write(self, text):
+            raise BrokenPipeError
+
+        def flush(self):
+            pass
+    from wgt.system import Out
+    out = Out(Gone(), Gone())
+    out.info("still here")
+    out.error("still here")

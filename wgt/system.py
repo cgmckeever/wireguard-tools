@@ -103,21 +103,27 @@ class Out:
         self.stream = stream or sys.stdout
         self.err = err or sys.stderr
 
+    @staticmethod
+    def _print(text: str, stream: TextIO) -> None:
+        """A terminal that's gone must not stop a change half way."""
+        with contextlib.suppress(OSError):
+            print(text, file=stream, flush=True)
+
     def log(self, msg: str) -> None:
-        print(f"==> {msg}", file=self.stream, flush=True)
+        self._print(f"==> {msg}", self.stream)
 
     def info(self, msg: str) -> None:
-        print(f"    {msg}", file=self.stream, flush=True)
+        self._print(f"    {msg}", self.stream)
 
     def line(self, text: str = "") -> None:
         """A line as is (tables, blank lines between sections)."""
-        print(text, file=self.stream, flush=True)
+        self._print(text, self.stream)
 
     def warn(self, msg: str) -> None:
-        print(f"WARN: {msg}", file=self.err, flush=True)
+        self._print(f"WARN: {msg}", self.err)
 
     def error(self, msg: str) -> None:
-        print(f"ERROR: {msg}", file=self.err, flush=True)
+        self._print(f"ERROR: {msg}", self.err)
 
 
 def journal(runner: Runner, tag: str, msg: str) -> None:

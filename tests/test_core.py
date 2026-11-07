@@ -58,7 +58,7 @@ def test_ip_ints():
 
 @pytest.mark.parametrize("value,want", [
     ("FDAA:08F8:C196::/64", "fdaa:8f8:c196::/64"),
-    ("fd00:0:0::/64", "fd00:0:0::/64"),
+    ("fd00:0:0::/64", "fd00::/64"),
     ("fdaa::/64", "fdaa::/64"),
     ("fdaa:1:2:3:4::/64", None),
     ("fdaa::/48", None),

@@ -33,6 +33,7 @@ them, so a change here restarts wg0 at the next setup (tests/golden pins the tex
 
 from __future__ import annotations
 
+import re
 from typing import Iterable, List, Sequence, Tuple
 
 from .config import Config
@@ -207,6 +208,40 @@ def warp_rule_cmds(cfg: Config, on: bool) -> List[str]:
     return out
 
 
+def hook_expectations(cfg: Config, snap: Snapshot, pub_if: str) -> List[Tuple[str, str, str, str]]:
+    """What wg0's PostUp leaves running, read from its own lines, so a line added
+    there is checked without anyone remembering to: (family, "rule" or a table,
+    the text `ip` prints for it, the interface it needs or ""). Firewall lines
+    are ipt_rules' (which they come from)."""
+    found: List[Tuple[str, str, str, str]] = []
+    for line in hook_cmds(cfg, snap, pub_if, up=True):
+        soft = line.endswith("2>/dev/null || true")
+        added = line.rsplit("; ", 1)[-1].replace(" 2>/dev/null || true", "")
+        route = re.fullmatch(r"(ip(?: -6)?) route replace (.*) table (\S+)", added)
+        rule = re.fullmatch(r"(ip(?: -6)?) rule add (.*)", added)
+        if route:
+            family, what, table = route.groups()
+            dev = re.search(r" dev (\S+)", what)
+            optional = dev.group(1) if soft and dev else ""
+            found.append((family, table, what.split(" metric ")[0], optional))
+        elif rule:
+            found.append((rule.group(1), "rule", _rule_as_printed(rule.group(2)), ""))
+    return found
+
+
+def _rule_as_printed(spec: str) -> str:
+    """An `ip rule add` spec as `ip rule show` prints it: "<priority>:\t<rule>"."""
+    words = spec.split()
+    at = words.index("priority")
+    priority, rest = words[at + 1], words[:at] + words[at + 2:]
+    text = " ".join(rest)
+    if rest[0] == "fwmark":
+        return f"{priority}:\tfrom all fwmark {int(rest[1]):#x} {' '.join(rest[2:])}"
+    if rest[0] == "iif":
+        return f"{priority}:\tfrom all to {rest[3]} iif {rest[1]} {' '.join(rest[4:])}"
+    return f"{priority}:\t" + re.sub(r"/(32|128)\b", "", text)
+
+
 def client_table(snap: Snapshot, client: Client) -> str:
     """The routing table a config's own rules point at ("" for none: the
     subnet's WARP rule)."""
@@ -265,23 +300,23 @@ def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
     """One exit's part of wg0's PostUp (<up>) or PostDown: its tables with blackhole fallbacks, the
     fwmark rule sending its WARP tunnel's packets through the jump, and its
     clients' rules (its firewall rules come with ipt_rules)."""
-    client_table, jump_table, mark = exit_wtable(e), exit_ptable(e), exit_mark(e)
+    wtable, jump_table, mark = exit_wtable(e), exit_ptable(e), exit_mark(e)
     out: List[str] = []
     if up:
         out += jump_table_cmds(cfg, e)
         out.append(f"while ip rule del fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
                    f"do :; done; ip rule add fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO}")
         for fam in cfg.families():
-            out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {client_table}")
-            out.append(f"{fam} route replace default dev {e.wx} table {client_table} 2>/dev/null || true")
-            out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {client_table}")
+            out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {wtable}")
+            out.append(f"{fam} route replace default dev {e.wx} table {wtable} 2>/dev/null || true")
+            out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {wtable}")
         for c in snap.exit_clients(e.code):
             out += client_rule_cmds(cfg, snap, c, up=True)
     else:
         for c in snap.exit_clients(e.code):
             out += client_rule_cmds(cfg, snap, c, up=False)
         for fam in reversed(cfg.families()):
-            out.append(f"{fam} route flush table {client_table} 2>/dev/null || true")
+            out.append(f"{fam} route flush table {wtable} 2>/dev/null || true")
         out.append(f"while ip rule del fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
                    "do :; done")
         for fam in reversed(cfg.families()):

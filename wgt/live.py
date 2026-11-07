@@ -26,6 +26,11 @@ def handshakes(r: Runner, ifc: str) -> Dict[str, int]:
     return out
 
 
+def peers(r: Runner, ifc: str) -> List[str]:
+    """The public keys of an interface's peers, running now."""
+    return [line.split()[0] for line in r.query(["wg", "show", ifc, "allowed-ips"]).splitlines() if line.strip()]
+
+
 def transfers(r: Runner, ifc: str) -> Dict[str, Tuple[int, int]]:
     """public key -> (rx bytes, tx bytes)."""
     out: Dict[str, Tuple[int, int]] = {}

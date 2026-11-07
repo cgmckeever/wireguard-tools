@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import time
 from typing import TYPE_CHECKING, List, Optional
 
@@ -34,6 +35,7 @@ from .system import settings_of, write_private
 if TYPE_CHECKING:
     from .ctx import Ctx
 
+HOSTNAME_CFG = "99-wg-tools-hostname.cfg"
 PACKAGES = ("wireguard", "wireguard-tools", "iptables", "curl", "ca-certificates", "iputils-ping",
             "qrencode", "magic-wormhole")
 
@@ -70,13 +72,16 @@ def guard_default_route(ctx: Ctx) -> None:
         raise WgtError("default route changed; investigate before re-running")
 
 
-def start_unit(ctx: Ctx, ifc: str, changed: bool) -> None:
-    """Enable an interface's wg-quick unit for boot and make it match its config."""
+def start_unit(ctx: Ctx, ifc: str, changed: bool, ask: bool = True) -> None:
+    """Enable an interface's wg-quick unit for boot and make it match its config.
+    Not <ask>: it was stopped a moment ago with permission, so bring it straight
+    back (whoever would answer may be connected through it)."""
     r, unit = ctx.runner, f"wg-quick@{ifc}"
     enabled = False
     if not live.if_exists(r, ifc):
         r.step(f"Bring up {ifc} ({unit}, enabled at boot)", f"systemctl disable --now {unit}")
-        ops.confirm(ctx, f"Bring up {ifc} now?", default_yes=True)   # the setup is useless without it
+        if ask:
+            ops.confirm(ctx, f"Bring up {ifc} now?", default_yes=True)   # the setup is useless without it
         r.run(["systemctl", "enable", "--now", unit])
         enabled = True
     elif changed:
@@ -298,7 +303,7 @@ def offer_hostname(ctx: Ctx) -> None:
     full = ctx.facts.hostname
     cur = full.split(".")[0]
     want = ctx.cfg.SERVER_NAME.lower()
-    if cur.lower() == want or not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", want):
+    if cur.lower() in (want, "localhost") or not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", want):
         return
     if ctx.runner.dry_run or ctx.args.yes or not ui.have_tty():
         return
@@ -307,13 +312,14 @@ def offer_hostname(ctx: Ctx) -> None:
     new = want + (full[len(cur):] if "." in full else "")   # keep the domain part
     ctx.runner.step(f"Rename host {full} -> {new} (and in {ctx.paths.hosts_file})",
                     f"hostnamectl set-hostname {full}; put {cur} back in {ctx.paths.hosts_file}; "
-                    f"rm {os.path.join(ctx.paths.cloud_cfg_dir, '99-wg-tools-hostname.cfg')}")
+                    f"rm {os.path.join(ctx.paths.cloud_cfg_dir, HOSTNAME_CFG)}")
     ctx.runner.run(["hostnamectl", "set-hostname", new])
     hosts = store.read_text(ctx.paths.hosts_file) or ""
-    if re.search(rf"\b{re.escape(cur)}\b", hosts):
-        ctx.files.write(ctx.paths.hosts_file, 0o644, re.sub(rf"\b{re.escape(cur)}\b", want, hosts))
+    word = rf"(?<![\w.-]){re.escape(cur)}(?![\w-])"   # not inside ip6-localhost, or a longer name
+    if re.search(word, hosts):
+        ctx.files.write(ctx.paths.hosts_file, 0o644, re.sub(word, want, hosts))
     if os.path.isdir(ctx.paths.cloud_cfg_dir):
-        ctx.files.write(os.path.join(ctx.paths.cloud_cfg_dir, "99-wg-tools-hostname.cfg"), 0o644,
+        ctx.files.write(os.path.join(ctx.paths.cloud_cfg_dir, HOSTNAME_CFG), 0o644,
                         "preserve_hostname: true\n")
 
 
@@ -520,6 +526,24 @@ def restart_if_drifted(ctx: Ctx) -> None:
     ctx.runner.run(["systemctl", "restart", unit])
 
 
+def refuse_interface_change(ctx: Ctx) -> None:
+    """A new interface name would start beside the running one, not replace it."""
+    for key, flag in (("WG_IF", "--wg-if"), ("WARP_IF", "--warp-if")):
+        was = ctx.cfg.saved.get(key, "")
+        if was and was != ctx.cfg.values[key] and live.if_exists(ctx.runner, was):
+            raise WgtError(f"{was} is running; {flag} can't rename it. wgt rollback first, then setup {flag}")
+
+
+def refuse_routed_subnet(ctx: Ctx) -> None:
+    """A subnet the host already routes could cut off the way to it (SSH included)."""
+    subnet = ctx.cfg.WG_SUBNET
+    if subnet == ctx.cfg.saved.get("WG_SUBNET"):
+        return
+    clash = net.routed_overlap(subnet, ctx.facts.routes4, ctx.cfg.saved.get("WG_IF") or ctx.cfg.WG_IF)
+    if clash:
+        raise WgtError(f"subnet {subnet} overlaps {clash}, which this host already routes; pick another")
+
+
 def stop_before_rewrite(ctx: Ctx) -> bool:
     """wg0's config is about to change: stop wg0 with its current config first,
     so its PostDown removes exactly the rules its PostUp added (old subnet, old
@@ -551,9 +575,9 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     review_settings(ctx, asked)
     # Refuse to take over a wg0.conf we didn't create, before saving or touching anything.
     ops.ensure_managed(ctx, ctx.cfg.wg_conf)
-    renumber_clients(ctx)
+    refuse_interface_change(ctx)
+    refuse_routed_subnet(ctx)
     offer_hostname(ctx)
-    save_config(ctx)
     record_baseline(ctx)
     install_packages(ctx)
     link_wgt(ctx)
@@ -564,24 +588,36 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     keys_changed = ensure_server_keys(ctx)
     ops.resolve_endpoint(ctx, save=True)
     save_location(ctx)
-    sync_client_configs(ctx, old_name)
     write_sysctl(ctx)
     write_dropin(ctx)
+    # Late: until here a failure (WARP, a checksum) leaves the running wg0 and the
+    # databases agreeing about the subnet and settings.
+    renumber_clients(ctx)
+    save_config(ctx)
+    sync_client_configs(ctx, old_name)
     stopped = stop_before_rewrite(ctx)
-    changed = ops.write_wg_conf(ctx) or keys_changed
-    units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
-    if stopped and ctx.runner.dry_run:
-        ctx.out.info(f"[dry-run] would then start wg-quick@{ctx.cfg.WG_IF} with the new config")
-    else:
-        try:
-            start_unit(ctx, ctx.cfg.WG_IF, changed)
-        except BaseException:
-            # Only if wg0 didn't come up: answering no to a restart leaves a
-            # running wg0 (and its rules) alone.
-            if not ops.wg_up(ctx):
-                ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
-                run_down_hooks(ctx)
-            raise
+    # Stopped, a lost terminal must not stop us: the session may be running through wg0.
+    hangup = signal.signal(signal.SIGHUP, signal.SIG_IGN) if stopped and not ctx.runner.dry_run else None
+    changed = keys_changed
+    try:
+        changed = ops.write_wg_conf(ctx) or keys_changed
+        units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
+    finally:
+        if stopped and ctx.runner.dry_run:
+            ctx.out.info(f"[dry-run] would then start wg-quick@{ctx.cfg.WG_IF} with the new config")
+        else:
+            try:
+                start_unit(ctx, ctx.cfg.WG_IF, changed, ask=not stopped)
+            except BaseException:
+                # Only if wg0 didn't come up: answering no to a restart leaves a
+                # running wg0 (and its rules) alone.
+                if not ops.wg_up(ctx):
+                    ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
+                    run_down_hooks(ctx)
+                raise
+            finally:
+                if hangup is not None:
+                    signal.signal(signal.SIGHUP, hangup)
     if not stopped and not changed and ops.wg_up(ctx):
         restart_if_drifted(ctx)
     guard_default_route(ctx)
@@ -617,6 +653,7 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
     _remove_rules(ctx)
     _remove_units(ctx)
     _restore_forwarding(ctx, state)
+    _restore_host_files(ctx)
     configs = [cfg.wg_conf, cfg.warp_conf]
     configs += [path for e in ctx.snap.exits for path in (ctx.paths.px_conf(e.code), ctx.paths.wx_conf(e.code))]
     for path in configs:
@@ -675,6 +712,12 @@ def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
         r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.all.forwarding={fwd6}"])
     if ra:
         r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.{host.pub_if(state, ctx.facts)}.accept_ra={ra}"], check=False)
+
+
+def _restore_host_files(ctx: Ctx) -> None:
+    """What offer_hostname changed. The hostname itself stays (its step said how to put it back)."""
+    ctx.files.restore_original(ctx.paths.hosts_file, remove_new=False)
+    ctx.files.restore_original(os.path.join(ctx.paths.cloud_cfg_dir, HOSTNAME_CFG), remove_new=True)
 
 
 def _purge(ctx: Ctx) -> None:

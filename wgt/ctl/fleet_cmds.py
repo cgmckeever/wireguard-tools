@@ -3,12 +3,11 @@
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Dict, List, Optional, Tuple
 
 from .. import fleet, store, ui
-from ..const import DEVICE_DIRECT_LAST, device_ip
+from ..const import DEVICE_CTL_FIRST, DEVICE_DIRECT_LAST, device_ip
 from ..ctx import VALUE_FLAGS
 from ..errors import WgtError
 from . import remote
@@ -47,9 +46,7 @@ def read_entries() -> Dict[str, fleet.Entry]:
 
 
 def write_entries(entries: Dict[str, fleet.Entry]) -> None:
-    fd = os.open(remote.DEVICES, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(fleet.format_entries(entries))
+    remote.write_local(remote.DEVICES, fleet.format_entries(entries))
 
 
 def refresh_entries(seen: fleet.Seen, complete: bool) -> Dict[str, fleet.Entry]:
@@ -154,7 +151,8 @@ def cmd_devices(args: List[str]) -> int:
     verb = args[0] if args else "list"
     if verb == "forget" and len(args) == 2:
         return _devices_forget(args[1])
-    if verb == "fix" and len(args) == 3 and args[2].isdigit() and 2 <= int(args[2]) <= DEVICE_DIRECT_LAST:
+    if verb == "fix" and len(args) == 3 and args[2].isdigit() \
+            and DEVICE_CTL_FIRST <= int(args[2]) <= DEVICE_DIRECT_LAST:
         return _devices_fix(args[1], int(args[2]))
     if not (verb in ("list", "sync") and len(args) <= 1):
         raise WgtError("usage: wgt-ctl devices [sync | fix <device> <number 2-254> | forget <device>]")

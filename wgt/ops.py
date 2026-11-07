@@ -186,6 +186,14 @@ def remove_client(ctx: Ctx, name: str) -> None:
     _write_clients(ctx, name, None)
 
 
+def rename_client(ctx: Ctx, old: str, entry: store.Client) -> None:
+    """<old>'s entry replaced by <entry> in one write: stopping in between must
+    not lose its public key. Reloads ctx.snap."""
+    db = ctx.paths.client_db
+    ctx.files.write(db, 0o600, store.put_client(store.put_client(ctx.files.read(db), old, None), entry.name, entry))
+    ctx.reload()
+
+
 def _write_clients(ctx: Ctx, name: str, entry: Optional[store.Client]) -> None:
     db = ctx.paths.client_db
     ctx.files.write(db, 0o600, store.put_client(ctx.files.read(db), name, entry))
@@ -220,6 +228,13 @@ def set_device(ctx: Ctx, name: str, number: Optional[int], groups: Optional[Tupl
     ones it has); reloads ctx.snap."""
     db = ctx.paths.device_db
     ctx.files.write(db, 0o600, store.put_device(ctx.files.read(db), name, number, groups))
+    ctx.reload()
+
+
+def rename_device(ctx: Ctx, old: str, new: str) -> None:
+    """Move <old>'s number and groups to <new>, in one write; reloads ctx.snap."""
+    db = ctx.paths.device_db
+    ctx.files.write(db, 0o600, store.rename_device(ctx.files.read(db), old, new))
     ctx.reload()
 
 

@@ -6,9 +6,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from . import clients, exits, host, live, ops, results, rules, store, ui
+from . import clients, devices, exits, host, live, ops, results, rules, store, ui
 from .const import (
     DEVICE_SERVER,
     DEVICE_WATCHDOG,
@@ -21,6 +21,7 @@ from .const import (
     WATCHDOG_STALE,
     device_ip,
 )
+from .system import settings_of
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -186,6 +187,7 @@ class Tests:
                 out.append(f"{f} plain host config rules")
         if not self.device_net_ok():
             out.append("static device addresses")
+        out += self.hooks_missing() + self.peers_wrong()
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             if live.ipt_count(self.runner, x, t, ch, rule) != 1:
                 out.append(f"{x} {t} {ch} {rule}")
@@ -200,6 +202,30 @@ class Tests:
         c = self.cfg
         addrs = self.runner.query(["ip", "-4", "-o", "addr", "show", "dev", c.WG_IF])
         return f" {device_ip(DEVICE_SERVER)}/" in addrs and rules.device_rule_text(c) in live.rules(self.runner, "ip")
+
+    def hooks_missing(self) -> List[str]:
+        """Every route and rule wg0's PostUp puts in, that isn't running (the line
+        itself, read from the hooks). A soft line's interface may just be down."""
+        r, missing = self.runner, []
+        rule_text: Dict[str, str] = {}
+        for family, where, text, needs in rules.hook_expectations(self.cfg, self.ctx.snap, self.ctx.pub_if):
+            if where == "rule":
+                seen = rule_text.setdefault(family, live.rules(r, family))
+                if not any(line.split("\t")[0] + "\t" + line.split("\t")[-1].strip() == text
+                           for line in seen.splitlines() if "\t" in line):
+                    missing.append(f"{family} rule: {text}")
+            elif not (needs and not live.if_exists(r, needs)):
+                if not re.search(rf"^{re.escape(text)}( |$)", live.table(r, family, where), re.M):
+                    missing.append(f"{family} table {where}: {text}")
+        return missing
+
+    def peers_wrong(self) -> List[str]:
+        """Peers running on wg0 that clients.db doesn't want, and ones it wants that aren't."""
+        snap = self.ctx.snap
+        want = {c.pub: c.name for c in snap.clients if not snap.is_disabled(c.name)}
+        have = set(live.peers(self.runner, self.cfg.WG_IF))
+        return ([f"peer missing: {name}" for pub, name in want.items() if pub not in have]
+                + [f"peer not in clients.db (or disabled): {pub}" for pub in have - set(want)])
 
     def boot_order_ok(self) -> bool:
         """wg0's unit starts after warp's (and wants it), via setup's drop-in."""
@@ -239,6 +265,17 @@ class Tests:
                       "(main, then blackhole; no stale ones)", self.direct_rules_ok(f))
         res.check(f"static addresses: {device_ip(DEVICE_SERVER)} on {c.WG_IF}; one with no config in use "
                   "is unreachable", self.device_net_ok())
+        missing = self.hooks_missing()
+        res.check(f"every route and rule in {c.WG_IF}'s hooks is running"
+                  + (f" (missing: {'; '.join(missing[:3])})" if missing else ""), not missing)
+        wrong = self.peers_wrong()
+        res.check(f"{c.WG_IF}'s running peers match clients.db" + (f" ({'; '.join(wrong[:3])})" if wrong else ""),
+                  not wrong)
+        stale = devices.access_wrong(self.ctx)
+        res.check("devices' firewall access matches their groups" + (f" ({'; '.join(stale[:3])})" if stale else ""),
+                  not stale)
+        if settings_of(store.read_text(c.wg_conf) or "") != settings_of(ops.render_wg_conf(self.ctx)):
+            res.result("WARN", f"{c.wg_conf} differs from what this version writes (apply: wgt setup)")
         orphans = [x.name for x in self.ctx.snap.clients if x.exit and self.ctx.snap.exit(x.exit) is None]
         res.check("every config's jump exists" + (f" (missing for: {' '.join(orphans)})" if orphans else ""),
                   not orphans)
