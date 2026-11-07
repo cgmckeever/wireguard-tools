@@ -10,7 +10,7 @@ import re
 import tempfile
 from typing import TYPE_CHECKING, Callable, List, Optional
 
-from . import host, render, store
+from . import host, render, rules, store
 from .errors import WgtError
 
 if TYPE_CHECKING:
@@ -151,10 +151,18 @@ def _wgcf(ctx: Ctx, d: str, args: List[str], log: str, append: bool) -> bool:
     return ctx.runner.run_logged([ctx.paths.wgcf_bin, *args], log, cwd=d, append=append)
 
 
-def render_profile(ctx: Ctx, profile_path: str, table: Optional[int] = None, mark: Optional[int] = None) -> str:
-    """warp.conf (or a jump's wx-<code>.conf) from a wgcf profile."""
+def conf_text(ctx: Ctx, profile: str, e: Optional[store.Exit] = None,
+              warn: Callable[[str], None] = lambda m: None) -> str:
+    """warp.conf, or jump <e>'s wx-<code>.conf, from a wgcf profile's text: what setup
+    writes, and what `wgt debug` shows for tools/render-diff.sh."""
+    table, mark = (rules.exit_wtable(e), rules.exit_mark(e)) if e else (None, None)
+    return render.render_warp_conf(ctx.cfg, profile, ctx.facts.has_ipv6, host.resolve4,
+                                   table=table, mark=mark, warn=warn)
+
+
+def render_profile(ctx: Ctx, profile_path: str, e: Optional[store.Exit] = None) -> str:
+    """conf_text from a profile file, which must exist."""
     profile = store.read_text(profile_path)
     if profile is None:
         raise WgtError(f"missing {profile_path}")
-    return render.render_warp_conf(ctx.cfg, profile, ctx.facts.has_ipv6, host.resolve4,
-                                   table=table, mark=mark, warn=ctx.out.warn)
+    return conf_text(ctx, profile, e, warn=ctx.out.warn)

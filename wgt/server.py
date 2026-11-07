@@ -15,7 +15,7 @@ import re
 import shutil
 import signal
 import time
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from . import checks, devices, exits, host, live, net, ops, render, results, rules, store, ui, units, warp
 from .const import (
@@ -443,11 +443,15 @@ def _move_to_current_name(ctx: Ctx, name: str, conf: str, old_name: str) -> str:
     return conf
 
 
+def sysctl_wanted(ctx: Ctx) -> Tuple[List[str], Optional[str]]:
+    """The forwarding sysctls this server should have, and its accept_ra now."""
+    accept_ra = live.sysctl(ctx.runner, render.accept_ra_key(ctx.pub_if)) or None
+    return render.sysctl_lines(ctx.cfg, ctx.pub_if, ctx.facts.has_ipv6, accept_ra), accept_ra
+
+
 def write_sysctl(ctx: Ctx) -> None:
     """Persist and apply the forwarding sysctls."""
-    pub = ctx.pub_if
-    accept_ra = live.sysctl(ctx.runner, render.accept_ra_key(pub)) or None
-    lines = render.sysctl_lines(ctx.cfg, pub, ctx.facts.has_ipv6, accept_ra)
+    lines, accept_ra = sysctl_wanted(ctx)
     # Remember accept_ra before we change it, so rollback can restore it.
     if any("accept_ra" in line for line in lines) and not store.state_get(ctx.snap.state, "ORIG_ACCEPT_RA"):
         ops.state_set(ctx, "ORIG_ACCEPT_RA", accept_ra or "")

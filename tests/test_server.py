@@ -366,6 +366,14 @@ def test_debug_shows_everything_setup_writes(make_ctx, capsys):
         assert piece in out
 
 
+def test_debug_asks_for_accept_ra_as_setup_does(make_ctx, capsys):
+    """A VLAN's dot would read as a separator: the same sysctl name both ways."""
+    ctx = make_ctx()
+    ops.state_set(ctx, "PUB_IF", "eth0.100")
+    cli.command("debug")(ctx, ["system"])
+    assert "sysctl -n net.ipv6.conf.eth0/100.accept_ra" in ctx.runner.calls
+
+
 def test_backup_prunes_only_this_hosts_archives(make_ctx, tmp_path):
     ctx = make_ctx()
     dest = tmp_path / "shared"

@@ -55,25 +55,22 @@ Settings (for setup and restore; --allowed-ips also on client): --name --subnet 
 
 def cmd_debug(ctx: Ctx, what: List[str]) -> None:
     """Hidden: print what this checkout renders from the server's state (keys
-    redacted), so tools/render-diff.sh can compare two versions before a deploy."""
-    from . import live, units
-    from .server import PACKAGES
+    redacted), so tools/render-diff.sh can compare two versions before a deploy.
+    From the functions setup writes with, or "identical" there wouldn't mean what setup
+    would do (test_invariants holds it to that)."""
+    from . import exits, server, units, warp
     from .system import redact
     target = what[0] if what else "all"
-    psk = store.psk_reader(ctx.paths)
     pieces = []
     if target in ("all", "wg0"):
-        pieces.append(("wg0", render.render_wg_conf(ctx.cfg, ctx.snap, ctx.pub_if, psk)))
+        pieces.append(("wg0", ops.render_wg_conf(ctx)))
     if target in ("all", "warp"):
-        profile = store.read_text(ctx.paths.wgcf_profile()) or ""
-        pieces.append(("warp", render.render_warp_conf(ctx.cfg, profile, ctx.facts.has_ipv6, host.resolve4)))
+        pieces.append(("warp", warp.conf_text(ctx, store.read_text(ctx.paths.wgcf_profile()) or "")))
     if target in ("all", "exits"):
         for e in ctx.snap.exits:
-            raw = store.read_text(ctx.paths.jump_source(e.code)) or ""
-            pieces.append((e.px, render.render_jump_conf(raw, e)))
-            prof = store.read_text(ctx.paths.wgcf_profile(ctx.paths.exit_wgcf_dir(e.code))) or ""
-            pieces.append((e.wx, render.render_warp_conf(
-                ctx.cfg, prof, ctx.facts.has_ipv6, host.resolve4, table=rules.exit_wtable(e), mark=rules.exit_mark(e))))
+            pieces.append((e.px, exits.jump_tunnel_conf(ctx, e)))
+            profile = store.read_text(ctx.paths.wgcf_profile(ctx.paths.exit_wgcf_dir(e.code))) or ""
+            pieces.append((e.wx, warp.conf_text(ctx, profile, e)))
     if target in ("all", "hooks"):
         down = rules.hook_cmds(ctx.cfg, ctx.snap, ctx.pub_if, up=False)
         pieces.append(("hooks-down", "".join(x + "\n" for x in down)))
@@ -83,10 +80,8 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
         pieces += [(os.path.basename(path), text) for path, text in units.unit_files(ctx)]
         pieces.append(("dropin", render.render_dropin(ctx.cfg)))
     if target in ("all", "system"):
-        accept_ra = live.sysctl(ctx.runner, f"net.ipv6.conf.{ctx.pub_if}.accept_ra") or None
-        pieces.append(("sysctl", render.render_sysctl(
-            render.sysctl_lines(ctx.cfg, ctx.pub_if, ctx.facts.has_ipv6, accept_ra))))
-        pieces.append(("packages", "".join(p + "\n" for p in PACKAGES)))
+        pieces.append(("sysctl", render.render_sysctl(server.sysctl_wanted(ctx)[0])))
+        pieces.append(("packages", "".join(p + "\n" for p in server.PACKAGES)))
     for name, text in pieces:
         sys.stdout.write(f"=== {name}\n{redact(text)}")
 

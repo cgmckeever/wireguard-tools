@@ -826,3 +826,22 @@ def test_nothing_interrupts_setup_between_wg0s_stop_and_start(world, monkeypatch
     world.run(["setup"])
     assert during == [signal.SIG_IGN]
     assert signal.getsignal(sig) == before
+
+
+# --- wgt debug ---
+
+def test_debug_shows_what_setup_wrote(world, capsys):
+    """tools/render-diff.sh trusts wgt debug to say what the next setup would write."""
+    world.run(["setup"])
+    capsys.readouterr()
+    world.run(["debug"])
+    shown = dict(re.findall(r"(?ms)^=== (\S+)\n(.*?)(?=^=== |\Z)", capsys.readouterr().out))
+    p, ctx = world.paths, world.run(["status"], fn=lambda c: c)
+    written = {"wg0": ctx.cfg.wg_conf, "warp": ctx.cfg.warp_conf, "sysctl": p.sysctl_file, "dropin": ctx.cfg.dropin}
+    for e in ctx.snap.exits:
+        written.update({e.px: p.px_conf(e.code), e.wx: p.wx_conf(e.code)})
+    for w in ALL_WATCHDOGS:
+        if w != EXIT_WATCHDOG or ctx.snap.exits:
+            written.update({f"{w}.service": p.unit_file(f"{w}.service"), f"{w}.timer": p.unit_file(f"{w}.timer")})
+    for piece, path in written.items():
+        assert shown[piece] == system.redact(store.read_text(path) or ""), piece

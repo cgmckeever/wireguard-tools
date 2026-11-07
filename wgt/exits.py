@@ -95,13 +95,16 @@ def write_confs(ctx: Ctx, e: store.Exit) -> bool:
     px, wx = ctx.paths.px_conf(e.code), ctx.paths.wx_conf(e.code)
     for path in (px, wx):
         ops.ensure_managed(ctx, path)
-    raw = store.read_text(ctx.paths.jump_source(e.code)) or ""
-    changed = ctx.files.write_config(px, 0o600, render.render_jump_conf(raw, e))
+    changed = ctx.files.write_config(px, 0o600, jump_tunnel_conf(ctx, e))
     profile = ctx.paths.wgcf_profile(ctx.paths.exit_wgcf_dir(e.code))
     if os.path.isfile(profile):
-        changed |= ctx.files.write_config(wx, 0o600,
-                                          warp.render_profile(ctx, profile, rules.exit_wtable(e), rules.exit_mark(e)))
+        changed |= ctx.files.write_config(wx, 0o600, warp.render_profile(ctx, profile, e))
     return changed
+
+
+def jump_tunnel_conf(ctx: Ctx, e: store.Exit) -> str:
+    """px-<code>.conf, from the jump's config as given."""
+    return render.render_jump_conf(store.read_text(ctx.paths.jump_source(e.code)) or "", e)
 
 
 def hold(ctx: Ctx, code: str) -> None:
