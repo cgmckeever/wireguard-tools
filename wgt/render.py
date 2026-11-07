@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Callable, List, Optional, Tuple
+from typing import Callable, Iterator, List, Optional, Tuple
 
 from . import rules
 from .config import Config
@@ -17,6 +17,8 @@ from .store import Exit, Snapshot, client_exit, name_warp
 _KEY = re.compile(r"\s*=.*")
 _VAL = re.compile(r"^[^=]*=\s*")
 _COMMENT_OR_BLANK = re.compile(r"^\s*(#|$)")
+_INTERFACE = re.compile(r"^\s*\[Interface\]")
+_PEER = re.compile(r"^\s*\[Peer\]")
 
 
 def render_template(name: str, **values: str) -> str:
@@ -51,6 +53,32 @@ def _kv(line: str) -> Tuple[str, str]:
     k = _KEY.sub("", line, count=1).lstrip()
     v = _VAL.sub("", line, count=1).rstrip()
     return k, v
+
+
+def _settings(conf: str) -> Iterator[Tuple[str, str, str]]:
+    """What's in a WireGuard config, comments and blanks left out: (section, key, value),
+    section being "i" or "p" ("" before the first). A section's header comes as a
+    key of its own: "[Interface]" or "[Peer]"."""
+    section = ""
+    for line in conf.splitlines():
+        if _INTERFACE.match(line):
+            section = "i"
+            yield section, "[Interface]", ""
+        elif _PEER.match(line):
+            section = "p"
+            yield section, "[Peer]", ""
+        elif not _COMMENT_OR_BLANK.match(line):
+            yield (section, *_kv(line))
+
+
+def check_jump_conf(text: str) -> None:
+    """A jump's WireGuard config must have one interface key and IPv4 address
+    and one peer with a key and endpoint."""
+    for k in ("PrivateKey", "PublicKey", "Endpoint"):
+        if sum(1 for line in text.splitlines() if re.match(rf"^\s*{k}\s*=", line)) != 1:
+            raise WgtError(f"not a single-peer WireGuard config (need one {k})")
+    if not re.search(r"^\s*Address\s*=.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+", text, re.M):
+        raise WgtError("the config has no IPv4 Address")
 
 
 # --- wg0.conf ---
@@ -126,23 +154,17 @@ def render_warp_conf(cfg: Config, profile: str, has_ipv6: bool,
         return f"{key} = {', '.join(parts)}" if parts else None
 
     out = [f"{MARKER} from wgcf-profile.conf; other routing/NAT is in wg0.conf"]
-    sec = ""
-    for line in profile.splitlines():
-        if re.match(r"^\s*\[Interface\]", line):
+    for sec, k, v in _settings(profile):
+        if k == "[Interface]":
             out += ["[Interface]", f"MTU = {cfg.WARP_MTU}", "Table = off"]
             if mark is not None:
                 out.append(f"FwMark = {mark}")
             out.append("PostUp = sysctl -q -w net.ipv4.conf.%i.rp_filter=2")
             out += [f"PostUp = {r}" for r in routes]
-            sec = "i"
             continue
-        if re.match(r"^\s*\[Peer\]", line):
+        if k == "[Peer]":
             out += ["", "[Peer]"]
-            sec = "p"
             continue
-        if _COMMENT_OR_BLANK.match(line):
-            continue
-        k, v = _kv(line)
         if sec == "i" and (k in ("DNS", "MTU", "Table", "FwMark") or re.match(r"^(Pre|Post)(Up|Down)$", k)):
             continue
         if k in ("Address", "AllowedIPs"):
@@ -167,22 +189,14 @@ def render_jump_conf(raw: str, e: Exit) -> str:
     peer only; Table = off, our MTU, no DNS, loose rp_filter, and the exit's
     jump table's default route (the blackhole stays when the tunnel goes)."""
     out = [f"{MARKER} exit {e.code}: jump tunnel from exits/{jump_source_name(e.code)}; WARP inside it is {e.wx}"]
-    sec = ""
-    for line in raw.splitlines():
-        if re.match(r"^\s*\[Interface\]", line):
+    for sec, k, v in _settings(raw):
+        if k == "[Interface]":
             out += ["[Interface]", f"MTU = {JUMP_MTU}", "Table = off",
                     "PostUp = sysctl -q -w net.ipv4.conf.%i.rp_filter=2",
                     f"PostUp = ip route replace default dev %i table {rules.exit_ptable(e)}"]
-            sec = "i"
-            continue
-        if re.match(r"^\s*\[Peer\]", line):
+        elif k == "[Peer]":
             out += ["", "[Peer]"]
-            sec = "p"
-            continue
-        if _COMMENT_OR_BLANK.match(line):
-            continue
-        k, v = _kv(line)
-        if sec == "i" and k == "PrivateKey":
+        elif sec == "i" and k == "PrivateKey":
             out.append(f"{k} = {v}")
         elif sec == "i" and k == "Address":
             v4 = next((a for a in re.split(r"\s*,\s*", v) if "." in a), None)
@@ -198,7 +212,7 @@ def peer_hint(raw: str) -> str:
     """The comment under [Peer] some providers write, e.g. Proton's "FR#252" ("" if none)."""
     in_peer = False
     for line in raw.splitlines():
-        if re.match(r"^\s*\[Peer\]", line):
+        if _PEER.match(line):
             in_peer = True
         elif in_peer and re.match(r"^\s*#", line):
             return re.sub(r"^\s*#\s*", "", line)

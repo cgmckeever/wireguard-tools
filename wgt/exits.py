@@ -80,16 +80,6 @@ def print_list(ctx: Ctx) -> None:
 
 # --- configs, up and down ---
 
-def check_jump_conf(text: str) -> None:
-    """A jump's WireGuard config must have one interface key and IPv4 address
-    and one peer with a key and endpoint."""
-    for k in ("PrivateKey", "PublicKey", "Endpoint"):
-        if sum(1 for line in text.splitlines() if re.match(rf"^\s*{k}\s*=", line)) != 1:
-            raise WgtError(f"not a single-peer WireGuard config (need one {k})")
-    if not re.search(r"^\s*Address\s*=.*[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+", text, re.M):
-        raise WgtError("the config has no IPv4 Address")
-
-
 def write_confs(ctx: Ctx, e: store.Exit) -> bool:
     """Write an exit's two tunnel configs; True if either changed."""
     px, wx = ctx.paths.px_conf(e.code), ctx.paths.wx_conf(e.code)
@@ -304,7 +294,7 @@ def _read_jump(src: str) -> str:
         if text is None:
             raise WgtError(f"no such file: {src}")
         raw = text
-    check_jump_conf(raw)
+    render.check_jump_conf(raw)
     return raw
 
 
