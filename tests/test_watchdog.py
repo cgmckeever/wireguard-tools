@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from wgt import cli, watchdog
-from wgt.const import EXIT_WATCHDOG, WARP_WATCHDOG
+from wgt.const import EXIT_WATCHDOG, WARP_WATCHDOG, WATCHDOGS
 
 NOW = int(time.time())
 
@@ -289,3 +289,7 @@ def test_a_watchdog_run_doesnt_import_the_http_stack():
     code = "import sys, wgt.cli, wgt.watchdog; sys.exit('urllib.request' in sys.modules)"
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     assert subprocess.run([sys.executable, "-c", code], cwd=root).returncode == 0
+
+
+def test_every_watchdog_has_a_run():
+    assert set(watchdog.runs()) == {w.word for w in WATCHDOGS}

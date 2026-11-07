@@ -64,9 +64,49 @@ LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes
 WARP_WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
 DEVICE_WATCHDOG = "wg-tools-device-watchdog"
-ALL_WATCHDOGS = (WARP_WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG)
 EXIT_HOLD = 60               # seconds a hold file (jump test) keeps the watchdog off a jump
 WATCHDOG_STALE = 180         # seconds without a handshake before a watchdog acts on a tunnel
+
+
+@dataclass(frozen=True)
+class Watchdog:
+    """One watchdog: its systemd units, and `wgt watchdog <word>` (watchdog.runs) that they run."""
+
+    name: str              # its units' name and its journal tag
+    word: str
+    label: str             # "<label> watchdog" in the timer's description and `wgt test`
+    service_what: str      # the service's description ({warp_if}: the WARP interface)
+    step_what: str         # setup's step when it starts the timer (the same)
+    timeout: int           # seconds a stuck run may take
+    boot: int              # seconds after boot of the first run
+    every: int             # seconds between runs
+    accuracy: int
+    jumps_only: bool = False   # only runs on a server with jumps
+
+    @property
+    def check_text(self) -> str:
+        return f"{self.label} watchdog timer enabled and running"
+
+
+# A new watchdog is a row here (rollback, `wgt log`, setup, status and `wgt test` read
+# this) and its function in watchdog.runs.
+WATCHDOGS = (
+    Watchdog(WARP_WATCHDOG, "warp", "WARP",
+             "WARP watchdog (new source port if {warp_if} stops handshaking)",
+             f"WARP watchdog ({WARP_WATCHDOG}.timer: new source port for {{warp_if}} after "
+             f"{WATCHDOG_STALE}s without a handshake)",
+             timeout=60, boot=30, every=30, accuracy=5),
+    Watchdog(EXIT_WATCHDOG, "exits", "jump",
+             "jump watchdog (jumps up while their clients are active)",
+             f"jump watchdog ({EXIT_WATCHDOG}.timer: jumps up while their clients are active, "
+             f"down after {EXIT_IDLE}s idle)",
+             timeout=30, boot=20, every=10, accuracy=2, jumps_only=True),
+    Watchdog(DEVICE_WATCHDOG, "devices", "device",
+             "device watchdog (static addresses follow the config in use)",
+             f"device watchdog ({DEVICE_WATCHDOG}.timer: static addresses follow the config in use)",
+             timeout=30, boot=20, every=10, accuracy=2),
+)
+ALL_WATCHDOGS = tuple(w.name for w in WATCHDOGS)
 
 MIB = 1024 * 1024
 KEEP_CHANGES = 5             # newest copies kept per file (plus its original)

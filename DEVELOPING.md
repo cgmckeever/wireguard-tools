@@ -99,6 +99,7 @@ is per device, not per config, so it lives in `devices.db`.
   split is one write (`ops.rename_client`), and everything is validated before the
   first write.
 - Nothing is asked once wg0 is stopped: whoever answers may be connected through it.
+- A new watchdog is a row in `const.WATCHDOGS` and its function in `watchdog.runs`.
 - `wgt test` and setup's drift check read what wg0's hooks should have running from
   the hooks themselves (`rules.hook_expectations`), so a new line is checked for free.
 - `SETUP_DONE` in the state file is written last and means setup finished; `WARP`

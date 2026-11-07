@@ -26,6 +26,7 @@ from .const import (
     MARKER,
     SET_UP_KEYS,
     SETUP_DONE,
+    WATCHDOGS,
 )
 from .errors import CommandFailed, WgtError
 from .system import write_private
@@ -640,8 +641,9 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
         ctx.out.log("Static addresses and groups")
         devices.apply_now(ctx)
     guard_default_route(ctx)
-    units.write_watchdog(ctx)
-    units.write_device_watchdog(ctx)
+    for w in WATCHDOGS:
+        if not w.jumps_only:   # exits.sync sees to the others
+            units.write_watchdog(ctx, w.name)
     exits.sync(ctx)
     unnumbered = [d for d in ctx.snap.device_names() if ctx.snap.device_number(d) is None]
     if unnumbered:

@@ -12,14 +12,13 @@ from . import clients, devices, exits, host, live, ops, results, rules, store, u
 from .const import (
     CLIENT_CONFIG_KEYS,
     DEVICE_SERVER,
-    DEVICE_WATCHDOG,
     DIRECT_STOP_PRIO,
     EXIT_RULE_PRIO,
-    EXIT_WATCHDOG,
     SETTING_ROWS,
     WARP_RULE_PRIO,
     WARP_WATCHDOG,
     WATCHDOG_STALE,
+    WATCHDOGS,
     device_ip,
 )
 
@@ -280,8 +279,9 @@ class Tests:
         res.check(f"wg-quick@{c.WG_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WG_IF}"))
         res.check(f"wg-quick@{c.WARP_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WARP_IF}"))
         res.check(f"wg-quick@{c.WG_IF} ordered after (and wants) wg-quick@{c.WARP_IF}", self.boot_order_ok())
-        res.check("WARP watchdog timer enabled and running", live.timer_on(r, WARP_WATCHDOG))
-        res.check("device watchdog timer enabled and running", live.timer_on(r, DEVICE_WATCHDOG))
+        for w in WATCHDOGS:
+            if not w.jumps_only:   # exits.run_tests checks the others
+                res.check(w.check_text, live.timer_on(r, w.name))
         if self.ctx.snap.exits:
             exits.run_tests(self.ctx, res, bring_up=False)
         if any(ts > 0 for ts in live.handshakes(r, c.WG_IF).values()):
@@ -293,7 +293,8 @@ class Tests:
 
 def watchdogs(ctx: Ctx) -> List[str]:
     """The watchdogs that should be running (the jump one only with jumps)."""
-    return [WARP_WATCHDOG, DEVICE_WATCHDOG] + ([EXIT_WATCHDOG] if ctx.snap.exits else [])
+    return ([w.name for w in WATCHDOGS if not w.jumps_only]
+            + [w.name for w in WATCHDOGS if w.jumps_only and ctx.snap.exits])
 
 
 def cmd_test(ctx: Ctx, words: List[str]) -> int:

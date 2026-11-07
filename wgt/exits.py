@@ -202,7 +202,7 @@ def sync(ctx: Ctx) -> None:
     for e in ctx.snap.exits:
         if write_confs(ctx, e) and any_up(ctx, e) and not ctx.runner.attempt(["systemctl", "restart", *e.units]):
             ctx.out.warn(f"jump {e.code} didn't restart; the watchdog keeps trying (see: wgt log)")
-    units.write_exit_watchdog(ctx)
+    units.write_watchdog(ctx, EXIT_WATCHDOG)
 
 
 def free_idx(ctx: Ctx) -> int:
@@ -313,7 +313,7 @@ def _wire_live(ctx: Ctx, e: store.Exit) -> None:
         ctx.runner.sh_lines(rules.exit_hook_cmds(ctx.cfg, ctx.snap, e, up=True))
         ctx.runner.sh_lines(rules.ipt_cmds(rules.exit_ipt_rules(ctx.cfg, e), up=True))
     units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
-    units.write_exit_watchdog(ctx)
+    units.write_watchdog(ctx, EXIT_WATCHDOG)
 
 
 def _check_new(ctx: Ctx, e: store.Exit) -> None:
@@ -495,8 +495,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
         else:
             res.result("PASS", f"jump {e.code}: idle, no active devices (comes up when one connects; "
                                f"'wgt jump test' checks it live)")
-    res.check("jump watchdog timer enabled and running",
-              live.timer_on(r, EXIT_WATCHDOG))
+    res.check("jump watchdog timer enabled and running", live.timer_on(r, EXIT_WATCHDOG))
 
 
 EXIT_COMMANDS = {"list": cmd_list, "add": cmd_add, "remove": cmd_remove, "test": cmd_test}

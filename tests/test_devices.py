@@ -123,7 +123,7 @@ def test_wgt_test_checks_the_device_watchdog_timer(make_ctx, capsys, monkeypatch
 
 def test_setup_writes_the_device_watchdog(make_ctx):
     ctx = make_ctx(answers={f"systemctl is-active -q {DEVICE_WATCHDOG}.timer": (3, "")})
-    units.write_device_watchdog(ctx)
+    units.write_watchdog(ctx, DEVICE_WATCHDOG)
     timer = ctx.paths.unit_file(f"{DEVICE_WATCHDOG}.timer")
     service = ctx.paths.unit_file(f"{DEVICE_WATCHDOG}.service")
     assert "OnUnitActiveSec=10s" in store.read_text(timer)

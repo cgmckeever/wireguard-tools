@@ -5,7 +5,7 @@ what it must; what it does is logged to the journal (`wgt log`)."""
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from . import devices, exits, live, ops, store
 from .const import DEVICE_WATCHDOG, EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WARP_WATCHDOG, WATCHDOG_STALE
@@ -176,14 +176,14 @@ def run_devices(ctx: Ctx) -> None:
         ops.release_lock(ctx)
 
 
+def runs() -> Dict[str, Callable[[Ctx], None]]:
+    """const.WATCHDOGS' words -> what each one does."""
+    return {"warp": run_warp, "exits": run_exits, "devices": run_devices}
+
+
 def cmd_watchdog(ctx: Ctx, words: List[str]) -> None:
     """wgt watchdog warp|exits|devices: one pass, run by the systemd timers."""
-    which = words[0] if words else ""
-    if which == "warp":
-        run_warp(ctx)
-    elif which == "exits":
-        run_exits(ctx)
-    elif which == "devices":
-        run_devices(ctx)
-    else:
-        raise WgtError("usage: wgt watchdog warp|exits|devices (run by the systemd timers)")
+    run = runs().get(words[0] if words else "")
+    if run is None:
+        raise WgtError(f"usage: wgt watchdog {'|'.join(runs())} (run by the systemd timers)")
+    run(ctx)

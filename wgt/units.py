@@ -7,7 +7,7 @@ import shutil
 from typing import TYPE_CHECKING, List, Tuple
 
 from . import live, ops, render, store
-from .const import DEVICE_WATCHDOG, EXIT_IDLE, EXIT_WATCHDOG, WARP_WATCHDOG, WATCHDOG_STALE
+from .const import WATCHDOGS, Watchdog
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -45,60 +45,28 @@ def remove_timer(ctx: Ctx, name: str) -> None:
         ctx.files.restore_original(path, remove_new=True)
 
 
-def _watchdog_service(ctx: Ctx, what: str, word: str, timeout: int) -> str:
-    return render.render_template("watchdog.service.tmpl", WHAT=what, COMMAND=f"{wgt_command(ctx)} watchdog {word}",
-                                  TIMEOUT=str(timeout))
-
-
-def _watchdog_timer(what: str, boot: int, every: int, accuracy: int) -> str:
-    return render.render_template("watchdog.timer.tmpl", WHAT=what, BOOT=str(boot), EVERY=str(every),
-                                  ACCURACY=str(accuracy))
-
-
-def _warp_watchdog(ctx: Ctx) -> Tuple[str, str]:
-    """The WARP watchdog: every 30s, `wgt watchdog warp`."""
-    return (_watchdog_service(ctx, f"WARP watchdog (new source port if {ctx.cfg.WARP_IF} stops handshaking)",
-                              "warp", 60),
-            _watchdog_timer("WARP", 30, 30, 5))
-
-
-def _exit_watchdog(ctx: Ctx) -> Tuple[str, str]:
-    """The exit watchdog: every 10s, `wgt watchdog exits`."""
-    return (_watchdog_service(ctx, "jump watchdog (jumps up while their clients are active)", "exits", 30),
-            _watchdog_timer("jump", 20, 10, 2))
-
-
-def _device_watchdog(ctx: Ctx) -> Tuple[str, str]:
-    """The device watchdog: every 10s, `wgt watchdog devices`."""
-    return (_watchdog_service(ctx, "device watchdog (static addresses follow the config in use)", "devices", 30),
-            _watchdog_timer("device", 20, 10, 2))
+def _watchdog_units(ctx: Ctx, w: Watchdog) -> Tuple[str, str]:
+    """A watchdog's service and timer, as text."""
+    service = render.render_template("watchdog.service.tmpl", WHAT=w.service_what.format(warp_if=ctx.cfg.WARP_IF),
+                                     COMMAND=f"{wgt_command(ctx)} watchdog {w.word}", TIMEOUT=str(w.timeout))
+    timer = render.render_template("watchdog.timer.tmpl", WHAT=w.label, BOOT=str(w.boot), EVERY=str(w.every),
+                                   ACCURACY=str(w.accuracy))
+    return service, timer
 
 
 def unit_files(ctx: Ctx) -> List[Tuple[str, str]]:
     """Every watchdog's (unit file, content), as setup writes them."""
     found: List[Tuple[str, str]] = []
-    for name, build in ((WARP_WATCHDOG, _warp_watchdog), (EXIT_WATCHDOG, _exit_watchdog),
-                        (DEVICE_WATCHDOG, _device_watchdog)):
-        service, timer = build(ctx)
-        found += [(ctx.paths.unit_file(f"{name}.service"), service), (ctx.paths.unit_file(f"{name}.timer"), timer)]
+    for w in WATCHDOGS:
+        service, timer = _watchdog_units(ctx, w)
+        found += [(ctx.paths.unit_file(f"{w.name}.service"), service), (ctx.paths.unit_file(f"{w.name}.timer"), timer)]
     return found
 
 
-def write_watchdog(ctx: Ctx) -> None:
-    write_timer(ctx, WARP_WATCHDOG,
-                f"WARP watchdog ({WARP_WATCHDOG}.timer: new source port for {ctx.cfg.WARP_IF} after "
-                f"{WATCHDOG_STALE}s without a handshake)", *_warp_watchdog(ctx))
-
-
-def write_exit_watchdog(ctx: Ctx) -> None:
-    write_timer(ctx, EXIT_WATCHDOG, f"jump watchdog ({EXIT_WATCHDOG}.timer: jumps up while their clients are active, "
-                                    f"down after {EXIT_IDLE}s idle)", *_exit_watchdog(ctx))
-
-
-def write_device_watchdog(ctx: Ctx) -> None:
-    write_timer(ctx, DEVICE_WATCHDOG,
-                f"device watchdog ({DEVICE_WATCHDOG}.timer: static addresses follow the config in use)",
-                *_device_watchdog(ctx))
+def write_watchdog(ctx: Ctx, name: str) -> None:
+    """Install watchdog <name> and keep its timer on."""
+    w = next(x for x in WATCHDOGS if x.name == name)
+    write_timer(ctx, w.name, w.step_what.format(warp_if=ctx.cfg.WARP_IF), *_watchdog_units(ctx, w))
 
 
 def open_firewall(ctx: Ctx, outs: List[str]) -> None:

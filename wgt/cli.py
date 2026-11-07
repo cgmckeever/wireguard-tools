@@ -9,7 +9,7 @@ import sys
 from typing import Callable, List, Optional
 
 from . import host, ops, render, rules, store
-from .const import ALL_WATCHDOGS, DEVICE_ADDRESS_FORM, DEVICE_WATCHDOG, EXIT_WATCHDOG, WARP_WATCHDOG
+from .const import ALL_WATCHDOGS, DEVICE_ADDRESS_FORM, EXIT_WATCHDOG, WATCHDOGS
 from .ctx import Args, Ctx, load, parse, settings_env
 from .errors import WgtError
 from .system import Out, Runner
@@ -171,7 +171,8 @@ def main(argv: Optional[List[str]] = None) -> int:
 def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
     """A watchdog run (every 10-30s from a timer): no host checks beyond root,
     no fact gathering, and any error is logged to the journal, not a traceback."""
-    tag = {"warp": WARP_WATCHDOG, "devices": DEVICE_WATCHDOG}.get((rest or [""])[0], EXIT_WATCHDOG)
+    word = (rest or [""])[0]
+    tag = next((w.name for w in WATCHDOGS if w.word == word), EXIT_WATCHDOG)   # any watchdog's, for a bad word's error
     if os.geteuid() != 0 and os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
         raise WgtError("must run as root")
     quick = host.Facts(kernel_ipv6=os.path.exists("/proc/net/if_inet6"), has_ipv6=False,
