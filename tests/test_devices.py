@@ -1,5 +1,5 @@
 """Static device addresses: the numbers, the commands, the watchdog's rules, the
-fleet's record (wgt/fleet.py; wgt-ctl's use of it is in test_ctl.py)."""
+fleet's record (wgt/ctl/fleet.py; wgt-ctl's use of it is in test_ctl.py)."""
 
 from __future__ import annotations
 
@@ -9,11 +9,12 @@ from pathlib import Path
 
 import pytest
 
-from wgt import checks, clients, devices, fleet, live, ops, render, rules, store, units, watchdog
+from wgt import checks, clients, devices, live, ops, render, rules, store, units, watchdog
 from wgt.config import resolve
 from wgt.const import DEVICE_CHAIN, DEVICE_SOURCE_CHAIN, DEVICE_WATCHDOG, Paths, device_ip
+from wgt.ctl import fleet
+from wgt.ctl.fleet import Entry
 from wgt.errors import WgtError
-from wgt.fleet import Entry
 
 NOW = int(time.time())
 

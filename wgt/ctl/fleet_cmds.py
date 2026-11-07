@@ -1,16 +1,16 @@
 """wgt-ctl's view across servers: every config, and each device's static number
-(local/devices; the decisions are in wgt/fleet.py)."""
+(local/devices; the decisions are in fleet.py)."""
 
 from __future__ import annotations
 
 import time
 from typing import Dict, List, Optional, Tuple
 
-from .. import fleet, store, ui
+from .. import store, ui
 from ..const import device_ip
 from ..ctx import VALUE_FLAGS
 from ..errors import WgtError
-from . import remote
+from . import fleet, remote
 from .remote import out
 
 

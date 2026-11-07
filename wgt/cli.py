@@ -121,7 +121,7 @@ COMMANDS = {
     "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
     "client": ("clients", "cmd_client"), "device": ("clients", "cmd_device"),
     "jump": ("exits", "cmd_exit"), "exit": ("exits", "cmd_exit"),
-    "tunnel": ("exits", "cmd_tunnel"), "warp": ("server", "cmd_warp"),
+    "tunnel": ("exits", "cmd_tunnel"), "warp": ("warp_rotate", "cmd_warp"),
     "watchdog": ("watchdog", "cmd_watchdog"), "debug": ("cli", "cmd_debug"),
 }
 

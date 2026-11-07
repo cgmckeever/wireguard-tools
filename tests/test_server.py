@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from conftest import FIXTURES, KEYS, temp_paths
 
-from wgt import backup, cli, host, ops, render, store
+from wgt import backup, cli, host, ops, render, store, warp_rotate
 from wgt import server as srv
 from wgt.errors import WgtError
 from wgt.host import Facts
@@ -293,14 +293,14 @@ def rotating(make_ctx, monkeypatch):
         return True
     monkeypatch.setattr(warp, "register", fake_register)
     monkeypatch.setattr(warp, "install_wgcf", lambda ctx, **kw: True)
-    monkeypatch.setattr(srv.time, "sleep", lambda s: None)
+    monkeypatch.setattr(warp_rotate.time, "sleep", lambda s: None)
     return state
 
 
 def test_warp_rotate_host(make_ctx, rotating):
     ctx = make_ctx(argv=["warp", "rotate"], answers={"ip link show warp": (0, "")})
     Path(ctx.paths.wgcf_account()).write_text("account = 'old'\n")
-    srv.cmd_warp(ctx, ["rotate"])
+    warp_rotate.cmd_warp(ctx, ["rotate"])
     assert Path(ctx.paths.wgcf_account()).read_text() == "account = 'new'\n"
     assert "NEWWARPKEY=" in Path(ctx.cfg.warp_conf).read_text()
     assert not os.path.exists(ctx.paths.wgcf_dir + ".new")
@@ -312,13 +312,13 @@ def test_warp_rotate_refused_changes_nothing(make_ctx, rotating):
     ctx = make_ctx()
     Path(ctx.paths.wgcf_account()).write_text("account = 'old'\n")
     with pytest.raises(WgtError, match="refused"):
-        srv.cmd_warp(ctx, ["rotate"])
+        warp_rotate.cmd_warp(ctx, ["rotate"])
     assert Path(ctx.paths.wgcf_account()).read_text() == "account = 'old'\n"
 
 
 def test_warp_rotate_unknown_jump(make_ctx, rotating):
     with pytest.raises(WgtError, match="no jump 'xx-yy'"):
-        srv.cmd_warp(make_ctx(), ["rotate", "xx-yy"])
+        warp_rotate.cmd_warp(make_ctx(), ["rotate", "xx-yy"])
 
 
 def test_with_device_network_adds_and_replaces_server_address():

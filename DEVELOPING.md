@@ -12,7 +12,8 @@ wgt/                      the package (Python 3.8+, standard library only)
   ctx.py                  the command line (Args) and what every command gets (Ctx)
   ctl/                    wgt-ctl, from your own machine: main and per-server dispatch (__init__.py),
                           the server list and ssh (remote.py), init (newserver.py), backup, remove and
-                          move (rebuild.py), numbers across servers (fleet_cmds.py), jump files (jumpfiles.py)
+                          move (rebuild.py), numbers across servers (fleet_cmds.py; fleet.py is its pure part: local/devices,
+                          no ssh, no files), jump files (jumpfiles.py)
   const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError
   config.py               settings: flag > env > saved > default, validation
   store.py                the server files: state, clients.db, exits.db (jumps), devices.db, disabled, backup record; config names
@@ -24,12 +25,12 @@ wgt/                      the package (Python 3.8+, standard library only)
   live.py                 read-only queries: handshakes, rules, tables, units, Cloudflare's trace
   ops.py                  shared operations: lock, confirm, setup checks, state, endpoint, wg0.conf,
                           peers, the client/exit databases, subcommand dispatch
-  warp.py, units.py       wgcf and WARP profiles; systemd units, watchdog timers, ufw
-  server.py               setup, rollback (setup's inverse), wgt warp rotate
+  warp.py, units.py       wgcf and WARP profiles; systemd units (start_unit), watchdog timers, ufw
+  server.py               setup, rollback (setup's inverse)
+  warp_rotate.py          wgt warp rotate: new WARP accounts
   backup.py               backup, restore (archive checks)
   clients.py              client commands, the clients table (and QR, share), `wgt device`'s table and rename
   devices.py              static device addresses and groups: numbers, `wgt device`'s other verbs, the watchdog's rules
-  fleet.py                local/devices: wgt-ctl's record of each device's number (pure: no ssh, no files)
   exits.py                `wgt jump` (alias `exit`): bringing a jump up/down, probing it
   checks.py               test, status, summary
   results.py              PASS/FAIL counts shared by `test` and `jump test`

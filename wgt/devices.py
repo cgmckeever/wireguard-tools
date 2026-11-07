@@ -13,7 +13,7 @@ Groups are per server, unlike numbers: `device list --tsv` gives them as a third
 column, which is what wgt-ctl would read to keep them the same across servers.
 
 The numbers live in devices.db; wgt-ctl keeps them the same across servers
-(fleet.py). `wgt client add` alone can't see the other servers, so it counts down
+(ctl/fleet.py). `wgt client add` alone can't see the other servers, so it counts down
 from the top of the range and wgt-ctl counts up from the bottom."""
 
 from __future__ import annotations

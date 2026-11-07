@@ -14,9 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional
 
-from .const import DEVICE_ADDRESS_FORM, DEVICE_CTL_FIRST, DEVICE_CTL_LAST, device_ip
-from .errors import WgtError
-from .store import is_uint
+from ..const import DEVICE_ADDRESS_FORM, DEVICE_CTL_FIRST, DEVICE_CTL_LAST, device_ip
+from ..errors import WgtError
+from ..store import is_uint
 
 HEADER = f"# wgt-ctl devices: device number [removed date] (static address {DEVICE_ADDRESS_FORM})"
 

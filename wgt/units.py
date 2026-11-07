@@ -25,6 +25,36 @@ def wgt_command(ctx: Ctx) -> str:
     return link if os.path.exists(link) else checkout_wgt()
 
 
+def start_unit(ctx: Ctx, ifc: str, changed: bool, ask: bool = True) -> None:
+    """Enable an interface's wg-quick unit for boot and make it match its config.
+    Not <ask>: it was stopped a moment ago with permission, so bring it straight
+    back (whoever would answer may be connected through it)."""
+    r, unit = ctx.runner, f"wg-quick@{ifc}"
+    enabled = False
+    if not live.if_exists(r, ifc):
+        r.step(f"Bring up {ifc} ({unit}, enabled at boot)", f"systemctl disable --now {unit}")
+        if ask:
+            ops.confirm(ctx, f"Bring up {ifc} now?", default_yes=True)   # the setup is useless without it
+        r.run(["systemctl", "enable", "--now", unit])
+        enabled = True
+    elif changed:
+        r.step(f"Restart {unit} to apply its new config",
+               f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
+        ops.confirm(ctx, f"Restart {ifc} now?")
+        if live.unit_active(r, unit):
+            r.run(["systemctl", "restart", unit])
+        else:
+            r.run(["wg-quick", "down", ifc])
+            r.run(["systemctl", "enable", "--now", unit])
+            enabled = True
+    else:
+        ctx.out.info(f"{ifc} is up and unchanged")
+        if not live.unit_active(r, unit):
+            ctx.out.warn(f"{ifc} is up but not via {unit} (started by hand?)")
+    if not enabled and not live.unit_enabled(r, unit):
+        r.run(["systemctl", "enable", unit])
+
+
 def write_timer(ctx: Ctx, name: str, what: str, service: str, timer: str) -> None:
     """Install a watchdog's service and timer and keep the timer enabled and on."""
     changed = False
