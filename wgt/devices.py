@@ -35,6 +35,8 @@ from .const import (
 )
 from .errors import WgtError
 
+FAILED = "could not"   # starts sync's lines about a rule it couldn't change
+
 if TYPE_CHECKING:
     from .ctx import Ctx
 
@@ -46,7 +48,7 @@ def static_of(ctx: Ctx, config: str) -> str:
 
 
 def _number_word(word: str) -> int:
-    if not word.isdigit() or not store.valid_device_number(int(word)):
+    if not store.is_uint(word) or not store.valid_device_number(int(word)):
         raise WgtError(f"a device number is {DEVICE_CTL_FIRST}-{DEVICE_DIRECT_LAST}: '{word}'")
     return int(word)
 
@@ -134,7 +136,7 @@ def desired(snap: store.Snapshot, handshakes: Mapping[str, int], now: float) -> 
     sources: List[str] = []
     for d in snap.devices:
         static = device_ip(d.number)
-        configs = [c for c in snap.device_clients(d.name) if not snap.is_disabled(c.name)]
+        configs = _enabled(snap, d.name)
         sources += [f"-s {c.ip}/32 -j SNAT --to-source {static}" for c in configs]
         recent = [c for c in configs if handshakes.get(c.pub, 0) > 0 and now - handshakes[c.pub] <= DEVICE_ACTIVE]
         if recent:
@@ -168,8 +170,9 @@ def _enabled(snap: store.Snapshot, device: str) -> List[store.Client]:
 
 def sync(ctx: Ctx) -> List[str]:
     """Make the chains match desired(), new rules before old ones go, so a
-    forward never disappears in between. Returns what changed, for the log.
-    Nothing to do until wg0 has been restarted with the chains (setup)."""
+    forward never disappears in between. Returns what changed and what failed,
+    for the log. Nothing to do until wg0 has been restarted with the chains
+    (setup). Takes the caller's lock."""
     r = ctx.runner
     forwards, sources = desired(ctx.snap, live.handshakes(r, ctx.cfg.WG_IF), ctx.clock())
     log: List[str] = []
@@ -177,21 +180,41 @@ def sync(ctx: Ctx) -> List[str]:
         have = live.ipt_chain(r, "nat", chain)
         if have is None:
             continue
-        for spec in want:
-            if spec not in have and r.ok(["iptables", "-t", "nat", "-A", chain, *spec.split()]) \
-                    and chain == DEVICE_CHAIN:
+        for spec in (s for s in want if s not in have):
+            if not r.attempt(["iptables", "-t", "nat", "-A", chain, *spec.split()]):
+                log.append(f"{FAILED} add to {chain}: {spec}")
+            elif chain == DEVICE_CHAIN:
                 log.append(spec.replace(" -j DNAT --to-destination ", " -> ").replace("-d ", "").replace("/32", ""))
-        for spec in have:
-            if spec not in want and r.ok(["iptables", "-t", "nat", "-D", chain, *spec.split()]) \
-                    and chain == DEVICE_CHAIN and spec.split()[1].split("/")[0] not in forwards:
+        for spec in (s for s in have if s not in want):
+            if not r.attempt(["iptables", "-t", "nat", "-D", chain, *spec.split()]):
+                log.append(f"{FAILED} remove from {chain}: {spec}")
+            elif chain == DEVICE_CHAIN and spec.split()[1].split("/")[0] not in forwards:
                 log.append(f"{spec.split()[1].split('/')[0]}: no config in use")
-    _sync_allowed(ctx)
-    return log
+    return log + _sync_allowed(ctx)
 
 
-def _sync_allowed(ctx: Ctx) -> None:
+def apply_now(ctx: Ctx) -> None:
+    """After a change here: the firewall follows at once rather than at the
+    watchdog's next run, which stays as the retry. With wg0 down there's nothing
+    to change: its chains come back with it."""
+    if not ops.wg_up(ctx):
+        ctx.out.info(f"{ctx.cfg.WG_IF} is down: this applies when it's back up")
+        return
+    if live.ipt_chain(ctx.runner, "filter", DEVICE_PEER_CHAIN) is None:
+        ctx.out.warn(f"{ctx.cfg.WG_IF} is running without the device rules: this applies after: wgt setup")
+        return
+    failed = [msg for msg in sync(ctx) if msg.startswith(FAILED)]
+    for msg in failed:
+        ctx.out.warn(f"{msg} (the watchdog keeps retrying; see: wgt log)")
+    if not failed and not ctx.runner.dry_run:
+        ctx.out.info("applied")
+
+
+def _sync_allowed(ctx: Ctx) -> List[str]:
     """Make the filter chains match the groups. What's allowed goes in above the
-    chain's own rules (the refusal at the end, which this leaves alone)."""
+    chain's own rules (the refusal at the end, which this leaves alone). Returns
+    what failed: an allow rule that won't go away is a device keeping access."""
+    failed: List[str] = []
     r, snap = ctx.runner, ctx.snap
     servers = server_sources(snap)
     wanted = [("iptables", DEVICE_PEER_CHAIN, peer_rules(snap)),
@@ -203,11 +226,13 @@ def _sync_allowed(ctx: Ctx) -> None:
         if have is None:
             continue
         for spec in want:
-            if spec not in have:
-                r.ok([cmd, "-t", "filter", "-I", chain, *spec.split()])
+            if spec not in have and not r.attempt([cmd, "-t", "filter", "-I", chain, *spec.split()]):
+                failed.append(f"{FAILED} add to {chain}: {spec}")
         for spec in have:
-            if spec.startswith("-s ") and spec not in want:
-                r.ok([cmd, "-t", "filter", "-D", chain, *spec.split()])
+            if spec.startswith("-s ") and spec not in want \
+                    and not r.attempt([cmd, "-t", "filter", "-D", chain, *spec.split()]):
+                failed.append(f"{FAILED} remove from {chain}: {spec}")
+    return failed
 
 
 # --- commands ---
@@ -227,7 +252,7 @@ def cmd_list(ctx: Ctx, words: List[str]) -> None:
 
 def cmd_set(ctx: Ctx, words: List[str]) -> None:
     """set <device> [number]: its static number (none given: the next from the
-    top of the range). Takes effect within 20s; the device needs no new config."""
+    top of the range). Takes effect at once; the device needs no new config."""
     usage = "wgt device set <device> [number]"
     if not words or len(words) > 2:
         raise WgtError(f"usage: {usage}")
@@ -252,11 +277,12 @@ def cmd_set(ctx: Ctx, words: List[str]) -> None:
         ctx.runner.step(f"Device '{device}': static address {device_ip(number)}",
                         f"wgt device set {device} {have if have is not None else '<number>'}")
         ops.set_device(ctx, device, number)
+        apply_now(ctx)
 
 
 def cmd_group(ctx: Ctx, words: List[str]) -> None:
     """group [<device> <group,group>]: add a device to groups (none given: list
-    every device and its groups). Takes effect within 20s; no new config."""
+    every device and its groups). Takes effect at once; no new config."""
     if not words:
         cmd_list(ctx, [])
         return
@@ -267,11 +293,12 @@ def cmd_group(ctx: Ctx, words: List[str]) -> None:
     have = ctx.snap.device_groups(device)
     ctx.runner.step(f"Device '{device}': add to {','.join(wanted)}", f"wgt device ungroup {device} {words[1]}")
     ops.set_device(ctx, device, number, tuple(dict.fromkeys(have + wanted)))
+    apply_now(ctx)
 
 
 def cmd_ungroup(ctx: Ctx, words: List[str]) -> None:
     """ungroup <device> [group,group]: remove a device from these groups (none
-    given: all of them, which isolates it). Takes effect within 20s."""
+    given: all of them, which isolates it). Takes effect at once."""
     if len(words) not in (1, 2):
         raise WgtError("usage: wgt device ungroup <device> [group,group]")
     device = words[0]
@@ -281,6 +308,7 @@ def cmd_ungroup(ctx: Ctx, words: List[str]) -> None:
     ctx.runner.step(f"Device '{device}': remove from {','.join(leaving) or 'no groups'}",
                     f"wgt device group {device} {','.join(have)}" if have else "nothing to undo")
     ops.set_device(ctx, device, number, tuple(g for g in have if g not in leaving))
+    apply_now(ctx)
 
 
 def _for_groups(ctx: Ctx, device: str) -> int:

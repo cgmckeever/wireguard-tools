@@ -3,7 +3,9 @@ fleet's record (wgt/fleet.py; wgt-ctl's use of it is in test_ctl.py)."""
 
 from __future__ import annotations
 
+import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -538,3 +540,118 @@ def test_sync_inserts_allowed_above_the_refusal_and_removes_stale(make_ctx):
     assert f"iptables -t filter -I WGT-SERVER -s {tv}/32 -j ACCEPT" in run
     assert "iptables -t filter -D WGT-PEERS -s 1.2.3.4/32 -j ACCEPT" in run
     assert not any("-D WGT-PEERS -j REJECT" in c or "-D WGT-SERVER -j REJECT" in c for c in run)
+
+
+def test_device_rename_with_a_missing_psk_renames_nothing(make_ctx):
+    """Stopping half way would leave it impossible to re-run ('<new>' exists)."""
+    ctx = make_ctx()
+    device = "mbp-1"
+    configs = [c.name for c in ctx.snap.device_clients(device)]
+    for name in configs:
+        Path(ctx.paths.psk(name)).parent.mkdir(parents=True, exist_ok=True)
+        Path(ctx.paths.psk(name)).write_text("PSK\n")
+        conf = Path(clients.client_conf(ctx, name))
+        conf.parent.mkdir(parents=True, exist_ok=True)
+        conf.write_text("[Interface]\n")
+    os.remove(ctx.paths.psk(configs[-1]))
+    with pytest.raises(WgtError, match="nothing renamed"):
+        clients.cmd_device_rename(ctx, [device, "mbp-2"])
+    assert [c.name for c in ctx.snap.device_clients(device)] == configs
+
+
+def test_a_dry_run_sync_changes_no_firewall_rule(make_ctx):
+    stale = "-A WGT-DEVICES -d 10.9.8.9/32 -j DNAT --to-destination 192.168.250.9\n"
+    ctx = make_ctx(answers={"iptables -t nat -S WGT-DEVICES": (0, "-N WGT-DEVICES\n" + stale)})
+    ctx.runner.dry_run = True
+    devices.sync(ctx)
+    assert not any(" -D " in c or " -A " in c or " -I " in c for c in ctx.runner.calls)
+
+
+# --- group and number changes reach the firewall at once ---
+
+CHAINS = {"iptables -t filter -S WGT-PEERS": (0, "-N WGT-PEERS\n"),
+          "iptables -t nat -S WGT-DEVICES": (0, "-N WGT-DEVICES\n"),
+          "iptables -t nat -S WGT-DEVICE-SRC": (0, "-N WGT-DEVICE-SRC\n")}
+
+
+def _server_chain(*rules_in_it):
+    return {"iptables -t filter -S WGT-SERVER": (0, "".join(f"{x}\n" for x in ("-N WGT-SERVER", *rules_in_it)))}
+
+
+def _numbered(ctx, device="tv", number=9):
+    ops.set_device(ctx, device, number)
+    return ctx
+
+
+def test_group_opens_the_server_at_once(make_ctx, capsys):
+    ctx = _numbered(make_ctx(answers=dict(CHAINS, **_server_chain())), "mbp-1")
+    devices.cmd_group(ctx, ["mbp-1", "server"])
+    ip = ctx.snap.device_clients("mbp-1")[0].ip
+    assert f"iptables -t filter -I WGT-SERVER -s {ip}/32 -j ACCEPT" in ctx.runner.calls
+    assert "applied" in capsys.readouterr().out
+
+
+def test_ungroup_closes_the_server_at_once(make_ctx):
+    ctx = _numbered(make_ctx())
+    devices.cmd_group(ctx, ["tv", "server"])
+    ip = ctx.snap.device_clients("tv")[0].ip
+    rule = f"-s {ip}/32 -j ACCEPT"
+    ctx.runner.answers.update(CHAINS, **_server_chain(f"-A WGT-SERVER {rule}"))
+    ctx.runner.calls.clear()
+    devices.cmd_ungroup(ctx, ["tv"])
+    assert f"iptables -t filter -D WGT-SERVER {rule}" in ctx.runner.calls
+
+
+def test_a_new_number_reaches_the_firewall_at_once(make_ctx):
+    ctx = make_ctx(answers=dict(CHAINS, **_server_chain()))
+    devices.cmd_set(ctx, ["mbp-1", "77"])
+    assert any(c.startswith("iptables -t nat -A WGT-DEVICE-SRC") and "--to-source 10.9.8.77" in c
+               for c in ctx.runner.calls)
+
+
+def test_a_rule_that_wont_go_is_reported_by_the_command(make_ctx, capsys):
+    ctx = _numbered(make_ctx())
+    devices.cmd_group(ctx, ["tv", "server"])
+    rule = f"-s {ctx.snap.device_clients('tv')[0].ip}/32 -j ACCEPT"
+    ctx.runner.answers.update(CHAINS, **_server_chain(f"-A WGT-SERVER {rule}"))
+    ctx.runner.answers["iptables -t filter -D WGT-SERVER*"] = (1, "")
+    capsys.readouterr()
+    devices.cmd_ungroup(ctx, ["tv"])
+    told = capsys.readouterr()
+    assert "could not remove from WGT-SERVER" in told.err and "applied" not in told.out
+
+
+def test_a_nat_rule_that_wont_change_is_reported_too(make_ctx):
+    stale = "-A WGT-DEVICES -d 10.9.8.9/32 -j DNAT --to-destination 192.168.250.9"
+    ctx = make_ctx(answers={"iptables -t nat -S WGT-DEVICES": (0, f"-N WGT-DEVICES\n{stale}\n"),
+                            "iptables -t nat -D WGT-DEVICES*": (1, "")})
+    assert any(m.startswith("could not remove from WGT-DEVICES") for m in devices.sync(ctx))
+
+
+def test_wg0_down_saves_the_change_for_when_its_back(make_ctx, capsys):
+    ctx = _numbered(make_ctx(answers=dict(CHAINS, **_server_chain(), **{"ip link show dev wg0": (1, "")})))
+    devices.cmd_group(ctx, ["tv", "server"])
+    assert ctx.snap.device_groups("tv") == ("server",)
+    assert not any("-I WGT-SERVER" in c for c in ctx.runner.calls)
+    assert "applies when it's back up" in capsys.readouterr().out
+
+
+def test_no_device_rules_running_says_so_rather_than_applied(make_ctx, capsys):
+    ctx = _numbered(make_ctx())
+    devices.cmd_group(ctx, ["tv", "server"])
+    told = capsys.readouterr()
+    assert "wgt setup" in told.err and "applied" not in told.out
+
+
+def test_a_dry_run_group_change_touches_no_rule(make_ctx):
+    ctx = _numbered(make_ctx(answers=dict(CHAINS, **_server_chain())))
+    ctx.runner.dry_run = True
+    devices.cmd_group(ctx, ["tv", "server"])
+    assert not any(" -I " in c or " -A " in c or " -D " in c for c in ctx.runner.calls)
+
+
+def test_client_add_with_a_group_applies_at_once(make_ctx):
+    ctx = make_ctx(argv=["--group", "server", "--warp", "off"], answers=dict(CHAINS, **_server_chain()))
+    clients.cmd_add(ctx, ["newone"])
+    ip = ctx.snap.client("newone").ip
+    assert f"iptables -t filter -I WGT-SERVER -s {ip}/32 -j ACCEPT" in ctx.runner.calls

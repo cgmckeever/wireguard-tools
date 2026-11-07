@@ -1,6 +1,6 @@
 """Config files, rendered as text: wg0.conf, warp.conf (and each jump's
-wx-<code>.conf), px-<code>.conf, client configs and the templates. Output is
-byte-identical to the bash version, so switching tools rewrites nothing."""
+wx-<code>.conf), px-<code>.conf, client configs and the templates. tests/golden pins the output:
+a change to wg0.conf's settings restarts wg0 at the next setup."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from . import rules
 from .config import Config
 from .const import DEVICE_NET, DEVICE_SERVER, JUMP_MTU, MARKER, TEMPLATE_DIR, device_ip
 from .errors import WgtError
-from .store import Exit, Snapshot, client_exit
+from .store import Exit, Snapshot, client_exit, name_warp
 
 _KEY = re.compile(r"\s*=.*")
 _VAL = re.compile(r"^[^=]*=\s*")
@@ -37,7 +37,7 @@ def render_template(name: str, **values: str) -> str:
 
 
 def _kv(line: str) -> Tuple[str, str]:
-    """(key, value) of a "Key = value" line, as the bash version's awk split it."""
+    """(key, value) of a "Key = value" line."""
     k = _KEY.sub("", line, count=1).lstrip()
     v = _VAL.sub("", line, count=1).rstrip()
     return k, v
@@ -52,7 +52,7 @@ def render_wg_conf(cfg: Config, snap: Snapshot, pub_if: str, psk: Callable[[str]
     addr = f"{cfg.server_ip}/{cfg.pfx}" + (f", {cfg.p6}::1/64" if cfg.ipv6 else "")
     addr += f", {device_ip(DEVICE_SERVER)}/{DEVICE_NET.split('/')[1]}"
     out: List[str] = [
-        f"{MARKER} (WARP {cfg.WARP}); peers are rebuilt from {p.client_db} (use wgt client)",
+        f"{MARKER}; peers are rebuilt from {p.client_db} (use wgt client)",
         "[Interface]",
         f"Address = {addr}",
         f"ListenPort = {cfg.WG_PORT}",
@@ -199,7 +199,7 @@ def peer_hint(raw: str) -> str:
 def exit_desc(snap: Snapshot, name: str) -> str:
     """The "# exit:" line of a config: its exit and WARP, from its name."""
     code = client_exit(name)
-    off = snap.warp_off(name)
+    off = not name_warp(name)
     if code:
         e = snap.exit(code)
         return f"{code} = {e.label if e else ''} (jump{', no WARP' if off else ' -> Cloudflare WARP'})"
@@ -208,7 +208,7 @@ def exit_desc(snap: Snapshot, name: str) -> str:
 
 def render_client_conf(cfg: Config, snap: Snapshot, name: str, ip: str, private_key: str,
                        server_pub: str, psk: str, endpoint: str, allowed: str) -> str:
-    # Address as the bash version wrote it: "ip/32, ip6/128" (a space after the first comma only).
+    # Address is "ip/32, ip6/128": the same text sync_client_configs compares against.
     return render_template(
         "client.conf.tmpl",
         NAME=name, SERVER_NAME=cfg.SERVER_NAME, EXIT=exit_desc(snap, name), PRIVATE_KEY=private_key,

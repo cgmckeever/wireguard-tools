@@ -34,7 +34,7 @@ def _tar(path, members):
 
 def test_restore_refuses_unsafe_archives(make_ctx, tmp_path):
     ctx = make_ctx()
-    ctx.cfg.saved["WARP"] = ""     # "not set up"
+    ops.state_unset(ctx, "WARP")   # not set up
     state = ctx.paths.state.lstrip("/")
     bad = [[(state, "file"), (ctx.paths.wg("..", "..", "root", "x").lstrip("/"), "file")],
            [(state, "file"), (ctx.paths.wg("link").lstrip("/"), "sym")]]
@@ -139,6 +139,7 @@ def test_rollback_purge_undoes_a_fresh_setup(tmp_path, monkeypatch):
     assert {"wg/wg0.conf", "wg/warp.conf", "wg/server.key", "wg/wg-tools.state", "99-wg.conf",
             "systemd/wg-tools-warp-watchdog.timer"} <= made, made
     assert ctx.cfg.values["ENDPOINT"] == "203.0.113.1"
+    assert ops.is_set_up(ctx) and "SETUP_DONE=1" in (root / "wg" / "wg-tools.state").read_text()
     run("rollback", "--purge")
     assert tree(root) == before
 
@@ -146,7 +147,7 @@ def test_rollback_purge_undoes_a_fresh_setup(tmp_path, monkeypatch):
 def test_summary_when_not_set_up(make_ctx, capsys):
     from wgt import checks
     ctx = make_ctx()
-    ctx.cfg.saved.pop("WARP", None)
+    ops.state_unset(ctx, "WARP")
     checks.cmd_summary(ctx, [])
     assert "not set up (wgt setup)" in capsys.readouterr().out
 
@@ -330,3 +331,90 @@ def test_with_device_network_adds_and_replaces_server_address():
     assert srv.with_device_network(want) == want
     swapped = old.replace("[Interface]", "# server-address: 10.8.0.1/32, fd00::1/128\n[Interface]")
     assert srv.with_device_network(swapped) == want
+
+
+# --- settings belong to setup; setup says when it's finished ---
+
+@pytest.mark.parametrize("argv", [["client", "add", "zed", "--port", "9999"], ["jump", "list", "--dns", "9.9.9.9"],
+                                  ["device", "list", "--allowed-ips", "10.0.0.0/8"]])
+def test_settings_are_refused_outside_setup(argv, capsys):
+    assert cli.main(argv) == 1
+    assert "server setting" in capsys.readouterr().err
+
+
+def test_only_setup_and_restore_read_settings_from_the_environment():
+    from wgt.ctx import settings_env
+    env = {"WG_PORT": "9999"}
+    assert settings_env(cli.parse(["setup"]), "setup", env) == env
+    assert settings_env(cli.parse(["restore", "x"]), "restore", env) == env
+    assert settings_env(cli.parse(["client", "list"]), "client", env) == {}
+    assert settings_env(cli.parse(["client", "add", "a", "--allowed-ips", "10.0.0.0/8"]), "client", env) == {}
+
+
+def test_is_set_up_follows_the_state_file(make_ctx):
+    ctx = make_ctx()
+    assert ops.is_set_up(ctx)                     # WARP=on: an older version's marker
+    ops.state_unset(ctx, "WARP")
+    assert not ops.is_set_up(ctx)
+    ops.state_set(ctx, "SETUP_DONE", "1")
+    assert ops.is_set_up(ctx)
+
+
+def test_debug_shows_everything_setup_writes(make_ctx, capsys):
+    ctx = make_ctx()
+    cli.command("debug")(ctx, [])
+    out = capsys.readouterr().out
+    for piece in ("=== wg0\n", "=== hooks-down\n", "=== wg-tools-device-watchdog.timer\n",
+                  "=== wg-tools-warp-watchdog.service\n", "=== dropin\n", "=== sysctl\n", "=== packages\n"):
+        assert piece in out
+
+
+def test_backup_prunes_only_this_hosts_archives(make_ctx, tmp_path):
+    ctx = make_ctx()
+    dest = tmp_path / "shared"
+    dest.mkdir()
+    other = dest / "wireguard-tools.aaa.20200101-000000.tar.gz"
+    other.write_text("another host's")
+    mine = [dest / f"wireguard-tools.boba.202001{i + 10}-000000.tar.gz" for i in range(12)]
+    for path in mine:
+        path.write_text("old")
+    backup.prune_archives(ctx, str(dest), "boba")
+    assert other.exists()
+    assert [p.exists() for p in mine] == [False, False] + [True] * 10
+
+
+def test_restore_passes_setups_switches_on(make_ctx):
+    ctx = make_ctx(argv=["restore", "x", "--force", "--new-server-keys", "--port", "1234"])
+    flags = backup.setup_flags(ctx)
+    assert "--force" in flags and "--new-server-keys" in flags and flags[flags.index("--port") + 1] == "1234"
+
+
+def test_a_checksum_file_that_wont_download_stops_the_install(make_ctx):
+    import json
+
+    from wgt import warp
+    ctx = make_ctx(answers={"dpkg --print-architecture": (0, "amd64\n")})
+    rel = {"assets": [{"browser_download_url": "https://x/wgcf_2.2_linux_amd64"},
+                      {"browser_download_url": "https://x/checksums.txt"}]}
+
+    def fetch(url, timeout):
+        if url.endswith("checksums.txt"):
+            raise OSError("timed out")
+        return b"#!/bin/sh\n" if url.endswith("amd64") else json.dumps(rel).encode()
+    with pytest.raises(WgtError, match="checksums"):
+        warp.install_wgcf(ctx, reinstall=True, fetch=fetch)
+    assert not any(c.startswith("install -m 755 ") for c in ctx.runner.calls)
+
+
+def test_wgt_test_notices_the_static_address_rule_missing(make_ctx):
+    from wgt import checks
+    answers = {"ip -4 -o addr show dev wg0": (0, "85: wg0 inet 10.9.8.1/24 scope global wg0\n"),
+               "ip rule show": (0, "9300:\tfrom all to 10.9.8.0/24 iif wg0 unreachable\n")}
+    assert checks.Tests(make_ctx(answers=answers)).device_net_ok()
+
+
+def test_wgt_test_fails_without_the_static_address_rule(make_ctx):
+    from wgt import checks
+    answers = {"ip -4 -o addr show dev wg0": (0, "85: wg0 inet 10.9.8.1/24 scope global wg0\n"),
+               "ip rule show": (0, "")}
+    assert not checks.Tests(make_ctx(answers=answers)).device_net_ok()

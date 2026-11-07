@@ -7,10 +7,8 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, List, Optional
 
-from . import devices as static
-from . import exits as jumps
-from . import live, ops
-from .const import DEVICE_WATCHDOG, EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
+from . import devices, exits, live, ops, store
+from .const import DEVICE_WATCHDOG, EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WARP_WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 from .system import journal, read_marker, remove_markers, write_marker
 
@@ -23,7 +21,7 @@ def log_event(ctx: Ctx, tag: str, msg: str) -> None:
     journal(ctx.runner, tag, msg)
 
 
-def warp(ctx: Ctx) -> None:
+def run_warp(ctx: Ctx) -> None:
     """If the WARP tunnel has had no handshake for WATCHDOG_STALE seconds on two
     runs in a row, give it a new source port: Cloudflare sometimes stops
     answering one flow (seen after reboots), and a new port gets a handshake
@@ -42,12 +40,12 @@ def warp(ctx: Ctx) -> None:
         return
     old = live.listen_port(r, ifc)
     remove_markers(marker)
-    if r.ok(["wg", "set", ifc, "listen-port", "0"]):
-        log_event(ctx, WATCHDOG, f"{ifc}: no handshake for over {WATCHDOG_STALE}s; moved from port {old} to "
+    if r.attempt(["wg", "set", ifc, "listen-port", "0"]):
+        log_event(ctx, WARP_WATCHDOG, f"{ifc}: no handshake for over {WATCHDOG_STALE}s; moved from port {old} to "
                               f"{live.listen_port(r, ifc)}")
 
 
-def exits(ctx: Ctx) -> None:
+def run_exits(ctx: Ctx) -> None:
     """A jump is up only while one of its clients has handshaked within
     EXIT_IDLE seconds: brought up when one does (its WARP too only if an
     active client has WARP on), taken down when none has. A jump tunnel silent
@@ -58,7 +56,7 @@ def exits(ctx: Ctx) -> None:
     if not ctx.snap.exits or not ops.try_lock(ctx):
         return
     try:
-        _exits(ctx)
+        _exits_pass(ctx)
     finally:
         ops.release_lock(ctx)
 
@@ -87,7 +85,7 @@ def decide(active: bool, px_up: bool, wx_up: bool, now: int, started_at: int, wx
             return RESTART_JUMP
         if not need_wx:
             return None
-        if now - started_at > WATCHDOG_STALE and now - wx_last_hs > WATCHDOG_STALE:
+        if settled and now - wx_last_hs > WATCHDOG_STALE:
             return RESTART if port_tried else NEW_PORT
         return None
     return DOWN if px_up or wx_up else None
@@ -101,71 +99,78 @@ def _held(ctx: Ctx, code: str, now: int) -> bool:
         return False
 
 
-def _exits(ctx: Ctx) -> None:
-    """One pass over the jumps. Uses r.ok, not run: a timer job must get
+def _exits_pass(ctx: Ctx) -> None:
+    """One pass over the jumps. Uses r.attempt, not run: a timer job must get
     through every jump whatever fails, and logs what it did instead."""
     r = ctx.runner
     now = int(ctx.clock())
+    if not live.if_exists(r, ctx.cfg.WG_IF):
+        return   # no handshakes to read, not every client idle: wg0 may just be restarting
     hs = live.handshakes(r, ctx.cfg.WG_IF)
     for e in ctx.snap.exits:
         if _held(ctx, e.code, now):
             continue
-        users = jumps.active_clients(ctx.snap, e.code, hs, now)
+        users = exits.active_clients(ctx.snap, e.code, hs, now)
         active = bool(users)
-        need_wx = any(not ctx.snap.warp_off(c.name) for c in users)
+        need_wx = any(store.name_warp(c.name) for c in users)
         px_up, wx_up = live.if_exists(r, e.px), live.if_exists(r, e.wx)
         started_marker, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
         wx_last_hs = live.newest_hs(r, e.wx) if active and px_up and wx_up else 0
         px_last_hs = live.newest_hs(r, e.px) if active and px_up else None
         action = decide(active, px_up, wx_up, now, read_marker(started_marker), wx_last_hs, os.path.exists(port_marker),
                         need_wx, px_last_hs)
-        stale = f"no WARP handshake for over {WATCHDOG_STALE}s"
-        # Touch only what must change: WARP-off clients ride the jump tunnel alone.
-        px_unit, wx_unit = e.units
-        if action == UP:
-            units = [wx_unit] if px_up else ([px_unit, wx_unit] if need_wx else [px_unit])
-        elif action == RESTART_JUMP:
-            units = [px_unit, wx_unit] if need_wx or wx_up else [px_unit]
+        if wx_last_hs and now - wx_last_hs <= WATCHDOG_STALE:
+            remove_markers(port_marker)   # recovered: the next silent spell starts with a new port again
+        _apply(ctx, e, action, _units_for(action, e, px_up, wx_up, need_wx), now)
+
+
+def _units_for(action: Optional[str], e: store.Exit, px_up: bool, wx_up: bool, need_wx: bool) -> List[str]:
+    """What <action> restarts. Only what must change: WARP-off clients ride the
+    jump tunnel alone."""
+    px_unit, wx_unit = e.units
+    if action == UP:
+        return [wx_unit] if px_up else ([px_unit, wx_unit] if need_wx else [px_unit])
+    if action == RESTART_JUMP:
+        return [px_unit, wx_unit] if need_wx or wx_up else [px_unit]
+    return [wx_unit]
+
+
+def _apply(ctx: Ctx, e: store.Exit, action: Optional[str], units: List[str], now: int) -> None:
+    """Do what decide() chose for one jump, and log it."""
+    r = ctx.runner
+    started_marker, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
+    stale = f"no WARP handshake for over {WATCHDOG_STALE}s"
+    say = lambda msg: log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {msg}")   # noqa: E731
+    if action == UP:
+        # restart, not start: a unit can be "active" with its link gone.
+        if r.attempt(["systemctl", "restart", *units]):
+            write_marker(started_marker, str(now))
+            say("a client is active; brought up")
         else:
-            units = [wx_unit]
-        if action == UP:
-            # restart, not start: a unit can be "active" with its link gone.
-            if r.ok(["systemctl", "restart", *units]):
-                write_marker(started_marker, str(now))
-                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: a client is active; brought up")
-            else:
-                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: a client is active, but bringing it up failed")
-        elif action == NEW_PORT:
-            if r.ok(["wg", "set", e.wx, "listen-port", "0"]):
-                write_marker(started_marker, str(now))
-                write_marker(port_marker)
-                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {stale}; new source port")
-        elif action == RESTART:
-            remove_markers(port_marker)
-            if r.ok(["systemctl", "restart", *units]):
-                write_marker(started_marker, str(now))
-                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {stale} after a new port; its WARP restarted")
-        elif action == RESTART_JUMP:
-            remove_markers(port_marker)
-            if r.ok(["systemctl", "restart", *units]):
-                write_marker(started_marker, str(now))
-                log_event(ctx, EXIT_WATCHDOG,
-                          f"jump {e.code}: jump tunnel silent for over {WATCHDOG_STALE}s; restarted")
-        elif action == DOWN:
-            idle = f"no client handshake in the last {EXIT_IDLE}s"
-            if jumps.down(ctx, e, check=False):
-                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {idle}; taken down")
-            else:
-                log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {idle}, but taking it down failed")
+            say("a client is active, but bringing it up failed")
+    elif action == NEW_PORT:
+        if r.attempt(["wg", "set", e.wx, "listen-port", "0"]):
+            write_marker(started_marker, str(now))
+            write_marker(port_marker)
+            say(f"{stale}; new source port")
+    elif action in (RESTART, RESTART_JUMP):
+        remove_markers(port_marker)
+        if r.attempt(["systemctl", "restart", *units]):
+            write_marker(started_marker, str(now))
+            say(f"{stale} after a new port; its WARP restarted" if action == RESTART
+                else f"jump tunnel silent for over {WATCHDOG_STALE}s; restarted")
+    elif action == DOWN:
+        idle = f"no client handshake in the last {EXIT_IDLE}s"
+        say(f"{idle}; taken down" if exits.down(ctx, e, check=False) else f"{idle}, but taking it down failed")
 
 
-def devices(ctx: Ctx) -> None:
+def run_devices(ctx: Ctx) -> None:
     """Point each device's static address at the config it's using. Skips the
     run while wireguard-tools is changing things (its lock)."""
     if not ops.try_lock(ctx):
         return
     try:
-        for msg in static.sync(ctx):
+        for msg in devices.sync(ctx):
             log_event(ctx, DEVICE_WATCHDOG, msg)
     finally:
         ops.release_lock(ctx)
@@ -175,10 +180,10 @@ def cmd_watchdog(ctx: Ctx, words: List[str]) -> None:
     """wgt watchdog warp|exits|devices: one pass, run by the systemd timers."""
     which = words[0] if words else ""
     if which == "warp":
-        warp(ctx)
+        run_warp(ctx)
     elif which == "exits":
-        exits(ctx)
+        run_exits(ctx)
     elif which == "devices":
-        devices(ctx)
+        run_devices(ctx)
     else:
         raise WgtError("usage: wgt watchdog warp|exits|devices (run by the systemd timers)")

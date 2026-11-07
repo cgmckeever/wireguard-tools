@@ -122,12 +122,12 @@ class Out:
 
 def journal(runner: Runner, tag: str, msg: str) -> None:
     """One line in the journal under <tag> (what `wgt log` shows)."""
-    runner.ok(["logger", "-t", tag, msg])
+    runner.attempt(["logger", "-t", tag, msg])
 
 
 class Runner:
-    """Runs commands. Mutating commands (run/sh) only print under --dry-run;
-    queries (query/ok) always run, since they change nothing."""
+    """Runs commands. Changes (run/sh/attempt) only print under --dry-run;
+    questions (query/ok) always run, so they must change nothing."""
 
     def __init__(self, dry_run: bool = False, out: Optional[Out] = None, prog: str = "wgt"):
         self.dry_run = dry_run
@@ -177,8 +177,16 @@ class Runner:
         except OSError:
             return ""
 
+    def attempt(self, args: Sequence[str]) -> bool:
+        """Make a change whose failure the caller handles (a timer job must get
+        through its whole list). True if it worked; never raises."""
+        if self.dry_run:
+            self.out.info("[dry-run] " + " ".join(args))
+            return True
+        return self.ok(args)
+
     def ok(self, args: Sequence[str]) -> bool:
-        """True if a command succeeds (False if it fails or can't run)."""
+        """Ask: does this command succeed? Not for changes (see attempt)."""
         try:
             return self._exec(args, check=False, capture=True)[0] == 0
         except OSError:

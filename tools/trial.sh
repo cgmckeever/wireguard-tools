@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# trial.sh — Full trial of the Python version on a throwaway server (bossk),
-# ending where it started. Run on the server, as root, from the checkout:
+# trial.sh — Full trial on a throwaway server (it gets named bossk), ending where
+# it started. Run on the server, as root, from the checkout:
 #   tools/trial.sh <jump.conf>   (any single-peer WireGuard config in Paris, e.g. Proton's)
 #
-# purge -> snapshot -> setup -> test -> jump + clients
+# purge -> snapshot -> setup -> test -> jump + configs -> static addresses and groups
 # -> device on-demand and fail-closed -> backup -> purge -> restore (same keys)
 # -> purge -> diff with the snapshot.
 set -uo pipefail
@@ -75,6 +75,17 @@ DESC="host without WARP: warp=off"; ok wait_probe "warp=off"
 DESC="host without WARP: no IPv6 through WARP"; ok bash -c '! ip netns exec dev curl -6 -s -m 5 https://[2606:4700:4700::1111]/cdn-cgi/trace | grep -q warp=on'
 DESC="wgt test with plain configs"; ok W test >/dev/null 2>&1
 
+echo "=== static addresses and groups"
+DESC="phone has a static number"; ok bash -c "bin/wgt device list --tsv | grep -qE '^phone2?\s[0-9]+'"
+DESC="group add"; ok W device group phone trial,server --yes >/dev/null 2>&1
+DESC="group shows"; ok bash -c "bin/wgt device list --tsv | grep -qE '^phone\s[0-9]+\strial,server'"
+sleep 20
+DESC="the watchdog lets it reach the server"; ok bash -c "iptables -S WGT-SERVER | grep -q ACCEPT"
+DESC="ungroup"; ok W device ungroup phone --yes >/dev/null 2>&1
+sleep 20
+DESC="isolated again"; ok bash -c "! iptables -S WGT-SERVER | grep -- '-s ' | grep -q ACCEPT"
+DESC="wgt test after groups"; ok W test >/dev/null 2>&1
+
 echo "=== backup, purge, restore"
 ip netns del dev
 keys_before=$(md5sum /etc/wireguard/server.key /etc/wireguard/clients/*.conf | md5sum)
@@ -91,8 +102,7 @@ DESC="old device config still exits in Paris"; ok wait_loc FR
 ip netns del dev
 
 echo "=== purge and compare"
-W client remove par-fr.phone --yes >/dev/null 2>&1; W client remove phone --yes >/dev/null 2>&1
-W client remove mac --yes >/dev/null 2>&1
+for config in $(bin/wgt client list --tsv | cut -f1); do W client remove "$config" --yes >/dev/null 2>&1; done
 DESC="jump remove"; ok W jump remove par-fr --yes >/dev/null 2>&1
 DESC="rollback --purge"; ok W rollback --purge --yes >/dev/null 2>&1
 snap /root/trial-after

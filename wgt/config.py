@@ -27,8 +27,22 @@ _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,32}")
 _SUBNET4 = re.compile(r"([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})")
 
 
+_DNS = re.compile(r"[A-Za-z0-9.:-]+( *, *[A-Za-z0-9.:-]+)*")
+_ENDPOINT = re.compile(r"\[[0-9a-fA-F:.]+\]|[0-9a-fA-F:]+|[A-Za-z0-9.-]+")
+
+
+def valid_allowed_ips(value: str) -> bool:
+    """A comma list of CIDRs, as a config's AllowedIPs."""
+    try:
+        for cidr in value.split(","):
+            ipaddress.ip_network(cidr.strip(), strict=False)
+    except ValueError:
+        return False
+    return True
+
+
 def _in_range(value: str, lo: int, hi: int) -> bool:
-    """An integer of ASCII digits in [lo, hi] (as the bash [0-9]+ check)."""
+    """An integer of ASCII digits in [lo, hi]."""
     return bool(re.fullmatch(r"[0-9]+", value)) and lo <= int(value) <= hi
 
 
@@ -67,11 +81,6 @@ class Config:
         raise AttributeError(name)
 
     @property
-    def warp_on(self) -> bool:
-        """Clients' default exit is WARP (WARP=on), not the public interface."""
-        return self.values.get("WARP") == "on"
-
-    @property
     def warp_conf(self) -> str:
         return self.paths.wg(f"{self.WARP_IF}.conf")
 
@@ -90,8 +99,13 @@ class Config:
     def finalize(self, kernel_ipv6: bool) -> None:
         """Check every value and derive the subnet addresses; raises WgtError."""
         v = self.values
-        if v["WARP"] not in ("on", "off"):
-            raise WgtError(f"bad WARP setting: {v['WARP']} (expected on or off)")
+        # These three go into the configs sent to devices.
+        if not _DNS.fullmatch(v["WG_DNS"]):
+            raise WgtError(f"bad DNS (addresses or search domains, comma-separated): {v['WG_DNS']!r}")
+        if not valid_allowed_ips(v["CLIENT_ALLOWED_IPS"]):
+            raise WgtError(f"bad allowed IPs (comma-separated CIDRs): {v['CLIENT_ALLOWED_IPS']!r}")
+        if v["ENDPOINT"] and not _ENDPOINT.fullmatch(v["ENDPOINT"]):
+            raise WgtError(f"bad endpoint (an address or hostname, no port; the port is --port): {v['ENDPOINT']!r}")
         if not _SERVER_NAME.fullmatch(v["SERVER_NAME"]):
             raise WgtError(f"server name must be 1-32 of [A-Za-z0-9_-]: '{v['SERVER_NAME']}'")
         for k in ("WG_IF", "WARP_IF"):
@@ -171,8 +185,7 @@ class Config:
 
 def resolve(flags: Mapping[str, str], env: Mapping[str, str], saved: Mapping[str, str],
             hostname: str = "wg", routes: str = "", paths: Optional[Paths] = None) -> Config:
-    """Combine the sources: flag > environment > saved > default. WARP is never
-    read from the environment. An empty subnet becomes a random one, or with
+    """Combine the sources: flag > environment > saved > default. An empty subnet becomes a random one, or with
     wgt-ctl init (which passes the other servers' subnets) the next free one."""
     values: Dict[str, str] = {}
     sources: Dict[str, str] = {}
@@ -180,7 +193,7 @@ def resolve(flags: Mapping[str, str], env: Mapping[str, str], saved: Mapping[str
     for k in keys:
         if flags.get(k):
             values[k], sources[k] = flags[k], "flag"
-        elif k != "WARP" and env.get(k):
+        elif env.get(k):
             values[k], sources[k] = env[k], "env"
         elif saved.get(k):
             values[k], sources[k] = saved[k], "saved"

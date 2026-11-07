@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Mapping, Optional
 
 from . import host, store
 from .config import Config, resolve
@@ -29,6 +29,25 @@ BOOL_FLAGS = {
     "--purge": "purge",
     "--follow": "follow", "-f": "follow", "--no-follow": "no_follow", "--tsv": "tsv",
 }
+
+# Only these commands change the server's settings. Elsewhere a setting would be
+# written into wg0.conf (a peer change rewrites it) without being saved or applied,
+# and take effect, unasked, at the next restart.
+SETTINGS_COMMANDS = ("setup", "restore")
+# ... except this one, which a client command uses for the config it makes.
+CLIENT_SETTING = "CLIENT_ALLOWED_IPS"
+
+
+def settings_env(args: Args, cmd: str, environ: Mapping[str, str]) -> Mapping[str, str]:
+    """The environment <cmd> may take settings from; a setting flag it can't use is refused."""
+    if cmd in SETTINGS_COMMANDS:
+        return environ
+    allowed = (CLIENT_SETTING,) if cmd == "client" else ()
+    for flag, key in VALUE_FLAGS.items():
+        if key in args.settings and key not in allowed:
+            raise WgtError(f"{flag} is a server setting: wgt setup {flag} <value>")
+    return {}
+
 
 @dataclass
 class Args:
@@ -60,7 +79,7 @@ def parse(argv: List[str]) -> Args:
     i = 0
     while i < len(argv):
         w = argv[i]
-        if w in ("-h", "--help", "help") and not a.words:
+        if w in ("-h", "--help") or (w == "help" and not a.words):
             a.help = True
         elif w in BOOL_FLAGS:
             setattr(a, BOOL_FLAGS[w], True)
@@ -138,7 +157,7 @@ class Ctx:
 
 
 def load(args: Args, paths: Optional[Paths] = None, runner: Optional[Runner] = None,
-         env: Optional[Dict[str, str]] = None, facts: Optional[host.Facts] = None) -> Ctx:
+         env: Optional[Mapping[str, str]] = None, facts: Optional[host.Facts] = None) -> Ctx:
     """Build the Ctx: read the server's files, gather host facts, resolve the
     settings (flag > env > saved > default). Tests pass fakes for the rest."""
     paths = paths or Paths()

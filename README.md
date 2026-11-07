@@ -16,8 +16,8 @@ traffic leaves from there.
 A WireGuard network is a private network, like your home LAN: each config is a
 key to it, so give configs only to your own devices and to people you'd let onto
 your LAN. Inside it, a device starts out isolated: it has the internet, but can't
-reach other devices or the WireGuard Server until you put it in a
-[group](#groups-who-can-reach-what).
+reach other devices or the WireGuard Server's tunnel addresses until you put it in
+a [group](#groups-who-can-reach-what).
 
 ### Terms
 
@@ -123,7 +123,9 @@ wgt setup --name dengar --dry-run    # see exactly what it would change first
 
 All optional. They're saved in `/etc/wireguard/wg-tools.state`, so re-runs and
 `wgt client` commands reuse them; pass a flag again to change it. Each can also
-be set as an environment variable (flag > env > saved > default).
+be set as an environment variable (flag > env > saved > default). They only apply
+to `wgt setup` and `wgt restore`, and other commands refuse them, except
+`--allowed-ips` on `wgt client`.
 
 | Flag | Env | Default | What it sets |
 |------|-----|---------|--------------|
@@ -317,7 +319,7 @@ wgt device set laptop 42               # give it this number, 2-254 (none given:
 wgt device rename laptop work-laptop   # every config of it, and its number; keys and addresses stay
 ```
 
-A number change applies within 20s and needs no new config, but anything
+A number change applies at once and needs no new config, but anything
 pointing at the old address must change. With several servers, use `wgt-ctl`
 instead: see [Static addresses across
 servers](#static-addresses-across-servers).
@@ -355,7 +357,10 @@ at the config with the newest handshake in the last 180s. Good to know:
 #### Groups: who can reach what
 
 Every device starts with no groups, which means isolated: it has the internet but
-can't reach other devices or the server. Groups open that up. **Two devices can
+can't reach other devices or the server's tunnel addresses. Anything listening on
+the server's other addresses, like SSH on its public IP, is still reachable, even
+if your provider's firewall would block it from the internet. Groups open up the
+rest. **Two devices can
 talk if they share a group**, and the special group **`server`** lets a device
 reach the server, and not the others in it.
 
@@ -375,9 +380,11 @@ wgt client add nas --group home        # or when adding it
 | `home,server` | the internet, others in `home`, and the server |
 | `home,work` | the internet, and others in `home` or `work`; those two sets still can't reach each other |
 
-Changes apply within 20s and need no new config. Removing a shared group cuts open
+Changes apply at once and need no new config. Removing a shared group cuts open
 connections between those devices; a connection already open to the server stays
-until it ends.
+until it ends. If a firewall change fails, the command warns and the watchdog keeps
+retrying. When a device switches configs, its static address follows within 20s,
+since that takes the server seeing a new handshake.
 
 - **Internet, jumps and WARP aren't affected.** Groups only cover traffic to other
   devices and to the server.
@@ -470,7 +477,8 @@ wgt rollback --purge  # ...and delete keys, configs, WARP accounts and jumps
 
 `test` checks WARP (up, handshaking, and actually used by `warp.` configs but
 not by the server itself), every routing, NAT and firewall rule (each exactly
-once), the services and watchdogs, and each jump's routing, plus its
+once), the static addresses, that every config's jump exists, the services and
+watchdogs, and each jump's routing, plus its
 handshakes and a trace through it with and without WARP if it's up.
 
 Backups go in `/var/backups/wireguard-tools/` (mode 700, outside the checkout,
@@ -594,12 +602,13 @@ wgt-ctl all test
 wgt-ctl all warp rotate all            # new WARP accounts everywhere
 wgt-ctl all pull
 wgt-ctl all backup
-wgt-ctl all client rename phone pixel  # a whole device, on every server that has it (--force: with a server down)
+wgt-ctl all device rename phone pixel  # a whole device, on every server that has it (--force: with a server down)
 ```
 
-`all client rename` takes device names and renames nothing unless every server
-answers; with `--force` it goes ahead, and running it again later finishes the
-servers it missed.
+`all device rename` (or `all client rename`, the same thing) takes device names and
+renames nothing unless every server answers; with `--force` it goes ahead, and
+running it again later finishes the servers it missed. It refuses a new name that's
+already another device.
 
 **No server.** Overviews of every server, and adding a new one:
 
@@ -620,7 +629,7 @@ list; `wgt-ctl summary` with no server is the overview of all of them.
 `wgt-ctl device ...` and `wgt-ctl client ...` (singular) are the `wgt` commands,
 so they pick a server first. Because
 these words come first, a server can't be named `init`, `clients`, `devices`,
-`summary`, `all`, `help` or `list`; a name is up to 32 of `A-Za-z0-9_-`, starting
+`summary`, `all`, `help`, `list` or any command's name; a name is up to 32 of `A-Za-z0-9_-`, starting
 with a letter.
 
 ### Static addresses across servers
@@ -652,8 +661,9 @@ you to check against your provider's console. If only a password works it
 offers `ssh-copy-id`. It then installs git, clones the same repository your
 local checkout came from (its `origin`) and
 runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
-passed to setup. The server is added to the list only once setup finishes. A
-server already running these tools is adopted under its saved name instead.
+passed to setup. The server is added to the list only once setup finishes; if it
+stops part-way, fix the cause and run the same `init` again. A server where setup
+already finished is adopted under its saved name instead.
 
 Its subnet question offers the next free subnet in order (`10.200.200.0/24`,
 `10.200.201.0/24`, ...) that none of your other servers uses, instead of a random
@@ -724,8 +734,11 @@ the server was on another.
 but intact, and `move` offers to bring it back (`wgt setup` there). The new machine
 is left as it is: run `wgt rollback --purge` on it before you retry, and as soon as
 you can if you brought the old one back, since they share accounts. Without `--to`,
-the archive on your machine is the way back: copy it to the server, run `wgt
-rollback --purge` if it got part-way, then `wgt restore` it.
+the archive on your machine is the way back. On the server, clone the tools to
+`/opt/wireguard-tools` if they're gone, copy the archive there, run
+`/opt/wireguard-tools/bin/wgt rollback --purge` if it got part-way, then
+`/opt/wireguard-tools/bin/wgt restore` it. `move` checks the branch can be cloned
+before it purges anything.
 
 ### Private files
 
@@ -741,11 +754,13 @@ seconds), so new code runs as soon as it's pulled; but files already generated
 don't change until `wgt setup` runs. With `wgt-ctl`:
 
 1. Check which generated files would change on each server (read-only):
-   `tools/render-diff.sh`. "identical" everywhere means a pull is all it takes.
+   `tools/render-diff.sh`. It compares `wg0.conf`, the WARP and jump tunnels, the
+   rules, the watchdog units, the drop-in, the sysctl file and the package list.
+   "identical" everywhere means a pull is all it takes. It doesn't compare client
+   configs: a change to those needs `setup` too, then handing the configs out again.
 2. Try one server first: `wgt-ctl boba pull && wgt-ctl boba test`.
 3. Then the rest: `wgt-ctl all pull`.
-4. If step 1 showed differences (a template, `wgt/render.py` or `wgt/rules.py`
-   change, new packages or units), apply them with `wgt-ctl all setup --yes`.
+4. If step 1 showed differences, apply them with `wgt-ctl all setup --yes`.
    Setup restarts `wg0` only if its settings changed, not for comment-only
    changes. In a terminal it still asks `Continue?` once per server. It updates
    existing client configs line by line, so a change to `client.conf.tmpl` only

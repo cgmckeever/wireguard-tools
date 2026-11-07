@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Tuple
 
-from . import live, render, store
-from .const import DEVICE_WATCHDOG, EXIT_IDLE, EXIT_WATCHDOG, WATCHDOG, WATCHDOG_STALE
+from . import live, ops, render, store
+from .const import DEVICE_WATCHDOG, EXIT_IDLE, EXIT_WATCHDOG, WARP_WATCHDOG, WATCHDOG_STALE
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -45,36 +45,60 @@ def remove_timer(ctx: Ctx, name: str) -> None:
         ctx.files.restore_original(path, remove_new=True)
 
 
-def write_watchdog(ctx: Ctx) -> None:
+def _watchdog_service(ctx: Ctx, what: str, word: str, timeout: int) -> str:
+    return render.render_template("watchdog.service.tmpl", WHAT=what, COMMAND=f"{wgt_command(ctx)} watchdog {word}",
+                                  TIMEOUT=str(timeout))
+
+
+def _watchdog_timer(what: str, boot: int, every: int, accuracy: int) -> str:
+    return render.render_template("watchdog.timer.tmpl", WHAT=what, BOOT=str(boot), EVERY=str(every),
+                                  ACCURACY=str(accuracy))
+
+
+def _warp_watchdog(ctx: Ctx) -> Tuple[str, str]:
     """The WARP watchdog: every 30s, `wgt watchdog warp`."""
-    svc = render.render_template("watchdog.service.tmpl",
-                                 WHAT=f"WARP watchdog (new source port if {ctx.cfg.WARP_IF} stops handshaking)",
-                                 COMMAND=f"{wgt_command(ctx)} watchdog warp", TIMEOUT="60")
-    timer = render.render_template("warp-watchdog.timer.tmpl")
-    write_timer(ctx, WATCHDOG,
-                f"WARP watchdog ({WATCHDOG}.timer: new source port for {ctx.cfg.WARP_IF} after "
-                f"{WATCHDOG_STALE}s without a handshake)", svc, timer)
+    return (_watchdog_service(ctx, f"WARP watchdog (new source port if {ctx.cfg.WARP_IF} stops handshaking)",
+                              "warp", 60),
+            _watchdog_timer("WARP", 30, 30, 5))
+
+
+def _exit_watchdog(ctx: Ctx) -> Tuple[str, str]:
+    """The exit watchdog: every 10s, `wgt watchdog exits`."""
+    return (_watchdog_service(ctx, "jump watchdog (jumps up while their clients are active)", "exits", 30),
+            _watchdog_timer("jump", 20, 10, 2))
+
+
+def _device_watchdog(ctx: Ctx) -> Tuple[str, str]:
+    """The device watchdog: every 10s, `wgt watchdog devices`."""
+    return (_watchdog_service(ctx, "device watchdog (static addresses follow the config in use)", "devices", 30),
+            _watchdog_timer("device", 20, 10, 2))
+
+
+def unit_files(ctx: Ctx) -> List[Tuple[str, str]]:
+    """Every watchdog's (unit file, content), as setup writes them."""
+    found: List[Tuple[str, str]] = []
+    for name, build in ((WARP_WATCHDOG, _warp_watchdog), (EXIT_WATCHDOG, _exit_watchdog),
+                        (DEVICE_WATCHDOG, _device_watchdog)):
+        service, timer = build(ctx)
+        found += [(ctx.paths.unit_file(f"{name}.service"), service), (ctx.paths.unit_file(f"{name}.timer"), timer)]
+    return found
+
+
+def write_watchdog(ctx: Ctx) -> None:
+    write_timer(ctx, WARP_WATCHDOG,
+                f"WARP watchdog ({WARP_WATCHDOG}.timer: new source port for {ctx.cfg.WARP_IF} after "
+                f"{WATCHDOG_STALE}s without a handshake)", *_warp_watchdog(ctx))
 
 
 def write_exit_watchdog(ctx: Ctx) -> None:
-    """The exit watchdog: every 10s, `wgt watchdog exits`."""
-    svc = render.render_template("watchdog.service.tmpl",
-                                 WHAT="jump watchdog (jumps up while their clients are active)",
-                                 COMMAND=f"{wgt_command(ctx)} watchdog exits", TIMEOUT="30")
-    timer = render.render_template("exit-watchdog.timer.tmpl")
-    write_timer(ctx, EXIT_WATCHDOG,
-                f"jump watchdog ({EXIT_WATCHDOG}.timer: jumps up while their clients are active, "
-                f"down after {EXIT_IDLE}s idle)", svc, timer)
+    write_timer(ctx, EXIT_WATCHDOG, f"jump watchdog ({EXIT_WATCHDOG}.timer: jumps up while their clients are active, "
+                                    f"down after {EXIT_IDLE}s idle)", *_exit_watchdog(ctx))
 
 
 def write_device_watchdog(ctx: Ctx) -> None:
-    """The device watchdog: every 10s, `wgt watchdog devices`."""
-    svc = render.render_template("watchdog.service.tmpl",
-                                 WHAT="device watchdog (static addresses follow the config in use)",
-                                 COMMAND=f"{wgt_command(ctx)} watchdog devices", TIMEOUT="30")
-    timer = render.render_template("device-watchdog.timer.tmpl")
     write_timer(ctx, DEVICE_WATCHDOG,
-                f"device watchdog ({DEVICE_WATCHDOG}.timer: static addresses follow the config in use)", svc, timer)
+                f"device watchdog ({DEVICE_WATCHDOG}.timer: static addresses follow the config in use)",
+                *_device_watchdog(ctx))
 
 
 def open_firewall(ctx: Ctx, outs: List[str]) -> None:
@@ -90,8 +114,7 @@ def open_firewall(ctx: Ctx, outs: List[str]) -> None:
     for o in outs:
         ctx.runner.run(["ufw", "route", "allow", "in", "on", wg, "out", "on", o, "comment", "wireguard-tools"])
     if store.state_get(ctx.snap.state, "UFW") != "1":
-        from .ops import state_set  # ops imports units' module-level helpers
-        state_set(ctx, "UFW", "1")
+        ops.state_set(ctx, "UFW", "1")
 
 
 def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:

@@ -57,18 +57,18 @@ def pick_client(ctx: Ctx, verb: str) -> str:
     """No name given: a numbered list of clients to pick from (needs a terminal)."""
     clients = sorted(ctx.snap.clients, key=lambda c: store.device_key(c.name))
     if not clients:
-        raise WgtError("no clients yet (add one: wgt client add <name>)")
+        raise WgtError("no configs yet (add one: wgt client add <device>)")
     if not ui.have_tty() or ctx.args.yes:
-        raise WgtError(f"usage: wgt client {verb} <name>")
+        raise WgtError(f"usage: wgt client {verb} <config>")
     try:
         i = ui.menu("", [f"{c.name:<24} {way_out(ctx, c.name):<32} {c.ip}" for c in clients],
                     f"{verb.capitalize()} which client? (number or name)")
     except ValueError as e:
         if ctx.snap.client(str(e)):
             return str(e)
-        raise WgtError(f"no client '{e}'") from None
+        raise WgtError(f"no config '{e}'") from None
     if i is None:
-        raise WgtError("no client chosen")
+        raise WgtError("no config chosen")
     return clients[i].name
 
 
@@ -97,7 +97,7 @@ def pick_exits(ctx: Ctx, name: str) -> List[str]:
 def fetch_hint(ctx: Ctx, conf: str) -> None:
     """How to copy a config to your own machine (WGT_SSH_TARGET, set by wgt-ctl,
     is the login that machine uses for this server)."""
-    ep = (ctx.cfg.values.get("ENDPOINT") or store.state_get(ctx.snap.state, "ENDPOINT")).strip("[]")
+    ep = ctx.cfg.values.get("ENDPOINT") or store.state_get(ctx.snap.state, "ENDPOINT")
     target = os.environ.get("WGT_SSH_TARGET") or f"root@{ep or '<server>'}"
     ctx.out.info(f"fetch it with: scp {target}:{conf} .")
 
@@ -122,7 +122,7 @@ def show_qr(ctx: Ctx, conf: str) -> None:
         raise WgtError("qrencode not installed")
     if not width.isdigit():
         raise WgtError(f"QR_WIDTH must be a number of terminal columns: '{width}'")
-    ctx.out.warn("this QR code contains the client's private key")
+    ctx.out.warn("this QR code contains the device's private key")
     data = qr_data(store.read_text(conf) or "")
     term = f"{os.environ.get('LC_TERMINAL', '')} {os.environ.get('TERM_PROGRAM', '')}"
     inline = re.search(r"iTerm2|iTerm\.app|WezTerm", term) and not os.environ.get("TMUX")
@@ -146,7 +146,7 @@ def issue_client(ctx: Ctx, name: str, ip: str, allowed: str, endpoint: str, old_
     go in before its peer, so its first packets can't leave through the
     default exit."""
     if not endpoint:
-        raise WgtError("no client endpoint (pass --endpoint <ip-or-host>)")
+        raise WgtError("no endpoint saved (wgt setup --endpoint <ip-or-host>)")
     conf = client_conf(ctx, name)
     if ctx.runner.dry_run:
         ctx.out.info(f"[dry-run] would generate a keypair + preshared key, write {conf} (mode 600),")
@@ -178,7 +178,7 @@ def ensure_jump_live(ctx: Ctx, c: store.Client) -> None:
     table routes and NAT are live (idempotent), even on a wg0 still running
     hooks from before WARP-off clients existed (pulled, not yet restarted)."""
     e = ctx.snap.exit(c.exit) if c.exit else None
-    if e is None or not ctx.snap.warp_off(c.name) or not ops.wg_up(ctx):
+    if e is None or store.name_warp(c.name) or not ops.wg_up(ctx):
         return
     ctx.runner.sh_lines(rules.jump_table_cmds(ctx.cfg, e))
     ctx.runner.sh_lines(rules.ipt_cmds(rules.exit_ipt_rules(ctx.cfg, e), up=True))
@@ -216,7 +216,7 @@ def hand_over(ctx: Ctx, conf: str) -> None:
         else:
             ctx.out.warn("qrencode not installed; no QR code")
     ctx.out.line()
-    ctx.out.info(f"client config: {conf}")
+    ctx.out.info(f"config: {conf}")
     fetch_hint(ctx, conf)
 
 
@@ -311,8 +311,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
                          "(add one: wgt jump add <code> <wg.conf>)")
     uniq: List[str] = []
     for code in codes:
-        code = "host" if code in store.HOST_EXITS else code
-        if code != "host" and ctx.snap.exit(code) is None:
+        if code != store.HOST_EXIT and ctx.snap.exit(code) is None:
             raise WgtError(f"no jump '{code}' on this server (see: wgt jump list)")
         if code not in uniq:
             uniq.append(code)
@@ -323,6 +322,8 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     for code in uniq:
         for warp in warps:
             add_one(ctx, store.config_name("" if code == "host" else code, warp, base), planned, endpoint)
+    if ctx.snap.device_groups(base):
+        devices.apply_now(ctx)   # its new configs get what its groups allow
 
 
 def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
@@ -344,7 +345,7 @@ def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
 
 def get_name(ctx: Ctx, words: List[str], verb: str) -> str:
     """The one client name a command takes, or the picker if none was given."""
-    ops.no_more_words(words[1:], f"wgt client {verb} <name>")
+    ops.no_more_words(words[1:], f"wgt client {verb} <config>")
     name = words[0] if words else pick_client(ctx, verb)
     valid_name(name)
     return name
@@ -357,7 +358,7 @@ def cmd_rotate(ctx: Ctx, words: List[str]) -> None:
     ops.require_server(ctx)
     c = ctx.snap.client(name)
     if c is None:
-        raise WgtError(f"no client '{name}' (see: wgt client list)")
+        raise WgtError(f"no config '{name}' (see: wgt client list)")
     # Keep the client's own AllowedIPs unless --allowed-ips was given.
     allowed = allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS)
     if ctx.cfg.sources.get("CLIENT_ALLOWED_IPS") not in ("flag", "env") and c.allowed:
@@ -394,9 +395,9 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ops.take_lock(ctx)
     c = ctx.snap.client(name)
     if c is None:
-        ctx.out.info(f"no client '{name}'")
+        ctx.out.info(f"no config '{name}'")
         return
-    ctx.runner.step(f"Remove client '{name}' ({c.ip})", f"wgt client add {name} (issues new keys)")
+    ctx.runner.step(f"Remove config '{name}' ({c.ip})", f"wgt client add {name} (issues new keys)")
     ops.confirm(ctx, f"Remove {name}?")
     # Peer first, then its exit rules: no packet of it may fall back to the default exit.
     if ops.wg_up(ctx):
@@ -445,9 +446,9 @@ def rename_config(ctx: Ctx, old: str, new: str) -> None:
     """Rename one config (the lock is held); its device's number is the caller's."""
     c = ctx.snap.client(old)
     if c is None:
-        raise WgtError(f"no client '{old}' (see: wgt client list)")
+        raise WgtError(f"no config '{old}' (see: wgt client list)")
     if ctx.snap.client(new):
-        raise WgtError(f"a client '{new}' already exists")
+        raise WgtError(f"a config '{new}' already exists")
     code = store.client_exit(new)
     if code and ctx.snap.exit(code) is None:
         raise WgtError(f"no jump '{code}' on this server (see: wgt jump list)")
@@ -495,23 +496,23 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     ops.require_server(ctx)
     c = ctx.snap.client(name)
     if c is None:
-        raise WgtError(f"no client '{name}' (see: wgt client list)")
+        raise WgtError(f"no config '{name}' (see: wgt client list)")
     if ctx.snap.is_disabled(name) == disable:
         ctx.out.info(f"'{name}' is already {verb}d")
         return
     if disable:
-        ctx.runner.step(f"Disable client '{name}' ({c.ip}): cut off now; keys, config and address kept",
+        ctx.runner.step(f"Disable config '{name}' ({c.ip}): cut off now; keys, config and address kept",
                         f"wgt client enable {name}")
         ops.confirm(ctx, f"Disable {name}?")
     else:
-        ctx.runner.step(f"Enable client '{name}' ({c.ip}) with its existing config", f"wgt client disable {name}")
+        ctx.runner.step(f"Enable config '{name}' ({c.ip}) with its existing config", f"wgt client disable {name}")
     ops.set_disabled(ctx, name, disable)
     ops.write_wg_conf(ctx)
     if not ops.wg_up(ctx):
         ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
     elif disable:
         ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", c.pub, "remove"])
-        ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other clients unaffected)")
+        ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other configs unaffected)")
     else:
         ops.add_live_peer(ctx, name, c.pub, c.ip)
 
@@ -598,7 +599,7 @@ def list_menu(ctx: Ctx, names: List[str]) -> None:
     try:
         n = ui.pick_number("\n  Client # (Enter to exit): ", len(names))
     except ValueError as e:
-        raise WgtError(f"no client number '{e}'") from None
+        raise WgtError(f"no config number '{e}'") from None
     if n is None:
         return
     name = names[n - 1]
@@ -653,9 +654,13 @@ def cmd_device_rename(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"no device '{old}' (see: wgt client list)")
     if ctx.snap.device_clients(new):
         raise WgtError(f"a device '{new}' already exists")
+    # Checked first: a rename stopped half way couldn't be re-run ('<new>' would exist).
     missing = [c.name for c in configs if store.read_text(client_conf(ctx, c.name)) is None]
-    if missing:   # checked first: a rename stopped half way couldn't be re-run ('<new>' would exist)
+    if missing:
         raise WgtError(f"no config file for {' '.join(missing)}: nothing renamed")
+    missing = [c.name for c in configs if not (store.read_text(ctx.paths.psk(c.name)) or "").strip()]
+    if missing:
+        raise WgtError(f"no preshared key for {' '.join(missing)}: nothing renamed (rotate them first)")
     number = ctx.snap.device_number(old)
     groups = ctx.snap.device_groups(old)
     for c in configs:

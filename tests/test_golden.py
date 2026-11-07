@@ -1,7 +1,7 @@
 """Everything wg0.conf, warp.conf and the exit tunnels are built from must match
-tests/golden byte for byte. The files were first rendered by the bash version
-(tools/golden-bash.sh), so they pin compatibility with what servers run; after
-a deliberate change, regenerate them with UPDATE_GOLDEN=1 (see DEVELOPING.md)."""
+tests/golden byte for byte, because a change to them restarts wg0 on every server
+at its next setup. After a deliberate change, regenerate them with UPDATE_GOLDEN=1
+and review the diff (see DEVELOPING.md)."""
 
 from __future__ import annotations
 

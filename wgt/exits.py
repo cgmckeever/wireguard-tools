@@ -53,7 +53,7 @@ def state(ctx: Ctx, e: store.Exit) -> str:
 def needs_wx(ctx: Ctx, e: store.Exit) -> bool:
     """An active client of <e> has WARP on (so the jump's WARP must run)."""
     hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
-    return any(not ctx.snap.warp_off(c.name) for c in active_clients(ctx.snap, e.code, hs, ctx.clock()))
+    return any(store.name_warp(c.name) for c in active_clients(ctx.snap, e.code, hs, ctx.clock()))
 
 
 def active_count(ctx: Ctx, code: str) -> int:
@@ -326,8 +326,8 @@ def _check_new(ctx: Ctx, e: store.Exit) -> None:
         ctx.out.info(f"jump '{e.code}' works: {said}")
     else:
         ctx.out.warn(f"jump '{e.code}' isn't passing traffic yet ({said}); check: wgt jump test")
-    ctx.out.info(f"it goes down when idle and comes up when a client connects; add one: "
-                 f"wgt client add <name> --exit {e.code}")
+    ctx.out.info(f"it goes down when idle and comes up when a device connects; add one: "
+                 f"wgt client add <device> --exit {e.code}")
 
 
 def cmd_remove(ctx: Ctx, words: List[str]) -> None:
@@ -341,7 +341,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"no jump '{code}' (see: wgt jump list)")
     users = " ".join(c.name for c in ctx.snap.exit_clients(code))
     if users:
-        raise WgtError(f"clients use jump '{code}': {users}; remove them first (wgt client remove <name>)")
+        raise WgtError(f"configs use jump '{code}': {users}; remove them first (wgt client remove <config>)")
     ctx.runner.step(f"Remove jump '{code}' ({e.label}): its tunnels, routing, WARP account and jump config",
                     f"wgt jump add {code} <wg.conf>")
     ops.confirm(ctx, f"Remove jump {code}?")
@@ -400,13 +400,13 @@ def cmd_tunnel_test(ctx: Ctx, words: List[str]) -> int:
 
 
 def cmd_tunnel(ctx: Ctx, words: List[str]) -> Optional[int]:
-    """wgt tunnel <command>: only test for now."""
+    """wgt tunnel <command>: only test for now, so no command means test."""
     ops.require_setup(ctx)
-    return ops.dispatch(ctx, "tunnel", words, {"test": cmd_tunnel_test})
+    return ops.dispatch(ctx, "tunnel", words or ["test"], {"test": cmd_tunnel_test})
 
 
 def cmd_exit(ctx: Ctx, words: List[str]) -> Optional[int]:
-    """wgt jump (or exit, the old name) <command>: dispatch; no command means list."""
+    """wgt jump (or exit) <command>: dispatch; no command means list."""
     ops.require_setup(ctx)
     return ops.dispatch(ctx, "jump", words, EXIT_COMMANDS)
 
@@ -428,7 +428,7 @@ def tables_ok(ctx: Ctx, e: store.Exit) -> bool:
 def client_rules_ok(ctx: Ctx, e: store.Exit) -> bool:
     """One rule per client address: to its WARP table, or (WARP off) its jump table."""
     users = ctx.snap.exit_clients(e.code)
-    off = sum(1 for c in users if ctx.snap.warp_off(c.name))
+    off = sum(1 for c in users if not store.name_warp(c.name))
     for fam in ctx.cfg.families():
         lines = [line for line in live.rules(ctx.runner, fam).splitlines() if "fwmark" not in line]
         for table, want in ((rules.exit_wtable(e), len(users) - off), (rules.exit_ptable(e), off)):
@@ -460,7 +460,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
     for e in ctx.snap.exits:
         res.check(f"jump {e.code}: tables with blackhole fallbacks, fwmark rule to the jump", tables_ok(ctx, e))
         users = ctx.snap.exit_clients(e.code)
-        off = sum(1 for c in users if ctx.snap.warp_off(c.name))
+        off = sum(1 for c in users if not store.name_warp(c.name))
         res.check(f"jump {e.code}: one rule per address of its {len(users)} client(s)"
                   + (f" ({off} without WARP, via the jump)" if off else ""), client_rules_ok(ctx, e))
         act = active_count(ctx, e.code)
@@ -479,7 +479,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
             res.result("FAIL", f"jump {e.code}: not (fully) up while {act} client(s) are active "
                                "(the watchdog brings it up within 10s)")
         else:
-            res.result("PASS", f"jump {e.code}: idle, no active clients (comes up when one connects; "
+            res.result("PASS", f"jump {e.code}: idle, no active devices (comes up when one connects; "
                                f"'wgt jump test' checks it live)")
     res.check("jump watchdog timer enabled and running",
               live.timer_on(r, EXIT_WATCHDOG))

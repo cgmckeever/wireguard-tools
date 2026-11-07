@@ -9,7 +9,7 @@ import sys
 from typing import Callable, List, Optional
 
 from . import host, ops, render, rules, store
-from .ctx import Args, Ctx, load, parse
+from .ctx import Args, Ctx, load, parse, settings_env
 from .errors import WgtError
 from .system import Out, Runner
 
@@ -26,7 +26,7 @@ Cloudflare WARP. The device picks one at a time.
                              --no-follow, or piped: print and stop)
   backup [dir] | restore <archive> | rollback [--purge]
 
-  client list [--tsv] | add <device> [--exit host|<jump>[,..]] [--warp on|off] [--allowed-ips ..] [--group ..]
+  client list [--tsv] | add <device> [--exit host|<jump>[,..]] [--warp on|off|on,off] [--allowed-ips ..] [--group ..]
          show <config> [--qr] | share <config> | rotate <config> [--allowed-ips ..]
          rename <old> <new> | disable <config> | enable <config> | remove <config>
          (add: per exit, <device> and warp.<device> (--warp on|off: one); a full config
@@ -45,7 +45,7 @@ Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
   --force             setup: reinstall wgcf, regenerate the WARP profile, take over
                       configs these tools didn't create
   --new-server-keys   setup: new server keypair (every client must then be rotated)
-Settings (saved by setup): --name --subnet --subnet6 --port --mtu --warp-mtu --dns
+Settings (for setup and restore; --allowed-ips also on client): --name --subnet --subnet6 --port --mtu --warp-mtu --dns
   --endpoint --wg-if --warp-if --table --allowed-ips --location
 """
 
@@ -55,6 +55,8 @@ Settings (saved by setup): --name --subnet --subnet6 --port --mtu --warp-mtu --d
 def cmd_debug(ctx: Ctx, what: List[str]) -> None:
     """Hidden: print what this checkout renders from the server's state (keys
     redacted), so tools/render-diff.sh can compare two versions before a deploy."""
+    from . import live, units
+    from .server import PACKAGES
     from .system import redact
     target = what[0] if what else "all"
     psk = store.psk_reader(ctx.paths)
@@ -76,6 +78,14 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
         pieces.append(("hooks-down", "".join(x + "\n" for x in down)))
         ipt = rules.ipt_rules(ctx.cfg, ctx.pub_if, ctx.snap.exits)
         pieces.append(("ipt", "".join("|".join(r) + "\n" for r in ipt)))
+    if target in ("all", "units"):
+        pieces += [(os.path.basename(path), text) for path, text in units.unit_files(ctx)]
+        pieces.append(("dropin", render.render_dropin(ctx.cfg)))
+    if target in ("all", "system"):
+        accept_ra = live.sysctl(ctx.runner, f"net.ipv6.conf.{ctx.pub_if}.accept_ra") or None
+        pieces.append(("sysctl", render.render_sysctl(
+            render.sysctl_lines(ctx.cfg, ctx.pub_if, ctx.facts.has_ipv6, accept_ra))))
+        pieces.append(("packages", "".join(p + "\n" for p in PACKAGES)))
     for name, text in pieces:
         sys.stdout.write(f"=== {name}\n{redact(text)}")
 
@@ -85,13 +95,13 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     wg-quick units (wg0, warp, each jump's tunnels). Like tail -f: the
     last [lines] (default 40), then new entries until Ctrl-C. With
     --no-follow, or when the output isn't a terminal, it prints and stops."""
-    from .const import DEVICE_WATCHDOG, EXIT_WATCHDOG, WATCHDOG
+    from .const import DEVICE_WATCHDOG, EXIT_WATCHDOG, WARP_WATCHDOG
     ops.no_more_words(words[1:], "wgt log [lines] [--no-follow]")
     count = words[0] if words else "40"
     if not count.isdigit():
         raise WgtError("usage: wgt log [lines] [--no-follow]")
     matches: List[str] = []
-    for tag in ("wg-tools", WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG):
+    for tag in ("wg-tools", WARP_WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG):
         matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
     ifcs = [ctx.cfg.WG_IF, ctx.cfg.WARP_IF]
     for e in ctx.snap.exits:
@@ -140,15 +150,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         cmd, rest = args.words[0], args.words[1:]
         if cmd not in COMMANDS:
             raise WgtError(f"unknown command: {cmd} (see: wgt help)")
+        env = settings_env(args, cmd, os.environ)
         if cmd == "watchdog":
             return run_watchdog(args, rest, out)
         if os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
             host.preflight(Runner())
-        ctx = load(args)
+        ctx = load(args, env=env)
         if args.dry_run:
             out.log("DRY RUN: nothing will be changed")
         return command(cmd)(ctx, rest) or 0
-    except WgtError as e:
+    except (WgtError, OSError) as e:
         out.error(str(e))
         return 1
     except KeyboardInterrupt:
@@ -159,18 +170,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
     """A watchdog run (every 10-30s from a timer): no host checks beyond root,
     no fact gathering, and any error is logged to the journal, not a traceback."""
-    from .const import DEVICE_WATCHDOG, EXIT_WATCHDOG, WATCHDOG
-    tag = {"warp": WATCHDOG, "devices": DEVICE_WATCHDOG}.get((rest or [""])[0], EXIT_WATCHDOG)
+    from .const import DEVICE_WATCHDOG, EXIT_WATCHDOG, WARP_WATCHDOG
+    tag = {"warp": WARP_WATCHDOG, "devices": DEVICE_WATCHDOG}.get((rest or [""])[0], EXIT_WATCHDOG)
     if os.geteuid() != 0 and os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
         raise WgtError("must run as root")
     quick = host.Facts(kernel_ipv6=os.path.exists("/proc/net/if_inet6"), has_ipv6=False,
                        hostname="", routes4="", default_route="")
     try:
-        ctx = load(args, facts=quick)
+        ctx = load(args, env={}, facts=quick)
         return command("watchdog")(ctx, rest) or 0
-    except WgtError:
-        raise
-    except Exception as e:   # a timer job must log, not crash
+    except Exception as e:   # a timer job must log, not crash (a bad database line too: `wgt log` shows it)
         from .system import journal
         journal(Runner(), tag, f"error: {type(e).__name__}: {e}")
         out.error(f"{type(e).__name__}: {e}")

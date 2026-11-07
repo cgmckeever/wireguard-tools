@@ -1,5 +1,5 @@
-"""The server's own files, in the formats the bash version wrote (servers
-switched over with their files unchanged; keep them compatible):
+"""The server's own files, and their formats (running servers have these files,
+so keep them compatible):
 
   wg-tools.state     KEY=value lines; the last one for a key wins
   clients.db         "name ip public-key allowed-ips" (no private keys)
@@ -12,6 +12,7 @@ Reading is pure; writes return the new text, and system.Files writes it."""
 
 from __future__ import annotations
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
@@ -80,13 +81,18 @@ def saved_settings(text: Optional[str], keys: Iterable[str]) -> Dict[str, str]:
 
 # --- names ---
 
+def is_uint(word: str) -> bool:
+    """Plain ASCII digits (str.isdigit also takes "²", which int() refuses)."""
+    return bool(re.fullmatch(r"[0-9]+", word))
+
+
 EXIT_CODE_RULE = "2-6 of a-z0-9 and -, starting with a letter, not ending in -, not 'warp' or 'host' (e.g. par-fr)"
-HOST_EXITS = ("host", "warp")   # --exit words for this server's own way out ("warp": the old spelling)
+HOST_EXIT = "host"   # the --exit word for this server's own way out
 
 
 def valid_exit_code(code: str) -> bool:
     """See EXIT_CODE_RULE (the code names interfaces px-<code>, wx-<code>)."""
-    return bool(_EXIT_CODE.fullmatch(code)) and code not in HOST_EXITS
+    return bool(_EXIT_CODE.fullmatch(code)) and code not in (HOST_EXIT, WARP_TAG)
 
 
 WARP_TAG = "warp"   # the name part of a config that goes through WARP
@@ -167,12 +173,20 @@ class Client:
         return " ".join(x for x in (self.name, self.ip, self.pub, self.allowed) if x)
 
 
+def _is_ipv4(word: str) -> bool:
+    try:
+        ipaddress.IPv4Address(word)
+    except ValueError:
+        return False
+    return True
+
+
 def parse_clients(text: Optional[str]) -> List[Client]:
     """clients.db entries; one without a valid IPv4 address is refused."""
     out = []
     for line in _entries(text):
         f = line.split() + ["", "", ""]
-        if not re.fullmatch(r"([0-9]{1,3}\.){3}[0-9]{1,3}", f[1]) or not f[2]:
+        if not _is_ipv4(f[1]) or not f[2]:
             raise WgtError(f"clients.db: bad line (want 'name ip public-key [allowed-ips]'): {line}")
         out.append(Client(f[0], f[1], f[2], f[3], raw=line))
     return out
@@ -294,11 +308,12 @@ def valid_device_number(number: int) -> bool:
 
 
 def parse_devices(text: Optional[str]) -> List[Device]:
-    """devices.db entries; a bad number is refused."""
-    out = []
+    """devices.db entries; a bad number is refused, and so is a name or number
+    used twice: one static address can only forward to one device."""
+    out: List[Device] = []
     for line in _entries(text):
         f = line.split()
-        if len(f) not in (2, 3) or not _CLIENT_BASE.fullmatch(f[0]) or not f[1].isdigit() \
+        if len(f) not in (2, 3) or not _CLIENT_BASE.fullmatch(f[0]) or not is_uint(f[1]) \
                 or not valid_device_number(int(f[1])):
             raise WgtError(f"devices.db: bad line (want 'device number [groups]', number "
                            f"{DEVICE_CTL_FIRST}-{DEVICE_DIRECT_LAST}): {line}")
@@ -306,6 +321,8 @@ def parse_devices(text: Optional[str]) -> List[Device]:
             groups = parse_groups(f[2]) if len(f) == 3 else ()
         except WgtError as e:
             raise WgtError(f"devices.db: bad line ({e}): {line}") from e
+        if any(d.name == f[0] or d.number == int(f[1]) for d in out):
+            raise WgtError(f"devices.db: that device or number is already listed: {line}")
         out.append(Device(f[0], int(f[1]), groups))
     return out
 
@@ -353,13 +370,6 @@ def backup_forget(text: Optional[str], path: str) -> str:
     return "".join(line + "\n" for line in (text or "").splitlines() if line.partition("\t")[0] != path)
 
 
-def backup_move(text: Optional[str], path: str, new_orig: str) -> str:
-    """The backup record with <path>'s original pointed at <new_orig>."""
-    lines = [f"{path}\t{new_orig}" if line.partition("\t")[0] == path else line
-             for line in (text or "").splitlines()]
-    return "".join(line + "\n" for line in lines)
-
-
 # --- the whole picture, read once ---
 
 @dataclass
@@ -400,14 +410,9 @@ class Snapshot:
     def is_disabled(self, name: str) -> bool:
         return name in self.disabled
 
-    def warp_off(self, name: str) -> bool:
-        """Config <name> has no warp part: it leaves straight out of its exit
-        (this server's IP, or its jump's tunnel), never through a WARP of ours."""
-        return not name_warp(name)
-
     def direct_clients(self) -> List[Client]:
         """Host configs without warp (out this server's IP)."""
-        return [c for c in self.clients if not c.exit and self.warp_off(c.name)]
+        return [c for c in self.clients if not c.exit and not name_warp(c.name)]
 
 
 def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
@@ -424,7 +429,7 @@ def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
 
 def psk_reader(paths: Paths, read: Optional[Reader] = None) -> Callable[[str], str]:
     """A function: client name -> its preshared key (trailing newlines removed),
-    or "" if it has none (as `$(cat psk)` in the bash version)."""
+    or "" if it has none."""
     read = read or read_text
 
     def psk(name: str) -> str:

@@ -7,19 +7,25 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-# Settings saved in the state file by setup, in this order (WARP: always on now; marks set up).
+# Settings saved in the state file by setup, in this order.
 CONFIG_KEYS = (
-    "WARP", "SERVER_NAME", "WG_SUBNET", "WG_SUBNET6", "WG_PORT", "WG_MTU", "WARP_MTU",
+    "SERVER_NAME", "WG_SUBNET", "WG_SUBNET6", "WG_PORT", "WG_MTU", "WARP_MTU",
     "WG_DNS", "WG_IF", "WARP_IF", "RT_TABLE", "CLIENT_ALLOWED_IPS",
 )
 
+# In the state file once setup has finished (rollback clears it). WARP is how
+# older versions said so; it goes at a server's next setup.
+SETUP_DONE = "SETUP_DONE"
+LEGACY_SETUP_DONE = "WARP"
+SET_UP_KEYS = (SETUP_DONE, LEGACY_SETUP_DONE)
+
 DEFAULTS = {
-    "WARP": "on", "WG_PORT": "51820", "WARP_MTU": "1280", "WG_MTU": "1280",
+    "WG_PORT": "51820", "WARP_MTU": "1280", "WG_MTU": "1280",
     "WG_DNS": "1.1.1.1", "WG_IF": "wg0", "WARP_IF": "warp", "RT_TABLE": "100",
     "CLIENT_ALLOWED_IPS": "0.0.0.0/0, ::/0",
 }
 
-RULE_PRIO = 10000
+WARP_RULE_PRIO = 10000
 BLACKHOLE_METRIC = 4096
 MARKER = "# Managed by wireguard-tools"
 TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
@@ -28,7 +34,7 @@ EXIT_TABLE_BASE = 200        # client table of exit idx: 200+idx
 EXIT_PTABLE_BASE = 230       # jump table of exit idx: 230+idx
 EXIT_MARK_BASE = 22272       # fwmark of exit idx: 0x5700+idx
 EXIT_MAX = 20
-EXIT_RULE_PRIO = 9500        # per-client rules: before the WARP rule (RULE_PRIO)
+EXIT_RULE_PRIO = 9500        # per-client rules: before the WARP rule (WARP_RULE_PRIO)
 EXIT_MARK_PRIO = 9400
 DIRECT_STOP_PRIO = 9501      # WARP-off host clients: blackhole after their main-table rule
 JUMP_MTU = 1420
@@ -48,11 +54,11 @@ SERVER_GROUP = "server"      # the group that reaches the server, and not the ot
 DEVICE_RULE_PRIO = 9300      # before every client rule: no config in use means unreachable, not a way out
 
 LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes
-WATCHDOG = "wg-tools-warp-watchdog"
+WARP_WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
 DEVICE_WATCHDOG = "wg-tools-device-watchdog"
 EXIT_HOLD = 60               # seconds a hold file (exit test) keeps the watchdog off a jump
-WATCHDOG_STALE = 180         # seconds without a WARP handshake before it acts
+WATCHDOG_STALE = 180         # seconds without a handshake before a watchdog acts on a tunnel
 
 MIB = 1024 * 1024
 KEEP_CHANGES = 5             # newest copies kept per file (plus its original)
@@ -172,7 +178,7 @@ class Paths:
     @property
     def warp_marker(self) -> str:
         """The WARP watchdog's note of an unhealthy run (it acts on the second)."""
-        return os.path.join(self.run_dir, WATCHDOG)
+        return os.path.join(self.run_dir, WARP_WATCHDOG)
 
     def exit_port_marker(self, code: str) -> str:
         """Present once the exit watchdog has tried a new WARP port for <code>:
@@ -200,7 +206,7 @@ def device_ip(number: int) -> str:
 # a default is only shown when its value differs from it.
 SETTING_ROWS = (
     ("SERVER_NAME", "name", ""), ("ENDPOINT", "endpoint", ""), ("WG_PORT", "port", ""),
-    ("WG_SUBNET", "subnet", ""), ("WG_SUBNET6", "subnet6", ""), ("WARP", "WARP", ""),
+    ("WG_SUBNET", "subnet", ""), ("WG_SUBNET6", "subnet6", ""),
     ("WG_DNS", "DNS", ""), ("CLIENT_ALLOWED_IPS", "allowed IPs", ""), ("WG_MTU", "MTU", ""),
     ("WARP_MTU", "WARP MTU", DEFAULTS["WARP_MTU"]), ("WG_IF", "interface", DEFAULTS["WG_IF"]),
     ("WARP_IF", "WARP interface", DEFAULTS["WARP_IF"]), ("RT_TABLE", "table", DEFAULTS["RT_TABLE"]),

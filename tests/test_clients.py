@@ -13,7 +13,7 @@ from wgt.errors import WgtError
 
 
 def test_add_with_exit_puts_rules_before_peer(make_ctx):
-    ctx = make_ctx(argv=["--exit", "warp,par-fr,par-fr", "--warp", "on"])
+    ctx = make_ctx(argv=["--exit", "host,par-fr,par-fr", "--warp", "on"])
     clients.cmd_add(ctx, ["phone"])
     names = [c.name for c in ctx.snap.clients]
     assert names.count("warp.phone") == 1 and names.count("warp.par-fr.phone") == 1   # deduplicated
@@ -152,7 +152,7 @@ def test_add_rereads_files_after_lock(make_ctx):
 def test_exit_remove_refused_while_used_and_ordered(make_ctx):
     from wgt import exits
     ctx = make_ctx()
-    with pytest.raises(WgtError, match="clients use jump 'par-fr'"):
+    with pytest.raises(WgtError, match="configs use jump 'par-fr'"):
         exits.cmd_remove(ctx, ["par-fr"])
     clients.cmd_remove(ctx, ["nyc-us.phone"])
     ctx.runner.calls.clear()
@@ -243,7 +243,7 @@ def test_add_makes_plain_and_warp_per_exit(make_ctx):
 
 
 def test_add_one_warp_setting(make_ctx):
-    ctx = make_ctx(argv=["--exit", "warp,host", "--warp", "on"])
+    ctx = make_ctx(argv=["--exit", "host,host", "--warp", "on"])
     clients.cmd_add(ctx, ["phone2"])
     names = [c.name for c in ctx.snap.clients]
     assert names.count("warp.phone2") == 1 and "phone2" not in names

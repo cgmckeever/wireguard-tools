@@ -10,12 +10,14 @@ covers rolling a change out.
 wgt/                      the package (Python 3.8+, standard library only)
   cli.py                  wgt: usage, dispatch, log, the hidden `debug` render
   ctx.py                  the command line (Args) and what every command gets (Ctx)
-  ctl.py                  wgt-ctl (ssh/scp to the servers)
+  ctl/                    wgt-ctl, from your own machine: main and per-server dispatch (__init__.py),
+                          the server list and ssh (remote.py), init (newserver.py), backup, remove and
+                          move (rebuild.py), numbers across servers (fleet_cmds.py), jump files (jumpfiles.py)
   const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError
   config.py               settings: flag > env > saved > default, validation
-  store.py                the server files: state, clients.db, exits.db (jumps), disabled, backup record; config names
+  store.py                the server files: state, clients.db, exits.db (jumps), devices.db, disabled, backup record; config names
   net.py, host.py         address maths; host facts and preflight
-  rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP switch, jumps, per-client WARP)
+  rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP, jumps, static addresses)
   render.py               wg0.conf, warp.conf, px/wx, client configs, templates
   system.py               Runner (commands, dry-run, journal), FakeRunner, Files (writes with backups),
                           marker files
@@ -36,8 +38,7 @@ wgt/                      the package (Python 3.8+, standard library only)
 bin/wgt, bin/wgt-ctl      launchers (put the checkout on sys.path and call main)
 templates/                client config and systemd unit templates
 tests/                    pytest: unit, golden files, FakeRunner commands, setup -> rollback
-tools/                    render-diff.sh (before a deploy), trial.sh (full cycle on a throwaway
-                          server), golden-bash.sh (how the golden files were first made)
+tools/                    render-diff.sh (before a deploy), trial.sh (full cycle on a throwaway server)
 test.sh, pyproject.toml   tests and lint (sets up .venv on first use); lint settings
 ```
 
@@ -61,8 +62,9 @@ is per device, not per config, so it lives in `devices.db`.
 - Errors raise one `WgtError`, which prints `ERROR: ...` and exits 1. A
   failure part-way through setup removes the wg0 rules it had applied.
 - Every change goes through `Runner` or `Files`, so it is dry-run aware and
-  backed up first. Keys never reach a log line, a command line or a diff:
-  diffs are redacted, and keys are passed through files or stdin. Two
+  backed up first. `Runner.ok` and `query` are questions and always run: a change
+  whose failure you handle yourself is `Runner.attempt`. Keys never reach a log
+  line, a command line or a diff: diffs are redacted, and keys are passed through files or stdin. Two
   deliberate exceptions write directly: wg-tools.state and the server keys
   (`system.write_private`: no change copy on every write, only an explicit one
   before `--new-server-keys` replaces them; rollback reads the state rather
@@ -89,16 +91,24 @@ is per device, not per config, so it lives in `devices.db`.
 - Paths come from `Paths` helpers (const.py), never literals, so tests can
   move every one of them into a temp dir.
 - Docstrings and comments say why, not what.
-- `wgt-ctl`'s own steps (`jump-add`, `clients`) run only `wgt` commands every
-  server version knows, since servers may not have pulled yet.
+- Server settings come only through `setup` and `restore` (`ctx.settings_env`):
+  anywhere else one would reach wg0.conf without being saved. `--allowed-ips` on
+  `wgt client` is the one exception.
+- `SETUP_DONE` in the state file is written last and means setup finished; `WARP`
+  there means the same on a server that hasn't re-run setup since. `wgt-ctl init`
+  reads it to tell a server to adopt from one to finish.
+- `wgt-ctl` assumes every server runs a recent `wgt`: pull everywhere first
+  (`wgt-ctl all pull`), then use new commands.
+- In `wgt/ctl/`, call another module's functions as `remote.ssh(...)`, not by
+  importing the name: that's what lets tests replace them.
 
 ## Tests
 
 - **Golden files.** `tests/golden/<case>/` holds the configs, hooks and rules
-  rendered from each fixture server in `tests/fixtures/<case>/wg`. They were
-  first made by the bash version (`tools/golden-bash.sh`, from git tag
-  `bash-final`), so they pin byte-for-byte compatibility with what servers
-  already run. For a deliberate rendering change, regenerate them and review
+  rendered from each fixture server in `tests/fixtures/<case>/wg`. A change
+  to `wg0.conf`'s settings restarts wg0 at each server's next setup, so they pin
+  it byte for byte. (They were first made by the bash version: git tag
+  `bash-final`.) For a deliberate rendering change, regenerate them and review
   the diff before committing:
 
   ```bash
@@ -112,6 +122,8 @@ is per device, not per config, so it lives in `devices.db`.
   system path moved there and a `FakeRunner` that records commands instead of
   running them. `tests/test_server.py` runs a whole `setup` then
   `rollback --purge` this way and checks nothing is left behind.
+- **Remote scripts.** ssh is faked, so `test_ctl.py` checks the real ssh options
+  with `ssh -G` and the scripts sent to servers with `bash -n`.
 - **Live checks.** `tools/render-diff.sh` (read-only, every server) before a
   deploy; `tools/trial.sh` on a throwaway server for the full cycle.
 - CI (`.github/workflows/tests.yml`) runs the tests on Python 3.8 and 3.12,

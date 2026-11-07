@@ -68,7 +68,7 @@ def test_canon_subnet6(value, want):
 
 
 def test_random_subnet_avoids_routes():
-    # Half of the candidates are taken; the pick (20 tries, like the bash version) avoids them.
+    # Half of the candidates are taken; the pick (20 tries) avoids them.
     routes = "\n".join(f"10.{a}.{b}.0/24 dev x" for a in range(200, 228) for b in range(200, 256))
     for seed in range(50):
         s = net.random_subnet(routes, random.Random(seed))
@@ -96,12 +96,11 @@ def cfg(**saved):
 
 
 def test_precedence():
-    c = resolve({"WG_PORT": "1"}, {"WG_PORT": "2", "WG_DNS": "9.9.9.9", "WARP": "off"},
+    c = resolve({"WG_PORT": "1"}, {"WG_PORT": "2", "WG_DNS": "9.9.9.9"},
                 {"WG_PORT": "3", "WG_DNS": "8.8.8.8", "WG_MTU": "1300", "WG_SUBNET": "10.1.1.0/24"})
     assert (c.WG_PORT, c.sources["WG_PORT"]) == ("1", "flag")
     assert (c.WG_DNS, c.sources["WG_DNS"]) == ("9.9.9.9", "env")
     assert (c.WG_MTU, c.sources["WG_MTU"]) == ("1300", "saved")
-    assert (c.WARP, c.sources["WARP"]) == ("on", "default")   # never from the environment
     assert not c.subnet_defaulted
 
 
@@ -171,7 +170,6 @@ def test_backup_record():
     assert store.backup_record(t, "/x", "/copy") == t       # first record wins
     assert store.backup_orig(t, "/x") == "NEW"
     assert store.backup_forget(t, "/x") == ""
-    assert store.backup_orig(store.backup_move(t, "/x", "/moved"), "/x") == "/moved"
 
 
 def test_snapshot_exit_clients():
@@ -275,3 +273,35 @@ def test_fleet_subnets_pick_next_free():
     assert c.sources["WG_SUBNET"] == "next free in the fleet"
     saved = resolve({}, {"WGT_FLEET_SUBNETS": "10.1.1.0/24"}, {"WG_SUBNET": "10.9.9.0/24"})
     assert saved.values["WG_SUBNET"] == "10.9.9.0/24"   # a saved subnet stays
+
+
+# --- the databases and settings refuse what would go wrong later ---
+
+@pytest.mark.parametrize("text", ["a 5\nb 5\n", "a 5\na 6\n", "a ²\n"])
+def test_devices_db_refuses_duplicates_and_odd_digits(text):
+    with pytest.raises(WgtError, match="devices.db"):
+        store.parse_devices(text)
+
+
+def test_clients_db_refuses_an_impossible_address():
+    with pytest.raises(WgtError, match="clients.db"):
+        store.parse_clients("phone 999.1.1.1 KEY\n")
+
+
+@pytest.mark.parametrize("key,value", [
+    ("WG_DNS", "1.1.1.1\nPostUp = touch /x"), ("CLIENT_ALLOWED_IPS", "10.0.0.0/8\nPostUp = touch /x"),
+    ("CLIENT_ALLOWED_IPS", "not-a-cidr"), ("ENDPOINT", "vpn.example.com:51820"), ("ENDPOINT", "1.2.3.4:51820"),
+])
+def test_values_sent_to_devices_are_checked(key, value):
+    c = resolve({key: value}, {}, {"WG_SUBNET": "10.1.1.0/24"})
+    with pytest.raises(WgtError):
+        c.finalize(kernel_ipv6=False)
+
+
+@pytest.mark.parametrize("key,value", [
+    ("WG_DNS", "1.1.1.1, 2606:4700:4700::1111"), ("WG_DNS", "9.9.9.9,home.lan"), ("ENDPOINT", "vpn.example.com"),
+    ("ENDPOINT", "[2001:db8::1]"), ("ENDPOINT", "2001:db8::1"), ("ENDPOINT", "203.0.113.1"),
+    ("CLIENT_ALLOWED_IPS", "0.0.0.0/0, ::/0"), ("CLIENT_ALLOWED_IPS", "10.4.5.0/24,fd00::/64"),
+])
+def test_values_sent_to_devices_can_be_normal(key, value):
+    resolve({key: value}, {}, {"WG_SUBNET": "10.1.1.0/24"}).finalize(kernel_ipv6=False)

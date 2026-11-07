@@ -9,7 +9,18 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from . import clients, exits, host, live, ops, results, rules, store, ui
-from .const import DEVICE_WATCHDOG, DIRECT_STOP_PRIO, EXIT_RULE_PRIO, RULE_PRIO, SETTING_ROWS, WATCHDOG, WATCHDOG_STALE
+from .const import (
+    DEVICE_SERVER,
+    DEVICE_WATCHDOG,
+    DIRECT_STOP_PRIO,
+    EXIT_RULE_PRIO,
+    EXIT_WATCHDOG,
+    SETTING_ROWS,
+    WARP_RULE_PRIO,
+    WARP_WATCHDOG,
+    WATCHDOG_STALE,
+    device_ip,
+)
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -45,8 +56,6 @@ def running_value(ctx: Ctx, key: str) -> str:
         return live.mtu(c.WG_IF)
     if key == "WARP_MTU":
         return live.mtu(c.WARP_IF)
-    if key == "WARP":
-        return "on" if f"from {c.WG_SUBNET} lookup {c.RT_TABLE}" in live.rules(r) else "off"
     return ""
 
 
@@ -58,7 +67,7 @@ def expected_running(ctx: Ctx, key: str) -> str:
         return f"{c.server_ip}/{c.pfx}"
     if key == "WG_SUBNET6":
         return f"{c.p6}::1/64" if c.ipv6 else ""
-    if key in ("WG_PORT", "WG_MTU", "WARP_MTU", "WARP"):
+    if key in ("WG_PORT", "WG_MTU", "WARP_MTU"):
         return c.values[key]
     return ""
 
@@ -101,24 +110,13 @@ def settings_table(ctx: Ctx, running: bool = False, subnet_asked: bool = False) 
 # --- test ---
 
 class Tests:
-    """The checks. WARP checks only fail the run while WARP is on (or when
-    testing WARP itself)."""
+    """The checks."""
 
     def __init__(self, ctx: Ctx, res: Optional[results.Results] = None):
         self.ctx = ctx
         self.runner = ctx.runner
         self.cfg = ctx.cfg
         self.res = res or results.Results(out=ctx.out.line)
-        self.scope = "all"
-
-    def check_warp(self, desc: str, ok: bool) -> None:
-        """A WARP check: only a warning while WARP is switched off."""
-        if ok:
-            self.res.result("PASS", desc)
-        elif self.cfg.warp_on or self.scope == "warp":
-            self.res.result("FAIL", desc)
-        else:
-            self.res.result("WARN", f"{desc} (WARP is off)")
 
     def warp_trace_on(self) -> bool:
         """Cloudflare's trace through the WARP tunnel says warp=on (or plus)."""
@@ -130,13 +128,13 @@ class Tests:
         src = live.ipv6_global_addr(self.runner, self.cfg.WARP_IF)
         if not src:
             return False
-        rule = ["from", src, "lookup", self.cfg.RT_TABLE, "priority", str(RULE_PRIO - 1)]
-        self.runner.ok(["ip", "-6", "rule", "add"] + rule)
+        rule = ["from", src, "lookup", self.cfg.RT_TABLE, "priority", str(WARP_RULE_PRIO - 1)]
+        self.runner.attempt(["ip", "-6", "rule", "add"] + rule)
         try:
             out = self.runner.query(["curl", "-6", "-fsS", "--max-time", "10", "--interface", src,
                                 "https://[2606:4700:4700::1111]/cdn-cgi/trace"])
         finally:
-            self.runner.ok(["ip", "-6", "rule", "del"] + rule)
+            self.runner.attempt(["ip", "-6", "rule", "del"] + rule)
         return live.is_warp_trace(out)
 
     def default_route_kept(self) -> bool:
@@ -145,10 +143,9 @@ class Tests:
         return bool(rec) and host.route_key(self.ctx.facts.default_route) == host.route_key(rec)
 
     def warp_rule_ok(self, family: str) -> bool:
-        """The WARP switch's policy rule: exactly once with WARP on, absent with it off."""
-        want = 1 if self.cfg.warp_on else 0
+        """The subnet's policy rule into RT_TABLE is there exactly once."""
         needle = f"from {self.cfg.family_net(family)} lookup {self.cfg.RT_TABLE}"
-        return sum(1 for line in live.rules(self.runner, family).splitlines() if needle in line) == want
+        return sum(1 for line in live.rules(self.runner, family).splitlines() if needle in line) == 1
 
     def rt_table_ok(self, family: str) -> bool:
         """RT_TABLE has the warp default, the blackhole fallback and the client subnet."""
@@ -187,6 +184,8 @@ class Tests:
                 out.append(f"{f} table {c.RT_TABLE}")
             if not self.direct_rules_ok(f):
                 out.append(f"{f} plain host config rules")
+        if not self.device_net_ok():
+            out.append("static device addresses")
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             if live.ipt_count(self.runner, x, t, ch, rule) != 1:
                 out.append(f"{x} {t} {ch} {rule}")
@@ -194,6 +193,13 @@ class Tests:
             if not exits.client_rules_ok(self.ctx, e):
                 out.append(f"jump {e.code} config rules")
         return out
+
+    def device_net_ok(self) -> bool:
+        """wg0 holds the server's static address, and an address with no config
+        in use is unreachable instead of taking a way out."""
+        c = self.cfg
+        addrs = self.runner.query(["ip", "-4", "-o", "addr", "show", "dev", c.WG_IF])
+        return f" {device_ip(DEVICE_SERVER)}/" in addrs and rules.device_rule_text(c) in live.rules(self.runner, "ip")
 
     def boot_order_ok(self) -> bool:
         """wg0's unit starts after warp's (and wants it), via setup's drop-in."""
@@ -205,11 +211,10 @@ class Tests:
     def run(self, scope: str = "all") -> results.Results:
         """Run the checks ("warp": only those WARP itself needs)."""
         r, c, res = self.runner, self.cfg, self.res
-        self.scope = scope
-        self.check_warp(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_trace_on())
+        self.res.check(f"{c.WARP_IF}: curl --interface {c.WARP_IF} shows warp=on", self.warp_trace_on())
         if c.ipv6:
-            self.check_warp(f"{c.WARP_IF}: IPv6 through {c.WARP_IF} shows warp=on", self.warp6_trace_on())
-        self.check_warp(f"{c.WARP_IF}: handshake within {WATCHDOG_STALE}s",
+            self.res.check(f"{c.WARP_IF}: IPv6 through {c.WARP_IF} shows warp=on", self.warp6_trace_on())
+        self.res.check(f"{c.WARP_IF}: handshake within {WATCHDOG_STALE}s",
                         live.hs_recent(r, c.WARP_IF, WATCHDOG_STALE, self.ctx.clock()))
         res.check("server's own traffic is not tunneled (plain curl shows warp=off)",
                   live.trace_field(live.trace(r), "warp") == "off")
@@ -226,37 +231,44 @@ class Tests:
             res.check("net.ipv6.conf.all.forwarding = 1", live.sysctl(r, "net.ipv6.conf.all.forwarding") == "1")
         for f in c.families():
             net = c.family_net(f)
-            if c.warp_on:
-                res.check(f"{f} rule: from {net} lookup {c.RT_TABLE} (exactly once; WARP on)", self.warp_rule_ok(f))
-            else:
-                res.check(f"{f} rule: none from {net} (WARP off)", self.warp_rule_ok(f))
-            self.check_warp(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
+            res.check(f"{f} rule: from {net} lookup {c.RT_TABLE} (exactly once)", self.warp_rule_ok(f))
+            self.res.check(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
                             self.rt_table_ok(f))
             direct = len(self.ctx.snap.direct_clients())
             res.check(f"{f} rules: {direct} plain host config(s) leave via this server's IP "
                       "(main, then blackhole; no stale ones)", self.direct_rules_ok(f))
+        res.check(f"static addresses: {device_ip(DEVICE_SERVER)} on {c.WG_IF}; one with no config in use "
+                  "is unreachable", self.device_net_ok())
+        orphans = [x.name for x in self.ctx.snap.clients if x.exit and self.ctx.snap.exit(x.exit) is None]
+        res.check("every config's jump exists" + (f" (missing for: {' '.join(orphans)})" if orphans else ""),
+                  not orphans)
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             res.check(f"exactly once: {x} {t} {ch} {rule}", live.ipt_count(r, x, t, ch, rule) == 1)
         res.check(f"wg-quick@{c.WG_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WG_IF}"))
-        self.check_warp(f"wg-quick@{c.WARP_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WARP_IF}"))
+        self.res.check(f"wg-quick@{c.WARP_IF} enabled at boot", live.unit_enabled(r, f"wg-quick@{c.WARP_IF}"))
         res.check(f"wg-quick@{c.WG_IF} ordered after (and wants) wg-quick@{c.WARP_IF}", self.boot_order_ok())
         res.check("WARP watchdog timer enabled and running",
-                  live.timer_on(r, WATCHDOG))
+                  live.timer_on(r, WARP_WATCHDOG))
         res.check("device watchdog timer enabled and running", live.timer_on(r, DEVICE_WATCHDOG))
         if self.ctx.snap.exits:
             exits.run_tests(self.ctx, res, bring_up=False)
         if any(ts > 0 for ts in live.handshakes(r, c.WG_IF).values()):
-            res.result("PASS", "at least one client handshake")
+            res.result("PASS", "at least one device has connected")
         else:
-            res.result("WARN", "no client has connected yet")
+            res.result("WARN", "no device has connected yet")
         return res
+
+
+def watchdogs(ctx: Ctx) -> List[str]:
+    """The watchdogs that should be running (the jump one only with jumps)."""
+    return [WARP_WATCHDOG, DEVICE_WATCHDOG] + ([EXIT_WATCHDOG] if ctx.snap.exits else [])
 
 
 def cmd_test(ctx: Ctx, words: List[str]) -> int:
     """All checks (WARP, wg0, rules, units, jumps)."""
     ops.no_more_words(words, "wgt test")
     ops.require_setup(ctx)
-    ctx.out.log(f"Tests (WARP {ctx.cfg.WARP})")
+    ctx.out.log("Tests")
     return results.report(ctx, Tests(ctx).run("all"))
 
 
@@ -274,8 +286,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
         ctx.out.line(line)
     if rep.pending:
         out.warn(f"{rep.pending} saved setting(s) pending (not running yet); apply with: wgt setup")
-    out.log(f"WARP (warp.* configs leave via {c.WARP_IF}, the rest straight out)" if c.warp_on
-            else f"WARP {c.WARP} (old setting: run 'wgt setup'; client traffic leaves via {ops.default_out_if(ctx)})")
+    out.log(f"WARP (warp.* configs leave via {c.WARP_IF}, the rest straight out)")
     out.log("Interfaces")
     for ifc in (c.WARP_IF, c.WG_IF):
         active, enabled = live.unit_state(r, f"wg-quick@{ifc}")
@@ -284,9 +295,9 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
             out.info(f"{brief}  [{active}, {enabled or 'disabled'}]")
         else:
             out.info(f"{ifc}: absent  [{enabled or 'disabled'}]")
-    last = live.last_event(r, WATCHDOG)
-    timer = live.unit_state(r, f"{WATCHDOG}.timer")[0]
-    out.info(f"watchdog: {WATCHDOG}.timer {timer}; last port change: {last or 'never'}")
+    for name in watchdogs(ctx):
+        out.info(f"watchdog: {name}.timer {live.unit_state(r, f'{name}.timer')[0]}")
+    out.info(f"last WARP port change: {live.last_event(r, WARP_WATCHDOG) or 'never'}")
     out.log("WARP handshake")
     if live.if_exists(r, c.WARP_IF):
         out.info(f"{c.WARP_IF}: {ui.ago(live.newest_hs(r, c.WARP_IF))}")
@@ -296,7 +307,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
     out.log("Clients")
     clients.print_clients(ctx, prefix="    ", numbered=False)
     if not ctx.snap.clients:
-        out.info("none yet (add one: wgt client add <name>)")
+        out.info("none yet (add one: wgt client add <device>)")
     out.log("Routes")
     out.info(f"main default: {ctx.facts.default_route}  (recorded: {store.state_get(ctx.snap.state, 'DEFAULT_ROUTE')})")
     for f in c.families():
@@ -305,7 +316,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
             for line in found:
                 ctx.out.info(f"{f} rule: {line}")
         else:
-            out.info(f"{f} rule: none (WARP off)")
+            out.info(f"{f} rule: MISSING (run: wgt setup)")
         for line in live.table(r, f, c.RT_TABLE).splitlines():
             ctx.out.info(f"{f} table {c.RT_TABLE}: {line}")
     out.log("Rules")
@@ -348,11 +359,9 @@ def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
     if live.if_exists(r, c.WARP_IF):
         warp_hs = live.newest_hs(r, c.WARP_IF)
         fresh = warp_hs > 0 and now - warp_hs <= WATCHDOG_STALE
-        warp = f"{c.WARP}, handshake {ui.ago(warp_hs, now)}" + ("" if fresh else "  <- STALE")
+        warp = f"handshake {ui.ago(warp_hs, now)}" + ("" if fresh else "  <- STALE")
     else:
-        warp = f"{c.WARP}, tunnel DOWN" if c.warp_on else f"{c.WARP} (tunnel not running)"
-    if not c.warp_on:
-        warp += f"; clients leave via {ops.default_out_if(ctx)}"
+        warp = "tunnel DOWN"
     lines.append(("WARP", warp))
 
     problems = []
@@ -378,9 +387,9 @@ def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
     lines.append(("firewall", f"all {len(wanted)} rules present" if not missing
                   else f"{missing} of {len(wanted)} rules MISSING (wgt status)"))
 
-    timer = live.unit_state(r, f"{WATCHDOG}.timer")[0]
-    lines.append(("watchdog", f"{'running' if timer == 'active' else timer.upper()}; "
-                              f"last port change: {live.last_event(r, WATCHDOG) or 'never'}"))
+    stopped = [name for name in watchdogs(ctx) if live.unit_state(r, f"{name}.timer")[0] != "active"]
+    lines.append(("watchdog", f"{'NOT RUNNING: ' + ' '.join(stopped) if stopped else 'running'}; "
+                              f"last WARP port change: {live.last_event(r, WARP_WATCHDOG) or 'never'}"))
 
     if not ctx.snap.exits:
         lines.append(("jumps", "none"))
@@ -400,7 +409,7 @@ def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
         if disabled:
             text += f", {disabled} disabled"
     else:
-        text += " (add one: wgt client add <name>)"
+        text += " (add one: wgt client add <device>)"
     lines.append(("clients", text))
     newest = max(in_use, key=lambda cl: hs.get(cl.pub, 0), default=None)
     if newest is not None and hs.get(newest.pub, 0):

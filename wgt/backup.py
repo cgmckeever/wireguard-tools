@@ -11,7 +11,7 @@ import time
 from typing import TYPE_CHECKING, List, Optional
 
 from . import clients, ops, store, units
-from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, Paths
+from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, SET_UP_KEYS, Paths
 from .ctx import VALUE_FLAGS
 from .errors import WgtError
 from .system import write_private
@@ -55,6 +55,16 @@ def rebuild_backup_map(ctx: Ctx, keep_map: Optional[str], members: List[str]) ->
     write_private(ctx.paths.backup_map, backup_map)
 
 
+def prune_archives(ctx: Ctx, dest_dir: str, short_host: str) -> None:
+    """Keep this host's KEEP_ARCHIVES newest: its names sort by date, while
+    another host's (<dest_dir> may be shared) would sort anywhere."""
+    pattern = os.path.join(glob.escape(dest_dir), f"wireguard-tools.{glob.escape(short_host)}.*.tar.gz")
+    archives = sorted(glob.glob(pattern))
+    for stale in archives[: max(0, len(archives) - KEEP_ARCHIVES)]:
+        os.remove(stale)
+        ctx.out.info(f"pruned old archive: {stale}")
+
+
 def cmd_backup(ctx: Ctx, words: List[str]) -> None:
     """Archive keys, configs, clients, jumps and state (mode 600: it holds
     private keys), then prune old archives and change copies."""
@@ -75,10 +85,7 @@ def cmd_backup(ctx: Ctx, words: List[str]) -> None:
         finally:
             os.umask(old_umask)
         os.chmod(archive, 0o600)
-        archives = sorted(glob.glob(os.path.join(dest_dir, "wireguard-tools.*.tar.gz")))
-        for stale in archives[: max(0, len(archives) - KEEP_ARCHIVES)]:
-            os.remove(stale)
-            ctx.out.info(f"pruned old archive: {stale}")
+        prune_archives(ctx, dest_dir, short_host)
         # Archived, so each file's older change copies can go (originals stay).
         for line in (store.read_text(ctx.paths.backup_map) or "").splitlines():
             ctx.files.prune(line.split("\t")[0])
@@ -115,12 +122,13 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
         return
     ctx.reload()
     # The old server's host facts, firewall note and detected IP don't apply here.
-    for k in HOST_STATE_KEYS:
+    # Nor is this server set up until the setup below finishes.
+    for k in HOST_STATE_KEYS + SET_UP_KEYS:
         ops.state_unset(ctx, k)
     if re.match(r"^\[?[0-9a-fA-F:.]+\]?$", store.state_get(ctx.snap.state, "ENDPOINT")):
         ops.state_unset(ctx, "ENDPOINT")
     rebuild_backup_map(ctx, keep_map, members)
-    ctx.out.info("restored; clients: " + " ".join(c.name for c in store.load(ctx.paths).clients))
+    ctx.out.info("restored; configs: " + " ".join(c.name for c in store.load(ctx.paths).clients))
     if has_warp:
         ctx.out.warn("the WARP account is now on this server too; don't keep running it on the old one")
     if has_exits:
@@ -133,9 +141,9 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
 
 
 def setup_flags(ctx: Ctx) -> List[str]:
-    """The setting flags given to restore (--endpoint, --port, --location...),
+    """The setup flags given to restore (--endpoint, --port, --location, --force...),
     passed on to the setup it runs, so a restore can change them."""
-    flags: List[str] = []
+    flags = [flag for flag, on in (("--force", ctx.args.force), ("--new-server-keys", ctx.args.new_server_keys)) if on]
     for flag, key in VALUE_FLAGS.items():
         if key in ctx.args.settings:
             flags += [flag, ctx.args.settings[key]]

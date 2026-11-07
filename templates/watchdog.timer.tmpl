@@ -1,0 +1,11 @@
+# Managed by wireguard-tools
+[Unit]
+Description=Run the wireguard-tools {{WHAT}} watchdog every {{EVERY}}s
+
+[Timer]
+OnBootSec={{BOOT}}s
+OnUnitActiveSec={{EVERY}}s
+AccuracySec={{ACCURACY}}s
+
+[Install]
+WantedBy=timers.target

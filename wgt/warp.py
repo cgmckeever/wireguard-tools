@@ -64,7 +64,8 @@ def install_wgcf(ctx: Ctx, reinstall: bool = False, fetch: Optional[Fetch] = Non
 
 def _published_sha256(fetch: Fetch, sums_url: str, name: str) -> str:
     """The sha256 to expect for <name>: WGCF_SHA256 if set (pinning), else the
-    release's checksums file; "" if neither exists."""
+    release's checksums file; "" if it publishes none. One it publishes but we
+    can't read stops the install: an unverified binary would run as root."""
     pinned = os.environ.get("WGCF_SHA256", "")
     if pinned or not sums_url:
         return pinned
@@ -73,8 +74,8 @@ def _published_sha256(fetch: Fetch, sums_url: str, name: str) -> str:
             fields = line.split()
             if len(fields) == 2 and fields[1].lstrip("*") == name:
                 return fields[0]
-    except OSError:
-        pass
+    except OSError as e:
+        raise WgtError(f"cannot fetch wgcf's checksums ({sums_url}): {e}; set WGCF_SHA256 to pin one") from None
     return ""
 
 

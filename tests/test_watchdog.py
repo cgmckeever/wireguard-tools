@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from wgt import cli, watchdog
-from wgt.const import EXIT_WATCHDOG, WATCHDOG
+from wgt.const import EXIT_WATCHDOG, WARP_WATCHDOG
 
 NOW = int(time.time())
 
@@ -35,7 +35,7 @@ def test_brings_up_city_with_active_client(make):
     ctx = make({"ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'warp.par-fr.mbp-1')}\t{NOW - 30}\n")
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     calls = ctx.runner.calls
     assert "systemctl restart wg-quick@px-par-fr wg-quick@wx-par-fr" in calls
     assert not any("nyc-us" in c and c.startswith("systemctl") for c in calls)
@@ -46,7 +46,7 @@ def test_takes_down_idle_city(make):
     ctx = make({"ip link show dev px-par-fr": UP, "ip link show dev wx-par-fr": UP,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'warp.par-fr.mbp-1')}\t{NOW - 400}\n")
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert "systemctl stop wg-quick@wx-par-fr wg-quick@px-par-fr" in ctx.runner.calls
 
 
@@ -54,7 +54,7 @@ def test_disabled_client_doesnt_keep_city_up(make):
     ctx = make({"ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'warp.par-fr.tv')}\t{NOW - 5}\n")
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert not any(c.startswith("systemctl restart") for c in ctx.runner.calls)
 
 
@@ -62,7 +62,7 @@ def test_hold_file_skips_city(make):
     ctx = make({"ip link show dev px-par-fr": UP, "ip link show dev wx-par-fr": UP,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
     open(os.path.join(ctx.paths.run_dir, f"{EXIT_WATCHDOG}.par-fr.hold"), "w").close()
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert not any("par-fr" in c and c.startswith("systemctl") for c in ctx.runner.calls)
 
 
@@ -72,11 +72,11 @@ def test_stale_city_new_port_then_restart(make):
                 "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n"),
                 "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 5}\n")})   # the jump itself is fine
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'warp.par-fr.mbp-1')}\t{NOW - 10}\n")
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert "wg set wx-par-fr listen-port 0" in ctx.runner.calls
     started = os.path.join(ctx.paths.run_dir, f"{EXIT_WATCHDOG}.par-fr")
     Path(started).write_text(str(NOW - 600))    # the new port didn't help for a while
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert "systemctl restart wg-quick@wx-par-fr" in ctx.runner.calls   # its WARP alone: the jump is fine
 
 
@@ -86,7 +86,7 @@ def test_dead_jump_restarts_whole(make):
                 "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n"),
                 "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 900}\n")})
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'warp.par-fr.mbp-1')}\t{NOW - 10}\n")
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert "systemctl restart wg-quick@px-par-fr wg-quick@wx-par-fr" in ctx.runner.calls
 
 
@@ -97,7 +97,7 @@ def test_skips_while_locked(make):
     fd = os.open(ctx.paths.lock_file, os.O_WRONLY | os.O_CREAT)
     fcntl.flock(fd, fcntl.LOCK_EX)
     try:
-        watchdog.exits(ctx)
+        watchdog.run_exits(ctx)
     finally:
         os.close(fd)
     assert ctx.runner.calls == []
@@ -106,10 +106,10 @@ def test_skips_while_locked(make):
 def test_warp_watchdog_acts_on_second_stale_run(make):
     ctx = make({"ip link show dev warp": UP, "wg show warp latest-handshakes": (0, f"K\t{NOW - 900}\n"),
                 "wg show warp listen-port": (0, "40000\n")})
-    watchdog.warp(ctx)
+    watchdog.run_warp(ctx)
     assert "wg set warp listen-port 0" not in ctx.runner.calls
-    assert os.path.exists(os.path.join(ctx.paths.run_dir, WATCHDOG))
-    watchdog.warp(ctx)
+    assert os.path.exists(os.path.join(ctx.paths.run_dir, WARP_WATCHDOG))
+    watchdog.run_warp(ctx)
     assert "wg set warp listen-port 0" in ctx.runner.calls
 
 
@@ -118,10 +118,10 @@ def test_watchdog_error_is_logged_not_raised(make, monkeypatch):
 
     def boom(ctx):
         raise ValueError("bad wg output")
-    monkeypatch.setattr(wd, "exits", boom)
+    monkeypatch.setattr(wd, "run_exits", boom)
     monkeypatch.setenv("WGT_SKIP_PREFLIGHT", "1")
     ctx = make({})
-    monkeypatch.setattr(cli, "load", lambda args, facts=None: ctx)
+    monkeypatch.setattr(cli, "load", lambda args, env=None, facts=None: ctx)
     logged = []
     from wgt import system
     monkeypatch.setattr(system, "journal", lambda runner, tag, msg: logged.append((tag, msg)))
@@ -149,7 +149,7 @@ def test_warp_off_jump_client_needs_only_the_jump_tunnel(make):
     ctx = make({"ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
                 "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'nyc-us.phone')}\t{NOW - 30}\n")
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert "systemctl restart wg-quick@px-nyc-us" in ctx.runner.calls
     assert not any("wx-nyc-us" in c and c.startswith("systemctl") for c in ctx.runner.calls)
 
@@ -160,7 +160,7 @@ def test_warp_off_jump_with_dead_warp_left_alone(make):
                 "ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
                 "wg show px-nyc-us latest-handshakes": (0, f"K\t{NOW - 5}\n")})
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'nyc-us.phone')}\t{NOW - 30}\n")
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert not any(c.startswith("systemctl") for c in ctx.runner.calls)
 
 
@@ -205,7 +205,7 @@ def test_silent_warp_restarts_only_its_warp(make, tmp_path):
         0, f"{pub(ctx, 'warp.par-fr.mbp-1')}\t{NOW - 30}\n")
     Path(ctx.paths.exit_marker("par-fr")).write_text(str(NOW - 999))
     Path(ctx.paths.exit_port_marker("par-fr")).write_text("")
-    watchdog.exits(ctx)
+    watchdog.run_exits(ctx)
     assert "systemctl restart wg-quick@wx-par-fr" in ctx.runner.calls
     assert not any(c.startswith("systemctl restart") and "px-par-fr" in c for c in ctx.runner.calls)
 
@@ -238,3 +238,45 @@ def test_tunnel_test_without_jumps(make_ctx, monkeypatch, tmp_path):
     rows = [g for g in got if g.strip().startswith(("PASS", "FAIL"))]
     assert len(rows) == 2 and all(r.split()[0] == "PASS" for r in rows)
     assert "plain" in rows[0] and "warp" in rows[1].split()[2]
+
+
+def test_a_recovered_warp_starts_over_with_a_new_port(make):
+    """The port marker means a new port was tried during this silence, not ever."""
+    ctx = make({"ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN,
+                "wg show px-par-fr latest-handshakes": (0, f"K\t{NOW - 5}\n"),
+                "wg show wx-par-fr latest-handshakes": (0, f"K\t{NOW - 5}\n")})
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'warp.par-fr.mbp-1')}\t{NOW - 30}\n")
+    marker = Path(ctx.paths.exit_port_marker("par-fr"))
+    marker.write_text("")
+    watchdog.run_exits(ctx)
+    assert not marker.exists()
+
+
+def test_wg0_gone_leaves_the_jumps_alone(make):
+    """No handshakes to read isn't every client idle: wg0 may just be restarting."""
+    ctx = make({"ip link show dev wg0": DOWN})
+    watchdog.run_exits(ctx)
+    assert not any(c.startswith("systemctl") for c in ctx.runner.calls)
+
+
+def test_a_dry_run_watchdog_changes_nothing(make):
+    ctx = make({"ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
+                "ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN})
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'warp.par-fr.mbp-1')}\t{NOW - 30}\n")
+    ctx.runner.dry_run = True
+    watchdog.run_exits(ctx)
+    assert not any(c.startswith("systemctl") for c in ctx.runner.calls)
+
+
+def test_a_bad_database_reaches_the_watchdogs_log(make, monkeypatch):
+    from wgt import system
+    from wgt.errors import WgtError
+
+    def bad(args, env=None, facts=None):
+        raise WgtError("devices.db: bad line")
+    monkeypatch.setenv("WGT_SKIP_PREFLIGHT", "1")
+    monkeypatch.setattr(cli, "load", bad)
+    logged = []
+    monkeypatch.setattr(system, "journal", lambda runner, tag, msg: logged.append((tag, msg)))
+    assert cli.main(["watchdog", "devices"]) == 1
+    assert logged and logged[0][0] == "wg-tools-device-watchdog" and "devices.db" in logged[0][1]

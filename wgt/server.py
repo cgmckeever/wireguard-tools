@@ -17,7 +17,17 @@ import time
 from typing import TYPE_CHECKING, List, Optional
 
 from . import checks, exits, host, live, net, ops, render, results, rules, store, ui, units, warp
-from .const import CONFIG_KEYS, DEVICE_NET, DEVICE_WATCHDOG, EXIT_WATCHDOG, MARKER, WATCHDOG
+from .const import (
+    CONFIG_KEYS,
+    DEVICE_NET,
+    DEVICE_WATCHDOG,
+    EXIT_WATCHDOG,
+    LEGACY_SETUP_DONE,
+    MARKER,
+    SET_UP_KEYS,
+    SETUP_DONE,
+    WARP_WATCHDOG,
+)
 from .errors import WgtError
 from .system import settings_of, write_private
 
@@ -30,9 +40,9 @@ PACKAGES = ("wireguard", "wireguard-tools", "iptables", "curl", "ca-certificates
 
 # --- small pieces ---
 
-def run_hooks(ctx: Ctx, up: bool) -> None:
-    """Run wg0's PostUp/PostDown lines directly (rollback, error cleanup)."""
-    ctx.runner.sh_lines(rules.hook_cmds(ctx.cfg, ctx.snap, ctx.pub_if, up))
+def run_down_hooks(ctx: Ctx) -> None:
+    """Run wg0's PostDown lines directly (rollback, error cleanup)."""
+    ctx.runner.sh_lines(rules.hook_cmds(ctx.cfg, ctx.snap, ctx.pub_if, up=False))
 
 
 def install_packages(ctx: Ctx) -> None:
@@ -319,7 +329,7 @@ def renumber_clients(ctx: Ctx) -> None:
     for c in ctx.snap.clients:
         n = ctx.cfg.net_int + net.ip2int(c.ip) - old_int
         if not ctx.cfg.first_host <= n <= ctx.cfg.last_host:
-            raise WgtError(f"client '{c.name}' ({c.ip}) has no matching address in {ctx.cfg.WG_SUBNET}; "
+            raise WgtError(f"config '{c.name}' ({c.ip}) has no matching address in {ctx.cfg.WG_SUBNET}; "
                            f"use a subnet at least as large as {old}")
         new_ip = net.int2ip(n)
         allowed = ",".join(ctx.cfg.WG_SUBNET if a == old else a for a in c.allowed.split(",")) if c.allowed else ""
@@ -329,7 +339,7 @@ def renumber_clients(ctx: Ctx) -> None:
                     "their configs change, re-send them)", f"wgt setup --subnet {old}")
     for m in moves:
         ctx.out.info(m)
-    ops.confirm(ctx, f"Move the clients to {ctx.cfg.WG_SUBNET}?")
+    ops.confirm(ctx, f"Move the configs to {ctx.cfg.WG_SUBNET}?")
     ctx.files.write(ctx.paths.client_db, 0o600, store.format_clients(e.fields_line() for e in entries))
     ctx.reload()
 
@@ -366,11 +376,11 @@ def ensure_server_keys(ctx: Ctx) -> bool:
         ctx.out.info("server keys present")
         return False
     if os.path.isfile(p.server_key) and os.path.getsize(p.server_key) > 0:
-        ctx.runner.step("Regenerate server keys (--new-server-keys): every client must be re-issued "
+        ctx.runner.step("Regenerate server keys (--new-server-keys): every config must be re-issued "
                         "(wgt client rotate)",
                         f"restore {p.server_key} and {os.path.basename(p.server_pub)} from their copies in "
                         f"{ctx.files.change_dir(p.server_key)}")
-        ops.confirm(ctx, "Regenerate the server keys? Every client stops working until rotated")
+        ops.confirm(ctx, "Regenerate the server keys? Every config stops working until rotated")
         ctx.files.backup(p.server_key)   # the old keys stay recoverable until --purge
         ctx.files.backup(p.server_pub)
     else:
@@ -392,8 +402,8 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
     endpoint, port, DNS and MTU, with its current addresses and allowed IPs.
     Keys are unchanged, so only the configs need re-sending."""
     # Patched line by line rather than re-rendered: re-rendering needs each
-    # client's private key back out of its file, and would rewrite configs the
-    # bash version wrote (and every device would need its config re-sent).
+    # client's private key back out of its file, and any unrelated difference
+    # would mean every device needing its config re-sent.
     endpoint = f"{ctx.cfg.values['ENDPOINT']}:{ctx.cfg.WG_PORT}"
     stale: List[str] = []
     for c in ctx.snap.clients:
@@ -402,7 +412,7 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
         if not src:
             continue
         text = store.read_text(src) or ""
-        # Address keeps the bash version's "ip/32, ip6/128" spacing (only the first comma).
+        # Address as render_client_conf writes it: "ip/32, ip6/128".
         want = {"Endpoint": endpoint, "Address": ctx.cfg.client_addrs(c.ip).replace(",", ", ", 1),
                 "DNS": ctx.cfg.WG_DNS, "MTU": ctx.cfg.WG_MTU}
         if c.allowed:
@@ -417,7 +427,7 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
         if (changed or src != conf) and c.name not in stale:
             stale.append(c.name)
     if stale:
-        ctx.out.warn(f"client configs changed (now {ctx.cfg.SERVER_NAME}.<client>.conf at {endpoint}); re-send them "
+        ctx.out.warn(f"configs changed (now {ctx.cfg.SERVER_NAME}.<config>.conf at {endpoint}); re-send them "
                      f"(wgt client share/show --qr): {' '.join(stale)}")
 
 
@@ -469,8 +479,8 @@ def write_sysctl(ctx: Ctx) -> None:
 
 
 def write_dropin(ctx: Ctx) -> None:
-    """Start wg0 after warp at boot (Wants, not Requires: with WARP off, wg0 must
-    come up even if warp can't; with it on, RT_TABLE's blackhole fails closed)."""
+    """Start wg0 after warp at boot (Wants, not Requires: plain configs must work
+    even if warp can't come up; RT_TABLE's blackhole stops the warp.* ones)."""
     if ctx.files.write(ctx.cfg.dropin, 0o644, render.render_dropin(ctx.cfg)):
         ctx.runner.run(["systemctl", "daemon-reload"])
 
@@ -541,7 +551,6 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     review_settings(ctx, asked)
     # Refuse to take over a wg0.conf we didn't create, before saving or touching anything.
     ops.ensure_managed(ctx, ctx.cfg.wg_conf)
-    ctx.cfg.values["WARP"] = "on"               # no longer a switch; kept as the set-up marker
     renumber_clients(ctx)
     offer_hostname(ctx)
     save_config(ctx)
@@ -571,7 +580,7 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
             # running wg0 (and its rules) alone.
             if not ops.wg_up(ctx):
                 ctx.out.error(f"removing partially applied {ctx.cfg.WG_IF} routing/NAT rules")
-                run_hooks(ctx, up=False)
+                run_down_hooks(ctx)
             raise
     if not stopped and not changed and ops.wg_up(ctx):
         restart_if_drifted(ctx)
@@ -583,6 +592,9 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     if unnumbered:
         ctx.out.info(f"no static address yet: {' '.join(unnumbered)} "
                      "(wgt-ctl devices sync, or here: wgt device set <device>)")
+    # Last, so a setup that stopped part-way doesn't count as set up.
+    ops.state_set(ctx, SETUP_DONE, "1")
+    ops.state_unset(ctx, LEGACY_SETUP_DONE)
     ctx.out.line()
     ctx.out.info(f"REMINDER: open UDP {ctx.cfg.WG_PORT} in your VPS provider's firewall / security group.")
     ctx.out.info("Next: wgt client add <device> (makes <device> and warp.<device>)")
@@ -597,11 +609,10 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
     ctx.runner.step(f"Roll back: stop {cfg.WG_IF}, {cfg.WARP_IF} and jumps, remove routing/NAT/firewall "
                     "rules, restore original files", "wgt setup")
     if ctx.args.purge:
-        ctx.out.warn("--purge also deletes the WARP accounts, server and client keys, client configs and "
+        ctx.out.warn("--purge also deletes the WARP accounts, server and device keys, configs and "
                      "jumps (irreversible)")
     ops.confirm(ctx, "Proceed with rollback?")
-    # Read before anything below changes the state file.
-    state = ctx.snap.state
+    state = ctx.snap.state   # the host facts, before the steps below reload ctx.snap
     _stop_everything(ctx)
     _remove_rules(ctx)
     _remove_units(ctx)
@@ -620,7 +631,7 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
 def _stop_everything(ctx: Ctx) -> None:
     """The watchdogs first (they'd bring things back), then jumps, wg0, warp."""
     r, cfg = ctx.runner, ctx.cfg
-    timers = [f"{name}.timer" for name in (WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG)
+    timers = [f"{name}.timer" for name in (WARP_WATCHDOG, EXIT_WATCHDOG, DEVICE_WATCHDOG)
               if os.path.exists(ctx.paths.unit_file(f"{name}.timer"))]
     if timers:
         r.run(["systemctl", "disable", "--now", *timers], check=False)
@@ -635,7 +646,7 @@ def _stop_everything(ctx: Ctx) -> None:
 
 def _remove_rules(ctx: Ctx) -> None:
     """wg0's PostDown (routing, NAT, firewall) run directly, and the ufw rules setup added."""
-    run_hooks(ctx, up=False)
+    run_down_hooks(ctx)
     if store.state_get(ctx.snap.state, "UFW") == "1":
         units.close_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits), port=True)
         ops.state_unset(ctx, "UFW")
@@ -646,7 +657,7 @@ def _remove_units(ctx: Ctx) -> None:
     cfg, files = ctx.cfg, ctx.files
     files.restore_original(cfg.dropin, remove_new=True)
     files.remove_empty_dir(cfg.dropin_dir)
-    units.remove_timer(ctx, WATCHDOG)
+    units.remove_timer(ctx, WARP_WATCHDOG)
     units.remove_timer(ctx, EXIT_WATCHDOG)
     units.remove_timer(ctx, DEVICE_WATCHDOG)
     files.remove(ctx.paths.warp_marker)
@@ -688,7 +699,8 @@ def _keep(ctx: Ctx) -> None:
     """Without --purge: mark the server not set up, keep keys, clients and accounts."""
     p = ctx.paths
     # Not set up any more (wgt client and restore check this).
-    ops.state_unset(ctx, "WARP")
+    for key in SET_UP_KEYS:
+        ops.state_unset(ctx, key)
     kept = f"keys, clients ({p.client_db}, {p.client_dir})"
     if os.path.isdir(p.wgcf_dir):
         kept += f", WARP account ({p.wgcf_dir})"

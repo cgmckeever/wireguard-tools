@@ -19,17 +19,17 @@ How it fits together (see README "How it works"):
 Per client, then, the way out is exit (host | jump) x WARP (on | off):
 
              WARP on                       WARP off
-  host       RT_TABLE (the WARP switch)    main (this server's IP)
+  host       RT_TABLE (the subnet's rule)  main (this server's IP)
   jump       client table 200+n (wx)       jump table 230+n (px)
 
 Static device addresses (DEVICE_NET; see devices.py): wg0 holds the network's
 first address, so the server's own connections to a device use it. The fixed
-part is here: the chains and what leads to them, and a rule making an address with no config in use unreachable rather
-than a packet for a way out. The chains' rules are the device watchdog's.
+part is here: the chains and what leads to them, and a rule making an address
+with no config in use unreachable rather than a packet for a way out. The chains'
+rules are the device watchdog's.
 
-Every line is idempotent, and "down" is the exact inverse of "up" in reverse
-order. The rest of the text matches the bash version byte for byte (wg0.conf
-embeds it)."""
+Every line is idempotent, and "down" undoes "up", in reverse order. wg0.conf embeds
+them, so a change here restarts wg0 at the next setup (tests/golden pins the text)."""
 
 from __future__ import annotations
 
@@ -51,10 +51,10 @@ from .const import (
     EXIT_PTABLE_BASE,
     EXIT_RULE_PRIO,
     EXIT_TABLE_BASE,
-    RULE_PRIO,
+    WARP_RULE_PRIO,
     device_ip,
 )
-from .store import Client, Exit, Snapshot
+from .store import Client, Exit, Snapshot, name_warp
 
 IptRule = Tuple[str, str, str, str]   # command, table, chain, rule
 
@@ -94,7 +94,7 @@ def exit_ipt_rules(cfg: Config, e: Exit) -> List[IptRule]:
 
 
 def rule_spec(cfg: Config, family: str) -> str:
-    return f"from {cfg.family_net(family)} lookup {cfg.RT_TABLE} priority {RULE_PRIO}"
+    return f"from {cfg.family_net(family)} lookup {cfg.RT_TABLE} priority {WARP_RULE_PRIO}"
 
 
 def warp_route(cfg: Config) -> List[str]:
@@ -144,9 +144,10 @@ def device_ipt_rules(cfg: Config) -> List[IptRule]:
     peer chain, and everything for the server's tunnel addresses to the server
     chain. Both end in a refusal, and the watchdog inserts what the groups allow
     above it, so an empty chain refuses (replies to the server's own connections
-    pass). A device's traffic to the server's public IP isn't touched: that's
-    open to the internet anyway. Written in `iptables -S` order, the refusal
-    first as each rule goes in on top: live.ipt_count compares the text."""
+    pass). Only the tunnel addresses are guarded: anything listening on the server's
+    other addresses (its public IP, warp's) stays reachable from any device, even
+    where a provider's firewall would block the internet from it. Listed refusal
+    first, as each rule goes in on top of the chain: live.ipt_count compares the text."""
     wg = cfg.WG_IF
     established = "-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
     found: List[IptRule] = [
@@ -170,6 +171,11 @@ def device_ipt_rules(cfg: Config) -> List[IptRule]:
     return found
 
 
+def device_rule_text(cfg: Config) -> str:
+    """How `ip rule` prints device_rule."""
+    return f"to {DEVICE_NET} iif {cfg.WG_IF} unreachable"
+
+
 def device_rule(cfg: Config) -> str:
     return f"iif {cfg.WG_IF} to {DEVICE_NET} priority {DEVICE_RULE_PRIO} unreachable"
 
@@ -191,7 +197,7 @@ def ipt_cmds(rules: Iterable[IptRule], up: bool) -> List[str]:
 
 
 def warp_rule_cmds(cfg: Config, on: bool) -> List[str]:
-    """The WARP switch: add (on) or remove (off) the policy rules sending client
+    """Add (on) or remove (off) the policy rules sending client
     traffic to RT_TABLE."""
     out = []
     for f in cfg.families():
@@ -204,7 +210,7 @@ def warp_rule_cmds(cfg: Config, on: bool) -> List[str]:
 def client_table(snap: Snapshot, client: Client) -> str:
     """The routing table a config's own rules point at ("" for none: the
     subnet's WARP rule)."""
-    off = snap.warp_off(client.name)
+    off = not name_warp(client.name)
     if client.exit:
         e = snap.exit(client.exit)
         if e is None:
@@ -284,9 +290,8 @@ def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
 
 
 def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
-    """wg0's PostUp (<up>) or PostDown. RT_TABLE is filled either way; only
-    the policy rule depends on WARP. warp's route is optional here (warp may be
-    down; its own PostUp adds it)."""
+    """wg0's PostUp (<up>) or PostDown. warp's route is optional here (warp may
+    be down; its own PostUp adds it)."""
     rt, wg, warp = cfg.RT_TABLE, cfg.WG_IF, cfg.WARP_IF
     out: List[str] = []
     if up:
@@ -294,8 +299,7 @@ def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
             out.append(f"{f} route replace {cfg.family_net(f)} dev {wg} table {rt}")
             out.append(f"{f} route replace default dev {warp} table {rt} 2>/dev/null || true")
             out.append(f"{f} route replace blackhole default metric {BLACKHOLE_METRIC} table {rt}")
-        if cfg.warp_on:
-            out += warp_rule_cmds(cfg, True)
+        out += warp_rule_cmds(cfg, True)
         out += [f"{x} -t {t} -N {c} 2>/dev/null || true" for x, t, c in device_chains(cfg)]
         out += ipt_cmds(ipt_rules(cfg, pub_if, snap.exits), up=True)
         spec = device_rule(cfg)

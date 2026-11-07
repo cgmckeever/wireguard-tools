@@ -7,10 +7,10 @@ from __future__ import annotations
 import fcntl
 import os
 import time
-from typing import TYPE_CHECKING, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, List, Mapping, Optional, Tuple
 
 from . import live, render, store, ui
-from .const import MARKER
+from .const import MARKER, SET_UP_KEYS
 from .errors import WgtError
 from .system import write_private
 
@@ -86,13 +86,12 @@ def confirm(ctx: Ctx, question: str, default_yes: bool = False) -> None:
 
 
 def is_set_up(ctx: Ctx) -> bool:
-    """`wgt setup` has run here (its settings are saved; rollback clears WARP)."""
-    return bool(ctx.cfg.saved.get("WARP"))
+    """`wgt setup` finished here, and hasn't been rolled back."""
+    return any(store.state_get(ctx.snap.state, key) for key in SET_UP_KEYS)
 
 
 def require_setup(ctx: Ctx) -> None:
-    """For commands that need only `wgt setup` to have run (jumps): its
-    settings are saved (after rollback no WARP setting is)."""
+    """For commands that need only `wgt setup` to have run (jumps)."""
     if not is_set_up(ctx):
         raise WgtError("not set up; run 'wgt setup'")
 
@@ -133,13 +132,6 @@ def state_unset(ctx: Ctx, key: str) -> None:
     ctx.reload()
 
 
-def default_out_if(ctx: Ctx, warp: Optional[str] = None) -> str:
-    """Where clients without a jump leave: warp, or the public interface
-    with WARP off. <warp> ("on"/"off") asks about a mode other than the current one."""
-    on = ctx.cfg.warp_on if warp is None else warp == "on"
-    return ctx.cfg.WARP_IF if on else ctx.pub_if
-
-
 # --- endpoint ---
 
 def resolve_endpoint(ctx: Ctx, save: bool) -> str:
@@ -151,7 +143,7 @@ def resolve_endpoint(ctx: Ctx, save: bool) -> str:
     if not ep:
         ep = live.trace_field(live.trace(ctx.runner, "-4"), "ip")
         if not ep:
-            raise WgtError("could not detect the public IP; pass --endpoint <ip-or-host>")
+            raise WgtError("could not detect the public IP; wgt setup --endpoint <ip-or-host>")
     if ":" in ep and not ep.startswith("["):
         ep = f"[{ep}]"
     ctx.cfg.values["ENDPOINT"] = ep
@@ -236,12 +228,10 @@ def set_device(ctx: Ctx, name: str, number: Optional[int], groups: Optional[Tupl
 Command = Callable[..., Optional[int]]   # (ctx, words) -> exit status or None
 
 
-def dispatch(ctx: Ctx, noun: str, words: List[str], table: Mapping[str, Command],
-             aliases: Optional[Dict[str, str]] = None) -> Optional[int]:
+def dispatch(ctx: Ctx, noun: str, words: List[str], table: Mapping[str, Command]) -> Optional[int]:
     """wgt <noun> <verb> ...: run the verb's command (no verb: list). An
     unknown verb's error lists the verbs from <table>."""
     verb, rest = (words[0], words[1:]) if words else ("list", [])
-    verb = (aliases or {}).get(verb, verb)
     fn = table.get(verb)
     if fn is None:
         raise WgtError(f"unknown {noun} command: {verb} ({', '.join(table)}; see: wgt help)")

@@ -7,8 +7,10 @@
 #   tools/render-diff.sh                   every server in local/servers
 #   tools/render-diff.sh root@1.2.3.4 ...  just these
 #
-# "identical" means a pull changes no config there. A difference is what the
-# next `wgt setup` on that server would write (and possibly restart for).
+# Covers wg0.conf, the WARP and jump tunnels, rules, watchdog units, the drop-in,
+# sysctl and the package list; not client configs. "identical" means a pull changes
+# none of those there. A difference is what the next `wgt setup` on that server
+# would write (and possibly restart for).
 set -uo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 targets=("$@")
