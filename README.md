@@ -1,5 +1,7 @@
 # wireguard-tools
 
+*Cloudflare exit IPs, tunneled through your WireGuard region*
+
 ## Overview
 
 wireguard-tools turns a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or
