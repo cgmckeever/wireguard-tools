@@ -144,7 +144,8 @@ def test_the_name_in_the_configs_is_the_servers_own(store):
     ("client", ["add", "phone"], True), ("client", ["rotate", "warp.phone"], True),
     ("client", ["rename", "a.phone", "b.phone"], True), ("client", ["remove", "a.phone"], True),
     ("device", ["rename", "phone", "iphone"], True), ("client", ["add", "phone", "--dry-run"], False),
-    ("client", ["list"], False), ("client", ["disable", "a.phone"], False), ("device", ["set", "phone"], False),
+    ("client", ["list"], True), ("client", [], True), ("client", ["list", "--tsv"], False),
+    ("client", ["disable", "a.phone"], False), ("device", ["set", "phone"], False),
 ])
 def test_which_commands_deliver(cmd, args, delivers):
     assert tunnels.changes_configs(cmd, args) is delivers

@@ -267,7 +267,8 @@ wgt client rename warp.par-fr.tablet par-fr.tablet   # now without WARP, live
 |-----|---------|----------|
 | QR code | printed by `add`/`rotate`; again with `show --qr` | phones (WireGuard app → scan) |
 | Magic Wormhole | `share` | a device you can't reach with SSH |
-| scp | `scp root@<server>:/etc/wireguard/clients/dengar.laptop.conf .` (`add` and `show` print the exact command; through `wgt-ctl`, it uses your `local/servers` login) | your own machines |
+| scp | `scp root@<server>:/etc/wireguard/clients/dengar.laptop.conf .` (`add` and `show` print the exact command) | your own machines |
+| `wgt-ctl` | automatic: every config is copied to `~/wg-tunnels/devices/<device>/config/` ([Configs on your machine](#configs-on-your-machine)) | your own machines, with `wgt-ctl` |
 
 `share` prints a one-time code (like `7-guitar-revenge-tidy`) and waits up to 10
 minutes. The file is encrypted end to end; a wrong guess at the code ends the
@@ -479,13 +480,14 @@ its jump file. It makes no device configs: add those with
 
 ```bash
 wgt jump list              # jumps: state (up; up, no WARP; partly up; idle), configs, endpoint
-wgt jump test              # bring each one up and check it
+wgt jump test              # bring each one up and check it (up to 25s each for its WARP)
 wgt jump remove par-fr     # refused while configs use it (no code: pick from a list)
 ```
 
 **On demand.** A jump is only up while one of its configs is connected, so an
-idle jump holds no connection. A device switching to a jump's config waits
-about 10-15 seconds the first time. While a jump is down, or broken, its
+idle jump holds no connection. A device switching to an idle jump's config waits
+for it to come up the first time: the watchdog checks every 10 seconds, and a
+`warp.` config then waits a few seconds more for the jump's WARP. While a jump is down, or broken, its
 configs are blocked, never sent out another way.
 
 ### Check, back up, restore, clean up
@@ -615,10 +617,10 @@ private keys.
 
 ### Adding a server
 
-`wgt-ctl init` does the [Quick start](#quick-start) install over SSH (the server
-must already have Python 3). It logs in as root and, on first contact, shows the
+`wgt-ctl init` does the [Quick start](#quick-start) install over SSH. It logs in as root and, on first contact, shows the
 server's host key for you to check against your provider's console. If only a
-password works it offers `ssh-copy-id`. It then installs git, clones the same
+password works it offers `ssh-copy-id`. It then installs git and Python 3 if
+they're missing, clones the same
 repository your local checkout came from (its `origin`) and
 runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
 passed to setup. The server is added to the list only once setup finishes; if it
@@ -680,7 +682,7 @@ already another device.
 **No server.** Overviews of every server, and adding a new one:
 
 ```bash
-wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump files staged
+wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump files in carriers/
 wgt-ctl summary                        # every server at a glance (wgt summary on each, one block each)
 wgt-ctl clients                        # every config on every server: device, exit, static address, last seen, traffic
 wgt-ctl devices                        # each device's number and servers, with warnings (below)
@@ -721,24 +723,6 @@ back. New numbers always go above the highest on the list, so `devices forget` o
 a number in the middle only frees it for `devices fix`. A `wgt client add` run
 directly on a server uses its own range and can reuse a freed number there.
 
-### Adding jumps from your machine
-
-Keep your jump files on your machine and let `wgt-ctl` put them on servers:
-save one as `~/wg-tunnels/servers/<server>/carriers/<any name>.conf` (it's *staged*
-until pushed; see [Configs on your machine](#configs-on-your-machine)), then
-
-```bash
-wgt-ctl boba jump-add                  # pick it by number (or: all)
-```
-
-`jump-add` uploads the file and runs [`wgt jump add`](#jumps) there. The first
-time it sees a file it asks what it is ("Paris, France") and suggests a code
-from that name and the file's country tag if it has one (Proton's `FR#252` gives
-`par-fr`); the answer is written into the file as a `# jump: par-fr Paris, France` line
-(edit it to rename the jump before pushing). `wgt-ctl boba client add` also offers to push
-staged jump files that aren't on the server yet, so they show up in its exit
-menu.
-
 ### Configs on your machine
 
 `wgt-ctl` keeps WireGuard configs in `~/wg-tunnels` (or `$WG_TUNNELS`), the
@@ -748,18 +732,21 @@ wireguard-tunnels isn't needed. It uses two kinds of folder and leaves the rest 
 
 | Folder | What |
 |---|---|
-| `servers/<server>/carriers/` | jump files staged for that server ([above](#adding-jumps-from-your-machine)) |
+| `servers/<server>/carriers/` | jump files for that server ([below](#adding-jumps-from-your-machine)) |
 | `devices/<device>/config/` | that device's client configs, copied from each server |
 
-`wgt-ctl` only reads jump files; whatever makes them (you, or wireguard-tunnels)
-puts them in `servers/<server>/carriers/`. So every server you manage has that
-folder, even empty: `init` and `sync` make it, and `remove` deletes it if nothing
-is left in it. That's how wireguard-tunnels knows which servers exist.
+`wgt-ctl` doesn't make jump files (it only adds the `# jump:` line that names
+each); whatever makes them, you or wireguard-tunnels, puts them in
+`servers/<server>/carriers/`. So every server you manage has that folder, even
+empty: `init` and `sync` make it, and `remove` deletes it if nothing is left in
+it. That's how wireguard-tunnels knows which servers exist. `remove` leaves the
+server's client configs in `devices/`: delete those by hand.
 
 **Client configs follow the server.** After `client add`, `rotate`, `rename` and
-`remove` (and `all device rename`), `wgt-ctl` copies that server's client configs
-into `devices/<device>/config/`; `wgt-ctl <server> sync` (or `all sync`) does it on
-demand, such as after `setup` rewrites configs. The server's copy is the live one,
+`remove`, the `client` list and its action menu, and `device rename` (on one
+server or `all`), `wgt-ctl` copies that server's client configs into
+`devices/<device>/config/`; `wgt-ctl <server> sync` (or `all sync`) does it on
+demand, such as after `setup` or a `move` rewrites configs. The server's copy is the live one,
 so it wins:
 
 | On your machine | What happens |
@@ -773,6 +760,32 @@ A copy found in another device's folder (after a device rename) is updated where
 it is, with a note: the folder also holds wireguard-tunnels' files, so renaming
 it is yours to do. A failed copy only warns; the command itself still counts as
 done.
+
+These copies hold each config's private key, and so do the `.bak` files (a
+rotated config's old key included): delete `.bak` files you don't need.
+
+### Adding jumps from your machine
+
+Keep your jump files on your machine and let `wgt-ctl` put them on servers:
+save one as `~/wg-tunnels/servers/<server>/carriers/<any name>.conf` (it stays
+there after it's pushed; `jump-add`'s list shows which are on the server), then
+
+```bash
+wgt-ctl boba jump-add                  # pick it by number (or: all)
+```
+
+`jump-add` uploads the file and runs [`wgt jump add`](#jumps) there. The first
+time it sees a file it asks what it is ("Paris, France") and suggests a code
+from that name and the file's country tag if it has one (Proton's `FR#252` gives
+`par-fr`); the answer is written into the file as a `# jump: par-fr Paris, France` line
+(edit it to rename the jump before pushing). `wgt-ctl boba client add` also offers to push
+staged jump files that aren't on the server yet, so they show up in its exit
+menu.
+
+From an older version: move your files from `local/exits/<server>/` into
+`~/wg-tunnels/servers/<server>/carriers/` (they're named again on their next push;
+`local/exits/` isn't read any more), and run `wgt-ctl all sync` once so every
+server has its folder.
 
 ### Moving or rebuilding a server
 
@@ -804,6 +817,9 @@ wgt-ctl dengar move                                                # a fresh cop
 6. Point the server's line in `local/servers` at the new machine. It then asks
    whether to tear wireguard-tools off the old machine, including its backup
    archives (`--yes` tears it down without asking).
+
+If the endpoint changed, every config was rewritten: `wgt-ctl <server> sync`
+updates your copies in `~/wg-tunnels`.
 
 Without `--to`, the same steps run on the same machine, except that step 3 also
 deletes its keys and configs (`rollback --purge`) and re-clones the checkout, so
@@ -1022,7 +1038,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/clients.disabled` | names of disabled configs |
 | `/etc/wireguard/devices.db` | each device's static number and groups: `device number [group,group]` |
 | `/etc/wireguard/psk/<name>.psk` | per-config preshared keys |
-| `/etc/wireguard/clients/<server>.<name>.conf` | config files (each one's private key is kept only here, in change copies and in backup archives) |
+| `/etc/wireguard/clients/<server>.<name>.conf` | config files (each one's private key is kept only here, in change copies and in backup archives, and with `wgt-ctl` in `~/wg-tunnels`) |
 | `/etc/wireguard/wg-tools.state` | saved settings (including the location), recorded default route |
 | `/etc/wireguard/wg-tools.backups` | each changed file's original, for `rollback` |
 | `/usr/local/bin/wgcf` | the WARP client |

@@ -1,6 +1,6 @@
 
-# This machine's private files: server list, jump configs (private
-# keys). Never commit; see wgt-ctl in README.md.
+# This machine's private files: server list, device numbers, backup
+# archives (private keys). Never commit; see wgt-ctl in README.md.
 local/*
 !local/.gitkeep
 
