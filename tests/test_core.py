@@ -328,3 +328,8 @@ def test_eof_isnt_enter(monkeypatch, line, want):
     monkeypatch.setattr(builtins, "open", lambda path, mode="r": io.StringIO(line if mode == "r" else ""))
     assert ui.yes("Rename?", default=True) is want
 
+
+
+def test_a_jump_check_waits_out_two_lost_warp_handshakes_inside_the_hold():
+    from wgt.const import EXIT_HOLD, EXIT_WARP_WAIT
+    assert 15 < EXIT_WARP_WAIT < EXIT_HOLD

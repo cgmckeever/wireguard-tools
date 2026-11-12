@@ -176,7 +176,7 @@ def test_probe_keeps_a_jump_tunnel_in_use(make, monkeypatch):
     """`jump test` on a jump whose tunnel carries WARP-off clients: it starts
     the jump's WARP for the check and stops only that again."""
     from wgt import exits
-    monkeypatch.setattr(exits, "wait_hs", lambda ctx, e, seconds=10: None)
+    monkeypatch.setattr(exits, "wait_hs", lambda ctx, e, seconds=0: None)
     ctx = make({"ip link show dev px-nyc-us": UP, "ip link show dev wx-nyc-us": DOWN})
     with exits.probing(ctx, ctx.snap.exit("nyc-us")):
         pass

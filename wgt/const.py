@@ -65,6 +65,10 @@ WARP_WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
 DEVICE_WATCHDOG = "wg-tools-device-watchdog"
 EXIT_HOLD = 60               # seconds a hold file (jump test) keeps the watchdog off a jump
+# Seconds a jump check gives a just-started jump for its WARP handshake. WARP's first
+# try often goes out before the jump tunnel is up and is lost; WireGuard retries every
+# 5s, so a second loss is 15s. Under EXIT_HOLD, so the watchdog stays off meanwhile.
+EXIT_WARP_WAIT = 25
 WATCHDOG_STALE = 180         # seconds without a handshake before a watchdog acts on a tunnel
 
 

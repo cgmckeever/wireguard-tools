@@ -14,7 +14,7 @@ import time
 from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
 from . import live, ops, render, results, rules, store, ui, units, warp
-from .const import EXIT_IDLE, EXIT_MAX, EXIT_WATCHDOG, WATCHDOG_STALE
+from .const import EXIT_IDLE, EXIT_MAX, EXIT_WARP_WAIT, EXIT_WATCHDOG, WATCHDOG_STALE
 from .errors import WgtError
 
 if TYPE_CHECKING:
@@ -127,8 +127,8 @@ def down(ctx: Ctx, e: store.Exit, check: bool = True) -> bool:
     return not any_up(ctx, e)
 
 
-def wait_hs(ctx: Ctx, e: store.Exit, seconds: int = 10) -> None:
-    """Give a just-started exit up to <seconds> for its WARP handshake."""
+def wait_hs(ctx: Ctx, e: store.Exit, seconds: int = EXIT_WARP_WAIT) -> None:
+    """Give a just-started exit up to <seconds> for its WARP handshake (EXIT_WARP_WAIT)."""
     for _ in range(seconds):
         if live.newest_hs(ctx.runner, e.wx) > 0:
             return
