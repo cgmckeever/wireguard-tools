@@ -29,9 +29,6 @@ LIST = os.path.join(LOCAL, "servers")
 DEVICES = os.path.join(LOCAL, "devices")               # each device's static number (fleet.py)
 
 
-LINKS = os.path.join(LOCAL, "exits", "details.tsv")   # server, local file, code, full name (tab-separated)
-
-
 DEF_DIR = "/opt/wireguard-tools"
 DEF_WGT = f"{DEF_DIR}/bin/wgt"
 
@@ -63,7 +60,7 @@ SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.joi
 
 
 # wgt-ctl's own per-server commands.
-CTL_COMMANDS = ("pull", "backup", "jump-add", "ssh", "branch", "forget", "remove", "move")
+CTL_COMMANDS = ("pull", "backup", "jump-add", "ssh", "branch", "forget", "remove", "move", "sync")
 # The wgt commands (anything else after a server word is a mistake, not a command).
 WGT_COMMANDS = ("setup", "summary", "status", "test", "log", "backup", "restore", "rollback", "client",
                 "device", "jump", "exit", "tunnel", "warp")
@@ -96,7 +93,7 @@ class Server:
 
 def ensure_local() -> None:
     """local/ and its private dirs (700), and an empty servers list (600)."""
-    for d in (LOCAL, os.path.join(LOCAL, "exits"), os.path.join(LOCAL, "backups")):
+    for d in (LOCAL, os.path.join(LOCAL, "backups")):
         private_dir(d)
     if not os.path.exists(LIST):
         with open(LIST, "w") as f:
@@ -140,17 +137,6 @@ def pick() -> Server:
     if not reply:
         raise WgtError("no server chosen")
     return find(reply)
-
-
-def exits_dir(server: str) -> str:
-    """Where <server>'s jump configs wait to be pushed."""
-    return os.path.join(LOCAL, "exits", server)
-
-
-def staged(server: str) -> List[str]:
-    """<server>'s staged jump configs (local/exits/<server>/*.conf)."""
-    d = exits_dir(server)
-    return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".conf")) if os.path.isdir(d) else []
 
 
 def valid_server(name: str) -> bool:
@@ -200,6 +186,7 @@ def q(*args: str) -> str:
 
 def cmd_list(quick: bool = False) -> None:
     """The numbered server list; quick skips asking each server for its branch."""
+    from .tunnels import staged  # tunnels imports this module
     ss = servers()
     if not ss:
         out.info("no servers yet (add one: wgt-ctl init)")

@@ -10,7 +10,7 @@ from .. import store, ui
 from ..const import device_ip
 from ..ctx import VALUE_FLAGS
 from ..errors import WgtError
-from . import fleet, remote
+from . import fleet, remote, tunnels
 from .remote import out
 
 
@@ -135,7 +135,10 @@ def rename_everywhere(args: List[str]) -> int:
     rc = 0
     for s in holders:
         out.log(s.name)
-        rc = remote.do_wgt(s, ["device", "rename", old, new, *passed]) or rc
+        one = remote.do_wgt(s, ["device", "rename", old, new, *passed])
+        if one == 0:
+            tunnels.after(s, "device", ["rename", old, new, *passed])
+        rc = one or rc
     remote.ensure_local()
     entries = read_entries()
     if old in entries and rc == 0 and "--dry-run" not in passed:

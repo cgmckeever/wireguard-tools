@@ -9,7 +9,7 @@ from typing import Dict, List, Tuple
 from .. import store, ui
 from ..const import archive_name
 from ..errors import WgtError
-from . import newserver, remote
+from . import newserver, remote, tunnels
 from .remote import Server, out, q
 
 
@@ -61,7 +61,11 @@ def do_remove(s: Server, args: List[str]) -> int:
             return 0
     if teardown(s.target, s.dir) != 0:
         raise WgtError(f"teardown failed on {s.name}; it stays in {remote.LIST} - fix the cause and re-run")
-    return do_forget(s, ["--yes"])
+    rc = do_forget(s, ["--yes"])
+    left = tunnels.drop_anchor(s.name)
+    if left:
+        out.info(f"{left} still has jump files: kept (delete it by hand if they're done with)")
+    return rc
 
 
 def teardown(target: str, checkout: str) -> int:
@@ -87,7 +91,8 @@ def do_forget(s: Server, args: List[str]) -> int:
             return 0
     lines = [line for line in (store.read_text(remote.LIST) or "").splitlines() if (line.split() or [""])[0] != s.name]
     remote.write_local(remote.LIST, "\n".join(lines) + "\n")
-    out.info(f"forgot '{s.name}'; its local/exits/{s.name} and local/backups/{s.name} stay")
+    staged = tunnels.shown(tunnels.carriers_dir(s.name))
+    out.info(f"forgot '{s.name}'; its staged jumps ({staged}) and local/backups/{s.name} stay")
     return 0
 
 

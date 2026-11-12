@@ -5,7 +5,8 @@ a name, a list number, or all; a few take no server (below).
 One server:
   wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
   wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to local/backups/SERVER/
-  wgt-ctl SERVER jump-add [n|all]       push a jump file from local/exits/SERVER/ as a jump
+  wgt-ctl SERVER jump-add [n|all]       push a jump file from ~/wg-tunnels/servers/SERVER/carriers/
+  wgt-ctl SERVER sync                   copy its client configs to ~/wg-tunnels/devices/<device>/config/
   wgt-ctl SERVER ssh [command] | branch <b>
   wgt-ctl SERVER forget [--yes]         drop it from local/servers (the server is untouched)
   wgt-ctl SERVER remove [--yes]         tear wireguard-tools off it (rollback --purge, delete its
@@ -16,7 +17,7 @@ One server:
                                         then (--to) point the list at it and tear the old one down
 
 Every server, in turn:
-  wgt-ctl all <wgt command> | pull | backup | branch <b>
+  wgt-ctl all <wgt command> | pull | backup | branch <b> | sync
 
 No server:
   wgt-ctl [list]                        the servers: branch@commit (or unreachable), jump files staged
@@ -30,9 +31,12 @@ No server:
                                         set up a new server (or adopt one already running these tools)
 
 Leave SERVER out of a server command to pick one from the list. Private
-files stay under local/ (untracked): servers, exits/<server>/*.conf (jump
-files, any name), exits/details.tsv (which file is which jump),
-devices (each device's static number), backups/.
+files stay under local/ (untracked): servers, devices (each device's static
+number), backups/. WireGuard configs live in ~/wg-tunnels ($WG_TUNNELS, shared
+with wireguard-tunnels): servers/<server>/carriers/*.conf are jump files (any
+name; a "# jump: <code> <label>" line names each), and devices/<device>/config/
+gets each server's client configs after client add, rotate, rename and remove
+(the server's copy wins; a file that isn't a copy is never overwritten).
 
 `wgt-ctl SERVER client add` gives a device its fleet-wide number, and
 `wgt-ctl all device rename <device> <new> [--force]` renames a whole device on
@@ -47,7 +51,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Tuple
 
 from ..errors import WgtError
-from . import fleet_cmds, jumpfiles, newserver, rebuild, remote
+from . import fleet_cmds, jumpfiles, newserver, rebuild, remote, tunnels
 from .remote import Server, out, q
 
 
@@ -104,10 +108,11 @@ def do_ssh(s: Server, args: List[str]) -> int:
 
 
 CTL = {"pull": do_pull, "backup": rebuild.do_backup, "jump-add": jumpfiles.do_exit_add, "ssh": do_ssh,
-       "branch": do_branch, "forget": rebuild.do_forget, "remove": rebuild.do_remove, "move": rebuild.do_move}
+       "branch": do_branch, "forget": rebuild.do_forget, "remove": rebuild.do_remove, "move": rebuild.do_move,
+       "sync": tunnels.do_sync}
 
 
-ALL_OK = ("pull", "backup", "branch")   # ctl commands that take "all" (every wgt command does)
+ALL_OK = ("pull", "backup", "branch", "sync")   # ctl commands that take "all" (every wgt command does)
 
 
 def on(sel: str, cmd: str, args: List[str]) -> int:
@@ -119,7 +124,12 @@ def on(sel: str, cmd: str, args: List[str]) -> int:
 
 def _run(s: Server, cmd: str, args: List[str]) -> int:
     fn = CTL.get(cmd)
-    return fn(s, args) if fn else remote.do_wgt(s, [cmd] + args)
+    if fn:
+        return fn(s, args)
+    rc = remote.do_wgt(s, [cmd] + args)
+    if rc == 0:
+        tunnels.after(s, cmd, args)
+    return rc
 
 
 def _on_one(s: Server, cmd: str, args: List[str]) -> int:

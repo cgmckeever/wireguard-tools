@@ -1,5 +1,5 @@
-"""wgt-ctl's local parts: the local-file comment, the server list, the
-details table and the first-word grammar."""
+"""wgt-ctl's local parts: the local-file comment, the server list, staged
+jumps and the first-word grammar."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import subprocess
 import pytest
 
 from wgt import ctl, ui
-from wgt.ctl import fleet_cmds, jumpfiles, newserver, rebuild, remote
+from wgt.ctl import fleet_cmds, jumpfiles, newserver, rebuild, remote, tunnels
 from wgt.errors import WgtError
 
 
@@ -25,10 +25,13 @@ def test_local_file_comment_replaces_old_one():
 def local(tmp_path, monkeypatch):
     monkeypatch.setattr(remote, "LOCAL", str(tmp_path))
     monkeypatch.setattr(remote, "LIST", str(tmp_path / "servers"))
-    monkeypatch.setattr(remote, "LINKS", str(tmp_path / "details.tsv"))
     monkeypatch.setattr(remote, "DEVICES", str(tmp_path / "devices"))
+    monkeypatch.setenv("WG_TUNNELS", str(tmp_path / "wg-tunnels"))
     (tmp_path / "servers").write_text("# comment\ndengar  root@1.2.3.4\nboba root@5.6.7.8 /srv/wgt\n")
-    (tmp_path / "details.tsv").write_text("boba\tparis.france.conf\tpar-fr\tParis, France\n")
+    carriers = tmp_path / "wg-tunnels" / "servers" / "boba" / "carriers"
+    carriers.mkdir(parents=True)
+    (carriers / "paris.france.conf").write_text("# jump: par-fr Paris, France\n[Interface]\nPrivateKey = K\n")
+    (carriers / "unnamed.conf").write_text("[Interface]\nPrivateKey = K2\n")
     return tmp_path
 
 
@@ -40,9 +43,28 @@ def test_servers_and_find(local):
         remote.find("nope")
 
 
-def test_link_of(local):
-    assert jumpfiles.link_of("boba", "paris.france.conf") == ("par-fr", "Paris, France")
-    assert jumpfiles.link_of("dengar", "paris.france.conf") is None
+def test_link_of_reads_the_jump_line(local):
+    carriers = local / "wg-tunnels" / "servers" / "boba" / "carriers"
+    assert tunnels.carriers_dir("boba") == str(carriers)
+    assert jumpfiles.link_of(str(carriers / "paris.france.conf")) == ("par-fr", "Paris, France")
+    assert jumpfiles.link_of(str(carriers / "unnamed.conf")) is None
+
+
+def test_jump_line_replaces_old_one():
+    text = "# jump: old Old\n[Interface]\nPrivateKey = K\n"
+    out = jumpfiles.with_jump_line(text, "par-fr", "Paris, France")
+    assert out == "# jump: par-fr Paris, France\n[Interface]\nPrivateKey = K\n"
+    assert jumpfiles.with_jump_line(out, "par-fr", "Paris, France") == out
+
+
+def test_naming_a_jump_writes_it_into_the_file_and_refuses_a_taken_code(local, monkeypatch):
+    path = local / "wg-tunnels" / "servers" / "boba" / "carriers" / "unnamed.conf"
+    replies = iter(["Paris, France", "par-fr", "par"])
+    monkeypatch.setattr(ui, "have_tty", lambda: True)
+    monkeypatch.setattr(ui, "ask", lambda prompt: next(replies))
+    assert jumpfiles.make_link("boba", str(path)) == ("par", "Paris, France")
+    assert path.read_text() == "# jump: par Paris, France\n[Interface]\nPrivateKey = K2\n"
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
 
 
 def test_reserved_names():
@@ -521,8 +543,9 @@ def test_fleet_subnets_read_each_servers_state(local, monkeypatch):
 
 
 def test_list_shows_staged_jumps_by_name(local, monkeypatch, capsys):
-    (local / "exits" / "boba").mkdir(parents=True)
-    for name in ("a.conf", "a-b.conf", "notes.txt"):
-        (local / "exits" / "boba" / name).write_text("")
+    carriers = local / "wg-tunnels" / "servers" / "dengar" / "carriers"
+    carriers.mkdir(parents=True)
+    for name in ("a.conf", "a-b.conf", "notes.txt", "a.conf.20261112-120000.bak"):
+        (carriers / name).write_text("")
     remote.cmd_list(quick=True)
     assert "jump files staged: a,a-b" in capsys.readouterr().out

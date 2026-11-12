@@ -10,7 +10,7 @@ from .. import store, ui
 from ..config import FLEET_SUBNETS_ENV
 from ..const import SET_UP_KEYS
 from ..errors import WgtError
-from . import remote
+from . import remote, tunnels
 from .remote import out, q
 
 
@@ -160,9 +160,10 @@ def require_branch(target: str, branch: str) -> None:
 
 
 def record(name: str, target: str) -> None:
-    """Add a server to local/servers, with its exits dir."""
+    """Add a server to local/servers, and its (empty) folder for jump files in
+    ~/wg-tunnels, so wireguard-tunnels knows it exists."""
     remote.ensure_local()
     with open(remote.LIST, "a") as f:
         f.write(f"{name:<10} {target}\n")
-    remote.private_dir(remote.exits_dir(name))
+    tunnels.anchor(name)
     out.log(f"Added '{name}' ({target}) to {remote.LIST}")

@@ -13,7 +13,8 @@ wgt/                      the package (Python 3.8+, standard library only)
   ctl/                    wgt-ctl, from your own machine: main and per-server dispatch (__init__.py),
                           the server list and ssh (remote.py), init (newserver.py), backup, remove and
                           move (rebuild.py), numbers across servers (fleet_cmds.py; fleet.py is its pure part: local/devices,
-                          no ssh, no files), jump files (jumpfiles.py)
+                          no ssh, no files), jump files (jumpfiles.py), ~/wg-tunnels and client config
+                          delivery (tunnels.py; plan() is its pure part)
   const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError
   config.py               settings: flag > env > saved > default, validation
   store.py                the server files: state, clients.db, exits.db (jumps), devices.db, disabled, backup record; config names

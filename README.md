@@ -650,7 +650,8 @@ and these run from your machine, against that server:
 ```bash
 wgt-ctl boba pull                      # git pull its checkout (fast-forward only)
 wgt-ctl boba backup                    # wgt backup there, fetched to local/backups/boba/
-wgt-ctl boba jump-add                  # push a jump file from local/exits/boba/ as a jump
+wgt-ctl boba jump-add                  # push a jump file from ~/wg-tunnels/servers/boba/carriers/ as a jump
+wgt-ctl boba sync                      # copy its client configs to ~/wg-tunnels/devices/<device>/config/
 wgt-ctl boba ssh                       # log in (or: ssh <command>)
 wgt-ctl boba branch some-branch        # switch its checkout
 wgt-ctl boba forget                    # drop it from local/servers; the server is untouched
@@ -660,8 +661,8 @@ wgt-ctl boba move [--to <address>]     # rebuild it from its backup, elsewhere o
 ```
 
 **Every server: `wgt-ctl all COMMAND`.** Runs on each server in turn; one
-failing doesn't stop the rest. Takes any `wgt` command, plus `pull`, `backup`
-and `branch`:
+failing doesn't stop the rest. Takes any `wgt` command, plus `pull`, `backup`,
+`branch` and `sync`:
 
 ```bash
 wgt-ctl all test
@@ -723,7 +724,8 @@ directly on a server uses its own range and can reuse a freed number there.
 ### Adding jumps from your machine
 
 Keep your jump files on your machine and let `wgt-ctl` put them on servers:
-save one as `local/exits/<server>/<any name>.conf` (it's *staged* until pushed), then
+save one as `~/wg-tunnels/servers/<server>/carriers/<any name>.conf` (it's *staged*
+until pushed; see [Configs on your machine](#configs-on-your-machine)), then
 
 ```bash
 wgt-ctl boba jump-add                  # pick it by number (or: all)
@@ -732,9 +734,45 @@ wgt-ctl boba jump-add                  # pick it by number (or: all)
 `jump-add` uploads the file and runs [`wgt jump add`](#jumps) there. The first
 time it sees a file it asks what it is ("Paris, France") and suggests a code
 from that name and the file's country tag if it has one (Proton's `FR#252` gives
-`par-fr`); the answer is kept in `local/exits/details.tsv`. `wgt-ctl boba client add` also offers to push
+`par-fr`); the answer is written into the file as a `# jump: par-fr Paris, France` line
+(edit it to rename the jump before pushing). `wgt-ctl boba client add` also offers to push
 staged jump files that aren't on the server yet, so they show up in its exit
 menu.
+
+### Configs on your machine
+
+`wgt-ctl` keeps WireGuard configs in `~/wg-tunnels` (or `$WG_TUNNELS`), the
+folder [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels) uses
+for devices. It creates what it needs there, owner-only, the first time it writes;
+wireguard-tunnels isn't needed. It uses two kinds of folder and leaves the rest alone:
+
+| Folder | What |
+|---|---|
+| `servers/<server>/carriers/` | jump files staged for that server ([above](#adding-jumps-from-your-machine)) |
+| `devices/<device>/config/` | that device's client configs, copied from each server |
+
+`wgt-ctl` only reads jump files; whatever makes them (you, or wireguard-tunnels)
+puts them in `servers/<server>/carriers/`. So every server you manage has that
+folder, even empty: `init` and `sync` make it, and `remove` deletes it if nothing
+is left in it. That's how wireguard-tunnels knows which servers exist.
+
+**Client configs follow the server.** After `client add`, `rotate`, `rename` and
+`remove` (and `all device rename`), `wgt-ctl` copies that server's client configs
+into `devices/<device>/config/`; `wgt-ctl <server> sync` (or `all sync`) does it on
+demand, such as after `setup` rewrites configs. The server's copy is the live one,
+so it wins:
+
+| On your machine | What happens |
+|---|---|
+| no copy | added as `<server>.<config>.conf` |
+| a copy with the same private key (a rename keeps keys), or the same `# wireguard-tools client: <config> on <server>` line (a rotate changes keys) | replaced if different, keeping its file name; the old text is kept as `<file>.<time>.bak` |
+| a file named `<server>.<config>.conf` that isn't a copy | left alone, with a warning |
+| a copy of a config the server no longer has | renamed to `<file>.<time>.bak` |
+
+A copy found in another device's folder (after a device rename) is updated where
+it is, with a note: the folder also holds wireguard-tunnels' files, so renaming
+it is yours to do. A failed copy only warns; the command itself still counts as
+done.
 
 ### Moving or rebuilding a server
 
@@ -991,7 +1029,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1`, plus IPv6 forwarding (and `accept_ra = 2` on the public interface) when IPv6 is on |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
 | `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog (runs `wgt watchdog warp` every 30s) |
-| `/etc/wireguard/exits.db` | jumps: `code index label` (in file names such as this and `local/exits/`, "exit" means a jump, for historical reasons) |
+| `/etc/wireguard/exits.db` | jumps: `code index label` (in file names such as this, "exit" means a jump, for historical reasons) |
 | `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a jump file as given (from anywhere; the file name is historical) and its own WARP account |
 | `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a jump's tunnel and the WARP tunnel inside it |
 | `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | jump watchdog (runs `wgt watchdog exits` every 10s: jumps up on demand) |

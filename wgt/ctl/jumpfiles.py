@@ -1,4 +1,6 @@
-"""Jumps from local files: local/exits/<server>/*.conf, pushed to a server."""
+"""Jumps from staged files: ~/wg-tunnels/servers/<server>/carriers/*.conf (tunnels.py),
+pushed to a server. Each file names its jump in a "# jump: <code> <label>" line,
+written the first time it's pushed."""
 
 from __future__ import annotations
 
@@ -9,27 +11,31 @@ from typing import List, Optional, Tuple
 
 from .. import render, store, ui
 from ..errors import WgtError
-from . import fleet_cmds, remote
+from . import fleet_cmds, remote, tunnels
 from .remote import Server, out, q
 
-
-def links() -> List[Tuple[str, str, str, str]]:
-    """local/exits/details.tsv: (server, local file, code, full name) per named config."""
-    rows = [line.split("\t") for line in (store.read_text(remote.LINKS) or "").splitlines()]
-    return [(f[0], f[1], f[2], f[3]) for f in rows if len(f) >= 4]
+JUMP = re.compile(r"(?m)^# jump: (\S+) (.+?)[ \t]*$")
 
 
-def link_of(server: str, file: str) -> Optional[Tuple[str, str]]:
-    """(code, full name) for a local exit config, if it has been named."""
-    return next(((code, label) for srv, f, code, label in links() if srv == server and f == file), None)
+def link_of(path: str) -> Optional[Tuple[str, str]]:
+    """(code, label) from a staged file's "# jump:" line, once it has been named."""
+    m = JUMP.search(store.read_text(path) or "")
+    return (m.group(1), m.group(2)) if m else None
+
+
+def with_jump_line(text: str, code: str, label: str) -> str:
+    """The config with its "# jump:" line first (any earlier one replaced)."""
+    body = "".join(line + "\n" for line in text.splitlines() if not line.startswith("# jump: "))
+    return f"# jump: {code} {label}\n" + body
 
 
 def make_link(server: str, path: str) -> Tuple[str, str]:
-    """First push of a local config: ask what it is and pick its code (the name's
-    first 3 letters + a country tag like Proton's "FR#252", e.g. par-fr). A code another of
-    this server's files already uses is refused."""
+    """First push of a staged config: ask what it is and pick its code (the name's
+    first 3 letters + a country tag like Proton's "FR#252", e.g. par-fr), then write
+    both into the file. A code another of this server's files already uses is refused."""
     file = os.path.basename(path)
-    hint = render.peer_hint(store.read_text(path) or "")
+    text = store.read_text(path) or ""
+    hint = render.peer_hint(text)
     if not ui.have_tty():
         raise WgtError(f"{file} isn't named yet; run jump-add in a terminal once to name it")
     name = ui.ask(f"    What is {file} ({hint or 'no hint'})? e.g. Paris, France: ")
@@ -38,7 +44,7 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
     m = re.match(r"^([A-Za-z]{2})#", hint)
     city = re.sub(r"[^a-z]", "", name.lower())[:3]
     code = city + (f"-{m.group(1).lower()}" if m else "")
-    taken = {code for srv, _file, code, _label in links() if srv == server}
+    taken = {link[0] for f in tunnels.staged(server) if f != path for link in [link_of(f)] if link}
     while True:
         reply = ui.ask(f"    Short code on the server [{code}]: ")
         if not reply and not store.valid_exit_code(code):
@@ -50,9 +56,7 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
             out.info(f"{server} already has a jump '{code}'; pick another")
         else:
             break
-    with open(remote.LINKS, "a") as f:
-        f.write(f"{server}\t{file}\t{code}\t{name}\n")
-    os.chmod(remote.LINKS, 0o600)
+    remote.write_local(path, with_jump_line(text, code, name))
     return code, name
 
 
@@ -68,10 +72,9 @@ def add_one_exit(s: Server, path: str) -> None:
     the uploaded copy is deleted once imported."""
     file = os.path.basename(path)
     os.chmod(path, 0o600)
-    link = link_of(s.name, file) or make_link(s.name, path)
-    code, label = link
+    code, label = link_of(path) or make_link(s.name, path)
     if not store.valid_exit_code(code):
-        raise WgtError(f"bad code '{code}' for {file} in {remote.LINKS}")
+        raise WgtError(f"bad code '{code}' in {file}'s '# jump:' line")
     out.log(f"{s.name}: {file} -> jump {code} ({label})")
     if remote.ssh(s.target, f"install -d -m 700 {remote.REMOTE.exit_dir} {remote.INBOX}")[0] != 0:
         raise WgtError(f"cannot reach {s.target}")
@@ -105,8 +108,7 @@ def print_exit_files(s: Server, files: List[str], on_server: List[str]) -> None:
     print("")
     print(f"  {'#':>3}  {'FILE':<{w}}  {'CODE':<7} {'NAME':<20} ON SERVER")
     for i, f in enumerate(files, 1):
-        link = link_of(s.name, os.path.basename(f))
-        code, label = link if link else ("-", "(not named yet)")
+        code, label = link_of(f) or ("-", "(not named yet)")
         print(f"  {i:>3}  {os.path.basename(f):<{w}}  {code:<7} {label:<20} {'yes' if code in on_server else 'no'}")
     print("")
 
@@ -121,11 +123,11 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
     if "--exit" in args or any(a.startswith("--exit=") for a in args) or "." in name \
             or any(a in remote.YES for a in args):
         return
-    files = remote.staged(s.name)
+    files = tunnels.staged(s.name)
     if not files or not ui.have_tty():
         return
     on_server = remote_exit_codes(s)
-    staged = [f for f in files if (link_of(s.name, os.path.basename(f)) or ("", ""))[0] not in on_server]
+    staged = [f for f in files if (link_of(f) or ("", ""))[0] not in on_server]
     if not staged:
         return
     out.log(f"Jump configs staged here but not on {s.name}")
@@ -140,10 +142,10 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
 
 def do_exit_add(s: Server, args: List[str]) -> int:
     """Push one of this server's local configs (by its number in the list) or all."""
-    src = remote.exits_dir(s.name)
-    files = remote.staged(s.name)
+    src = tunnels.carriers_dir(s.name)
+    files = tunnels.staged(s.name)
     if not files:
-        raise WgtError(f"no configs in {src} (save WireGuard configs there, any name ending .conf)")
+        raise WgtError(f"no configs in {tunnels.shown(src)} (save WireGuard configs there, any name ending .conf)")
     os.chmod(src, 0o700)
     sel = args[0] if args else ""
     if not sel:
