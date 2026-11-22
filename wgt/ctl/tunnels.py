@@ -129,6 +129,11 @@ def sweep_owned(file: str, device: str) -> bool:
     return file.startswith(WARPED) or file == f"warp.{device}.conf"
 
 
+def same_name(a: str, b: str) -> bool:
+    """One file's name on a Mac's file system, which ignores case (Warp.iphone.conf is warp.iphone.conf)."""
+    return a.lower() == b.lower()
+
+
 def local_files(devices: List[str]) -> Dict[str, str]:
     """Every *.conf in those devices' config/ folders, the sweep's aside: path -> text.
     Each folder once: on a Mac, devices/iPhone and devices/iphone are one folder, whose
@@ -191,13 +196,13 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         # Claimed first: the name of another config's copy, new, already matched or still
         # to be (it holds a live key; a renamed config's copy keeps its name), is another
         # of this server's, not a stranger's.
-        other = next((p for p in claimed if p.lower() == path.lower()), "") \
-            or next((p for p in local if p.lower() == path.lower() and key_of(local[p]) in live_keys), "")
+        other = next((p for p in claimed if same_name(p, path)), "") \
+            or next((p for p in local if same_name(p, path) and key_of(local[p]) in live_keys), "")
         if other:
             case = "" if other == path else " (names differing only in case are one file on a Mac)"
             actions.append(Action("refuse", path, config, note=f"also another of this server's configs{case}"))
             continue
-        if path.lower() in {p.lower() for p in local}:
+        if any(same_name(p, path) for p in local):
             actions.append(Action("refuse", path, config, note=NOT_A_COPY))
             continue
         claimed.add(path)
