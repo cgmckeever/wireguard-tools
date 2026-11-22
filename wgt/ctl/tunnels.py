@@ -126,8 +126,7 @@ def sweep_owned(file: str, device: str) -> bool:
     warp.<device>.conf (the device's WARP alone). Without case: on a Mac's file
     system Warp.iphone.conf is warp.iphone.conf, and <device> may be another
     spelling of the folder."""
-    file, device = file.lower(), device.lower()
-    return file.startswith(WARPED) or file == f"warp.{device}.conf"
+    return file.lower().startswith(WARPED) or same_name(file, f"warp.{device}.conf")
 
 
 def same_name(a: str, b: str) -> bool:
