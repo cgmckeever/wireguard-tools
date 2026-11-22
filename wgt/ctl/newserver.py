@@ -50,6 +50,10 @@ def cmd_init(argv: List[str]) -> None:
         raise WgtError(f"setup did not finish, so it isn't on the list; fix the cause and re-run: "
                        f"wgt-ctl init --address {address} "
                        f"--name {name} --user {opts['--user']} --branch {opts['--branch']}")
+    if remote.dry_run(setup_args):
+        # Nothing was set up: listed, it would take the name a real init needs.
+        out.info("dry run: not added to the list (run init again without --dry-run)")
+        return
     record(name, target)
     # Setup rewrote any configs a re-run found (a machine kept its clients): copies follow.
     tunnels.after(remote.Server(name, target), "setup", setup_args)

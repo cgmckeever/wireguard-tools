@@ -535,6 +535,14 @@ def test_init_failed_setup_stays_off_the_list(initing):
     assert initing["delivered"] == []
 
 
+def test_init_with_a_dry_run_setup_stays_off_the_list(initing):
+    # nothing was set up: listed, the name would refuse the real init
+    newserver.cmd_init(INIT + ["--", "--dry-run"])
+    assert initing["setups"] == 1
+    assert all(s.name != "newbie" for s in remote.servers())
+    assert initing["delivered"] == []
+
+
 def test_ssh_passes_a_command_as_the_user_wrote_it(local, monkeypatch):
     seen = []
     monkeypatch.setattr(subprocess, "run",
