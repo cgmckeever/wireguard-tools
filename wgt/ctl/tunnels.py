@@ -108,7 +108,8 @@ def key_of(text: str) -> str:
 
 @dataclass
 class Action:
-    """What delivery does with one file. kind: new, update, same, refuse or retire."""
+    """What delivery does with one file. kind: new, update, same, refuse, retire, or
+    duplicate (another file with a config's key: left alone, with a warning)."""
 
     kind: str
     path: str
@@ -160,37 +161,63 @@ def all_devices() -> List[str]:
     return sorted(f for f in os.listdir(d) if os.path.isdir(os.path.join(d, f))) if os.path.isdir(d) else []
 
 
+def own_path(server: str, config: str) -> str:
+    """Where a new copy of <config> goes: devices/<device>/config/<server>.<config>.conf."""
+    return os.path.join(config_dir(store.device_of(config)), f"{server}.{config}.conf")
+
+
 def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: bool) -> List[Action]:
     """What to do to bring the local copies of <server>'s configs in line.
     issued: config name -> its text on the server; local: path -> text (devices/*/config/);
-    complete: issued is everything the server has, so copies of configs it lacks retire."""
+    complete: issued is everything the server has, so copies of configs it lacks retire.
+    In three passes: each config's copy found (by key, else header), then what retires,
+    then new copies, whose names may be ones this delivery retires."""
     live_keys = {key_of(t) for t in issued.values()} - {""}
-    by_key: Dict[str, str] = {}
+    by_key: Dict[str, List[str]] = {}
     by_header: Dict[Tuple[str, str], str] = {}
     for path, text in local.items():
         k = key_of(text)
         if k:
-            by_key.setdefault(k, path)
+            by_key.setdefault(k, []).append(path)
         h = header_of(text)
         # A copy holding a live key is that config's (a rename keeps keys): the key
         # match wins, whichever config the loop below reaches first.
         if h and k not in live_keys:
             by_header.setdefault(h, path)
-    actions = []
+    configs = sorted(issued, key=store.device_key)
+    actions: List[Action] = []
+    matched: Dict[str, str] = {}
     claimed = set()
-    for config in sorted(issued, key=store.device_key):
-        text = issued[config]
-        device = store.device_of(config)
-        k = key_of(text)
-        match = (by_key.get(k) if k else None) or by_header.get((config, server))
+    for config in configs:
+        k = key_of(issued[config])
+        # Several files with its key (a copy made by hand): the one at its own name is
+        # its copy; the others are left as they are, with a warning.
+        keyed = sorted(by_key.get(k, []) if k else [], key=lambda p: not same_name(p, own_path(server, config)))
+        match = keyed[0] if keyed else by_header.get((config, server))
         if match and match not in claimed:
             claimed.add(match)
+            matched[config] = match
+            actions += [Action("duplicate", p, config, note=f"holds its key too, not updated ({shown(match)} is)")
+                        for p in keyed[1:]]
+    retiring = []
+    if complete:
+        for path, text in sorted(local.items()):
+            h = header_of(text)
+            if path not in claimed and h and h[1] == server and key_of(text) not in live_keys:
+                retiring.append(Action("retire", path, h[0], note="the server no longer has it"))
+    gone = {a.path for a in retiring}
+    left = {p: t for p, t in local.items() if p not in gone}
+    for config in configs:
+        text = issued[config]
+        device = store.device_of(config)
+        match = matched.get(config)
+        if match:
             kind = "same" if local[match] == text else "update"
             moved = os.path.dirname(match) != config_dir(device)
             note = f"left in its folder; the device is now '{device}' (rename the folder to match)" if moved else ""
             actions.append(Action(kind, match, config, text, note))
             continue
-        path = os.path.join(config_dir(device), f"{server}.{config}.conf")
+        path = own_path(server, config)
         # Names compare without case: on a Mac's file system Warp.iphone.conf is warp.iphone.conf.
         if sweep_owned(os.path.basename(path), device):   # server "warp", config "<device>"
             actions.append(Action("refuse", path, config, note="wireguard-tunnels' own name (its sweep writes it)"))
@@ -199,31 +226,28 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         # to be (it holds a live key; a renamed config's copy keeps its name), is another
         # of this server's, not a stranger's.
         other = next((p for p in claimed if same_name(p, path)), "") \
-            or next((p for p in local if same_name(p, path) and key_of(local[p]) in live_keys), "")
+            or next((p for p in left if same_name(p, path) and key_of(left[p]) in live_keys), "")
         if other:
             case = "" if other == path else " (names differing only in case are one file on a Mac)"
             actions.append(Action("refuse", path, config, note=f"also another of this server's configs{case}"))
             continue
-        if any(same_name(p, path) for p in local):
+        if any(same_name(p, path) for p in left):
             actions.append(Action("refuse", path, config, note=NOT_A_COPY))
             continue
         claimed.add(path)
         actions.append(Action("new", path, config, text))
-    if complete:
-        for path, text in sorted(local.items()):
-            h = header_of(text)
-            if path in claimed or not h or h[1] != server or key_of(text) in live_keys:
-                continue
-            actions.append(Action("retire", path, h[0], note="the server no longer has it"))
-    return actions
+    return actions + retiring
 
 
 def refuse_taken(actions: List[Action]) -> List[Action]:
     """A new copy whose name is already on disk is refused too: local_files lists a
     folder once, so one reached by another path (a symlinked device folder) holds
     files plan() saw under that other path, not this one."""
+    gone = [os.path.realpath(a.path) for a in actions if a.kind == "retire"]
     for a in actions:
-        if a.kind == "new" and os.path.lexists(a.path):
+        # Not a name this delivery retires first (apply): it's free by the time it's written.
+        if a.kind == "new" and os.path.lexists(a.path) \
+                and not any(same_name(g, os.path.realpath(a.path)) for g in gone):
             a.kind, a.text, a.note = "refuse", "", NOT_A_COPY
     return actions
 
@@ -234,7 +258,8 @@ def bak_path(path: str) -> str:
 
 
 def apply(actions: List[Action]) -> None:
-    for a in actions:
+    """Retires first: a new copy may take a name one of them frees (Phone for phone)."""
+    for a in sorted(actions, key=lambda a: a.kind != "retire"):
         if a.kind in ("new", "update"):
             make_dir(os.path.dirname(a.path))
             if a.kind == "update":
@@ -259,6 +284,8 @@ def report(server: str, actions: List[Action]) -> None:
             out.info(f"{server} {a.config}: {words[a.kind]}: {shown(a.path)}")
         elif a.kind == "refuse":
             out.warn(f"{server} {a.config}: not delivered: {shown(a.path)} is {a.note}")
+        elif a.kind == "duplicate":
+            out.warn(f"{server} {a.config}: {shown(a.path)} {a.note}")
         if a.note and a.kind in ("same", "update"):
             out.warn(f"{server} {a.config}: {shown(a.path)}: {a.note}")
 

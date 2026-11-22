@@ -758,6 +758,7 @@ so it wins:
 | a copy with the same private key (a rename keeps keys), or the same `# wireguard-tools client: <config> on <server>` line (a rotate changes keys) | replaced if different, keeping its file name; the old text is kept as `<file>.<time>.bak` |
 | a file named `<server>.<config>.conf` (in any case: the Mac ignores it) that isn't a copy | left alone, with a warning |
 | a copy of a config the server no longer has | renamed to `<file>.<time>.bak` |
+| another file with the same private key (a copy you made, say in another device's folder) | left alone, with a warning; the copy named `<server>.<config>.conf` is the one kept up to date |
 | a `warped.*` file (a carrier wireguard-tunnels swept; same key and header, its own text) | never touched: not matched, replaced or renamed |
 | `warp.<device>.conf` (wireguard-tunnels' WARP-only tunnel) | never touched; a config that would get that name (a server called `warp`) isn't delivered, with a warning |
 

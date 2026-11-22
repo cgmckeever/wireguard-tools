@@ -86,6 +86,33 @@ def test_a_live_key_wins_over_a_header_whatever_the_order(store, renamed):
     assert path.read_text() == conf(renamed, "K1")
 
 
+def test_a_name_freed_by_a_retire_takes_the_new_copy_in_the_same_sync(store):
+    # the server dropped Old.iphone and has old.iphone: one file on a Mac, so the old copy
+    # retires first and the new one arrives in this sync, not the next
+    old = put(store, "iphone", "dengar.Old.iphone.conf", conf("Old.iphone", "K1"))
+    actions = tunnels.plan("dengar", {"old.iphone": conf("old.iphone", "K2")},
+                           tunnels.local_files(tunnels.all_devices()), True)
+    tunnels.apply(tunnels.refuse_taken(actions))
+    assert kinds(actions) == [("new", "dengar.old.iphone.conf", "old.iphone"),
+                              ("retire", "dengar.Old.iphone.conf", "Old.iphone")]
+    assert (old.parent / "dengar.old.iphone.conf").read_text() == conf("old.iphone", "K2")
+    assert any(f.startswith("dengar.Old.iphone.conf.") and f.endswith(".bak") for f in os.listdir(old.parent))
+
+
+def test_a_hand_copied_config_leaves_the_real_copy_updated_and_is_warned_about(store, monkeypatch):
+    # ipad's folder sorts first, but the copy at the config's own name is the one updated
+    real = put(store, "iphone", "dengar.iphone.conf", conf("iphone", "K1"))
+    mine = put(store, "ipad", "borrowed.conf", conf("iphone", "K1"))
+    told = io.StringIO()
+    monkeypatch.setattr(remote.out, "err", told)
+    new = conf("iphone", "K1", body="MTU = 1280\n")
+    actions = run(store, {"iphone": new})
+    tunnels.report("dengar", actions)
+    assert kinds(actions) == [("duplicate", "borrowed.conf", "iphone"), ("update", "dengar.iphone.conf", "iphone")]
+    assert real.read_text() == new and mine.read_text() == conf("iphone", "K1")
+    assert "borrowed.conf holds its key too" in told.getvalue()
+
+
 def test_a_rotated_config_is_matched_by_its_header(store):
     path = put(store, "iphone", "phone.conf", conf("warp.iphone", "OLD"))
     actions = run(store, {"warp.iphone": conf("warp.iphone", "NEW")})
