@@ -432,16 +432,18 @@ def refuse_routed_subnet(ctx: Ctx) -> None:
         raise WgtError(f"subnet {subnet} overlaps {clash}, which this host already routes; pick another")
 
 
-def restart_needed(ctx: Ctx) -> bool:
+def restart_needed(ctx: Ctx, keys_changed: bool = False) -> bool:
     """wg0 is running and its settings are about to change. Asks first: nothing
     can be asked once it's down. Asked before the settings are saved and the
     client configs rewritten, so a no leaves both as wg0 runs them. A subnet
-    move (renumbering, not yet done) always changes wg0's Address."""
+    move (renumbering, not yet done) always changes wg0's Address, and new server
+    keys (<keys_changed>) its key, which wg0.conf only names by path."""
     unit = f"wg-quick@{ctx.cfg.WG_IF}"
     current = ctx.files.read(ctx.cfg.wg_conf)
     if not ops.wg_up(ctx) or current is None:
         return False   # down or new: nothing to restart
-    if not renumbering(ctx) and store.entries(current) == store.entries(ops.render_wg_conf(ctx)):
+    if not renumbering(ctx) and not keys_changed \
+            and store.entries(current) == store.entries(ops.render_wg_conf(ctx)):
         return False   # only comments differ
     ctx.runner.step(f"Restart {ctx.cfg.WG_IF} for its new config (clients reconnect in a few seconds)",
                     f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
@@ -499,7 +501,7 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
     # databases agreeing about the subnet and settings. The restart is asked first:
     # a no stops before the settings and the configs devices get change.
     was_up = ops.wg_up(ctx)
-    restarting = restart_needed(ctx)
+    restarting = restart_needed(ctx, keys_changed)
     renumber_clients(ctx)
     units.remember_opened_ports(ctx)   # before save_config replaces the saved WG_PORT
     save_config(ctx)
