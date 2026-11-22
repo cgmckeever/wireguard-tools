@@ -72,7 +72,8 @@ def add_one_exit(s: Server, path: str) -> None:
     the uploaded copy is deleted once imported."""
     file = os.path.basename(path)
     os.chmod(path, 0o600)
-    code, label = link_of(path) or make_link(s.name, path, remote_exit_codes(s))
+    # Without a terminal make_link refuses before asking anything: no need to ask the server.
+    code, label = link_of(path) or make_link(s.name, path, remote_exit_codes(s) if ui.have_tty() else ())
     if not store.valid_exit_code(code):
         raise WgtError(f"bad code '{code}' in {file}'s '# jump:' line")
     out.log(f"{s.name}: {file} -> jump {code} ({label})")
