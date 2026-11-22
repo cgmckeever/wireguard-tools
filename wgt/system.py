@@ -86,7 +86,7 @@ def free_bak(path: str, when: float) -> str:
 def copy_order(name: str, base: str) -> Tuple[str, int]:
     """A change copy's place by age: its timestamp, then its number within that second."""
     stamp, _, n = name[len(base) + 1: -len(".bak")].partition(".")
-    return stamp, int(n) if n.isdigit() else 0
+    return stamp, int(n) if store.is_uint(n) else 0
 
 
 def is_copy_of(name: str, base: str) -> bool:
