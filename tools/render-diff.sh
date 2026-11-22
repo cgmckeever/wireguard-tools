@@ -15,7 +15,7 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
-    while read -r name target _; do
+    while read -r name target _ || [ -n "$name" ]; do   # a last line without a newline too
         case "$name" in ""|\#*) continue ;; esac
         targets+=("$target")
     done <"$here/local/servers"
