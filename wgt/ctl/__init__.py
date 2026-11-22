@@ -35,8 +35,9 @@ files stay under local/ (untracked): servers, devices (each device's static
 number), backups/. WireGuard configs live in ~/wg-tunnels ($WG_TUNNELS, shared
 with wireguard-tunnels): servers/<server>/carriers/*.conf are jump files (any
 name; a "# jump: <code> <label>" line names each), and devices/<device>/config/
-gets each server's client configs after client add, rotate, rename and remove
-(the server's copy wins; a file that isn't a copy is never overwritten).
+gets each server's client configs after client add, rotate, rename and remove,
+setup, restore and move (the server's copy wins; a file that isn't a copy is
+never overwritten).
 
 `wgt-ctl SERVER client add` gives a device its fleet-wide number, and
 `wgt-ctl all device rename <device> <new> [--force]` renames a whole device on
