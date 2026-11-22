@@ -227,6 +227,11 @@ def no_args(cmd: str, args: List[str]) -> None:
 YES = ("--yes", "-y")
 
 
+def dry_run(args: Sequence[str]) -> bool:
+    """A wgt command run with --dry-run: wgt-ctl changes nothing for it either."""
+    return "--dry-run" in args
+
+
 def only_yes(cmd: str, args: List[str]) -> bool:
     """For commands whose only option is --yes: refuse anything else; True if given."""
     if set(args) - set(YES):

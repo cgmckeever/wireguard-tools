@@ -119,9 +119,9 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
     menu can offer it. Skipped when the exit is already given."""
     name = fleet_cmds.client_name(args)
     # Nothing to offer when the exit is given (--exit, or a <code>.<name>
-    # client name) or there must be no prompts (--yes).
+    # client name), there must be no prompts (--yes), or nothing may change (--dry-run).
     if "--exit" in args or any(a.startswith("--exit=") for a in args) or "." in name \
-            or any(a in remote.YES for a in args):
+            or any(a in remote.YES for a in args) or remote.dry_run(args):
         return
     files = tunnels.staged(s.name)
     if not files or not ui.have_tty():

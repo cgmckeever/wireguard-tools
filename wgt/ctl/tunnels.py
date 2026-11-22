@@ -285,7 +285,7 @@ CHANGES = {"client": ("add", "rotate", "rename", "remove"), "device": ("rename",
 def changes_configs(cmd: str, args: List[str]) -> bool:
     """A wgt command that may have changed client configs. `client` alone and
     `client list` count: their action menu can rotate, rename or remove one."""
-    if "--dry-run" in args or "--tsv" in args:
+    if remote.dry_run(args) or "--tsv" in args:
         return False
     if cmd == "client" and (not args or args[0] == "list"):
         return True

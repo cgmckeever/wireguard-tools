@@ -94,7 +94,7 @@ def numbered_add(args: List[str]) -> Tuple[List[str], str]:
         out.info(f"not read for the static number (local/devices covers them): {', '.join(missed)}")
     known = entries.get(device)
     number = known.number if known else fleet.next_low(entries)
-    taken = not known and "--dry-run" not in args   # a dry run adds nothing: it mustn't use up a number
+    taken = not known and not remote.dry_run(args)   # a dry run adds nothing: it mustn't use up a number
     if taken:
         entries[device] = fleet.Entry(number)
         write_entries(entries)
@@ -142,7 +142,7 @@ def rename_everywhere(args: List[str]) -> int:
         rc = one or rc
     remote.ensure_local()
     entries = read_entries()
-    if old in entries and rc == 0 and "--dry-run" not in passed:
+    if old in entries and rc == 0 and not remote.dry_run(passed):
         moved = entries.pop(old)
         entries.setdefault(new, moved)
         write_entries(entries)
