@@ -246,6 +246,11 @@ def test_install_wgcf_checks_the_download(make_ctx, monkeypatch):
     assert any(c.startswith("install -m 755 ") and c.endswith(ctx.paths.wgcf_bin) for c in ctx.runner.calls)
     with pytest.raises(WgtError, match="checksum mismatch"):
         warp.install_wgcf(ctx, reinstall=True, fetch=fetch(b"0" * 64 + b"  wgcf_2.2_linux_amd64\n"))
+    # Checksums published, but none for this binary: unverified, so not installed either.
+    ctx.runner.calls.clear()
+    with pytest.raises(WgtError, match="don't list wgcf_2.2_linux_amd64"):
+        warp.install_wgcf(ctx, reinstall=True, fetch=fetch(b"0" * 64 + b"  wgcf_2.2_linux_arm64\n"))
+    assert not any(c.startswith("install -m 755 ") for c in ctx.runner.calls)
 
 
 def test_drift_seen_when_wg0_runs_older_rules(make_ctx):

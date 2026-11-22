@@ -219,7 +219,8 @@ Setup runs in two stages:
 If WARP can't be set up (wgcf can't be fetched, registration is refused, its unit
 won't start, its tests fail), setup warns and still finishes: plain configs work,
 `warp.` ones are blocked until it does; fix it and re-run setup. A wgcf checksum
-mismatch or a [changed default route](#troubleshooting) does stop setup.
+mismatch (or published checksums that don't list the binary: pin one with
+`WGCF_SHA256`) or a [changed default route](#troubleshooting) does stop setup.
 
 ### Devices and configs
 
