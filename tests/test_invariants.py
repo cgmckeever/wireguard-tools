@@ -549,8 +549,10 @@ def test_a_new_port_closes_the_old_one_in_ufw(world, monkeypatch):
     assert world.kernel.ufw == set()
 
 
-def test_a_new_port_stopped_anywhere_still_closes_the_old_one(tmp_path, monkeypatch):
-    """Setup saves the new WG_PORT before it opens ufw: a re-run must still close the old port."""
+@pytest.mark.parametrize("legacy", [False, True])
+def test_a_new_port_stopped_anywhere_still_closes_the_old_one(tmp_path, monkeypatch, legacy):
+    """Setup saves the new WG_PORT before it opens ufw: a re-run must still close the old port,
+    also on a server set up before UFW_PORT was recorded (<legacy>)."""
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
     monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
 
@@ -558,6 +560,8 @@ def test_a_new_port_stopped_anywhere_still_closes_the_old_one(tmp_path, monkeypa
         w = World(tmp_path / name, monkeypatch)
         w.kernel.ufw_active = True
         w.run(["setup"])
+        if legacy:
+            system.write_private(w.paths.state, store.state_unset(store.read_text(w.paths.state), "UFW_PORT"))
         return w
     counting = ready("count")
     counting.run(["setup", "--port", "51999"])

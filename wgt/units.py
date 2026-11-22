@@ -133,6 +133,16 @@ def opened_port(ctx: Ctx) -> str:
     return store.state_get(ctx.snap.state, "UFW_PORT") or ctx.cfg.saved.get("WG_PORT", "")
 
 
+def remember_opened_port(ctx: Ctx) -> None:
+    """Before setup saves a new WG_PORT: on a server set up before UFW_PORT was
+    recorded, record the port ufw was opened for (the saved WG_PORT), so a setup
+    that stops after saving still closes it on its re-run (or rollback)."""
+    saved = ctx.cfg.saved.get("WG_PORT", "")
+    if store.state_get(ctx.snap.state, "UFW") == "1" and not store.state_get(ctx.snap.state, "UFW_PORT") \
+            and saved and saved != ctx.cfg.WG_PORT:
+        ops.state_set(ctx, "UFW_PORT", saved)
+
+
 def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:
     """Remove the ufw rules open_firewall added: routing wg0 -> each of <outs>,
     and with <port> the WireGuard port too. Only if setup recorded opening
