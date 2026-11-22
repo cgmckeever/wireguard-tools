@@ -296,7 +296,8 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
         text = store.read_text(src) or ""
         new = render.with_client_settings(ctx.cfg, text, c.ip, c.allowed, endpoint)
         changed = new != text   # a setting a device uses: re-send
-        new = render.with_device_network(new)
+        # Comments only: the header follows a --name change (wgt-ctl reads the server from it).
+        new = render.with_device_network(render.with_client_header(ctx.cfg, new, c.name))
         if new != text:
             ctx.files.write(conf, 0o600, new)
         if (changed or src != conf) and c.name not in stale:

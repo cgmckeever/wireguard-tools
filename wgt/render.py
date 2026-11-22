@@ -263,10 +263,16 @@ def with_client_settings(cfg: Config, text: str, ip: str, allowed: str, endpoint
     return text
 
 
+def with_client_header(cfg: Config, text: str, name: str) -> str:
+    """A client config's "# wireguard-tools client:" line naming <name> and this
+    server's current SERVER_NAME (wgt-ctl reads the server from it)."""
+    return _set_line(r"(?m)^# wireguard-tools client: .*$", f"# wireguard-tools client: {name} on {cfg.SERVER_NAME}",
+                     text)
+
+
 def with_client_name(cfg: Config, snap: Snapshot, text: str, name: str) -> str:
     """A client config's comments for its new name (its way out is in the name)."""
-    header = f"# wireguard-tools client: {name} on {cfg.SERVER_NAME}"
-    text = _set_line(r"(?m)^# wireguard-tools client: .*$", header, text)
+    text = with_client_header(cfg, text, name)
     return _set_line(r"(?m)^# exit: .*$", f"# exit: {exit_desc(snap, name)}", text)
 
 

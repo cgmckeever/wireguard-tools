@@ -573,6 +573,14 @@ def test_a_new_port_stopped_anywhere_still_closes_the_old_one(tmp_path, monkeypa
         assert w.kernel.ufw == set(), f"killed at step {die_at}"
 
 
+def test_a_new_server_name_reaches_every_config_header(world):
+    """wgt-ctl reads the server's name from that line: after --name it names the new one."""
+    world.run(["setup", "--name", "other"])
+    for c in store.load(world.paths).clients:
+        text = store.read_text(world.paths.client_conf("other", c.name)) or ""
+        assert text.startswith(f"# wireguard-tools client: {c.name} on other\n"), c.name
+
+
 def test_the_jump_watchdog_runs_only_while_there_are_jumps(world):
     world.run(["setup"])
     timer = os.path.join(world.paths.systemd_dir, f"{EXIT_WATCHDOG}.timer")
