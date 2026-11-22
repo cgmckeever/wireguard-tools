@@ -371,17 +371,17 @@ def test_a_client_command_delivers_only_when_it_worked(store, monkeypatch):
     assert ctl._run(s, "client", ["rotate", "warp.phone"]) == 0 and done == ["dengar"]
 
 
-def test_a_setup_that_stopped_still_delivers(store, monkeypatch):
-    # a declined restart after --name stops setup once every header names the new server:
-    # copies must follow before a rotate leaves one behind under the old name
+def test_a_setup_or_restore_that_stopped_delivers_nothing(store, monkeypatch):
+    # setup rewrites every config before it asks to restart wg0: after a declined restart
+    # they hold settings wg0 isn't running yet (a new --port), so devices mustn't get them
     done = []
     monkeypatch.setattr(tunnels, "deliver", lambda s: done.append(s.name))
     s = remote.Server("dengar", "root@h")
     monkeypatch.setattr(remote, "do_wgt", lambda s, args: 1)
-    assert ctl._run(s, "setup", ["--name", "dengar2"]) == 1 and done == ["dengar"]
-    assert ctl._run(s, "restore", ["/root/x.tar.gz"]) == 1 and done == ["dengar"]   # maybe half extracted
-    monkeypatch.setattr(remote, "do_wgt", lambda s, args: 255)
-    assert ctl._run(s, "setup", []) == 255 and done == ["dengar"]                   # unreachable
+    assert ctl._run(s, "setup", ["--port", "51999"]) == 1 and done == []
+    assert ctl._run(s, "restore", ["/root/x.tar.gz"]) == 1 and done == []   # maybe half extracted
+    monkeypatch.setattr(remote, "do_wgt", lambda s, args: 0)
+    assert ctl._run(s, "setup", ["--port", "51999"]) == 0 and done == ["dengar"]
 
 
 def test_configs_naming_another_listed_server_are_not_delivered(store, tmp_path, monkeypatch):
