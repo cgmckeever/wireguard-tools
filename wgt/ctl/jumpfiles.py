@@ -74,6 +74,8 @@ def add_one_exit(s: Server, path: str) -> None:
     """Copy one local config to the server and add it there as its jump;
     the uploaded copy is deleted once imported."""
     file = os.path.basename(path)
+    # Every push, from jump-add or client add's offer: the folder and file hold private keys.
+    os.chmod(os.path.dirname(path), 0o700)
     os.chmod(path, 0o600)
     link = link_of(path)
     if link:
@@ -184,7 +186,6 @@ def do_exit_add(s: Server, args: List[str]) -> int:
     files = tunnels.staged(s.name)
     if not files:
         raise WgtError(f"no configs in {tunnels.shown(src)} (save WireGuard configs there, any name ending .conf)")
-    os.chmod(src, 0o700)
     sel = args[0] if args else ""
     if not sel:
         if not ui.have_tty():
