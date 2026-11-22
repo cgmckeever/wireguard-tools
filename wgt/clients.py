@@ -699,6 +699,14 @@ def cmd_device_rename(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"no device '{old}'{hint}")
     if ctx.snap.device_clients(new) and not ctx.args.force:
         raise WgtError(f"a device '{new}' already exists (if a rename to it stopped half way, finish it with --force)")
+    # --force can't tell a stopped rename from another device by its name alone. A stopped
+    # one never left a config of <old> beside its new name (each moves in one write), and
+    # <new> gets its number only in the last write, while <old> still has configs.
+    targets = [store.config_name(*store.split_name(c.name)[:2], new) for c in configs]
+    taken = [t for t in targets if ctx.snap.client(t)]
+    if taken or (configs and ctx.snap.device_clients(new) and ctx.snap.device_number(new) is not None):
+        why = f"configs {' '.join(taken)} already exist" if taken else "it has its own static address"
+        raise WgtError(f"'{new}' is another device, not a rename that stopped half way ({why}): nothing renamed")
     # Checked first: a rename stopped half way couldn't be re-run ('<new>' would exist).
     missing = [c.name for c in configs if store.read_text(client_conf(ctx, c.name)) is None]
     if missing:
