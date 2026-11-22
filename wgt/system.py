@@ -359,7 +359,7 @@ class Files:
             return
         base = os.path.basename(path)
         copies = sorted((os.path.join(copies_dir, n) for n in os.listdir(copies_dir) if is_copy_of(n, base)),
-                        key=lambda p: copy_order(os.path.basename(p), base))   # newest last
+                        key=lambda p: (copy_order(os.path.basename(p), base), p))   # newest last; ties by name
         kept = 0
         for copy in reversed(copies):
             if copy == orig:
