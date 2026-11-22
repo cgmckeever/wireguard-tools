@@ -552,7 +552,7 @@ def test_a_new_port_closes_the_old_one_in_ufw(world, monkeypatch):
 @pytest.mark.parametrize("legacy", [False, True])
 def test_a_new_port_stopped_anywhere_still_closes_the_old_one(tmp_path, monkeypatch, legacy):
     """Setup saves the new WG_PORT before it opens ufw: a re-run must still close the old port,
-    also on a server set up before UFW_PORT was recorded (<legacy>)."""
+    also on a server set up before UFW_PORTS was recorded (<legacy>)."""
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
     monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
 
@@ -561,7 +561,7 @@ def test_a_new_port_stopped_anywhere_still_closes_the_old_one(tmp_path, monkeypa
         w.kernel.ufw_active = True
         w.run(["setup"])
         if legacy:
-            system.write_private(w.paths.state, store.state_unset(store.read_text(w.paths.state), "UFW_PORT"))
+            system.write_private(w.paths.state, store.state_unset(store.read_text(w.paths.state), "UFW_PORTS"))
         return w
     counting = ready("count")
     counting.run(["setup", "--port", "51999"])
@@ -584,12 +584,60 @@ def test_only_setup_closes_the_old_port(world, monkeypatch):
     world.kernel.ufw_active = True
     world.run(["setup"])
     text = store.state_set(store.read_text(world.paths.state), "WG_PORT", "51999")
-    system.write_private(world.paths.state, text)   # saved, not yet moved: UFW_PORT is still 51820
+    system.write_private(world.paths.state, text)   # saved, not yet moved: wg0 is still on 51820
     world.run(world.words(["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"]))
     assert "51820/udp" in world.kernel.ufw
-    assert store.state_get(store.load(world.paths).state, "UFW_PORT") == "51820"
+    assert store.state_get(store.load(world.paths).state, "UFW_PORTS") == "51820 51999"
     world.run(["setup"])
     assert "51999/udp" in world.kernel.ufw and "51820/udp" not in world.kernel.ufw
+
+
+def test_going_back_to_the_old_port_closes_the_one_a_jump_opened(world, monkeypatch):
+    """After a setup that stopped once it saved --port, a jump add opens the new port too:
+    setup back on the old port must close it, or no rollback ever would."""
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
+    world.kernel.ufw_active = True
+    world.run(["setup"])
+    text = store.state_set(store.read_text(world.paths.state), "WG_PORT", "51999")
+    system.write_private(world.paths.state, text)
+    world.run(world.words(["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"]))
+    assert "51999/udp" in world.kernel.ufw
+    world.run(["setup", "--port", "51820"])
+    assert "51820/udp" in world.kernel.ufw and "51999/udp" not in world.kernel.ufw
+    world.run(["rollback"])
+    assert world.kernel.ufw == set()
+
+
+def test_two_stopped_port_changes_then_setup_closes_every_port_jumps_opened(world, monkeypatch):
+    """Each stopped --port leaves a port a jump add opens: setup closes all of them, not just the last."""
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
+    world.kernel.ufw_active = True
+    world.run(["setup"])
+    for port, code in (("51999", "lon-gb"), ("52000", "ber-de")):
+        text = store.state_set(store.read_text(world.paths.state), "WG_PORT", port)
+        system.write_private(world.paths.state, text)   # a setup --port that stopped after saving
+        world.run(world.words(["jump", "add", code, "JUMPFILE", "--label", code]))
+    assert {"51820/udp", "51999/udp", "52000/udp"} <= world.kernel.ufw
+    world.run(["setup", "--port", "51820"])
+    assert "51820/udp" in world.kernel.ufw and not {"51999/udp", "52000/udp"} & world.kernel.ufw
+    world.run(["rollback"])
+    assert world.kernel.ufw == set()
+
+
+def test_a_first_setup_stopped_anywhere_leaves_nothing_open_after_rollback(tmp_path, monkeypatch):
+    """UFW and the port are recorded before ufw opens it: rollback closes what a stopped setup opened."""
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
+    monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
+    counting = World(tmp_path / "count", monkeypatch)
+    counting.kernel.ufw_active = True
+    counting.run(["setup"])
+    for die_at in range(1, counting.host.steps + 1):
+        w = World(tmp_path / str(die_at), monkeypatch)
+        w.kernel.ufw_active = True
+        with pytest.raises(Died):
+            w.run(["setup"], die_at=die_at)
+        w.run(["rollback"])
+        assert w.kernel.ufw == set(), f"killed at step {die_at}"
 
 
 def test_a_new_server_name_reaches_every_config_header(world):

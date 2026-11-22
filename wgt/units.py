@@ -101,50 +101,57 @@ def write_watchdog(ctx: Ctx, name: str) -> None:
 
 def open_firewall(ctx: Ctx, outs: List[str], move_port: bool = False) -> None:
     """ufw (if active): allow the WireGuard port and wg0 -> every way out. <move_port>:
-    setup, which starts wg0 on the new port, also closes the one ufw was opened for;
-    anyone else leaves it (after a setup that stopped, wg0 may still listen there)."""
+    setup, which starts wg0 on the new port, also closes every other port it opened
+    (opened_ports); anyone else leaves them (after a setup that stopped, wg0 may still
+    listen on one)."""
     st = ctx.runner.query(["ufw", "status"])
     if "Status: active" not in st:
         ctx.out.info(f"ufw not active; {ctx.cfg.WG_IF}'s PostUp opens udp/{ctx.cfg.WG_PORT} in iptables INPUT")
         return
-    wg = ctx.cfg.WG_IF
-    # A new --port: close the one ufw was opened for. UFW_PORT records it, since the
-    # saved WG_PORT is already the new one if a setup stopped after saving it.
-    old_port = opened_port(ctx) if move_port else ""
-    if old_port == ctx.cfg.WG_PORT:
-        old_port = ""
-    closing, reopen = (f" (closing the old {old_port}/udp)", f"; ufw allow {old_port}/udp") if old_port else ("", "")
-    ctx.runner.step(f"Open ufw: allow {ctx.cfg.WG_PORT}/udp{closing} and routing {wg} -> {' '.join(outs)}",
-                    f"ufw delete allow {ctx.cfg.WG_PORT}/udp{reopen}; ufw route delete allow in on {wg} out on <each>")
-    ctx.runner.run(["ufw", "allow", f"{ctx.cfg.WG_PORT}/udp", "comment", "wireguard-tools"])
-    if old_port:
-        ctx.runner.run(["ufw", "delete", "allow", f"{old_port}/udp"], check=False)
-    for o in outs:
-        ctx.runner.run(["ufw", "route", "allow", "in", "on", wg, "out", "on", o, "comment", "wireguard-tools"])
+    wg, port = ctx.cfg.WG_IF, ctx.cfg.WG_PORT
+    before = opened_ports(ctx)
+    old = [p for p in before if p != port] if move_port else []
+    closing = f" (closing the old {', '.join(p + '/udp' for p in old)})" if old else ""
+    reopen = "".join(f"; ufw allow {p}/udp" for p in old)
+    ctx.runner.step(f"Open ufw: allow {port}/udp{closing} and routing {wg} -> {' '.join(outs)}",
+                    f"ufw delete allow {port}/udp{reopen}; ufw route delete allow in on {wg} out on <each>")
+    # Recorded before opened: wherever this stops, the record covers what's open.
+    _record_ports(ctx, before + [port])
     if store.state_get(ctx.snap.state, "UFW") != "1":
         ops.state_set(ctx, "UFW", "1")
-    recorded = store.state_get(ctx.snap.state, "UFW_PORT")
-    # Not setup: a recorded port setup hasn't moved from yet stays, for it to close.
-    if recorded != ctx.cfg.WG_PORT and (move_port or not recorded):
-        ops.state_set(ctx, "UFW_PORT", ctx.cfg.WG_PORT)
+    ctx.runner.run(["ufw", "allow", f"{port}/udp", "comment", "wireguard-tools"])
+    for p in old:
+        ctx.runner.run(["ufw", "delete", "allow", f"{p}/udp"], check=False)
+    for o in outs:
+        ctx.runner.run(["ufw", "route", "allow", "in", "on", wg, "out", "on", o, "comment", "wireguard-tools"])
+    if old:
+        _record_ports(ctx, [port])
 
 
-def opened_port(ctx: Ctx) -> str:
-    """The port ufw allows for us ("" if none): UFW_PORT, or on a server set up
+def opened_ports(ctx: Ctx) -> List[str]:
+    """The ports ufw may allow for us: UFW_PORTS, each recorded before it was opened,
+    so after a stop anywhere it covers every one that's open. On a server set up
     before it was recorded, the saved WG_PORT."""
     if store.state_get(ctx.snap.state, "UFW") != "1":
-        return ""
-    return store.state_get(ctx.snap.state, "UFW_PORT") or ctx.cfg.saved.get("WG_PORT", "")
-
-
-def remember_opened_port(ctx: Ctx) -> None:
-    """Before setup saves a new WG_PORT: on a server set up before UFW_PORT was
-    recorded, record the port ufw was opened for (the saved WG_PORT), so a setup
-    that stops after saving still closes it on its re-run (or rollback)."""
+        return []
+    recorded = store.state_get(ctx.snap.state, "UFW_PORTS").split()
     saved = ctx.cfg.saved.get("WG_PORT", "")
-    if store.state_get(ctx.snap.state, "UFW") == "1" and not store.state_get(ctx.snap.state, "UFW_PORT") \
-            and saved and saved != ctx.cfg.WG_PORT:
-        ops.state_set(ctx, "UFW_PORT", saved)
+    return recorded or ([saved] if saved else [])
+
+
+def _record_ports(ctx: Ctx, ports: List[str]) -> None:
+    value = " ".join(sorted(set(ports), key=lambda p: (len(p), p)))   # numeric order
+    if store.state_get(ctx.snap.state, "UFW_PORTS") != value:
+        ops.state_set(ctx, "UFW_PORTS", value)
+
+
+def remember_opened_ports(ctx: Ctx) -> None:
+    """Before setup saves a new WG_PORT: on a server from before UFW_PORTS, record
+    the port opened_ports falls back to (the saved WG_PORT), which saving replaces."""
+    if not store.state_get(ctx.snap.state, "UFW_PORTS"):
+        ports = opened_ports(ctx)
+        if ports:
+            _record_ports(ctx, ports)
 
 
 def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:
@@ -154,7 +161,7 @@ def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:
     if store.state_get(ctx.snap.state, "UFW") != "1" or not shutil.which("ufw"):
         return
     if port:
-        for p in sorted({ctx.cfg.WG_PORT, opened_port(ctx)} - {""}):
+        for p in sorted(set(opened_ports(ctx)) | {ctx.cfg.WG_PORT}, key=lambda p: (len(p), p)):
             ctx.runner.run(["ufw", "delete", "allow", f"{p}/udp"], check=False)
     for o in outs:
         ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", o], check=False)

@@ -468,7 +468,7 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
     # Late: until here a failure (WARP, a checksum) leaves the running wg0 and the
     # databases agreeing about the subnet and settings.
     renumber_clients(ctx)
-    units.remember_opened_port(ctx)   # before save_config replaces the saved WG_PORT
+    units.remember_opened_ports(ctx)   # before save_config replaces the saved WG_PORT
     save_config(ctx)
     sync_client_configs(ctx, old_name)
     was_up = ops.wg_up(ctx)
@@ -567,7 +567,7 @@ def _remove_rules(ctx: Ctx) -> None:
     run_down_hooks(ctx)
     if store.state_get(ctx.snap.state, "UFW") == "1":
         units.close_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits), port=True)
-        ops.state_unset(ctx, "UFW_PORT")
+        ops.state_unset(ctx, "UFW_PORTS")
         ops.state_unset(ctx, "UFW")
 
 
