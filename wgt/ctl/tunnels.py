@@ -41,7 +41,8 @@ MARK = "\x1e"   # starts each file's name line in a fetch (never in a config)
 
 
 def root() -> str:
-    return os.path.expanduser(os.environ.get("WG_TUNNELS") or "~/wg-tunnels")
+    """$WG_TUNNELS as written (as wireguard-tunnels reads it), else ~/wg-tunnels."""
+    return os.environ.get("WG_TUNNELS") or os.path.expanduser("~/wg-tunnels")
 
 
 def carriers_dir(server: str) -> str:

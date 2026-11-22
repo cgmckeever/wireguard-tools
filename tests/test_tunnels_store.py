@@ -191,6 +191,14 @@ def test_a_server_named_warp_never_writes_the_sweeps_warp_alone_name(store, ther
     assert (d / "warp.iphone.conf").read_text() == WARP_ALONE if there else not d.exists()
 
 
+def test_the_store_is_wg_tunnels_as_written(monkeypatch):
+    # wireguard-tunnels (store.root, tunnel.sh) doesn't expand a "~" in it: neither do we
+    monkeypatch.setenv("WG_TUNNELS", "~/elsewhere")
+    assert tunnels.root() == "~/elsewhere"
+    monkeypatch.delenv("WG_TUNNELS")
+    assert tunnels.root() == os.path.expanduser("~/wg-tunnels")
+
+
 def test_a_renamed_devices_copy_stays_put_with_a_note(store):
     put(store, "phone", "dengar.warp.phone.conf", conf("warp.phone", "K1"))
     [a] = run(store, {"warp.iphone": conf("warp.iphone", "K1")})
