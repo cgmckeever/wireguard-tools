@@ -480,7 +480,7 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
             if restarting:
                 stop_before_rewrite(ctx)
             changed = ops.write_wg_conf(ctx) or keys_changed
-            units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
+            units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits), move_port=True)
         finally:
             if restarting and ctx.runner.dry_run:
                 ctx.out.info(f"[dry-run] would then start wg-quick@{ctx.cfg.WG_IF} with the new config")

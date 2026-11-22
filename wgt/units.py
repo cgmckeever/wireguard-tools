@@ -99,8 +99,10 @@ def write_watchdog(ctx: Ctx, name: str) -> None:
     write_timer(ctx, w.name, w.step_what.format(warp_if=ctx.cfg.WARP_IF), *_watchdog_units(ctx, w))
 
 
-def open_firewall(ctx: Ctx, outs: List[str]) -> None:
-    """ufw (if active): allow the WireGuard port and wg0 -> every way out."""
+def open_firewall(ctx: Ctx, outs: List[str], move_port: bool = False) -> None:
+    """ufw (if active): allow the WireGuard port and wg0 -> every way out. <move_port>:
+    setup, which starts wg0 on the new port, also closes the one ufw was opened for;
+    anyone else leaves it (after a setup that stopped, wg0 may still listen there)."""
     st = ctx.runner.query(["ufw", "status"])
     if "Status: active" not in st:
         ctx.out.info(f"ufw not active; {ctx.cfg.WG_IF}'s PostUp opens udp/{ctx.cfg.WG_PORT} in iptables INPUT")
@@ -108,7 +110,7 @@ def open_firewall(ctx: Ctx, outs: List[str]) -> None:
     wg = ctx.cfg.WG_IF
     # A new --port: close the one ufw was opened for. UFW_PORT records it, since the
     # saved WG_PORT is already the new one if a setup stopped after saving it.
-    old_port = opened_port(ctx)
+    old_port = opened_port(ctx) if move_port else ""
     if old_port == ctx.cfg.WG_PORT:
         old_port = ""
     closing, reopen = (f" (closing the old {old_port}/udp)", f"; ufw allow {old_port}/udp") if old_port else ("", "")
@@ -121,7 +123,9 @@ def open_firewall(ctx: Ctx, outs: List[str]) -> None:
         ctx.runner.run(["ufw", "route", "allow", "in", "on", wg, "out", "on", o, "comment", "wireguard-tools"])
     if store.state_get(ctx.snap.state, "UFW") != "1":
         ops.state_set(ctx, "UFW", "1")
-    if store.state_get(ctx.snap.state, "UFW_PORT") != ctx.cfg.WG_PORT:
+    recorded = store.state_get(ctx.snap.state, "UFW_PORT")
+    # Not setup: a recorded port setup hasn't moved from yet stays, for it to close.
+    if recorded != ctx.cfg.WG_PORT and (move_port or not recorded):
         ops.state_set(ctx, "UFW_PORT", ctx.cfg.WG_PORT)
 
 

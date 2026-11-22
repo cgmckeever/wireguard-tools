@@ -427,7 +427,7 @@ def test_setup_brings_wg0_back_if_the_firewall_step_fails(world, monkeypatch):
     with open(conf, "w") as f:
         f.write(text.replace("ListenPort", "MTU = 1\nListenPort"))
 
-    def broken(ctx, outs):
+    def broken(ctx, outs, **kw):
         raise OSError("ufw broke")
     monkeypatch.setattr(units, "open_firewall", broken)
     with pytest.raises(OSError):
@@ -575,6 +575,21 @@ def test_a_new_port_stopped_anywhere_still_closes_the_old_one(tmp_path, monkeypa
         assert "51820/udp" not in w.kernel.ufw, f"killed at step {die_at}"
         w.run(["rollback"])
         assert w.kernel.ufw == set(), f"killed at step {die_at}"
+
+
+def test_only_setup_closes_the_old_port(world, monkeypatch):
+    """A setup that stopped after saving --port leaves wg0 on the old port: a jump
+    added meanwhile mustn't close it in ufw (wg0's PostUp re-opens it for IPv4 only)."""
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
+    world.kernel.ufw_active = True
+    world.run(["setup"])
+    text = store.state_set(store.read_text(world.paths.state), "WG_PORT", "51999")
+    system.write_private(world.paths.state, text)   # saved, not yet moved: UFW_PORT is still 51820
+    world.run(world.words(["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"]))
+    assert "51820/udp" in world.kernel.ufw
+    assert store.state_get(store.load(world.paths).state, "UFW_PORT") == "51820"
+    world.run(["setup"])
+    assert "51999/udp" in world.kernel.ufw and "51820/udp" not in world.kernel.ufw
 
 
 def test_a_new_server_name_reaches_every_config_header(world):
