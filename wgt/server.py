@@ -570,12 +570,10 @@ def _remove_rules(ctx: Ctx) -> None:
     if store.state_get(ctx.snap.state, "UFW") == "1":
         left = units.close_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits), port=True)
         if left:
-            # As in open_firewall: only a port ufw closed leaves the record, so a later
-            # rollback or setup still closes the rest (--purge deletes the record, hence the warning).
-            ops.state_set(ctx, "UFW_PORTS", " ".join(left))
+            # close_firewall kept them in UFW_PORTS for a later rollback or setup
+            # (--purge deletes the record, hence the warning).
             ctx.out.warn(f"ufw didn't close {', '.join(p + '/udp' for p in left)} (ufw delete allow <port>/udp)")
         else:
-            ops.state_unset(ctx, "UFW_PORTS")
             ops.state_unset(ctx, "UFW")
 
 
