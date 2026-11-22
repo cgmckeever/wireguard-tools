@@ -85,9 +85,14 @@ def free_bak(path: str, when: float) -> str:
 
 
 def copy_order(name: str, base: str) -> Tuple[str, int]:
-    """A change copy's place by age: its timestamp, then its number within that second."""
-    stamp, _, n = name[len(base) + 1: -len(".bak")].partition(".")
-    return stamp, int(n) if store.is_uint(n) else 0
+    """A change copy's place by age: its timestamp, then its number within that second.
+    An older wgt added its pid once more for each copy that second (.<pid>.bak, then
+    .<pid>.<pid>.bak): each added one counts one more."""
+    stamp, _, rest = name[len(base) + 1: -len(".bak")].partition(".")
+    nums = rest.split(".")
+    if not all(store.is_uint(n) for n in nums):
+        return stamp, 0
+    return stamp, int(nums[0]) + len(nums) - 1
 
 
 def is_copy_of(name: str, base: str) -> bool:

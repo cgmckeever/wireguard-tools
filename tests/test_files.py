@@ -89,6 +89,13 @@ def test_copy_order_reads_old_pid_names_too():
     assert sorted(names, key=lambda n: copy_order(n, "c.conf")) == [names[2], names[1], names[0]]
 
 
+def test_copy_order_reads_an_old_pid_chain_as_newer():
+    # an older wgt's third copy within a second was .<pid>.<pid>.bak
+    names = ["c.conf.20260101-000000.4321.4321.bak", "c.conf.20260101-000000.4321.bak",
+             "c.conf.20260101-000000.bak"]
+    assert sorted(names, key=lambda n: (copy_order(n, "c.conf"), n)) == [names[2], names[1], names[0]]
+
+
 def test_dry_run_hides_secret_files(files, capsys):
     f = files(dry_run=True)
     psk = os.path.join(f.paths.psk_dir, "phone.psk")
