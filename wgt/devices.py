@@ -326,7 +326,9 @@ def cmd_group(ctx: Ctx, words: List[str]) -> None:
     device, wanted = words[0], store.parse_groups(words[1])
     number = _for_groups(ctx, device)
     have = ctx.snap.device_groups(device)
-    ctx.runner.step(f"Device '{device}': add to {','.join(wanted)}", f"wgt device ungroup {device} {words[1]}")
+    added = [g for g in wanted if g not in have]   # the undo leaves the ones it was already in
+    ctx.runner.step(f"Device '{device}': add to {','.join(wanted)}",
+                    f"wgt device ungroup {device} {','.join(added)}" if added else "nothing to undo")
     ops.set_device(ctx, device, number, tuple(dict.fromkeys(have + wanted)))
     apply_now(ctx)
 
