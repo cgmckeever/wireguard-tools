@@ -124,7 +124,9 @@ def rename_everywhere(args: List[str]) -> int:
                        "--force and re-run it later to finish")
     clash = [name for name, devices in seen.items() if old in devices and new in devices]
     if clash:
-        raise WgtError(f"'{new}' already exists next to '{old}' on {', '.join(clash)}: nothing renamed")
+        # A rename that stopped half way there looks the same; only that server can tell and finish it.
+        raise WgtError(f"'{new}' already exists next to '{old}' on {', '.join(clash)}: nothing renamed (if a "
+                       f"rename stopped half way there: wgt-ctl {clash[0]} device rename {old} {new} --force)")
     # '<new>' elsewhere is an earlier rename being finished only if it has this device's number.
     numbers = {name: {d[name] for d in seen.values() if d.get(name) is not None} for name in (old, new)}
     if numbers[old] and numbers[new] and numbers[old] != numbers[new]:

@@ -693,7 +693,10 @@ def cmd_device_rename(ctx: Ctx, words: List[str]) -> None:
     configs = ctx.snap.device_clients(old)
     # --force finishes one that stopped half way: both names have configs, or only the new.
     if not configs and not (ctx.args.force and ctx.snap.device_clients(new)):
-        raise WgtError(f"no device '{old}' (see: wgt client list)")
+        # Every config moved but not the number yet looks just like this: say how to finish.
+        hint = f"; if a rename to '{new}' stopped half way, finish it with --force" if ctx.snap.device_clients(new) \
+            else " (see: wgt client list)"
+        raise WgtError(f"no device '{old}'{hint}")
     if ctx.snap.device_clients(new) and not ctx.args.force:
         raise WgtError(f"a device '{new}' already exists (if a rename to it stopped half way, finish it with --force)")
     # Checked first: a rename stopped half way couldn't be re-run ('<new>' would exist).
