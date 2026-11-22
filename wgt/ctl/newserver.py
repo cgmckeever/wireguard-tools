@@ -51,6 +51,8 @@ def cmd_init(argv: List[str]) -> None:
                        f"wgt-ctl init --address {address} "
                        f"--name {name} --user {opts['--user']} --branch {opts['--branch']}")
     record(name, target)
+    # Setup rewrote any configs a re-run found (a machine kept its clients): copies follow.
+    tunnels.after(remote.Server(name, target), "setup", setup_args)
     out.info(f"next: wgt-ctl {name} client add <device>   (or add jumps: wgt-ctl {name} jump-add)")
 
 
@@ -139,6 +141,7 @@ def _adopt(name: str, saved: str, target: str) -> None:
         out.info(f"recording it as '{saved}' (its saved name); rename it with: wgt-ctl {saved} setup --name {name}")
         _refuse_listed(saved)
     record(saved, target)
+    tunnels.after(remote.Server(saved, target), "setup", [])   # its clients' copies, here too
     out.info(f"update it to this version with: wgt-ctl {saved} pull")
 
 

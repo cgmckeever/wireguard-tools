@@ -484,10 +484,10 @@ def test_move_enter_keeps_the_old_machine(mover, monkeypatch):
 @pytest.fixture
 def initing(local, monkeypatch):
     """cmd_init with nothing remote; <probe> is what the server says, <setup_rc> how setup ends."""
-    state = {"probe": {}, "setup_rc": 0, "installed": False, "setups": 0}
+    state = {"probe": {}, "setup_rc": 0, "installed": False, "setups": 0, "delivered": []}
 
     def fake_ssh(target, command, **kw):
-        state["setups"] += 1
+        state["setups"] += " setup " in command
         return state["setup_rc"], ""
 
     monkeypatch.setattr(newserver, "login", lambda target: None)
@@ -495,6 +495,7 @@ def initing(local, monkeypatch):
     monkeypatch.setattr(newserver, "install_checkout", lambda target, branch: state.update(installed=True))
     monkeypatch.setattr(newserver, "fleet_subnets", list)
     monkeypatch.setattr(remote, "ssh", fake_ssh)
+    monkeypatch.setattr(tunnels, "deliver", lambda s: state["delivered"].append((s.name, s.target)))
     return state
 
 
@@ -506,6 +507,7 @@ def test_init_adopts_a_finished_server(initing):
     newserver.cmd_init(INIT)
     assert remote.find("old").target == "root@9.9.9.9"
     assert not initing["installed"] and not initing["setups"]
+    assert initing["delivered"] == [("old", "root@9.9.9.9")]   # its clients' copies
 
 
 @pytest.mark.parametrize("probe", [{"saved": "newbie", "checkout": "1"}, {"checkout": "1"}])
@@ -514,6 +516,7 @@ def test_init_finishes_an_unfinished_setup(initing, probe):
     newserver.cmd_init(INIT)
     assert initing["installed"] and initing["setups"] == 1
     assert remote.find("newbie").target == "root@9.9.9.9"
+    assert initing["delivered"] == [("newbie", "root@9.9.9.9")]   # a re-run may have kept clients
 
 
 def test_init_refuses_a_listed_name_in_another_case(initing):
@@ -528,6 +531,7 @@ def test_init_failed_setup_stays_off_the_list(initing):
     with pytest.raises(WgtError, match="re-run"):
         newserver.cmd_init(INIT)
     assert all(s.name != "newbie" for s in remote.servers())
+    assert initing["delivered"] == []
 
 
 def test_ssh_passes_a_command_as_the_user_wrote_it(local, monkeypatch):
