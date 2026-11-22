@@ -76,6 +76,16 @@ def test_a_renamed_config_keeps_its_keys_so_its_copy_follows(store):
     assert path.read_text() == conf("warp.chi-us.iphone", "K1")
 
 
+@pytest.mark.parametrize("renamed", ["z.iphone", "0.iphone"])   # sorting after or before the new one
+def test_a_live_key_wins_over_a_header_whatever_the_order(store, renamed):
+    # a.iphone renamed (its key kept) and a new a.iphone added: the old copy is the renamed one's
+    path = put(store, "iphone", "dengar.a.iphone.conf", conf("a.iphone", "K1"))
+    actions = run(store, {renamed: conf(renamed, "K1"), "a.iphone": conf("a.iphone", "K2")})
+    assert ("update", "dengar.a.iphone.conf", renamed) in kinds(actions)
+    assert ("refuse", "dengar.a.iphone.conf", "a.iphone") in kinds(actions)
+    assert path.read_text() == conf(renamed, "K1")
+
+
 def test_a_rotated_config_is_matched_by_its_header(store):
     path = put(store, "iphone", "phone.conf", conf("warp.iphone", "OLD"))
     actions = run(store, {"warp.iphone": conf("warp.iphone", "NEW")})

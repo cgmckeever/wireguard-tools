@@ -165,6 +165,7 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
     """What to do to bring the local copies of <server>'s configs in line.
     issued: config name -> its text on the server; local: path -> text (devices/*/config/);
     complete: issued is everything the server has, so copies of configs it lacks retire."""
+    live_keys = {key_of(t) for t in issued.values()} - {""}
     by_key: Dict[str, str] = {}
     by_header: Dict[Tuple[str, str], str] = {}
     for path, text in local.items():
@@ -172,11 +173,12 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         if k:
             by_key.setdefault(k, path)
         h = header_of(text)
-        if h:
+        # A copy holding a live key is that config's (a rename keeps keys): the key
+        # match wins, whichever config the loop below reaches first.
+        if h and k not in live_keys:
             by_header.setdefault(h, path)
     actions = []
     claimed = set()
-    live_keys = {key_of(t) for t in issued.values()} - {""}
     for config in sorted(issued, key=store.device_key):
         text = issued[config]
         device = store.device_of(config)
