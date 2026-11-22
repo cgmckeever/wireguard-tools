@@ -117,6 +117,49 @@ def test_bak_files_are_not_copies(store):
         ("new", "dengar.warp.iphone.conf", "warp.iphone")]
 
 
+SWEPT = "[Peer]\nAllowedIPs = 162.159.192.1/32, 10.9.8.0/24\n"   # a warped carrier: WARP only
+PLAIN = "DNS = 1.1.1.1\n[Peer]\nAllowedIPs = 0.0.0.0/0, ::/0\n"
+
+
+def test_a_warped_carrier_next_to_the_plain_copy_is_untouched(store):
+    plain = put(store, "mbp-1", "dengar.chi-us.mbp-1.conf", conf("chi-us.mbp-1", "K1", body=PLAIN))
+    warped = put(store, "mbp-1", "warped.dengar.chi-us.mbp-1.conf", conf("chi-us.mbp-1", "K1", body=SWEPT))
+    new = conf("chi-us.mbp-1", "K1", body="MTU = 1280\n" + PLAIN)
+    assert kinds(run(store, {"chi-us.mbp-1": new})) == [
+        ("update", "dengar.chi-us.mbp-1.conf", "chi-us.mbp-1")]
+    assert plain.read_text() == new
+    assert warped.read_text() == conf("chi-us.mbp-1", "K1", body=SWEPT)
+
+
+def test_a_warped_carrier_alone_gets_a_plain_copy_beside_it(store):
+    warped = put(store, "mbp-1", "warped.dengar.chi-us.mbp-1.conf", conf("chi-us.mbp-1", "K1", body=SWEPT))
+    issued = conf("chi-us.mbp-1", "K1", body=PLAIN)
+    assert kinds(run(store, {"chi-us.mbp-1": issued})) == [
+        ("new", "dengar.chi-us.mbp-1.conf", "chi-us.mbp-1")]
+    assert (warped.parent / "dengar.chi-us.mbp-1.conf").read_text() == issued
+    assert warped.read_text() == conf("chi-us.mbp-1", "K1", body=SWEPT)
+
+
+def test_a_warped_carrier_is_untouched_by_a_server_that_sorts_after_it(store):
+    put(store, "mbp-1", "zuckuss.chi-us.mbp-1.conf", conf("chi-us.mbp-1", "K1", "zuckuss", PLAIN))
+    swept = conf("chi-us.mbp-1", "K1", "zuckuss", SWEPT)
+    warped = put(store, "mbp-1", "warped.zuckuss.chi-us.mbp-1.conf", swept)
+    issued = {"chi-us.mbp-1": conf("chi-us.mbp-1", "K1", "zuckuss", "MTU = 1280\n" + PLAIN)}
+    actions = tunnels.plan("zuckuss", issued, tunnels.local_files(tunnels.all_devices()), True)
+    tunnels.apply(actions)
+    assert kinds(actions) == [("update", "zuckuss.chi-us.mbp-1.conf", "chi-us.mbp-1")]
+    assert warped.read_text() == swept
+
+
+def test_a_rotate_neither_updates_nor_retires_a_warped_carrier(store):
+    # its header still names the config, and its old key is no longer live
+    warped = put(store, "mbp-1", "warped.dengar.chi-us.mbp-1.conf", conf("chi-us.mbp-1", "OLD", body=SWEPT))
+    assert kinds(run(store, {"chi-us.mbp-1": conf("chi-us.mbp-1", "NEW", body=PLAIN)})) == [
+        ("new", "dengar.chi-us.mbp-1.conf", "chi-us.mbp-1")]
+    assert warped.read_text() == conf("chi-us.mbp-1", "OLD", body=SWEPT)
+    assert sorted(os.listdir(warped.parent)) == ["dengar.chi-us.mbp-1.conf", "warped.dengar.chi-us.mbp-1.conf"]
+
+
 def test_a_renamed_devices_copy_stays_put_with_a_note(store):
     put(store, "phone", "dengar.warp.phone.conf", conf("warp.phone", "K1"))
     [a] = run(store, {"warp.iphone": conf("warp.iphone", "K1")})

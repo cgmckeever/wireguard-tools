@@ -14,7 +14,11 @@ config. A local file is the same config when it has the same private key
 <server>" line. A matched file keeps its name; a new one is <server>.<config>.conf.
 A file that would be overwritten but isn't a copy of that config is left alone.
 A copy whose config the server no longer has becomes a .bak, as does the old
-text of a copy that changes."""
+text of a copy that changes.
+
+warped.* files are wireguard-tunnels' own: a carrier it swept, which keeps the
+server config's key and header line but not its text. Delivery never matches,
+updates or retires one."""
 
 from __future__ import annotations
 
@@ -110,8 +114,11 @@ class Action:
     note: str = ""
 
 
+WARPED = "warped."   # wireguard-tunnels' prefix for a swept carrier
+
+
 def local_files(devices: List[str]) -> Dict[str, str]:
-    """Every *.conf in those devices' config/ folders: path -> text."""
+    """Every *.conf in those devices' config/ folders, warped.* aside: path -> text."""
     found = {}
     for device in devices:
         d = config_dir(device)
@@ -119,7 +126,7 @@ def local_files(devices: List[str]) -> Dict[str, str]:
             continue
         for f in sorted(os.listdir(d)):
             p = os.path.join(d, f)
-            if f.endswith(".conf") and os.path.isfile(p):
+            if f.endswith(".conf") and not f.startswith(WARPED) and os.path.isfile(p):
                 found[p] = store.read_text(p) or ""
     return found
 
