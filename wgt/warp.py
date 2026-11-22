@@ -73,7 +73,7 @@ def _published_sha256(fetch: Fetch, sums_url: str, name: str) -> str:
             fields = line.split()
             if len(fields) == 2 and fields[1].lstrip("*") == name:
                 return fields[0]
-    except OSError as e:
+    except (OSError, UnicodeDecodeError) as e:   # not text: unreadable too, not a traceback
         raise WgtError(f"cannot fetch wgcf's checksums ({sums_url}): {e}; set WGCF_SHA256 to pin one") from None
     return ""
 
