@@ -23,7 +23,10 @@ fi
 rc=0
 for target in "${targets[@]}"; do
     echo "==> $target"
-    tmp=$(ssh -n "$target" 'mktemp -d') || { echo "    unreachable"; rc=1; continue; }
+    tmp=$(ssh -n "$target" 'mktemp -d' | tail -n 1) || { echo "    unreachable"; rc=1; continue; }
+    # A login script may print first: mktemp's line is the last, and it goes unquoted
+    # into the commands below (rm -rf too), so it must be a plain path.
+    [[ $tmp =~ ^/[A-Za-z0-9._/-]+$ ]] || { echo "    no temp dir there (got: ${tmp:0:60})"; rc=1; continue; }
     if ! (cd "$here" && COPYFILE_DISABLE=1 tar --no-xattrs -cf - wgt bin templates 2>/dev/null) \
             | ssh "$target" "tar -xf - -C $tmp"; then
         echo "    upload failed"; rc=1; ssh -n "$target" "rm -rf $tmp"; continue
