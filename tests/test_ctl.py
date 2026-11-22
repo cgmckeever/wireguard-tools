@@ -216,6 +216,16 @@ def test_move_to_new_machine(mover):
     assert remote.find("dengar").target == "root@9.9.9.9"
 
 
+def test_move_interrupted_while_delivering_already_lists_the_new_machine(mover, monkeypatch):
+    # the old machine is down by then: a Ctrl-C in the delivery mustn't leave the list on it
+    def interrupted(s):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(tunnels, "deliver", interrupted)
+    with pytest.raises(KeyboardInterrupt):
+        rebuild.do_move(remote.find("dengar"), ["--to", "9.9.9.9", "--yes"])
+    assert remote.find("dengar").target == "root@9.9.9.9"
+
+
 def test_move_failed_restore_keeps_list(mover):
     calls, state = mover
     state["fail"] = "restore"

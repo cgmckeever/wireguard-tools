@@ -181,15 +181,17 @@ def do_move(s: Server, args: List[str]) -> int:
     tested = remote.ssh(new, f"{remote.DEF_WGT} test && {remote.DEF_WGT} tunnel test", tty=True)[0]
     if tested != 0:
         return _move_failed(s, in_place, archive, "tests failed")
-    # The restore rewrote its configs (a new machine's address, setup flags): copies
-    # follow, as after `wgt-ctl <server> restore`.
-    tunnels.after(Server(s.name, new, s.dir), "restore", [])
 
+    if not in_place:
+        remote.set_target(s.name, new)
+        out.log(f"6. {s.name} is now {new} in {remote.LIST}")
+    # The restore rewrote its configs (a new machine's address, setup flags): copies
+    # follow, as after `wgt-ctl <server> restore`. Only once the list points at the new
+    # machine: a delivery stopped part-way (Ctrl-C) mustn't leave it on the old one.
+    tunnels.after(Server(s.name, new, s.dir), "restore", [])
     if in_place:
         out.log(f"{s.name} rebuilt")
         return 0
-    remote.set_target(s.name, new)
-    out.log(f"6. {s.name} is now {new} in {remote.LIST}")
     out.info(f"the old machine ({s.target}) is down, its keys kept")
     # No by default: Enter, or a lost terminal, must not destroy the way back.
     # Its tests can't see a provider's firewall blocking the new machine's UDP port.
