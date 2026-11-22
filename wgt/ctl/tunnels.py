@@ -187,13 +187,15 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         if sweep_owned(os.path.basename(path), device):   # server "warp", config "<device>"
             actions.append(Action("refuse", path, config, note="wireguard-tunnels' own name (its sweep writes it)"))
             continue
+        # Claimed first: the name of another config's copy, new or already matched (a
+        # renamed config's copy keeps its name), is another of this server's, not a stranger's.
+        other = next((p for p in claimed if p.lower() == path.lower()), "")
+        if other:
+            case = "" if other == path else " (names differing only in case are one file on a Mac)"
+            actions.append(Action("refuse", path, config, note=f"also another of this server's configs{case}"))
+            continue
         if path.lower() in {p.lower() for p in local}:
             actions.append(Action("refuse", path, config, note=NOT_A_COPY))
-            continue
-        if path.lower() in {p.lower() for p in claimed}:   # another device whose name differs only in case
-            actions.append(Action("refuse", path, config,
-                                  note="also another of this server's configs (names differing only in case "
-                                       "are one file on a Mac)"))
             continue
         claimed.add(path)
         actions.append(Action("new", path, config, text))
