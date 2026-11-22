@@ -15,8 +15,8 @@ The other side's rules are in that repo's `wgtun/store.py` (`sweep_owned`).
   as is, starting `# wireguard-tools client: <config> on <server>` (`<server>`
   is the server's own SERVER_NAME from that line). Folders 0700, files 0600.
   Replaced text and copies the server no longer has become
-  `<file>.<YYYYmmdd-HHMMSS>.bak` (`<file>.<YYYYmmdd-HHMMSS>.<pid>.bak` for a
-  second one within that second). A file of that name that isn't a copy is
+  `<file>.<YYYYmmdd-HHMMSS>.bak` (`<file>.<YYYYmmdd-HHMMSS>.<n>.bak` for the
+  nth more within that second). A file of that name that isn't a copy is
   refused, never overwritten.
 - **Reads** `servers/<server>/carriers/*.conf` (jump-add). It also makes that
   folder (init, sync: how wireguard-tunnels knows the server exists), deletes

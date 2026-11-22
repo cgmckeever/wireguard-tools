@@ -12,7 +12,7 @@ from conftest import temp_paths
 from wgt import store
 from wgt.const import Paths
 from wgt.errors import WgtError
-from wgt.system import FakeRunner, Files, Out, is_copy_of
+from wgt.system import FakeRunner, Files, Out, copy_order, is_copy_of
 
 
 @pytest.fixture
@@ -59,16 +59,21 @@ def test_prune_keeps_original_and_five_newest(files):
 
 
 def test_prune_keeps_a_second_copy_within_the_same_second(files):
-    """<stamp>.<pid>.bak is newer than <stamp>.bak, though it sorts before it as a name."""
+    """<stamp>.<n>.bak counts up within a second, and sorts by number (.10 after .9)."""
     f = files()
     f.clock = lambda: 0
     p = f.paths.wg("c.conf")
     Path(p).write_text("0\n")
-    for i in range(1, 8):
+    for i in range(1, 14):
         f.write(p, 0o600, f"{i}\n")
     d = f.change_dir(p)
     kept = {Path(os.path.join(d, n)).read_text() for n in os.listdir(d) if is_copy_of(n, "c.conf")}
-    assert kept == {"0\n", "2\n", "3\n", "4\n", "5\n", "6\n"}   # the original and the five newest
+    assert kept == {"0\n", "8\n", "9\n", "10\n", "11\n", "12\n"}   # the original and the five newest
+
+
+def test_copy_order_reads_old_pid_names_too():
+    names = ["c.conf.20260101-000000.4321.bak", "c.conf.20260101-000000.bak", "c.conf.20251231-235959.bak"]
+    assert sorted(names, key=lambda n: copy_order(n, "c.conf")) == [names[2], names[1], names[0]]
 
 
 def test_dry_run_hides_secret_files(files, capsys):

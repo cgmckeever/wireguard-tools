@@ -64,13 +64,27 @@ def read_marker(path: str) -> int:
 
 
 def free_bak(path: str, when: float) -> str:
-    """<path>.<YYYYmmdd-HHMMSS>.bak (<when>, local time), plus .<pid> while that name
-    is taken (a second copy within the same second), so an earlier copy is never
-    overwritten. Sorted without the .bak, the later copy comes last (prune)."""
-    bak = f"{path}.{time.strftime('%Y%m%d-%H%M%S', time.localtime(when))}.bak"
-    while os.path.lexists(bak):   # a dangling link too: a copy would be written through it
-        bak = bak[: -len(".bak")] + f".{os.getpid() % 32768}.bak"
-    return bak
+    """<path>.<YYYYmmdd-HHMMSS>.bak (<when>, local time), or .<stamp>.<n>.bak for the
+    nth more within that second, so an earlier copy is never overwritten; copy_order
+    sorts them by age. (Servers set up earlier may also have .<stamp>.<pid>.bak.)"""
+    stem = f"{path}.{time.strftime('%Y%m%d-%H%M%S', time.localtime(when))}"
+    if not os.path.lexists(f"{stem}.bak"):   # a dangling link counts: a copy would be written through it
+        return f"{stem}.bak"
+    # Above every number used this second, not the first free one: prune may have
+    # removed a lower one, and a copy taking its number would sort as the oldest.
+    d, head = os.path.split(stem)
+    used = [copy_order(f, os.path.basename(path))[1] for f in os.listdir(d or ".")
+            if f.startswith(head + ".") and f.endswith(".bak")]
+    n = max(used, default=0) + 1
+    while os.path.lexists(f"{stem}.{n}.bak"):
+        n += 1
+    return f"{stem}.{n}.bak"
+
+
+def copy_order(name: str, base: str) -> Tuple[str, int]:
+    """A change copy's place by age: its timestamp, then its number within that second."""
+    stamp, _, n = name[len(base) + 1: -len(".bak")].partition(".")
+    return stamp, int(n) if n.isdigit() else 0
 
 
 def is_copy_of(name: str, base: str) -> bool:
@@ -341,10 +355,8 @@ class Files:
         if not os.path.isdir(copies_dir):
             return
         base = os.path.basename(path)
-        # Names end in a timestamp (plus .<pid> for a second copy within that second),
-        # then .bak: sorted without the .bak, newest is last.
         copies = sorted((os.path.join(copies_dir, n) for n in os.listdir(copies_dir) if is_copy_of(n, base)),
-                        key=lambda p: p[: -len(".bak")])
+                        key=lambda p: copy_order(os.path.basename(p), base))   # newest last
         kept = 0
         for copy in reversed(copies):
             if copy == orig:
