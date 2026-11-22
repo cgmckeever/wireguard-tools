@@ -42,8 +42,13 @@ MARK = "\x1e"   # starts each file's name line in a fetch (never in a config)
 
 
 def root() -> str:
-    """$WG_TUNNELS as written (as wireguard-tunnels reads it), else ~/wg-tunnels."""
-    return os.environ.get("WG_TUNNELS") or os.path.expanduser("~/wg-tunnels")
+    """$WG_TUNNELS as written (as wireguard-tunnels reads it), else ~/wg-tunnels. An
+    absolute path only: a relative one (or a "~" the shell didn't expand) would put
+    configs, private keys and all, under wherever wgt-ctl runs, a checkout say."""
+    path = os.environ.get("WG_TUNNELS") or os.path.expanduser("~/wg-tunnels")
+    if not os.path.isabs(path):
+        raise WgtError(f"WG_TUNNELS must be an absolute path, not '{path}'")
+    return path
 
 
 def carriers_dir(server: str) -> str:

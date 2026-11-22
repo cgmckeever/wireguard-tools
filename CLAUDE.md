@@ -8,7 +8,7 @@ promises to things outside it, and how to change it without breaking them.
 ## Contracts
 
 **The shared store with wireguard-tunnels**: `$WG_TUNNELS` as written (no `~`
-expansion, as there), else `~/wg-tunnels` (`wgt/ctl/tunnels.py`, `jumpfiles.py`; pinned by `tests/test_tunnels_store.py`).
+expansion, as there; absolute, or refused), else `~/wg-tunnels` (`wgt/ctl/tunnels.py`, `jumpfiles.py`; pinned by `tests/test_tunnels_store.py`).
 The other side's rules are in that repo's `wgtun/store.py` (`sweep_owned`).
 
 - **Writes** `devices/<device>/config/<server>.<config>.conf`, the server's file

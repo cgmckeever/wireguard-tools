@@ -299,10 +299,15 @@ def test_two_updates_in_one_second_keep_both_old_copies(store, monkeypatch):
                                                             conf("iphone", "K1", body="MTU = 1280\n")}
 
 
-def test_the_store_is_wg_tunnels_as_written(monkeypatch):
-    # wireguard-tunnels (store.root, tunnel.sh) doesn't expand a "~" in it: neither do we
-    monkeypatch.setenv("WG_TUNNELS", "~/elsewhere")
-    assert tunnels.root() == "~/elsewhere"
+def test_the_store_is_wg_tunnels_as_written_and_absolute(monkeypatch):
+    # wireguard-tunnels (store.root, tunnel.sh) doesn't expand a "~" in it: neither do we,
+    # and a path that isn't absolute is refused, not taken as one under the current folder
+    monkeypatch.setenv("WG_TUNNELS", "/srv/elsewhere")
+    assert tunnels.root() == "/srv/elsewhere"
+    for relative in ("~/elsewhere", "wg-tunnels", "./x"):
+        monkeypatch.setenv("WG_TUNNELS", relative)
+        with pytest.raises(WgtError, match="absolute"):
+            tunnels.root()
     monkeypatch.delenv("WG_TUNNELS")
     assert tunnels.root() == os.path.expanduser("~/wg-tunnels")
 

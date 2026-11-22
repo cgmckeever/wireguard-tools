@@ -725,7 +725,7 @@ directly on a server uses its own range and can reuse a freed number there.
 
 ### Configs on your machine
 
-`wgt-ctl` keeps WireGuard configs in `~/wg-tunnels` (or `$WG_TUNNELS`), the
+`wgt-ctl` keeps WireGuard configs in `~/wg-tunnels` (or `$WG_TUNNELS`, an absolute path), the
 folder [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels) uses
 for devices. It creates what it needs there, owner-only, the first time it writes;
 wireguard-tunnels isn't needed. It uses two kinds of folder and leaves the rest alone:
