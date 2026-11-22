@@ -205,7 +205,8 @@ def apply(actions: List[Action]) -> None:
         if a.kind in ("new", "update"):
             make_dir(os.path.dirname(a.path))
             if a.kind == "update":
-                os.replace(a.path, bak_path(a.path))
+                # A copy, not a move: if the write fails, the config is still where it was.
+                shutil.copy2(a.path, bak_path(a.path))
             remote.write_local(a.path, a.text)
         elif a.kind == "retire":
             os.replace(a.path, bak_path(a.path))

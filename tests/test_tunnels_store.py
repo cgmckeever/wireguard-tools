@@ -204,6 +204,17 @@ def test_a_name_that_differs_only_in_case_is_the_same_file_on_a_mac(store):
     assert mine.read_text() == "[Interface]\nPrivateKey = MINE\n"
 
 
+def test_an_update_whose_write_fails_leaves_the_config_in_place(store, monkeypatch):
+    path = put(store, "iphone", "dengar.iphone.conf", conf("iphone", "K1"))
+
+    def full(p, text, mode=0o600):
+        raise OSError("disk full")
+    monkeypatch.setattr(remote, "write_local", full)
+    with pytest.raises(OSError):
+        run(store, {"iphone": conf("iphone", "K1", body="MTU = 1280\n")})
+    assert path.read_text() == conf("iphone", "K1")
+
+
 def test_two_updates_in_one_second_keep_both_old_copies(store, monkeypatch):
     monkeypatch.setattr(tunnels.time, "strftime", lambda fmt: "20260101-000000")
     path = put(store, "iphone", "dengar.iphone.conf", conf("iphone", "K1"))
