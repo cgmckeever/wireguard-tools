@@ -109,10 +109,25 @@ def open_firewall(ctx: Ctx, outs: List[str]) -> None:
     ctx.runner.step(f"Open ufw: allow {ctx.cfg.WG_PORT}/udp and routing {wg} -> {' '.join(outs)}",
                     f"ufw delete allow {ctx.cfg.WG_PORT}/udp; ufw route delete allow in on {wg} out on <each>")
     ctx.runner.run(["ufw", "allow", f"{ctx.cfg.WG_PORT}/udp", "comment", "wireguard-tools"])
+    # A new --port: close the one ufw was opened for. UFW_PORT records it, since the
+    # saved WG_PORT is already the new one if a setup stopped after saving it.
+    old_port = opened_port(ctx)
+    if old_port and old_port != ctx.cfg.WG_PORT:
+        ctx.runner.run(["ufw", "delete", "allow", f"{old_port}/udp"], check=False)
     for o in outs:
         ctx.runner.run(["ufw", "route", "allow", "in", "on", wg, "out", "on", o, "comment", "wireguard-tools"])
     if store.state_get(ctx.snap.state, "UFW") != "1":
         ops.state_set(ctx, "UFW", "1")
+    if store.state_get(ctx.snap.state, "UFW_PORT") != ctx.cfg.WG_PORT:
+        ops.state_set(ctx, "UFW_PORT", ctx.cfg.WG_PORT)
+
+
+def opened_port(ctx: Ctx) -> str:
+    """The port ufw allows for us ("" if none): UFW_PORT, or on a server set up
+    before it was recorded, the saved WG_PORT."""
+    if store.state_get(ctx.snap.state, "UFW") != "1":
+        return ""
+    return store.state_get(ctx.snap.state, "UFW_PORT") or ctx.cfg.saved.get("WG_PORT", "")
 
 
 def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:
@@ -122,7 +137,8 @@ def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:
     if store.state_get(ctx.snap.state, "UFW") != "1" or not shutil.which("ufw"):
         return
     if port:
-        ctx.runner.run(["ufw", "delete", "allow", f"{ctx.cfg.WG_PORT}/udp"], check=False)
+        for p in sorted({ctx.cfg.WG_PORT, opened_port(ctx)} - {""}):
+            ctx.runner.run(["ufw", "delete", "allow", f"{p}/udp"], check=False)
     for o in outs:
         ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", o], check=False)
 

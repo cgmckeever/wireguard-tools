@@ -538,6 +538,41 @@ def test_ufw_follows_jumps_and_rollback(world, monkeypatch):
     assert not store.state_get(store.load(world.paths).state, "UFW")
 
 
+def test_a_new_port_closes_the_old_one_in_ufw(world, monkeypatch):
+    """Rollback only knows the current port: the old one must not stay open."""
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
+    world.kernel.ufw_active = True
+    world.run(["setup"])
+    world.run(["setup", "--port", "51999"])
+    assert "51999/udp" in world.kernel.ufw and "51820/udp" not in world.kernel.ufw
+    world.run(["rollback"])
+    assert world.kernel.ufw == set()
+
+
+def test_a_new_port_stopped_anywhere_still_closes_the_old_one(tmp_path, monkeypatch):
+    """Setup saves the new WG_PORT before it opens ufw: a re-run must still close the old port."""
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
+    monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
+
+    def ready(name):
+        w = World(tmp_path / name, monkeypatch)
+        w.kernel.ufw_active = True
+        w.run(["setup"])
+        return w
+    counting = ready("count")
+    counting.run(["setup", "--port", "51999"])
+    total = counting.host.steps
+    assert total > 0
+    for die_at in range(1, total + 1):
+        w = ready(str(die_at))
+        with pytest.raises(Died):
+            w.run(["setup", "--port", "51999"], die_at=die_at)
+        w.run(["setup", "--port", "51999"])
+        assert "51820/udp" not in w.kernel.ufw, f"killed at step {die_at}"
+        w.run(["rollback"])
+        assert w.kernel.ufw == set(), f"killed at step {die_at}"
+
+
 def test_the_jump_watchdog_runs_only_while_there_are_jumps(world):
     world.run(["setup"])
     timer = os.path.join(world.paths.systemd_dir, f"{EXIT_WATCHDOG}.timer")

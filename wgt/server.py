@@ -565,6 +565,7 @@ def _remove_rules(ctx: Ctx) -> None:
     run_down_hooks(ctx)
     if store.state_get(ctx.snap.state, "UFW") == "1":
         units.close_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits), port=True)
+        ops.state_unset(ctx, "UFW_PORT")
         ops.state_unset(ctx, "UFW")
 
 
