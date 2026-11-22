@@ -80,7 +80,7 @@ DESC="phone has a static number"; ok bash -c "bin/wgt device list --tsv | grep -
 DESC="group add"; ok W device group phone trial,server --yes >/dev/null 2>&1
 DESC="group shows"; ok bash -c "bin/wgt device list --tsv | grep -qE '^phone\s[0-9]+\strial,server'"
 sleep 20
-DESC="the watchdog lets it reach the server"; ok bash -c "iptables -S WGT-SERVER | grep -q ACCEPT"
+DESC="the watchdog lets it reach the server"; ok bash -c "iptables -S WGT-SERVER | grep -- '-s ' | grep -q ACCEPT"
 DESC="ungroup"; ok W device ungroup phone --yes >/dev/null 2>&1
 sleep 20
 DESC="isolated again"; ok bash -c "! iptables -S WGT-SERVER | grep -- '-s ' | grep -q ACCEPT"
