@@ -19,9 +19,13 @@ NOW = int(time.time())
 
 @pytest.fixture
 def make(make_ctx):
-    """A watchdog's Ctx: no command defaults, no IPv6; the runner answers <answers>."""
+    """A watchdog's Ctx: no command defaults, no IPv6; the runner answers <answers>.
+    "Now" is NOW, which the answers' handshake ages count from: on the real clock a
+    slow full run would age a "5s ago" handshake past WATCHDOG_STALE."""
     def build(answers):
-        return make_ctx(bare=True, has_ipv6=False, answers=answers)
+        ctx = make_ctx(bare=True, has_ipv6=False, answers=answers)
+        ctx.clock = lambda: NOW
+        return ctx
     return build
 
 
