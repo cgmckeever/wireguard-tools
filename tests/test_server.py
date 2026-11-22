@@ -86,6 +86,17 @@ def test_force_keeps_server_keys(make_ctx):
     assert cli.parse(["setup", "--new-server-keys"]).new_server_keys
 
 
+def test_a_missing_server_pub_comes_from_the_key_wg0_runs(make_ctx):
+    """Not a new keypair: that would stop every config, unasked with --yes."""
+    ctx = make_ctx(answers={"wg pubkey": (0, "DERIVEDPUB=\n")})
+    Path(ctx.paths.server_key).write_text("SERVERKEY=\n")
+    os.remove(ctx.paths.server_pub)
+    assert srv.server_keys_due(ctx) is False
+    assert Path(ctx.paths.server_key).read_text() == "SERVERKEY=\n"
+    assert Path(ctx.paths.server_pub).read_text() == "DERIVEDPUB=\n"
+    assert "wg genkey" not in ctx.runner.calls
+
+
 class WgcfRunner(FakeRunner):
     """FakeRunner that plays wgcf: `register` writes an account, `generate` a
     profile (the fixture's), as the real tool does in its working directory."""

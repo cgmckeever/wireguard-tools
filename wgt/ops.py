@@ -112,9 +112,7 @@ def require_setup(ctx: Ctx) -> None:
 def require_server(ctx: Ctx) -> None:
     """For commands that write client configs: setup ran and the server's keys
     and wg0.conf exist. A dry run only warns, to show what would happen."""
-    pub = ctx.paths.server_pub
-    have_pub = os.path.isfile(pub) and os.path.getsize(pub) > 0
-    if is_set_up(ctx) and os.path.isfile(ctx.cfg.wg_conf) and have_pub:
+    if is_set_up(ctx) and os.path.isfile(ctx.cfg.wg_conf) and store.is_nonempty(ctx.paths.server_pub):
         return
     if ctx.runner.dry_run:
         ctx.out.warn("server not set up yet; showing what would happen")

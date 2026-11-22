@@ -13,6 +13,7 @@ Reading is pure; writes return the new text, and system.Files writes it."""
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Tuple
@@ -43,6 +44,11 @@ def read_text(path: str) -> Optional[str]:
         return None
     except OSError as e:
         raise WgtError(f"cannot read {path}: {e.strerror}") from None
+
+
+def is_nonempty(path: str) -> bool:
+    """A file with something in it (a key file counts only then)."""
+    return os.path.isfile(path) and os.path.getsize(path) > 0
 
 
 def entries(text: Optional[str]) -> List[str]:

@@ -277,17 +277,29 @@ def record_baseline(ctx: Ctx) -> None:
 
 
 def _have_server_key(ctx: Ctx) -> bool:
-    return os.path.isfile(ctx.paths.server_key) and os.path.getsize(ctx.paths.server_key) > 0
+    return store.is_nonempty(ctx.paths.server_key)
+
+
+def _public_key(ctx: Ctx, key: str) -> str:
+    """The public half of a private key (given on stdin, never on the command line)."""
+    pub = ctx.runner.query(["wg", "pubkey"], input=key + "\n").strip() if key else ""
+    if not pub:
+        raise WgtError("could not generate the server keys")
+    return pub
 
 
 def server_keys_due(ctx: Ctx) -> bool:
     """New server keys are to be made: there are none, or --new-server-keys
     regenerates them (asked: every client then has to be rotated). Nothing is
-    written here: write_server_keys does that once a restart of a running wg0
-    is agreed (restart_needed), so a no keeps the key wg0 runs."""
+    written here, but a missing server.pub (it follows from the private key wg0
+    runs): write_server_keys does that once a restart of a running wg0 is agreed
+    (restart_needed), so a no keeps the key wg0 runs."""
     p = ctx.paths
-    have = all(os.path.isfile(f) and os.path.getsize(f) > 0 for f in (p.server_key, p.server_pub))
-    if have and not ctx.args.new_server_keys:
+    if _have_server_key(ctx) and not ctx.args.new_server_keys:
+        if not store.is_nonempty(p.server_pub):
+            ctx.runner.step(f"Write {p.server_pub} from {p.server_key} (it was missing)", f"rm {p.server_pub}")
+            if not ctx.runner.dry_run:
+                write_private(p.server_pub, _public_key(ctx, (store.read_text(p.server_key) or "").strip()) + "\n")
         ctx.out.info("server keys present")
         return False
     if _have_server_key(ctx):
@@ -311,9 +323,7 @@ def write_server_keys(ctx: Ctx) -> None:
     if ctx.runner.dry_run:
         return
     key = ctx.runner.query(["wg", "genkey"]).strip()
-    pub = ctx.runner.query(["wg", "pubkey"], input=key + "\n").strip()
-    if not key or not pub:
-        raise WgtError("could not generate the server keys")
+    pub = _public_key(ctx, key)
     write_private(p.server_key, key + "\n")
     write_private(p.server_pub, pub + "\n")
 
