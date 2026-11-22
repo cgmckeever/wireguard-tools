@@ -22,7 +22,8 @@ The other side's rules are in that repo's `wgtun/store.py` (`sweep_owned`).
   folder (init, sync: how wireguard-tunnels knows the server exists), deletes
   it when empty (remove), and writes a `# jump: <code> <label>` line into a
   file on its first push. nord.sh writes the same line, with the same code rule
-  (`store.valid_exit_code`).
+  (`store.valid_exit_code`). Each push also makes the folder 0700 and the file
+  0600 (they hold private keys).
 - **Never touches** `config/warped.*` (the sweep's: they keep the carrier's key
   and header line, so only the name tells them apart) or
   `config/warp.<device>.conf` (the sweep's WARP alone). `tunnels.sweep_owned`
