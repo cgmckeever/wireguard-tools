@@ -134,7 +134,7 @@ def _run(s: Server, cmd: str, args: List[str]) -> int:
 
 def _on_one(s: Server, cmd: str, args: List[str]) -> int:
     new_number_for = ""
-    if cmd == "client" and args[:1] == ["add"]:
+    if cmd == "client" and remote.subcommand(args)[0] == "add":   # flags may come first, as wgt reads them
         jumpfiles.offer_staged_exits(s, args)
         args, new_number_for = fleet_cmds.numbered_add(args)
     rc = _run(s, cmd, args)
@@ -150,10 +150,11 @@ def _on_all(cmd: str, args: List[str]) -> int:
         raise WgtError(f"'{cmd}' takes one server, not all")
     if not remote.servers():
         raise WgtError("no servers yet (add one: wgt-ctl init)")
-    if cmd in ("client", "device") and args[:1] == ["rename"]:
-        return fleet_cmds.rename_everywhere(args[1:])
+    sub, rest = remote.subcommand(args)   # flags may come first, as wgt reads them
+    if cmd in ("client", "device") and sub == "rename":
+        return fleet_cmds.rename_everywhere(rest)
     new_number_for = ""
-    if cmd == "client" and args[:1] == ["add"]:
+    if cmd == "client" and sub == "add":
         args, new_number_for = fleet_cmds.numbered_add(args)
     if cmd == "log" and "--no-follow" not in args:
         args = args + ["--no-follow"]   # following one server would block the rest

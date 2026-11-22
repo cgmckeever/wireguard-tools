@@ -292,6 +292,13 @@ def test_fetch_reads_every_config_by_its_header(store, monkeypatch):
         tunnels.fetch(remote.Server("dengar", "root@h"))
 
 
+def test_flags_before_the_subcommand_are_read_as_wgt_reads_them():
+    from wgt.ctl import fleet_cmds
+    assert remote.subcommand(["--yes", "add", "phone"]) == ("add", ["--yes", "phone"])
+    assert remote.subcommand(["--label", "add", "rename"]) == ("rename", ["--label", "add"])
+    assert fleet_cmds.client_name(["--yes", "add", "--warp", "off", "phone"]) == "phone"
+
+
 def test_a_non_utf8_byte_in_a_config_is_delivered_as_it_was(store, monkeypatch):
     m, seen = tunnels.MARK, {}
     text = conf("iphone", "K1", body="# exit: Z\udce9rich\n")   # a Latin-1 é, as surrogateescape reads it
@@ -327,6 +334,8 @@ def test_a_renamed_servers_last_config_still_retires(store, monkeypatch):
     ("client", ["list"], True), ("client", [], True), ("client", ["list", "--tsv"], False),
     ("client", ["disable", "a.phone"], False), ("device", ["set", "phone"], False),
     ("setup", [], True), ("setup", ["--name", "dengar2"], True), ("setup", ["--dry-run"], False),
+    ("client", ["--yes", "add", "phone"], True), ("client", ["--yes", "remove", "a.phone"], True),
+    ("client", ["--yes", "disable", "a.phone"], False), ("client", ["--yes"], True),
     ("restore", ["/root/x.tar.gz"], True),
 ])
 def test_which_commands_deliver(cmd, args, delivers):

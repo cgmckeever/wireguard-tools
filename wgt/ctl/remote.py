@@ -230,14 +230,25 @@ def no_args(cmd: str, args: List[str]) -> None:
 YES = ("--yes", "-y")
 
 
+def _word_indexes(args: Sequence[str]) -> Iterator[int]:
+    """Where wgt's words and flags are in <args>: each value flag's value is skipped."""
+    i = 0
+    while i < len(args):
+        yield i
+        i += 2 if args[i] in VALUE_FLAGS else 1
+
+
 def wgt_words(args: Sequence[str]) -> Iterator[str]:
     """wgt's words and flags as wgt reads them: a value flag's value (--label --dry-run,
     --warp off) is skipped, not read as a word or flag of its own (the flag itself is kept)."""
-    words = iter(args)
-    for a in words:
-        yield a
-        if a in VALUE_FLAGS:
-            next(words, None)
+    return (args[i] for i in _word_indexes(args))
+
+
+def subcommand(args: Sequence[str]) -> Tuple[str, List[str]]:
+    """A command's first word as wgt reads it, flags allowed first (`--yes add phone`:
+    add), and <args> without it ("" and <args> if there is none)."""
+    i = next((i for i in _word_indexes(args) if not args[i].startswith("-")), None)
+    return ("", list(args)) if i is None else (args[i], list(args[:i]) + list(args[i + 1:]))
 
 
 def flag_given(args: Sequence[str], flag: str) -> bool:

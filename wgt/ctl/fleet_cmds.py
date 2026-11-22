@@ -226,6 +226,7 @@ def _devices_forget(device: str) -> int:
 
 
 def client_name(args: List[str]) -> str:
-    """The client name in `client add ...` words: the first word that is
+    """The client name in `client add ...` words: the first word after `add` that is
     neither a flag nor a value flag's value (`--warp off par-fr.mac`)."""
-    return next((a for a in remote.wgt_words(args[1:]) if not a.startswith("-")), "")
+    _, rest = remote.subcommand(args)
+    return next((a for a in remote.wgt_words(rest) if not a.startswith("-")), "")

@@ -345,9 +345,10 @@ def changes_configs(cmd: str, args: List[str]) -> bool:
         return False
     if cmd in REWRITES_ALL:
         return True
-    if cmd == "client" and (not args or args[0] == "list"):
+    sub, _ = remote.subcommand(args)   # flags may come first, as wgt reads them
+    if cmd == "client" and sub in ("", "list"):
         return True
-    return bool(args) and args[0] in CHANGES.get(cmd, ())
+    return sub in CHANGES.get(cmd, ())
 
 
 def after(s: Server, cmd: str, args: List[str]) -> None:
