@@ -23,11 +23,25 @@ class Facts:
     default_route: str      # the main table's first IPv4 default route
 
 
+def ipv6_on(disabled: str) -> bool:
+    """The kernel has IPv6 and net.ipv6.conf.all.disable_ipv6 (<disabled>) is 0."""
+    return os.path.exists("/proc/net/if_inet6") and disabled == "0"
+
+
+def ipv6_on_quick() -> bool:
+    """ipv6_on without running sysctl (the watchdogs run every 10s)."""
+    try:
+        with open("/proc/sys/net/ipv6/conf/all/disable_ipv6") as f:
+            return ipv6_on(f.read().strip())
+    except OSError:
+        return False
+
+
 def gather(runner: Runner) -> Facts:
     """Read this machine's facts (read-only commands)."""
     disabled = runner.query(["sysctl", "-n", "net.ipv6.conf.all.disable_ipv6"]).strip()
     return Facts(
-        kernel_ipv6=os.path.exists("/proc/net/if_inet6") and disabled == "0",
+        kernel_ipv6=ipv6_on(disabled),
         has_ipv6=bool(runner.query(["ip", "-6", "route", "show", "default"]).strip()),
         hostname=socket.gethostname(),
         routes4=runner.query(["ip", "-4", "route", "show", "table", "all"]),

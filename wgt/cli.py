@@ -171,7 +171,7 @@ def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
     tag = next((w.name for w in WATCHDOGS if w.word == word), EXIT_WATCHDOG)   # any watchdog's, for a bad word's error
     if os.geteuid() != 0 and os.environ.get("WGT_SKIP_PREFLIGHT") != "1":
         raise WgtError("must run as root")
-    quick = host.Facts(kernel_ipv6=os.path.exists("/proc/net/if_inet6"), has_ipv6=False,
+    quick = host.Facts(kernel_ipv6=host.ipv6_on_quick(), has_ipv6=False,
                        hostname="", routes4="", default_route="")
     try:
         ctx = load(args, env={}, facts=quick)
