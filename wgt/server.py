@@ -653,8 +653,10 @@ def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
     fwd, fwd6, ra = (store.state_get(state, k) for k in ("ORIG_IP_FORWARD", "ORIG_IP6_FORWARD", "ORIG_ACCEPT_RA"))
     if fwd:
         r.run(["sysctl", "-q", "-w", f"net.ipv4.ip_forward={fwd}"])
-    if fwd6:
-        r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.all.forwarding={fwd6}"])
+    # Not fatal: the kernel's IPv6 may have gone since setup (ipv6.disable=1), and a rollback
+    # stopped here would stop at the same place every time.
+    if fwd6 and r.run(["sysctl", "-q", "-w", f"net.ipv6.conf.all.forwarding={fwd6}"], check=False)[0] != 0:
+        ctx.out.warn(f"could not restore net.ipv6.conf.all.forwarding={fwd6}")
     if ra:
         r.run(["sysctl", "-q", "-w", f"{render.accept_ra_key(host.pub_if(state, ctx.facts))}={ra}"], check=False)
 
