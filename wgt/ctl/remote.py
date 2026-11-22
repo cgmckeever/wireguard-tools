@@ -9,7 +9,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from .. import store, ui
 from ..const import Paths
@@ -228,17 +228,21 @@ def no_args(cmd: str, args: List[str]) -> None:
 YES = ("--yes", "-y")
 
 
-def dry_run(args: Sequence[str]) -> bool:
-    """A wgt command run with --dry-run: wgt-ctl takes no number, offers no push and
-    delivers nothing for it either (what a sweep reads still refreshes local/devices).
-    Read as wgt reads it: after a value flag (--label --dry-run) it's that flag's value."""
+def wgt_words(args: Sequence[str]) -> Iterator[str]:
+    """wgt's words and flags as wgt reads them: a value flag's value (--label --dry-run,
+    --warp off) is skipped, not read as a word or flag of its own."""
     words = iter(args)
     for a in words:
         if a in VALUE_FLAGS:
             next(words, None)
-        elif a == "--dry-run":
-            return True
-    return False
+        else:
+            yield a
+
+
+def dry_run(args: Sequence[str]) -> bool:
+    """A wgt command run with --dry-run: wgt-ctl takes no number, offers no push and
+    delivers nothing for it either (what a sweep reads still refreshes local/devices)."""
+    return "--dry-run" in wgt_words(args)
 
 
 def only_yes(cmd: str, args: List[str]) -> bool:

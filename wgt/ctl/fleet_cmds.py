@@ -8,7 +8,6 @@ from typing import Dict, List, Optional, Tuple
 
 from .. import store, ui
 from ..const import device_ip
-from ..ctx import VALUE_FLAGS
 from ..errors import WgtError
 from . import fleet, remote, tunnels
 from .remote import out
@@ -229,10 +228,4 @@ def _devices_forget(device: str) -> int:
 def client_name(args: List[str]) -> str:
     """The client name in `client add ...` words: the first word that is
     neither a flag nor a value flag's value (`--warp off par-fr.mac`)."""
-    words = iter(args[1:])
-    for a in words:
-        if a in VALUE_FLAGS:
-            next(words, None)
-        elif not a.startswith("-"):
-            return a
-    return ""
+    return next((a for a in remote.wgt_words(args[1:]) if not a.startswith("-")), "")
