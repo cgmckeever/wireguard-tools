@@ -90,8 +90,10 @@ def _verify(ctx: Ctx, data: bytes, want: str) -> None:
 
 
 def _install_binary(ctx: Ctx, data: bytes) -> bool:
-    """Install the downloaded wgcf, if it runs here."""
-    fd, tmp = tempfile.mkstemp()
+    """Install the downloaded wgcf, if it runs here. Tried beside where it goes, not
+    in /tmp: a /tmp mounted noexec would make every download "not run"."""
+    d = os.path.dirname(ctx.paths.wgcf_bin)
+    fd, tmp = tempfile.mkstemp(dir=d if os.path.isdir(d) else None, prefix=".wgcf.")
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
