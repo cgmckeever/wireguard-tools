@@ -175,6 +175,13 @@ def ssh(target: str, command: str, tty: bool = False, batch: bool = False, captu
     return p.returncode, (p.stdout or b"").decode("utf-8", errors)
 
 
+def own_line(command: str) -> str:
+    """<command> with its output starting on a line of its own, for readers that find
+    its lines by key: a login script's banner with no newline of its own can't
+    swallow the first one."""
+    return "echo; " + command
+
+
 def can_login(target: str) -> bool:
     return ssh(target, "true", batch=True, capture=True)[0] == 0
 

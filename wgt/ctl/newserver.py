@@ -20,8 +20,8 @@ def fleet_subnets() -> List[str]:
     servers are skipped)."""
     used = []
     for s in remote.servers():
-        # echo first: a login banner with no newline of its own can't swallow the state's first line.
-        rc, state = remote.ssh(s.target, f"echo; cat {remote.STATE_FILE} 2>/dev/null; true", batch=True, capture=True)
+        rc, state = remote.ssh(s.target, remote.own_line(f"cat {remote.STATE_FILE} 2>/dev/null; true"),
+                               batch=True, capture=True)
         subnet = store.state_get(state, "WG_SUBNET").strip()
         if rc == 0 and subnet:
             used.append(subnet)
@@ -109,11 +109,10 @@ def probe(target: str, address: str) -> Dict[str, str]:
     """What init needs to know about the server: uid, OS, an existing checkout,
     a saved server name, whether setup finished there (SET_UP_KEYS). Refuses
     non-root logins and unsupported systems."""
-    # The first echo starts uid= on its own line, after any login banner with no newline of its own.
-    rc, text = remote.ssh(target, f"""echo; echo "uid=$(id -u)"
+    rc, text = remote.ssh(target, remote.own_line(f"""echo "uid=$(id -u)"
         . /etc/os-release 2>/dev/null && echo "os=$ID $VERSION_ID"
         [ -d {remote.DEF_DIR}/.git ] && echo checkout=1
-        cat {remote.STATE_FILE} 2>/dev/null; true""", capture=True)
+        cat {remote.STATE_FILE} 2>/dev/null; true"""), capture=True)
     if rc != 0:
         raise WgtError(f"cannot reach {target}")
     facts = {k: v for k, v in (line.split("=", 1) for line in text.splitlines() if "=" in line)
