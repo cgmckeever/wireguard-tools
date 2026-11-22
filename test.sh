@@ -4,10 +4,16 @@
 #   ./test.sh            all tests
 #   ./test.sh -k exit    only tests whose name matches "exit" (any pytest option works)
 #   ./test.sh lint       ruff and mypy (settings in pyproject.toml)
-#   ./test.sh all        lint, then the tests
+#   ./test.sh all        lint, then the tests (the pre-commit hook and CI run this)
+#   ./test.sh hooks      use .githooks/ (the pre-commit hook) in this clone
 set -euo pipefail
 cd "$(dirname "$0")"
-RUFF=0.17.4     # also in pyproject.toml and .github/workflows/tests.yml
+if [ "${1:-}" = hooks ]; then
+    git config core.hooksPath .githooks
+    echo "pre-commit hook on: each commit runs ./test.sh all first"
+    exit 0
+fi
+RUFF=0.17.4     # also in pyproject.toml (CI runs this script, so it uses this pin)
 if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c 'import pytest, ruff, mypy' 2>/dev/null \
     || [ "$(.venv/bin/ruff --version)" != "ruff $RUFF" ]; then
     echo "==> Setting up .venv with pytest, ruff and mypy (first run only)"

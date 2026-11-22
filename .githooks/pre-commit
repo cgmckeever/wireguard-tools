@@ -1,0 +1,15 @@
+#!/bin/bash
+# pre-commit: ./test.sh all (ruff, mypy, pytest) before each commit; the
+# output only when something fails, and then no commit.
+# Set up once per clone: ./test.sh hooks. Skip once: git commit --no-verify.
+# It tests the working tree, not just what's staged: commit what you tested.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+log=$(mktemp "${TMPDIR:-/tmp}/wgt-pre-commit.XXXXXX") || exit 1
+trap 'rm -f "$log"' EXIT
+if ./test.sh all > "$log" 2>&1; then
+    echo "pre-commit: ./test.sh all passed ($(grep -Eo '[0-9]+ passed' "$log" | tail -1))" >&2
+else
+    cat "$log" >&2
+    echo "pre-commit: ./test.sh all failed, nothing committed (fix it, or git commit --no-verify)" >&2
+    exit 1
+fi

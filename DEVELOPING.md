@@ -42,6 +42,7 @@ templates/                client config and systemd unit templates
 tests/                    pytest: unit, golden files, FakeRunner commands, setup -> rollback
 tools/                    render-diff.sh (before a deploy), trial.sh (full cycle on a throwaway server)
 test.sh, pyproject.toml   tests and lint (sets up .venv on first use); lint settings
+.githooks/pre-commit      runs ./test.sh all before each commit (./test.sh hooks turns it on)
 ```
 
 ## Naming
@@ -140,6 +141,7 @@ depend on the routing rules and the config list.
 ./test.sh -k exit          # just the tests matching "exit" (any pytest option works)
 ./test.sh lint             # ruff and mypy (settings in pyproject.toml)
 ./test.sh all              # lint, then the tests
+./test.sh hooks            # once per clone: each commit runs ./test.sh all first (output only on failure)
 tools/render-diff.sh       # read-only: what this checkout would render differently on each server
 tools/trial.sh <jump.conf> # on a throwaway server: the full cycle, back to clean (a jump in Paris)
 ```
@@ -176,5 +178,9 @@ tools/trial.sh <jump.conf> # on a throwaway server: the full cycle, back to clea
   with `ssh -G` and the scripts sent to servers with `bash -n`.
 - **Live checks.** `tools/render-diff.sh` (read-only, every server) before a
   deploy; `tools/trial.sh` on a throwaway server for the full cycle.
-- CI (`.github/workflows/tests.yml`) runs the tests on Python 3.8 and 3.12,
-  and the lint.
+- **Before each commit.** `./test.sh hooks` points git at `.githooks/`, whose
+  pre-commit runs `./test.sh all` and refuses the commit if it fails
+  (`git commit --no-verify` skips it once). It tests the working tree, not just
+  what's staged.
+- CI (`.github/workflows/tests.yml`) runs `./test.sh all`, as the hook does, on
+  Python 3.8 and 3.12.
