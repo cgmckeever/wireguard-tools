@@ -362,6 +362,22 @@ def test_a_setup_that_stopped_still_delivers(store, monkeypatch):
     assert ctl._run(s, "setup", []) == 255 and done == ["dengar"]                   # unreachable
 
 
+def test_configs_naming_another_listed_server_are_not_delivered(store, tmp_path, monkeypatch):
+    # dengar given boba's name (setup --name boba): boba's copies would retire here
+    listed = tmp_path / "servers"
+    listed.write_text("dengar root@1.2.3.4\nboba root@5.6.7.8\nalias root@1.2.3.4\n")
+    monkeypatch.setattr(remote, "LIST", str(listed))
+    theirs = put(store, "iphone", "boba.iphone.conf", conf("iphone", "KB", server="boba"))
+    out = f"SERVER_NAME=boba\n{tunnels.MARK}boba.phone.conf\n{conf('phone', 'KD', server='boba')}"
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, out))
+    with pytest.raises(WgtError, match="boba"):
+        tunnels.deliver(remote.Server("dengar", "root@1.2.3.4"))
+    assert theirs.exists()
+    # the same machine listed twice is one server
+    out = f"SERVER_NAME=dengar\n{tunnels.MARK}dengar.phone.conf\n{conf('phone', 'KD')}"
+    assert tunnels.deliver(remote.Server("alias", "root@1.2.3.4")) == 0
+
+
 def test_sync_takes_no_arguments(store):
     with pytest.raises(WgtError):
         tunnels.do_sync(remote.Server("dengar", "root@h"), ["extra"])

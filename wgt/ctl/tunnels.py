@@ -302,6 +302,13 @@ def deliver(s: Server) -> int:
     issued, own = fetch(s)
     anchor(s.name)
     name = server_name(issued, s, own)
+    # Another listed server's name (setup --name <its name>): its copies would retire
+    # here, and these be named as its. The same machine listed twice is one server.
+    other = next((x for x in remote.servers() if x.name != s.name and x.target != s.target
+                  and same_name(x.name, name)), None)
+    if other:
+        raise WgtError(f"{s.name}'s configs name the server '{name}', which is {other.name} in {remote.LIST}: "
+                       f"nothing delivered (give {s.name} its own: wgt-ctl {s.name} setup --name <name>)")
     devices = sorted(set(all_devices()) | {store.device_of(c) for c in issued})
     actions = refuse_taken(plan(name, issued, local_files(devices), complete=True))
     apply(actions)
