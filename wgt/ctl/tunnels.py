@@ -230,7 +230,8 @@ def apply(actions: List[Action]) -> None:
             make_dir(os.path.dirname(a.path))
             if a.kind == "update":
                 # A copy, not a move: if the write fails, the config is still where it was.
-                shutil.copy2(a.path, bak_path(a.path))
+                # Written 0600 from the start (copy2 makes it umask-readable first).
+                remote.write_local(bak_path(a.path), store.read_text(a.path) or "")
             remote.write_local(a.path, a.text)
         elif a.kind == "retire":
             os.replace(a.path, bak_path(a.path))
