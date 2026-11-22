@@ -156,9 +156,12 @@ def ssh(target: str, command: str, tty: bool = False, batch: bool = False, captu
     """Run <command> on <target>, under bash whatever root's login shell is
     (a zsh login shell trips over unmatched globs). tty: with a terminal when
     we have one (prompts, QR codes); batch: never prompt, never read stdin (probes).
-    Captured output is read as UTF-8 whatever the locale, line endings as sent.
+    Captured output is read as UTF-8 whatever the locale, line endings as sent, and
+    starts where <command>'s does: anything a login script prints first is dropped.
     errors: how a byte that isn't UTF-8 is read ("replace": shown as U+FFFD, never
     a traceback; "surrogateescape": kept as it was, for writing back out byte for byte)."""
+    if capture:
+        command = f"printf '%s\\n' {shlex.quote(OUTPUT_MARK)}; {command}"
     command = "bash -c " + shlex.quote(command)
     args = ["ssh"] + SSH_OPTS
     if batch:
@@ -172,14 +175,18 @@ def ssh(target: str, command: str, tty: bool = False, batch: bool = False, captu
                        stdin=subprocess.DEVNULL if batch else None)
     if p.returncode == 255 and not batch:
         out.error(f"ssh to {target} failed (unreachable, or its host key isn't known/doesn't match)")
-    return p.returncode, (p.stdout or b"").decode("utf-8", errors)
+    return p.returncode, own_output((p.stdout or b"").decode("utf-8", errors))
 
 
-def own_line(command: str) -> str:
-    """<command> with its output starting on a line of its own, for readers that find
-    its lines by key: a login script's banner with no newline of its own can't
-    swallow the first one."""
-    return "echo; " + command
+OUTPUT_MARK = "\x1dwgt-ctl output\x1d"   # printed first by a captured command (ssh)
+
+
+def own_output(text: str) -> str:
+    """A captured command's output without what came before its OUTPUT_MARK line (a
+    login script's banner, with or without a newline of its own); all of it if the
+    command never ran."""
+    _, mark, rest = text.partition(OUTPUT_MARK + "\n")
+    return rest if mark else text
 
 
 def can_login(target: str) -> bool:

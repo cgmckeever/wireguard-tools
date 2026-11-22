@@ -601,3 +601,14 @@ def test_list_shows_staged_jumps_by_name(local, monkeypatch, capsys):
         (carriers / name).write_text("")
     remote.cmd_list(quick=True)
     assert "jump files staged: a,a-b" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("banner", ["Welcome\n", "Welcome", ""])
+def test_a_login_banner_never_reaches_a_captured_read(monkeypatch, banner):
+    # root's shell startup files may print before the command runs, with or without a newline
+    real = subprocess.run
+
+    def remote_side(args, **k):
+        return real(["bash", "-c", f"printf %s {banner!r}; " + args[-1]], capture_output=True)
+    monkeypatch.setattr(remote.subprocess, "run", remote_side)
+    assert remote.ssh("root@h", "echo SERVER_NAME=x; echo dev", capture=True) == (0, "SERVER_NAME=x\ndev\n")
