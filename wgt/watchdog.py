@@ -138,25 +138,25 @@ def _units_for(action: Optional[str], e: store.Exit, px_up: bool, wx_up: bool, n
 def _apply(ctx: Ctx, e: store.Exit, action: Optional[str], units: List[str], now: int) -> None:
     """Do what decide() chose for one jump, and log it."""
     r = ctx.runner
-    started_marker, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
+    port_marker = ctx.paths.exit_port_marker(e.code)
     stale = f"no WARP handshake for over {WATCHDOG_STALE}s"
     say = lambda msg: log_event(ctx, EXIT_WATCHDOG, f"jump {e.code}: {msg}")   # noqa: E731
     if action == UP:
         # restart, not start: a unit can be "active" with its link gone.
         if r.attempt(["systemctl", "restart", *units]):
-            ctx.files.write_marker(started_marker, str(now))
+            exits.mark_started(ctx, e, now)
             say("a client is active; brought up")
         else:
             say("a client is active, but bringing it up failed")
     elif action == NEW_PORT:
         if r.attempt(["wg", "set", e.wx, "listen-port", "0"]):
-            ctx.files.write_marker(started_marker, str(now))
+            exits.mark_started(ctx, e, now)
             ctx.files.write_marker(port_marker)
             say(f"{stale}; new source port")
     elif action in (RESTART, RESTART_JUMP):
         ctx.files.remove_markers(port_marker)
         if r.attempt(["systemctl", "restart", *units]):
-            ctx.files.write_marker(started_marker, str(now))
+            exits.mark_started(ctx, e, now)
             say(f"{stale} after a new port; its WARP restarted" if action == RESTART
                 else f"jump tunnel silent for over {WATCHDOG_STALE}s; restarted")
     elif action == DOWN:

@@ -297,3 +297,25 @@ def test_a_watchdog_run_doesnt_import_the_http_stack():
 
 def test_every_watchdog_has_a_run():
     assert set(watchdog.runs()) == {w.word for w in WATCHDOGS}
+
+
+def test_a_setup_restart_leaves_a_jumps_warp_down_and_gets_the_watchdogs_patience(make, monkeypatch):
+    """exits.sync restarts a changed jump's running tunnels only (one carrying WARP-off
+    clients keeps its WARP down), and marks the start as the watchdog does: its next
+    run mustn't take a tunnel still handshaking for a silent one."""
+    from wgt import exits
+    from wgt.system import read_marker
+    ctx = make({"ip link show dev px-nyc-us": UP, "ip link show dev wx-nyc-us": DOWN,
+                "ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
+                "wg show px-nyc-us latest-handshakes": (0, "K\t0\n")})
+    monkeypatch.setattr(exits, "write_confs", lambda ctx, e: True)
+    port = Path(ctx.paths.exit_port_marker("nyc-us"))
+    port.write_text("")
+    exits.sync(ctx)
+    restarts = [c for c in ctx.runner.calls if c.startswith("systemctl restart")]
+    assert restarts == ["systemctl restart wg-quick@px-nyc-us"]
+    assert read_marker(ctx.paths.exit_marker("nyc-us")) == NOW and not port.exists()
+    ctx.runner.calls.clear()
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'nyc-us.phone')}\t{NOW - 30}\n")
+    watchdog.run_exits(ctx)
+    assert not any(c.startswith("systemctl restart") for c in ctx.runner.calls)

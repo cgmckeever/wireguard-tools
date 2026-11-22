@@ -191,14 +191,30 @@ def probe(ctx: Ctx, e: store.Exit) -> Tuple[bool, str]:
     return live.is_warp_trace(t), t or "no answer"
 
 
+def mark_started(ctx: Ctx, e: store.Exit, now: int) -> None:
+    """<e>'s tunnels (re)started at <now>: the exit watchdog gives them WATCHDOG_STALE
+    to handshake before it acts on their silence."""
+    ctx.files.write_marker(ctx.paths.exit_marker(e.code), str(now))
+
+
 def sync(ctx: Ctx) -> None:
     """Setup re-run: re-render every exit's configs (MTU, IPv6 may have changed),
-    restart the ones that are up and changed, and keep the watchdog on."""
+    restart the tunnels that are up and changed (a jump's WARP that's down stays
+    down: only WARP-off clients may be on it), and keep the watchdog on."""
     if not ctx.snap.exits:
         return
     ctx.out.log("Jumps: " + " ".join(e.code for e in ctx.snap.exits))
     for e in ctx.snap.exits:
-        if write_confs(ctx, e) and any_up(ctx, e) and not ctx.runner.attempt(["systemctl", "restart", *e.units]):
+        if not write_confs(ctx, e):
+            continue
+        running = [unit for unit, ifc in zip(e.units, (e.px, e.wx)) if live.if_exists(ctx.runner, ifc)]
+        if not running:
+            continue
+        if ctx.runner.attempt(["systemctl", "restart", *running]):
+            # A fresh start, as when the watchdog brings it up: not yet silent.
+            mark_started(ctx, e, int(ctx.clock()))
+            ctx.files.remove_markers(ctx.paths.exit_port_marker(e.code))
+        else:
             ctx.out.warn(f"jump {e.code} didn't restart; the watchdog keeps trying (see: wgt log)")
     units.write_watchdog(ctx, EXIT_WATCHDOG)
 
