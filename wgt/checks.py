@@ -393,7 +393,7 @@ def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
 
     if live.if_exists(r, c.WARP_IF):
         warp_hs = live.newest_hs(r, c.WARP_IF)
-        fresh = warp_hs > 0 and now - warp_hs <= WATCHDOG_STALE
+        fresh = live.recent(warp_hs, WATCHDOG_STALE, now)
         warp = f"handshake {ui.ago(warp_hs, now)}" + ("" if fresh else "  <- STALE")
     else:
         warp = "tunnel DOWN"

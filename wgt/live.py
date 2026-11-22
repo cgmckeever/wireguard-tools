@@ -42,10 +42,14 @@ def transfers(r: Runner, ifc: str) -> Dict[str, Tuple[int, int]]:
     return out
 
 
+def recent(ts: int, within: float, now: float) -> bool:
+    """A handshake at <ts> (0: never) no more than <within> seconds before <now>."""
+    return ts > 0 and now - ts <= within
+
+
 def seen_within(handshakes: Mapping[str, int], pub: str, within: float, now: float) -> bool:
     """<pub> has handshaked, no more than <within> seconds before <now>."""
-    last = handshakes.get(pub, 0)
-    return last > 0 and now - last <= within
+    return recent(handshakes.get(pub, 0), within, now)
 
 
 def newest_hs(r: Runner, ifc: str) -> int:
@@ -54,8 +58,7 @@ def newest_hs(r: Runner, ifc: str) -> int:
 
 
 def hs_recent(r: Runner, ifc: str, within: int, now: Optional[float] = None) -> bool:
-    newest = newest_hs(r, ifc)
-    return newest > 0 and (now or time.time()) - newest <= within
+    return recent(newest_hs(r, ifc), within, now or time.time())
 
 
 def listen_port(r: Runner, ifc: str) -> str:

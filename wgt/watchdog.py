@@ -119,7 +119,7 @@ def _exits_pass(ctx: Ctx) -> None:
         px_last_hs = live.newest_hs(r, e.px) if active and px_up else None
         action = decide(active, px_up, wx_up, now, read_marker(started_marker), wx_last_hs, os.path.exists(port_marker),
                         need_wx, px_last_hs)
-        if wx_last_hs and now - wx_last_hs <= WATCHDOG_STALE:
+        if live.recent(wx_last_hs, WATCHDOG_STALE, now):
             ctx.files.remove_markers(port_marker)   # recovered: the next silent spell starts with a new port again
         _apply(ctx, e, action, _units_for(action, e, px_up, wx_up, need_wx), now)
 
