@@ -120,12 +120,12 @@ def open_firewall(ctx: Ctx, outs: List[str], move_port: bool = False) -> None:
     if store.state_get(ctx.snap.state, "UFW") != "1":
         ops.state_set(ctx, "UFW", "1")
     ctx.runner.run(["ufw", "allow", f"{port}/udp", "comment", "wireguard-tools"])
-    for p in old:
-        ctx.runner.run(["ufw", "delete", "allow", f"{p}/udp"], check=False)
+    # Only a port ufw closed leaves the record: one it didn't is still open.
+    closed = [p for p in old if ctx.runner.run(["ufw", "delete", "allow", f"{p}/udp"], check=False)[0] == 0]
     for o in outs:
         ctx.runner.run(["ufw", "route", "allow", "in", "on", wg, "out", "on", o, "comment", "wireguard-tools"])
-    if old:
-        _record_ports(ctx, [port])
+    if closed:
+        _record_ports(ctx, [p for p in before + [port] if p not in closed])
 
 
 def opened_ports(ctx: Ctx) -> List[str]:
