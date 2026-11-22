@@ -13,7 +13,7 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from .. import store, ui
 from ..const import Paths
-from ..ctx import VALUE_FLAGS
+from ..ctx import BOOL_FLAGS, VALUE_FLAGS
 from ..errors import WgtError
 from ..system import Out, atomic_write
 
@@ -242,7 +242,7 @@ def no_args(cmd: str, args: List[str]) -> None:
         raise WgtError(f"wgt-ctl <server> {cmd} takes no arguments (got: {' '.join(args)})")
 
 
-YES = ("--yes", "-y")
+YES = tuple(flag for flag, field in BOOL_FLAGS.items() if field == "yes")   # --yes, -y: as wgt reads them
 
 
 def _word_indexes(args: Sequence[str]) -> Iterator[int]:
