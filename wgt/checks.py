@@ -204,7 +204,9 @@ class Tests:
         rule_text: Dict[str, str] = {}
         for family, where, text, needs in rules.hook_expectations(self.cfg, self.ctx.snap, self.ctx.pub_if):
             if where == "rule":
-                seen = rule_text.setdefault(family, live.rules(r, family))
+                if family not in rule_text:   # once per family (setdefault would ask every time)
+                    rule_text[family] = live.rules(r, family)
+                seen = rule_text[family]
                 if not any(line.split("\t")[0] + "\t" + line.split("\t")[-1].strip() == text
                            for line in seen.splitlines() if "\t" in line):
                     missing.append(f"{family} rule: {text}")
