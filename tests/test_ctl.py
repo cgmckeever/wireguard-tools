@@ -516,6 +516,13 @@ def test_init_finishes_an_unfinished_setup(initing, probe):
     assert remote.find("newbie").target == "root@9.9.9.9"
 
 
+def test_init_refuses_a_listed_name_in_another_case(initing):
+    # on a Mac's file system Dengar's folders and copies would be dengar's
+    with pytest.raises(WgtError, match="as 'dengar'"):
+        newserver.cmd_init(["--address", "9.9.9.9", "--name", "Dengar"])
+    assert not initing["setups"]
+
+
 def test_init_failed_setup_stays_off_the_list(initing):
     initing["setup_rc"] = 1
     with pytest.raises(WgtError, match="re-run"):

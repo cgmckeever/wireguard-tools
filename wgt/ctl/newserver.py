@@ -73,14 +73,21 @@ def _ask_identity(opts: Dict[str, str]) -> Tuple[str, str, str]:
     name = name or ui.ask("    Server name (e.g. boba): ")
     if not remote.valid_server(name):
         raise WgtError(f"server name must be {remote.SERVER_NAME_RULE}: '{name}'")
-    if any(s.name == name for s in remote.servers()):
-        raise WgtError(f"'{name}' is already in {remote.LIST}")
+    _refuse_listed(name)
     if not remote.BRANCH.match(opts["--branch"]):
         raise WgtError(f"bad branch name: {opts['--branch']}")
     target = f"{opts['--user']}@{address}"
     if not remote.TARGET.match(target):
         raise WgtError(f"bad --user or --address: {target}")
     return address, name, target
+
+
+def _refuse_listed(name: str) -> None:
+    """A name already in local/servers, in any case: on a Mac's file system Boba's
+    folders and copies are boba's, and delivery refuses both (tunnels.deliver)."""
+    taken = next((s.name for s in remote.servers() if tunnels.same_name(s.name, name)), "")
+    if taken:
+        raise WgtError(f"'{name}' is already in {remote.LIST}" + (f" (as '{taken}')" if taken != name else ""))
 
 
 def login(target: str) -> None:
@@ -132,8 +139,7 @@ def _adopt(name: str, saved: str, target: str) -> None:
     out.log(f"wireguard-tools is already set up there as '{saved}'")
     if saved != name:
         out.info(f"recording it as '{saved}' (its saved name); rename it with: wgt-ctl {saved} setup --name {name}")
-        if any(s.name == saved for s in remote.servers()):
-            raise WgtError(f"'{saved}' is already in {remote.LIST}")
+        _refuse_listed(saved)
     record(saved, target)
     out.info(f"update it to this version with: wgt-ctl {saved} pull")
 
