@@ -44,7 +44,8 @@ def make_link(server: str, path: str, on_server: Sequence[str] = ()) -> Tuple[st
     m = re.match(r"^([A-Za-z]{2})#", hint)
     city = re.sub(r"[^a-z]", "", name.lower())[:3]
     code = city + (f"-{m.group(1).lower()}" if m else "")
-    taken = {link[0] for f in tunnels.staged(server) if f != path for link in [link_of(f)] if link} | set(on_server)
+    staged = {link[0] for f in tunnels.staged(server) if f != path for link in [link_of(f)] if link}
+    taken = staged | set(on_server)
     while True:
         reply = ui.ask(f"    Short code on the server [{code}]: ", gone="\0")
         # Ctrl-D or a lost terminal stops here; otherwise a taken default would ask forever.
@@ -54,7 +55,9 @@ def make_link(server: str, path: str, on_server: Sequence[str] = ()) -> Tuple[st
         if not store.valid_exit_code(code):
             out.info(f"the code must be {store.EXIT_CODE_RULE}")
         elif code in taken:
-            out.info(f"{server} already has a jump '{code}'; pick another")
+            whose = f"{server} already has a jump '{code}'" if code in on_server \
+                else f"another of {server}'s staged files is jump '{code}'"
+            out.info(f"{whose}; pick another")
         else:
             break
     remote.write_local(path, with_jump_line(text, code, name))
