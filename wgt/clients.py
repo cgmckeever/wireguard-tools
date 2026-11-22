@@ -325,7 +325,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
             uniq.append(code)
     if ctx.args.groups:
         store.parse_groups(ctx.args.groups)   # refused before anything is written
-    endpoint = ops.resolve_endpoint(ctx, save=False)
+    endpoint = ops.resolve_endpoint(ctx)
     devices.ensure_number(ctx, base)
     devices.ensure_groups(ctx, base)
     planned: List[str] = []
@@ -376,7 +376,7 @@ def cmd_rotate(ctx: Ctx, words: List[str]) -> None:
     allowed = allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS)
     if ctx.cfg.sources.get("CLIENT_ALLOWED_IPS") not in ("flag", "env") and c.allowed:
         allowed = c.allowed
-    endpoint = ops.resolve_endpoint(ctx, save=False)
+    endpoint = ops.resolve_endpoint(ctx)
     ctx.runner.step(f"Rotate keys for '{name}' ({c.ip}); its current config stops working",
                     "none (old keys are discarded)")
     ops.confirm(ctx, f"Rotate keys for {name}?")

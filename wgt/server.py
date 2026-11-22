@@ -18,10 +18,10 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 from . import checks, devices, exits, host, live, net, ops, render, rules, store, ui, units, warp
 from .const import (
     ALL_WATCHDOGS,
-    CONFIG_KEYS,
     LEGACY_SETUP_DONE,
     MARKER,
     SET_UP_KEYS,
+    SETTING_KEYS,
     SETUP_DONE,
     WATCHDOGS,
 )
@@ -151,7 +151,7 @@ def review_settings(ctx: Ctx, subnet_asked: bool) -> None:
     fresh = not ctx.cfg.saved.get("WG_SUBNET")
     if not ctx.cfg.values.get("ENDPOINT"):
         detected = live.trace_field(live.trace(ctx.runner, "-4"), "ip")
-        if detected:   # what's confirmed below is what resolve_endpoint saves, not a second lookup
+        if detected:   # what's confirmed below is what save_config saves, not a second lookup
             ctx.cfg.values["ENDPOINT"], ctx.cfg.sources["ENDPOINT"] = detected, "detected"
     ctx.out.log("Settings (first setup)" if fresh else f"Settings (re-run; saved in {ctx.paths.state})")
     rep = checks.settings_table(ctx, running=False, subnet_asked=subnet_asked)
@@ -252,8 +252,9 @@ def renumber_clients(ctx: Ctx) -> None:
 
 
 def save_config(ctx: Ctx) -> None:
-    """Persist the settings for later runs."""
-    for k in CONFIG_KEYS:
+    """Persist the settings for later runs, ENDPOINT as ops.resolve_endpoint left it.
+    One place, after the last question: a no leaves every saved setting as wg0 runs it."""
+    for k in SETTING_KEYS:
         if store.state_get(ctx.snap.state, k) != ctx.cfg.values[k]:
             ops.state_set(ctx, k, ctx.cfg.values[k])
 
@@ -516,18 +517,19 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
                      "see 'wgt status', then re-run setup")
     ctx.out.log("WireGuard server (configs named warp.* leave through WARP, the rest straight out)")
     keys_changed = server_keys_due(ctx)
-    ops.resolve_endpoint(ctx, save=True)
+    ops.resolve_endpoint(ctx)   # saved by save_config, with the rest
     save_location(ctx)
     write_sysctl(ctx)
     write_dropin(ctx)
     # Late: until here a failure (WARP, a checksum) leaves the running wg0 and the
-    # databases agreeing about the subnet and settings. The restart is asked first:
-    # a no stops before the settings, the server keys and the configs devices get change.
+    # databases agreeing about the subnet and settings. The restart is asked first,
+    # then a subnet move: a no to either stops before the settings, the server keys
+    # and the configs devices get change.
     was_up = ops.wg_up(ctx)
     restarting = restart_needed(ctx, keys_changed)
+    renumber_clients(ctx)
     if keys_changed:
         write_server_keys(ctx)
-    renumber_clients(ctx)
     units.remember_opened_ports(ctx)   # before save_config replaces the saved WG_PORT
     save_config(ctx)
     sync_client_configs(ctx, old_name)

@@ -145,10 +145,11 @@ def state_unset(ctx: Ctx, key: str) -> None:
 
 # --- endpoint ---
 
-def resolve_endpoint(ctx: Ctx, save: bool) -> str:
+def resolve_endpoint(ctx: Ctx) -> str:
     """Client endpoint: --endpoint / ENDPOINT, the saved value, or the detected
-    public IPv4 (saved only when <save>, i.e. by setup; detected once, by setup's
-    review, which shows it before it's confirmed)."""
+    public IPv4 (detected once, by setup's review, which shows it before it's
+    confirmed). Left in ctx.cfg, not saved: setup saves it with the other
+    settings (server.save_config), once nothing more can be answered no."""
     src = ctx.cfg.sources.get("ENDPOINT", "")
     ep = ctx.cfg.values.get("ENDPOINT", "") if src in ("flag", "env", "detected") else ""
     ep = ep or store.state_get(ctx.snap.state, "ENDPOINT")
@@ -159,8 +160,6 @@ def resolve_endpoint(ctx: Ctx, save: bool) -> str:
     if ":" in ep and not ep.startswith("["):
         ep = f"[{ep}]"
     ctx.cfg.values["ENDPOINT"] = ep
-    if save and store.state_get(ctx.snap.state, "ENDPOINT") != ep:
-        state_set(ctx, "ENDPOINT", ep)
     ctx.out.info(f"client endpoint: {ep}:{ctx.cfg.WG_PORT}")
     return ep
 

@@ -7,13 +7,14 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-# Settings saved in the state file by setup, in this order.
+# Settings saved in the state file by setup, in this order (ENDPOINT last: SETTING_KEYS).
 CONFIG_KEYS = (
     "SERVER_NAME", "WG_SUBNET", "WG_SUBNET6", "WG_PORT", "WG_MTU", "WARP_MTU",
     "WG_DNS", "WG_IF", "WARP_IF", "RT_TABLE", "CLIENT_ALLOWED_IPS",
 )
 
-# All of them: ENDPOINT is saved separately (setup detects it, and a re-run keeps it).
+# All of them (setup saves them together): ENDPOINT has no default (setup detects it,
+# and a re-run keeps it).
 SETTING_KEYS = CONFIG_KEYS + ("ENDPOINT",)
 # The ones written into configs on devices (setup rewrites those: sync_client_configs),
 # so a change to one means re-sending them.
