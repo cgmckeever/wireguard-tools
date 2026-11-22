@@ -282,8 +282,11 @@ def test_fetch_reads_every_config_by_its_header(store, monkeypatch):
     text = f"{m}dengar.warp.iphone.conf\n{conf('warp.iphone', 'K1')}{m}stray.conf\n[Interface]\n"
     monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, text))
     assert tunnels.fetch(remote.Server("dengar", "root@h")) == ({"warp.iphone": conf("warp.iphone", "K1")}, "")
-    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, "dengar2\n" + text))
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, "SERVER_NAME=dengar2\n" + text))
     assert tunnels.fetch(remote.Server("dengar", "root@h"))[1] == "dengar2"
+    # a login script's chatter before it isn't the name
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, "Welcome!\n" + text))
+    assert tunnels.fetch(remote.Server("dengar", "root@h"))[1] == ""
     monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (255, ""))
     with pytest.raises(WgtError):
         tunnels.fetch(remote.Server("dengar", "root@h"))
@@ -299,7 +302,7 @@ def test_the_name_in_the_configs_is_the_servers_own(store):
 def test_a_renamed_servers_last_config_still_retires(store, monkeypatch):
     # listed as dengar, SERVER_NAME dengar2: with no configs left, only the state names it
     gone = put(store, "iphone", "dengar2.phone.conf", conf("phone", "K1", server="dengar2"))
-    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, "dengar2\n"))
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, "SERVER_NAME=dengar2\n"))
     assert tunnels.deliver(remote.Server("dengar", "root@h")) == 0
     assert not gone.exists()
 

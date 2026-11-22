@@ -254,13 +254,14 @@ def fetch(s: Server) -> Tuple[Dict[str, str], str]:
     own SERVER_NAME ("" if unset). A config's name comes from its header (the file
     name also holds the server's own name)."""
     d = remote.REMOTE.client_dir
-    rc, o = remote.ssh(s.target, f"sed -n 's/^SERVER_NAME=//p' {remote.q(remote.STATE_FILE)} 2>/dev/null | tail -n 1; "
+    # SERVER_NAME= kept on its line: whatever else a login script prints first isn't read as the name.
+    rc, o = remote.ssh(s.target, f"sed -n '/^SERVER_NAME=/p' {remote.q(remote.STATE_FILE)} 2>/dev/null | tail -n 1; "
                                  f"cd {remote.q(d)} 2>/dev/null || exit 0; for f in *.conf; do "
                                  f"[ -f \"$f\" ] || continue; printf '{MARK}%s\\n' \"$f\"; cat \"$f\"; done",
                        batch=True, capture=True)
     if rc != 0:
         raise WgtError(f"can't read {s.name}'s client configs" + (" (unreachable)" if rc == 255 else ""))
-    own, *chunks = o.split(MARK)
+    head, *chunks = o.split(MARK)
     issued = {}
     for chunk in chunks:
         file, _, text = chunk.partition("\n")
@@ -269,7 +270,7 @@ def fetch(s: Server) -> Tuple[Dict[str, str], str]:
             issued[h[0]] = text
         else:
             out.warn(f"{s.name}: {file} has no '# wireguard-tools client:' line; not delivered")
-    return issued, own.strip()
+    return issued, store.state_get(head, "SERVER_NAME").strip()
 
 
 def server_name(issued: Dict[str, str], s: Server, own: str = "") -> str:
