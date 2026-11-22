@@ -82,7 +82,7 @@ def test_force_keeps_server_keys(make_ctx):
     ctx = make_ctx(argv=["--force"])
     for p in (ctx.paths.server_key, ctx.paths.server_pub):
         Path(p).write_text("KEY\n")
-    assert srv.ensure_server_keys(ctx) is False
+    assert srv.server_keys_due(ctx) is False
     assert cli.parse(["setup", "--new-server-keys"]).new_server_keys
 
 

@@ -276,33 +276,46 @@ def record_baseline(ctx: Ctx) -> None:
     ctx.out.info(f"default route: {route} (public interface {host.route_dev(route)})")
 
 
-def ensure_server_keys(ctx: Ctx) -> bool:
-    """Create the server keypair unless it exists (--new-server-keys regenerates
-    it: every client then has to be rotated). True if new."""
+def _have_server_key(ctx: Ctx) -> bool:
+    return os.path.isfile(ctx.paths.server_key) and os.path.getsize(ctx.paths.server_key) > 0
+
+
+def server_keys_due(ctx: Ctx) -> bool:
+    """New server keys are to be made: there are none, or --new-server-keys
+    regenerates them (asked: every client then has to be rotated). Nothing is
+    written here: write_server_keys does that once a restart of a running wg0
+    is agreed (restart_needed), so a no keeps the key wg0 runs."""
     p = ctx.paths
     have = all(os.path.isfile(f) and os.path.getsize(f) > 0 for f in (p.server_key, p.server_pub))
     if have and not ctx.args.new_server_keys:
         ctx.out.info("server keys present")
         return False
-    if os.path.isfile(p.server_key) and os.path.getsize(p.server_key) > 0:
+    if _have_server_key(ctx):
         ctx.runner.step("Regenerate server keys (--new-server-keys): every config must be re-issued "
                         "(wgt client rotate)",
                         f"restore {p.server_key} and {os.path.basename(p.server_pub)} from their copies in "
                         f"{ctx.files.change_dir(p.server_key)}")
         ops.confirm(ctx, "Regenerate the server keys? Every config stops working until rotated")
-        ctx.files.backup(p.server_key)   # the old keys stay recoverable until --purge
-        ctx.files.backup(p.server_pub)
     else:
         ctx.runner.step(f"Generate server keypair ({p.server_key})", f"rm {p.server_key} {p.server_pub}")
+    return True
+
+
+def write_server_keys(ctx: Ctx) -> None:
+    """The new server keypair server_keys_due announced; old keys stay recoverable
+    (change copies) until --purge."""
+    p = ctx.paths
+    if _have_server_key(ctx):
+        ctx.files.backup(p.server_key)
+        ctx.files.backup(p.server_pub)
     if ctx.runner.dry_run:
-        return True
+        return
     key = ctx.runner.query(["wg", "genkey"]).strip()
     pub = ctx.runner.query(["wg", "pubkey"], input=key + "\n").strip()
     if not key or not pub:
         raise WgtError("could not generate the server keys")
     write_private(p.server_key, key + "\n")
     write_private(p.server_pub, pub + "\n")
-    return True
 
 
 def sync_client_configs(ctx: Ctx, old_name: str) -> None:
@@ -492,16 +505,18 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
         ctx.out.warn("WARP isn't working: warp.* configs are blocked until it is (plain configs work); "
                      "see 'wgt status', then re-run setup")
     ctx.out.log("WireGuard server (configs named warp.* leave through WARP, the rest straight out)")
-    keys_changed = ensure_server_keys(ctx)
+    keys_changed = server_keys_due(ctx)
     ops.resolve_endpoint(ctx, save=True)
     save_location(ctx)
     write_sysctl(ctx)
     write_dropin(ctx)
     # Late: until here a failure (WARP, a checksum) leaves the running wg0 and the
     # databases agreeing about the subnet and settings. The restart is asked first:
-    # a no stops before the settings and the configs devices get change.
+    # a no stops before the settings, the server keys and the configs devices get change.
     was_up = ops.wg_up(ctx)
     restarting = restart_needed(ctx, keys_changed)
+    if keys_changed:
+        write_server_keys(ctx)
     renumber_clients(ctx)
     units.remember_opened_ports(ctx)   # before save_config replaces the saved WG_PORT
     save_config(ctx)

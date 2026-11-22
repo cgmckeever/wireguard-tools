@@ -926,15 +926,18 @@ def test_setup_still_finishes_if_warps_unit_wont_start(world, monkeypatch, faili
     assert store.state_get(store.read_text(world.paths.state), "SETUP_DONE") == "1"
 
 
-@pytest.mark.parametrize("flags", [["--port", "51999"], ["--subnet", "10.77.0.0/24"]])   # --name alone needs no restart
+@pytest.mark.parametrize("flags", [["--port", "51999"], ["--subnet", "10.77.0.0/24"],   # --name alone needs no restart
+                                   ["--new-server-keys"]])
 def test_no_to_the_restart_changes_neither_the_settings_nor_the_configs(world, monkeypatch, flags):
-    """Asked before they're written: after a no, what devices get still matches the running wg0."""
+    """Asked before they're written: after a no, what devices get still matches the running wg0
+    (the server's key included: new configs would carry a public key wg0 doesn't run)."""
     world.run(["setup"])
 
     def configs():
         d = world.paths.client_dir
         return {f: open(os.path.join(d, f)).read() for f in sorted(os.listdir(d))}
     state, db, before = store.read_text(world.paths.state), store.read_text(world.paths.client_db), configs()
+    keys = [store.read_text(p) for p in (world.paths.server_key, world.paths.server_pub)]
 
     def no(ctx, question, default_yes=False):
         if "Restart" in question:
@@ -944,6 +947,7 @@ def test_no_to_the_restart_changes_neither_the_settings_nor_the_configs(world, m
         world.run(["setup", *flags])
     assert configs() == before
     assert store.read_text(world.paths.client_db) == db
+    assert [store.read_text(p) for p in (world.paths.server_key, world.paths.server_pub)] == keys
     for k in ("WG_PORT", "WG_SUBNET", "SERVER_NAME"):
         assert store.state_get(store.read_text(world.paths.state), k) == store.state_get(state, k)
     assert "wg0" in world.kernel.links
