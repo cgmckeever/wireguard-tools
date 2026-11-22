@@ -498,6 +498,14 @@ def test_a_value_is_never_read_as_a_template_key():
         render.render_template("watchdog.timer.tmpl", WHAT="x", BOOT="1", EVERY="2")
 
 
+def test_a_template_key_may_hold_digits(tmp_path, monkeypatch):
+    (tmp_path / "t.tmpl").write_text("Address = {{SUBNET6}}\n")
+    monkeypatch.setattr(render, "TEMPLATE_DIR", str(tmp_path))
+    assert render.render_template("t.tmpl", SUBNET6="fd00::/64") == "Address = fd00::/64\n"
+    with pytest.raises(WgtError, match="no value for {{SUBNET6}}"):
+        render.render_template("t.tmpl")
+
+
 def test_a_label_with_a_backslash_survives_a_rename(make_ctx):
     from wgt import clients
     ctx = make_ctx()

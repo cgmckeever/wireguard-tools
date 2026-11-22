@@ -36,7 +36,7 @@ def render_template(name: str, **values: str) -> str:
         if m.group(1) not in values:
             raise WgtError(f"template {name}: no value for {m.group(0)}")
         return values[m.group(1)]
-    out = re.sub(r"\{\{([A-Z_]+)\}\}", fill, text)
+    out = re.sub(r"\{\{([A-Z0-9_]+)\}\}", fill, text)
     return out.rstrip("\n") + "\n"
 
 
