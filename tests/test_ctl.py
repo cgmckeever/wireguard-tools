@@ -210,6 +210,8 @@ def test_move_to_new_machine(mover):
     assert steps.index(("root@9.9.9.9", "install")) < steps.index(("root@1.2.3.4", f"{s.wgt} rollback --yes"))
     restore = next(c for t, c in calls if "restore" in c)
     assert "--endpoint vpn.example.com" in restore
+    # its configs, rewritten by the restore, are delivered from the new machine
+    assert any(t == "root@9.9.9.9" and "SERVER_NAME" in c for t, c in calls)
     assert calls[-1] == ("root@1.2.3.4", "teardown")
     assert remote.find("dengar").target == "root@9.9.9.9"
 

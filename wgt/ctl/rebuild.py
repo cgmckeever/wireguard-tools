@@ -181,6 +181,9 @@ def do_move(s: Server, args: List[str]) -> int:
     tested = remote.ssh(new, f"{remote.DEF_WGT} test && {remote.DEF_WGT} tunnel test", tty=True)[0]
     if tested != 0:
         return _move_failed(s, in_place, archive, "tests failed")
+    # The restore rewrote its configs (a new machine's address, setup flags): copies
+    # follow, as after `wgt-ctl <server> restore`.
+    tunnels.after(Server(s.name, new, s.dir), "restore", [])
 
     if in_place:
         out.log(f"{s.name} rebuilt")
