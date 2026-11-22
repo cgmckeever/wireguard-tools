@@ -79,11 +79,11 @@ def cmd_warp_rotate(ctx: Ctx, words: List[str]) -> int:
     if len(words) > 1:
         raise WgtError("usage: wgt warp rotate [host|<jump code>|all]")
     which = words[0] if words else "host"
+    ops.take_lock(ctx)   # first: the jumps are the ones exits.db lists once no one else is changing it
     if which not in ("host", "all") and not ctx.snap.exit(which):
         raise WgtError(f"no jump '{which}' (host, all, or one of: "
                        f"{', '.join(e.code for e in ctx.snap.exits) or 'no jumps'})")
     jumps = ctx.snap.exits if which == "all" else [e for e in ctx.snap.exits if e.code == which]
-    ops.take_lock(ctx)
     names = (["this server"] if which in ("host", "all") else []) + [f"jump {e.code}" for e in jumps]
     ctx.runner.step(f"New WARP accounts for: {', '.join(names)} (the old ones are backed up; "
                     "their warp. configs pause for a few seconds)", "restore the backed-up wgcf files, then wgt setup")
