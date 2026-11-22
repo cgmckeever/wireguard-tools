@@ -491,6 +491,13 @@ def test_a_newline_cant_become_another_saved_key():
         store.state_set("", "LOCATION", "Paris\nWG_PORT=9")
 
 
+def test_a_value_is_never_read_as_a_template_key():
+    out = render.render_template("watchdog.timer.tmpl", WHAT="{{EVERY}} {{NOPE}}", BOOT="1", EVERY="2", ACCURACY="3")
+    assert "Run the wireguard-tools {{EVERY}} {{NOPE}} watchdog every 2s" in out
+    with pytest.raises(WgtError, match="no value for {{ACCURACY}}"):
+        render.render_template("watchdog.timer.tmpl", WHAT="x", BOOT="1", EVERY="2")
+
+
 def test_a_label_with_a_backslash_survives_a_rename(make_ctx):
     from wgt import clients
     ctx = make_ctx()

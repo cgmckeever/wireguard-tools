@@ -23,18 +23,20 @@ _PEER = re.compile(r"^\s*\[Peer\]")
 
 def render_template(name: str, **values: str) -> str:
     """templates/<name> with each {{KEY}} replaced; an unfilled {{KEY}} is an
-    error. Ends with exactly one newline."""
+    error. One pass: a value's own text (a jump's label) is never read as a
+    {{KEY}}. Ends with exactly one newline."""
     path = os.path.join(TEMPLATE_DIR, name)
     try:
         with open(path, encoding="utf-8") as f:
-            out = f.read().rstrip("\n")
+            text = f.read().rstrip("\n")
     except FileNotFoundError:
         raise WgtError(f"missing template: {path}") from None
-    for k, v in values.items():
-        out = out.replace("{{" + k + "}}", v)
-    m = re.search(r"\{\{[A-Z_]+\}\}", out)
-    if m:
-        raise WgtError(f"template {name}: no value for {m.group(0)}")
+
+    def fill(m: re.Match[str]) -> str:
+        if m.group(1) not in values:
+            raise WgtError(f"template {name}: no value for {m.group(0)}")
+        return values[m.group(1)]
+    out = re.sub(r"\{\{([A-Z_]+)\}\}", fill, text)
     return out.rstrip("\n") + "\n"
 
 
