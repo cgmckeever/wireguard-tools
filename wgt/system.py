@@ -63,11 +63,11 @@ def read_marker(path: str) -> int:
     return int(value) if store.is_uint(value) else 0
 
 
-def free_bak(stem: str) -> str:
-    """<stem>.bak, plus .<pid> while that name is taken (a second copy within the
-    same second, stem ending in its timestamp), so an earlier copy is never
+def free_bak(path: str, when: float) -> str:
+    """<path>.<YYYYmmdd-HHMMSS>.bak (<when>, local time), plus .<pid> while that name
+    is taken (a second copy within the same second), so an earlier copy is never
     overwritten. Sorted without the .bak, the later copy comes last (prune)."""
-    bak = f"{stem}.bak"
+    bak = f"{path}.{time.strftime('%Y%m%d-%H%M%S', time.localtime(when))}.bak"
     while os.path.exists(bak):
         bak = bak[: -len(".bak")] + f".{os.getpid() % 32768}.bak"
     return bak
@@ -321,8 +321,7 @@ class Files:
             os.makedirs(self.paths.backup_dir, mode=0o700, exist_ok=True)
             os.chmod(self.paths.backup_dir, 0o700)
             os.makedirs(d, exist_ok=True)
-            stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(self.clock()))
-            bak = free_bak(os.path.join(d, f"{os.path.basename(path)}.{stamp}"))
+            bak = free_bak(os.path.join(d, os.path.basename(path)), self.clock())
             shutil.copy2(path, bak)
             self.out.info(f"backup: {bak}")
             orig = bak

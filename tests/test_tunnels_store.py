@@ -252,7 +252,7 @@ def test_an_update_whose_write_fails_leaves_the_config_in_place(store, monkeypat
 
 
 def test_two_updates_in_one_second_keep_both_old_copies(store, monkeypatch):
-    monkeypatch.setattr(tunnels.time, "strftime", lambda fmt: "20260101-000000")
+    monkeypatch.setattr(tunnels.time, "strftime", lambda fmt, *a: "20260101-000000")
     path = put(store, "iphone", "dengar.iphone.conf", conf("iphone", "K1"))
     run(store, {"iphone": conf("iphone", "K1", body="MTU = 1280\n")})
     run(store, {"iphone": conf("iphone", "K1", body="MTU = 1300\n")})

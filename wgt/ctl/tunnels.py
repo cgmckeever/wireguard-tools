@@ -217,7 +217,7 @@ def refuse_taken(actions: List[Action]) -> List[Action]:
 
 def bak_path(path: str) -> str:
     """<path>.<YYYYmmdd-HHMMSS>.bak, never an earlier copy's name (system.free_bak)."""
-    return system.free_bak(f"{path}.{time.strftime('%Y%m%d-%H%M%S')}")
+    return system.free_bak(path, time.time())
 
 
 def apply(actions: List[Action]) -> None:
