@@ -152,12 +152,13 @@ def private_dir(path: str) -> str:
 
 
 def ssh(target: str, command: str, tty: bool = False, batch: bool = False, capture: bool = False,
-        input: Optional[str] = None, errors: str = "strict") -> Tuple[int, str]:
+        input: Optional[str] = None, errors: str = "replace") -> Tuple[int, str]:
     """Run <command> on <target>, under bash whatever root's login shell is
     (a zsh login shell trips over unmatched globs). tty: with a terminal when
     we have one (prompts, QR codes); batch: never prompt, never read stdin (probes).
-    errors: how captured output that isn't UTF-8 is decoded ("surrogateescape":
-    kept as it was, for writing back out byte for byte)."""
+    Captured output is read as UTF-8 whatever the locale, line endings as sent.
+    errors: how a byte that isn't UTF-8 is read ("replace": shown as U+FFFD, never
+    a traceback; "surrogateescape": kept as it was, for writing back out byte for byte)."""
     command = "bash -c " + shlex.quote(command)
     args = ["ssh"] + SSH_OPTS
     if batch:
@@ -165,13 +166,13 @@ def ssh(target: str, command: str, tty: bool = False, batch: bool = False, captu
     elif tty and sys.stdin.isatty() and sys.stdout.isatty():
         args += ["-t", "-q"]
     args += [target, command]
-    p = subprocess.run(args, text=True, input=input, errors=errors,
+    p = subprocess.run(args, input=None if input is None else input.encode("utf-8", errors),
                        stdout=subprocess.PIPE if capture else None,
                        stderr=subprocess.DEVNULL if batch else None,
                        stdin=subprocess.DEVNULL if batch else None)
     if p.returncode == 255 and not batch:
         out.error(f"ssh to {target} failed (unreachable, or its host key isn't known/doesn't match)")
-    return p.returncode, p.stdout or ""
+    return p.returncode, (p.stdout or b"").decode("utf-8", errors)
 
 
 def can_login(target: str) -> bool:
