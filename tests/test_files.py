@@ -71,6 +71,19 @@ def test_prune_keeps_a_second_copy_within_the_same_second(files):
     assert kept == {"0\n", "8\n", "9\n", "10\n", "11\n", "12\n"}   # the original and the five newest
 
 
+def test_same_second_copies_after_prune_took_the_plain_bak(files):
+    """A file wgt made (original NEW): prune removes the second's plain .bak, and the
+    next copy that second must still count up, not take .bak and sort as the oldest."""
+    f = files()
+    f.clock = lambda: 0
+    p = f.paths.wg("c.conf")
+    for i in range(12):
+        f.write(p, 0o600, f"{i}\n")
+    d = f.change_dir(p)
+    kept = {Path(os.path.join(d, n)).read_text() for n in os.listdir(d) if is_copy_of(n, "c.conf")}
+    assert kept == {"6\n", "7\n", "8\n", "9\n", "10\n"}   # the five newest
+
+
 def test_copy_order_reads_old_pid_names_too():
     names = ["c.conf.20260101-000000.4321.bak", "c.conf.20260101-000000.bak", "c.conf.20251231-235959.bak"]
     assert sorted(names, key=lambda n: copy_order(n, "c.conf")) == [names[2], names[1], names[0]]

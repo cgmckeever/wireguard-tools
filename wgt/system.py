@@ -68,14 +68,16 @@ def free_bak(path: str, when: float) -> str:
     nth more within that second, so an earlier copy is never overwritten; copy_order
     sorts them by age. (Servers set up earlier may also have .<stamp>.<pid>.bak.)"""
     stem = f"{path}.{time.strftime('%Y%m%d-%H%M%S', time.localtime(when))}"
-    if not os.path.lexists(f"{stem}.bak"):   # a dangling link counts: a copy would be written through it
-        return f"{stem}.bak"
-    # Above every number used this second, not the first free one: prune may have
-    # removed a lower one, and a copy taking its number would sort as the oldest.
+    # Above every number used this second (a dangling link counts: a copy would be
+    # written through it), not the first free one: prune may have removed a lower
+    # one, the plain .bak (0) too, and a copy taking its number would sort as the oldest.
     d, head = os.path.split(stem)
-    used = [copy_order(f, os.path.basename(path))[1] for f in os.listdir(d or ".")
+    names = os.listdir(d or ".") if os.path.isdir(d or ".") else []
+    used = [copy_order(f, os.path.basename(path))[1] for f in names
             if f.startswith(head + ".") and f.endswith(".bak")]
-    n = max(used, default=0) + 1
+    if not used:
+        return f"{stem}.bak"
+    n = max(used) + 1
     while os.path.lexists(f"{stem}.{n}.bak"):
         n += 1
     return f"{stem}.{n}.bak"
