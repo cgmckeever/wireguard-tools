@@ -160,6 +160,24 @@ def test_a_rotate_neither_updates_nor_retires_a_warped_carrier(store):
     assert sorted(os.listdir(warped.parent)) == ["dengar.chi-us.mbp-1.conf", "warped.dengar.chi-us.mbp-1.conf"]
 
 
+WARP_ALONE = "[Interface]\nPrivateKey = WARPKEY\nAddress = 172.16.0.2/32\n[Peer]\nEndpoint = 162.159.192.1:2408\n"
+
+
+def test_the_sweeps_warp_alone_config_is_never_matched_updated_or_retired(store):
+    # wireguard-tunnels writes config/warp.<device>.conf (the device's WARP alone, no
+    # header): wgt-ctl's add, update, rotate and retire all pass it by
+    warp = put(store, "iphone", "warp.iphone.conf", WARP_ALONE)
+    old = put(store, "iphone", "dengar.old.iphone.conf", conf("old.iphone", "GONE"))
+    actions = run(store, {"warp.iphone": conf("warp.iphone", "K1"), "iphone": conf("iphone", "K2")})
+    assert kinds(actions) == [("new", "dengar.iphone.conf", "iphone"),
+                              ("new", "dengar.warp.iphone.conf", "warp.iphone"),
+                              ("retire", "dengar.old.iphone.conf", "old.iphone")]
+    assert not old.exists()
+    run(store, {"warp.iphone": conf("warp.iphone", "K3")})
+    assert warp.read_text() == WARP_ALONE
+    assert "warp.iphone.conf" in os.listdir(warp.parent)
+
+
 def test_a_renamed_devices_copy_stays_put_with_a_note(store):
     put(store, "phone", "dengar.warp.phone.conf", conf("warp.phone", "K1"))
     [a] = run(store, {"warp.iphone": conf("warp.iphone", "K1")})
