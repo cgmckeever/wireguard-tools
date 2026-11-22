@@ -20,6 +20,8 @@ if [ ${#targets[@]} -eq 0 ]; then
         targets+=("$target")
     done <"$here/local/servers"
 fi
+# Also keeps "${targets[@]}" below from failing under set -u in macOS's bash 3.2.
+[ ${#targets[@]} -gt 0 ] || { echo "no servers (local/servers lists none)"; exit 0; }
 rc=0
 for target in "${targets[@]}"; do
     echo "==> $target"
