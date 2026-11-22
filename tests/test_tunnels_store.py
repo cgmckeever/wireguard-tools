@@ -221,6 +221,15 @@ def test_a_name_that_differs_only_in_case_is_the_same_file_on_a_mac(store):
     assert mine.read_text() == "[Interface]\nPrivateKey = MINE\n"
 
 
+def test_the_sweeps_name_is_passed_by_in_any_spelling_of_its_folder(store):
+    # devices/IPhone reaches the iphone folder (a Mac's spelling, a symlink here): its
+    # warp.iphone.conf is still the sweep's
+    put(store, "iphone", "warp.iphone.conf", WARP_ALONE)
+    if not (store / "devices" / "IPhone").exists():   # a case-sensitive file system
+        os.symlink("iphone", store / "devices" / "IPhone")
+    assert tunnels.local_files(["IPhone", "iphone"]) == {}
+
+
 def test_a_folder_reached_another_way_still_refuses_a_hand_made_file(store, monkeypatch):
     # devices/phone -> iphone: local_files lists that folder once, as iphone's
     mine = put(store, "iphone", "dengar.phone.conf", "[Interface]\nPrivateKey = MINE\n")

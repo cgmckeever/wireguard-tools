@@ -142,7 +142,8 @@ def local_files(devices: List[str]) -> Dict[str, str]:
         seen.add((st.st_dev, st.st_ino))
         for f in sorted(os.listdir(d)):
             p = os.path.join(d, f)
-            if f.endswith(".conf") and not sweep_owned(f, device) and os.path.isfile(p):
+            # Without case, as plan() compares: <device> may be another spelling of the folder.
+            if f.endswith(".conf") and not sweep_owned(f.lower(), device.lower()) and os.path.isfile(p):
                 found[p] = store.read_text(p) or ""
     return found
 
