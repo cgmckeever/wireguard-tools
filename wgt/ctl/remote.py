@@ -8,14 +8,13 @@ import re
 import shlex
 import subprocess
 import sys
-import tempfile
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .. import store, ui
 from ..const import Paths
 from ..errors import WgtError
-from ..system import Out
+from ..system import Out, atomic_write
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -265,13 +264,10 @@ def needs_terminal(cmd: str) -> None:
 
 
 def write_local(path: str, text: str, mode: int = 0o600) -> None:
-    """A file under local/, whole or not at all: the server list and numbers aren't
-    recoverable from anywhere else."""
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path))
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(text)
-    os.chmod(tmp, mode)
-    os.replace(tmp, path)
+    """A file under local/ (or ~/wg-tunnels), whole or not at all: the server list and
+    numbers aren't recoverable from anywhere else. system.atomic_write: synced, and no
+    temp file left behind if it fails."""
+    atomic_write(path, text, mode)
 
 
 def set_target(name: str, target: str) -> None:
