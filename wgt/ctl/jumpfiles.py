@@ -72,10 +72,16 @@ def add_one_exit(s: Server, path: str) -> None:
     the uploaded copy is deleted once imported."""
     file = os.path.basename(path)
     os.chmod(path, 0o600)
-    # Without a terminal make_link refuses before asking anything: no need to ask the server.
-    code, label = link_of(path) or make_link(s.name, path, remote_exit_codes(s) if ui.have_tty() else ())
-    if not store.valid_exit_code(code):
-        raise WgtError(f"bad code '{code}' in {file}'s '# jump:' line")
+    link = link_of(path)
+    if link:
+        code, label = link
+        if not store.valid_exit_code(code):
+            raise WgtError(f"bad code '{code}' in {file}'s '# jump:' line")
+        confirm_replace(s, code, file)
+    else:
+        # Without a terminal make_link refuses before asking anything: no need to ask the server.
+        # A code it picks is never one the server has: nothing to replace.
+        code, label = make_link(s.name, path, remote_exit_codes(s) if ui.have_tty() else ())
     out.log(f"{s.name}: {file} -> jump {code} ({label})")
     if remote.ssh(s.target, f"install -d -m 700 {remote.REMOTE.exit_dir} {remote.INBOX}")[0] != 0:
         raise WgtError(f"cannot reach {s.target}")
@@ -94,6 +100,33 @@ def add_one_exit(s: Server, path: str) -> None:
                                  f"rc=$?; rm -f {uploaded}; exit $rc")
     if rc != 0:
         raise WgtError(f"jump add failed for {code}")
+
+
+def confirm_replace(s: Server, code: str, file: str) -> None:
+    """Pushing <file> as jump <code> replaces the server's jump of that code (`jump add
+    --yes`), moving its clients to the new tunnel: when that jump came from another file
+    (its "# local file:" line, or none: added on the server), ask first."""
+    if code not in remote_exit_codes(s):
+        return
+    source = jump_file_of(s, code)
+    if source == file:
+        return   # this file again: an update
+    was = f"from {source}" if source else "added on the server"
+    if not ui.have_tty():
+        raise WgtError(f"{s.name} already has jump {code} ({was}): "
+                       f"run jump-add in a terminal to replace it with {file}")
+    if not ui.yes(f"{s.name}'s jump {code} is {was}; replace it with {file} (its clients move to it)?", False):
+        raise WgtError(f"jump {code} kept")
+
+
+def jump_file_of(s: Server, code: str) -> str:
+    """The local file jump <code> on the server was pushed from ("" if none is named)."""
+    path = remote.q(remote.REMOTE.jump_source(code))
+    rc, o = remote.ssh(s.target, f"sed -n 's/^# local file: //p' {path} 2>/dev/null | head -n 1; true",
+                       batch=True, capture=True)
+    if rc != 0:
+        raise WgtError(f"can't reach {s.name} to see its jump {code}")
+    return o.strip()
 
 
 def remote_exit_codes(s: Server) -> List[str]:

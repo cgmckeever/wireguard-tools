@@ -784,7 +784,9 @@ wgt-ctl boba jump-add                  # pick it by number (or: all)
 time it sees a file it asks what it is ("Paris, France") and suggests a code
 from that name and the file's country tag if it has one (Proton's `FR#252` gives
 `par-fr`); the answer is written into the file as a `# jump: par-fr Paris, France` line
-(edit it to rename the jump before pushing). `wgt-ctl boba client add` also offers to push
+(edit it to rename the jump before pushing). Pushing a file again updates its jump; pushing
+one whose code the server already has from another file (or that was added on the server)
+asks first, since that jump's clients move to the new tunnel. `wgt-ctl boba client add` also offers to push
 staged jump files that aren't on the server yet, so they show up in its exit
 menu.
 

@@ -612,3 +612,29 @@ def test_a_login_banner_never_reaches_a_captured_read(monkeypatch, banner):
         return real(["bash", "-c", f"printf %s {banner!r}; " + args[-1]], capture_output=True)
     monkeypatch.setattr(remote.subprocess, "run", remote_side)
     assert remote.ssh("root@h", "echo SERVER_NAME=x; echo dev", capture=True) == (0, "SERVER_NAME=x\ndev\n")
+
+
+@pytest.mark.parametrize("source,tty,answer,replaced", [
+    ("paris.conf", False, None, True),           # this file again: an update, nothing asked
+    ("proton-fr.conf", True, True, True),        # another file: asked, yes
+    ("proton-fr.conf", True, False, False),      # asked, no: kept
+    ("proton-fr.conf", False, None, False),      # no terminal to ask on: refused
+    ("", True, True, True),                      # added on the server: asked too
+])
+def test_pushing_a_named_file_over_another_files_jump_asks_first(monkeypatch, source, tty, answer, replaced):
+    def ssh(target, command, **k):
+        if "exits.db" in command:
+            return 0, "par-fr 1 Paris\n"
+        return 0, source + "\n"
+    asked = []
+    monkeypatch.setattr(remote, "ssh", ssh)
+    monkeypatch.setattr(ui, "have_tty", lambda: tty)
+    monkeypatch.setattr(ui, "yes", lambda q, default: asked.append(q) or answer)
+    s = remote.Server("boba", "root@h")
+    if replaced:
+        jumpfiles.confirm_replace(s, "par-fr", "paris.conf")
+    else:
+        with pytest.raises(WgtError):
+            jumpfiles.confirm_replace(s, "par-fr", "paris.conf")
+    assert bool(asked) == (answer is not None)
+    jumpfiles.confirm_replace(s, "nyc-us", "paris.conf")   # a code the server doesn't have: nothing to ask
