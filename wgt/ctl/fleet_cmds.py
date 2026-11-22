@@ -134,12 +134,19 @@ def rename_everywhere(args: List[str]) -> int:
     holders = [s for s in remote.servers() if old in seen.get(s.name, {})]
     if not holders and not any(new in devices for devices in seen.values()):
         raise WgtError(f"no device '{old}' on any server")
+    # A rename there that stopped after its last config moved lists '<new>' alone, without
+    # a number: '<old>'s line may still hold it, and only --force moves it (or finds nothing to do).
+    finishing = {s.name for s in remote.servers()
+                 if s not in holders and new in seen.get(s.name, {}) and seen[s.name][new] is None}
     rc = 0
-    for s in holders:
+    for s in remote.servers():
+        if s not in holders and s.name not in finishing:
+            continue
         out.log(s.name)
-        one = remote.do_wgt(s, ["device", "rename", old, new, *passed])
+        words = ["rename", old, new, *(["--force"] if s.name in finishing else []), *passed]
+        one = remote.do_wgt(s, ["device", *words])
         if one == 0:
-            tunnels.after(s, "device", ["rename", old, new, *passed])
+            tunnels.after(s, "device", words)
         rc = one or rc
     remote.ensure_local()
     entries = read_entries()
