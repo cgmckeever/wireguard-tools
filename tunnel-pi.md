@@ -97,13 +97,15 @@ replace them everywhere.
 | `ADMIN_EMAIL` | `you@example.com` | all | the email Cloudflare Access lets in |
 | `PI_USER` | `pi` | all | the user you set in Raspberry Pi Imager |
 | `VPS_HOST` | `bossk.example.com` | 2 | the VPS's public name or IP (the `Endpoint` host in any client config) |
-| `PI_PORT` | `51821` | 2 | a free UDP port on the VPS (`ss -ulpn` shows nothing on it). wgt uses `51820` |
-| `WG_SUBNET` | `10.214.237.0/24` | 2B | the VPS's client subnet: `WG_SUBNET` in wgt's state, or any client config's `Address` as a /24 |
-| `CLIENT_IP` | `10.214.237.5` | 2B | the IPv4 `Address` of the client config that should exit through the Pi (`wgt client list`) |
+| `PI_PORT` | `51821` | 2 | a UDP port on the VPS that nothing listens on: `ss -ulpn` on the VPS doesn't list it. wgt uses `51820`. `443` is a good choice if it's free, since networks that filter UDP usually still allow 443 (QUIC) |
+| `WG_SUBNET` | `10.214.237.0/24` | 2B | **[VPS]** `awk -F= '/^WG_SUBNET=/ {v = $2} END {print v}' /etc/wireguard/wg-tools.state` (the last line wins) |
+| `CLIENT_IP` | `10.214.237.5` | 2B | **[VPS]** `wgt client list`: the address of the config that should exit through the Pi (the `Address` in that config, not its static `10.9.8.x` address) |
 | `CLIENT_IP6` | `fd12:3456::5` | 2B | that config's IPv6 `Address`, if it has one |
-| `JUMP_CODE` | `home` | 2C | the jump's code: 2–6 characters of `a-z`, `0-9`, `-` |
+| `JUMP_CODE` | `home` | 2C | the jump's code: 2–6 characters of `a-z`, `0-9`, `-`, not one `wgt jump list` already shows |
 | `JUMP_LABEL` | `Friend's house, Chicago` | 2C | its name in client lists |
 | `DEVICE` | `phone` | 2C | the device that gets a config through the Pi |
+| `SERVER` | `bossk` | 2C | only for the wgt-ctl route in 2C.2: the VPS's name in `local/servers` |
+| `FRIEND_LAN` | `192.168.1.0/24` | 2D | found in 2D.1's check, once the Pi is at the friend's |
 
 These are fixed, chosen to stay clear of wgt (`wgt/const.py`). Change them only
 after checking wgt's own values:
@@ -126,6 +128,45 @@ after checking wgt's own values:
 | **[Browser]** | the Cloudflare dashboard. A person does this: it needs a login |
 
 Steps run in order. Each one ends with a **Check**. Don't go on until it passes.
+
+**Creating files.** A step that says *Create `<path>` (mode `NNN`)* and then
+shows a block means: write exactly that block to that path, owned by root, with
+that mode, after filling in the placeholders. One way to do it:
+
+```sh
+sudo install -m NNN /dev/stdin <path> <<'EOF'
+<the block, placeholders filled in>
+EOF
+```
+
+The quoted `'EOF'` keeps `%i` and `$...` exactly as written. Every file under
+`/etc/wireguard` is mode `600`.
+
+## For an AI agent following this
+
+- **Ask before touching the VPS.** Every **[VPS]** step changes a server that
+  other people's traffic may run through. Get the person's go-ahead for each
+  server before the first command on it, read-only ones included. In this
+  repo, that means bossk only (see `CLAUDE.md`): dengar, ig88 and boba are live,
+  and this guide isn't proven on them.
+- **Some steps need a person:** everything marked **[Browser]**, flashing
+  the SD card, plugging the Pi in or moving it, the phone hotspot, and the
+  Cloudflare browser login on the first `ssh ADMIN_HOST`. Stop at each one,
+  say exactly what to do, and wait.
+- **Placeholders first.** Collect every value in "Values to fill in" before
+  you start, and confirm them with the person. Never run a command that still
+  holds a placeholder: an all-capitals name from that table, `<...>`, or one
+  filled in along the way (`PI_PUBKEY` and `VPS_PUBKEY` in 2A.2, `<TOKEN>` in
+  1.2).
+- **Keys stay put.** Never print or log a `*.key` file or a `PrivateKey` line.
+  Pass them only by file or pipe, exactly as written. 2C.2 is the only step
+  that moves one: Pi to VPS through a pipe, never to your screen. Public keys
+  (`*.pub`) are fine to show. The cloudflared `<TOKEN>` is a credential too:
+  use it in 1.2's command only, and don't repeat it anywhere else.
+- **A failed Check means stop.** Report the command, its output and the
+  Troubleshooting row that matches. Don't improvise a fix on the VPS.
+- **Keep a record** of the values used and each Check's result, so the person
+  can see what was done.
 
 ---
 
@@ -157,13 +198,14 @@ than `infinity` (after the next reboot).
 
 ## 1.2 Cloudflare Tunnel and Access
 
-**[Browser]** In Cloudflare Zero Trust:
+**[Browser]** In Cloudflare Zero Trust (`one.dash.cloudflare.com`). Cloudflare
+renames these menus from time to time, so follow the nearest match:
 
 1. Go to **Networks → Tunnels → Create a tunnel**, choose **Cloudflared**, and
    name it `tunnel-pi`. Choose **Debian / arm64**. The page shows install
    commands and a **token**.
-2. On the tunnel's **Public Hostname** tab, add `ADMIN_HOST` → type `SSH`,
-   URL `localhost:22`.
+2. On the tunnel's **Public Hostname** tab (newer dashboards: **Published
+   application routes**), add `ADMIN_HOST` → type `SSH`, URL `localhost:22`.
 3. Go to **Access → Applications → Add an application → Self-hosted** for
    `ADMIN_HOST`, with one **Allow** policy: *Emails* = `ADMIN_EMAIL`.
 
@@ -186,6 +228,9 @@ Host ADMIN_HOST
     ProxyCommand /opt/homebrew/bin/cloudflared access ssh --hostname %h
 EOF
 ```
+
+(On an Intel Mac the path is `/usr/local/bin/cloudflared`: `which cloudflared`
+shows it.)
 
 **Check:** the dashboard shows the tunnel as **Healthy**, and **[Mac]**
 `ssh ADMIN_HOST` opens a browser login once, then gives a shell on the Pi.
@@ -226,60 +271,74 @@ Call the Pi's output `PI_PUBKEY` and the VPS's `VPS_PUBKEY`.
 ### 2A.3 The exit rules script (Pi)
 
 Both 2B and 2C use this script to send traffic arriving on a WireGuard
-interface out of `eth0`. Its third word is the **LAN mode**:
+interface out of the Pi's **uplink**. The uplink is whichever interface holds
+the default route: `eth0` at the friend's, but `wlan0` or a USB adapter during
+the hotspot test. The script's third word is the **LAN mode**:
 
 - **`isolated`** (the default): the internet only. Nothing on the friend's
   LAN can be reached.
-- **`lan`**: also the friend's LAN, meaning the subnet `eth0` is on (see 2D).
+- **`lan`**: also the friend's LAN, meaning the uplink's own subnet (see 2D).
 
-**[Pi]** Create `/usr/local/sbin/tunnel-pi-exit` with mode `755`:
+**[Pi]** Create `/usr/local/sbin/tunnel-pi-exit` (mode `755`):
 
 ```sh
 #!/bin/sh
 # tunnel-pi-exit up <interface> [isolated|lan] | down <interface>
-# Traffic arriving on <interface> leaves through eth0 with the friend's IP.
-# isolated: never into their LAN (or any private range). lan: their LAN
-# (eth0's subnet) too, still no other private range.
+# Traffic arriving on <interface> leaves through the uplink (the interface with
+# the default route) with the friend's IP. isolated: never into their LAN or
+# any private range. lan: their LAN (the uplink's subnet) too, still no other
+# private range.
 set -e
+USAGE="usage: $0 up <interface> [isolated|lan] | down <interface>"
 IF="$2"; MODE="${3:-isolated}"
-[ -n "$IF" ] || { echo "usage: $0 up <interface> [isolated|lan] | down <interface>" >&2; exit 2; }
+[ -n "$IF" ] || { echo "$USAGE" >&2; exit 2; }
 PRIVATE=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10
-SAVED="/run/tunnel-pi-lan.$IF"      # the LAN let in at up, so down removes the same rule
+SAVED="/run/tunnel-pi-exit.$IF"     # "<uplink> <lan or ->" from up, so down removes the same rules
 case "$1" in
   up)
+    case "$MODE" in isolated|lan) ;; *) echo "$USAGE" >&2; exit 2 ;; esac
+    UP=$(ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+    [ -n "$UP" ] || { echo "tunnel-pi-exit: no default route yet" >&2; exit 1; }
+    LAN=-
     iptables -I FORWARD -i "$IF" -d "$PRIVATE" -j DROP
     if [ "$MODE" = lan ]; then
-      LAN=$(ip -4 -o addr show dev eth0 | awk '{print $4; exit}')   # e.g. 192.168.1.50/24
+      LAN=$(ip -4 -o addr show dev "$UP" | awk '{print $4; exit}')   # e.g. 192.168.1.50/24
       if [ -n "$LAN" ]; then
-        iptables -I FORWARD -i "$IF" -o eth0 -d "$LAN" -j ACCEPT    # above the DROP
-        echo "$LAN" > "$SAVED"
+        iptables -I FORWARD -i "$IF" -o "$UP" -d "$LAN" -j ACCEPT    # above the DROP
       else
-        echo "tunnel-pi-exit: eth0 has no IPv4 address yet; $IF stays isolated" >&2
+        LAN=-; echo "tunnel-pi-exit: $UP has no IPv4 address; $IF stays isolated" >&2
       fi
-    elif [ "$MODE" != isolated ]; then
-      echo "tunnel-pi-exit: mode must be isolated or lan" >&2; exit 2
     fi
-    iptables -A FORWARD -i "$IF" -o eth0 -j ACCEPT
-    iptables -A FORWARD -i eth0 -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    iptables -t nat -C POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null \
-      || iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+    iptables -A FORWARD -i "$IF" -o "$UP" -j ACCEPT
+    iptables -A FORWARD -i "$UP" -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -t nat -C POSTROUTING -o "$UP" -j MASQUERADE 2>/dev/null \
+      || iptables -t nat -A POSTROUTING -o "$UP" -j MASQUERADE
+    echo "$UP $LAN" > "$SAVED"
+    if [ "$LAN" = - ]; then echo "tunnel-pi-exit: $IF -> $UP, isolated" >&2
+    else echo "tunnel-pi-exit: $IF -> $UP, LAN $LAN reachable" >&2; fi
     ;;
   down)
-    if [ -r "$SAVED" ]; then
-      iptables -D FORWARD -i "$IF" -o eth0 -d "$(cat "$SAVED")" -j ACCEPT || true
-      rm -f "$SAVED"
-    fi
+    [ -r "$SAVED" ] || exit 0
+    read -r UP LAN < "$SAVED"
+    [ "$LAN" = - ] || iptables -D FORWARD -i "$IF" -o "$UP" -d "$LAN" -j ACCEPT || true
     iptables -D FORWARD -i "$IF" -d "$PRIVATE" -j DROP || true
-    iptables -D FORWARD -i "$IF" -o eth0 -j ACCEPT || true
-    iptables -D FORWARD -i eth0 -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true
+    iptables -D FORWARD -i "$IF" -o "$UP" -j ACCEPT || true
+    iptables -D FORWARD -i "$UP" -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true
+    rm -f "$SAVED"
     ;;
-  *) echo "usage: $0 up <interface> [isolated|lan] | down <interface>" >&2; exit 2 ;;
+  *) echo "$USAGE" >&2; exit 2 ;;
 esac
 ```
 
-### 2A.4 The Pi's link: `/etc/wireguard/wgpi.conf` (mode `600`)
+`wg-quick` runs it when the interface starts, so the uplink is chosen then.
+If the Pi moves to another network, or Wi-Fi is turned off, restart the
+interface (or reboot) so the rules follow.
 
-**[Pi]**
+**Check [Pi]:** `sh -n /usr/local/sbin/tunnel-pi-exit` prints nothing.
+
+### 2A.4 The Pi's link
+
+**[Pi]** Create `/etc/wireguard/wgpi.conf` (mode `600`):
 
 ```ini
 [Interface]
@@ -299,9 +358,9 @@ PersistentKeepalive = 25
 The keepalive holds the NAT mapping on the friend's router open, so the VPS can
 always reach the Pi.
 
-### 2A.5 The VPS's link: `/etc/wireguard/wgpi.conf` (mode `600`)
+### 2A.5 The VPS's link
 
-**[VPS]**
+**[VPS]** Create `/etc/wireguard/wgpi.conf` (mode `600`):
 
 ```ini
 [Interface]
@@ -327,9 +386,24 @@ ufw allow PI_PORT/udp     # if the VPS uses ufw; otherwise open PI_PORT/udp in y
 systemctl enable --now wg-quick@wgpi
 ```
 
-**[Pi]**
+**[Pi]** First make every `wg-quick` interface retry until it starts. At
+power-on, DHCP or DNS may not be ready yet. Without a retry, the link stays
+down until someone unplugs the Pi.
+
+Create `/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf` (mode
+`644`; make the folder first with `sudo mkdir -p`):
+
+```ini
+[Unit]
+StartLimitIntervalSec=0
+
+[Service]
+Restart=on-failure
+RestartSec=30
+```
 
 ```sh
+sudo systemctl daemon-reload
 sudo systemctl enable --now wg-quick@wgpi
 ```
 
@@ -339,8 +413,7 @@ sudo systemctl enable --now wg-quick@wgpi
   and `ping -c3 10.99.0.1` works.
 - **[VPS]** `ping -c3 10.99.0.2` works. The VPS can reach the Pi, even though
   the Pi is behind NAT.
-- **[Pi]** `ssh ADMIN_HOST` still works from your Mac. Nothing in cloudflared
-  changed.
+- **[Mac]** `ssh ADMIN_HOST` still works. Nothing in cloudflared changed.
 
 Now do **either 2B or 2C**, not both.
 
@@ -348,9 +421,10 @@ Now do **either 2B or 2C**, not both.
 
 ## 2B. The exit, by hand
 
-### 2B.1 The VPS's routing: replace `/etc/wireguard/wgpi.conf`
+### 2B.1 The VPS's routing
 
-**[VPS]**
+**[VPS]** Create `/etc/wireguard/wgpi.conf` (mode `600`), replacing the one
+from 2A.5:
 
 ```ini
 [Interface]
@@ -390,11 +464,13 @@ PublicKey = PI_PUBKEY
 AllowedIPs = 0.0.0.0/0
 ```
 
-### 2B.2 The kill switch: `/etc/systemd/system/tunnel-pi-killswitch.service`
+### 2B.2 The kill switch
 
-**[VPS]** If `wgpi` is down, these clients must lose their connection, not
-quietly fall back to the VPS's own IP. These rules live outside `wgpi`, so they
-stay in place when it stops:
+If `wgpi` is down, these clients must lose their connection, not quietly fall
+back to the VPS's own IP. These rules live outside `wgpi`, so they stay in
+place when it stops.
+
+**[VPS]** Create `/etc/systemd/system/tunnel-pi-killswitch.service` (mode `644`):
 
 ```ini
 [Unit]
@@ -423,8 +499,9 @@ systemctl restart wg-quick@wgpi
 
 ### 2B.3 The Pi's exit and DNS
 
-**[Pi]** Add these two lines to the `[Interface]` section of
-`/etc/wireguard/wgpi.conf`:
+**[Pi]** In `/etc/wireguard/wgpi.conf`, put these two lines in the
+`[Interface]` section, after the `PostUp = wg set ...` line (replacing the
+`# 2B adds two lines here` comment):
 
 ```ini
 PostUp = /usr/local/sbin/tunnel-pi-exit up %i isolated
@@ -534,9 +611,12 @@ ssh ADMIN_HOST 'sudo cat /etc/wireguard/jump-for-vps.conf' \
 
 ```sh
 ( umask 077; ssh ADMIN_HOST 'sudo cat /etc/wireguard/jump-for-vps.conf' \
-    > ~/wg-tunnels/servers/<server>/carriers/tunnel-pi.conf )
-wgt-ctl <server> jump-add          # pick tunnel-pi.conf; give it JUMP_CODE and JUMP_LABEL
+    > ~/wg-tunnels/servers/SERVER/carriers/tunnel-pi.conf )
+wgt-ctl SERVER jump-add          # asks: pick tunnel-pi.conf, then give it JUMP_CODE and JUMP_LABEL
 ```
+
+(The `carriers/` folder exists once `wgt-ctl` has run `init` or `sync` for
+SERVER.)
 
 Then delete the Pi's copy of the key. **[Pi]**:
 
@@ -621,9 +701,10 @@ Changing `lan` back to `isolated` and restarting turns it off again.
 cloudflared doesn't depend on either interface, so this is safe to do over
 `ssh ADMIN_HOST` after drop-off.
 
-**Check [Pi]:** `sudo iptables -L FORWARD -n` shows an `ACCEPT` to the LAN
-subnet (for example `192.168.1.0/24`) **above** the `DROP` lines for the
-private ranges.
+**Check [Pi]:** `journalctl -u wg-quick@wgpi -n 5` (or `@wgjump`) shows
+`tunnel-pi-exit: ... LAN <subnet> reachable`, and `sudo iptables -L FORWARD -n`
+shows an `ACCEPT` to that subnet **above** the `DROP` lines for the private
+ranges. That subnet, for example `192.168.1.0/24`, is `FRIEND_LAN`.
 
 ### 2D.2 Who gets it
 
@@ -643,10 +724,21 @@ applies to **all** Pi-exit clients. For some clients only:
   `FRIEND_LAN` here.
 
 - **2C:** run **two** jump servers on the Pi, one in each mode, as two jumps.
-  Repeat 2C.1–2C.2 with a second interface (`wgjumplan`; addresses
-  `10.98.0.5/30` on the Pi, `10.98.0.6/32` in its jump file; port `51823`) in
-  `lan` mode, and a second code (for example `homelan`). A device then picks
-  its mode by config: `home.phone` (isolated) or `homelan.laptop` (LAN).
+  Leave `wgjump` isolated, and repeat 2C.1–2C.3 for a second one, changing
+  these everywhere in those steps:
+
+  | In 2C | For the LAN jump |
+  |---|---|
+  | `wgjump` (interface, `.conf`, `.key`, `.pub`) | `wgjumplan` |
+  | `jump-for-vps.conf` | `jump-for-vps-lan.conf` |
+  | `10.98.0.1/30` | `10.98.0.5/30` |
+  | `10.98.0.2/32` (both places) | `10.98.0.6/32` |
+  | `51822` (both places) | `51823` |
+  | `up %i isolated` | `up %i lan` |
+  | `JUMP_CODE`, `JUMP_LABEL` | a second code and label, for example `homelan`, `Friend's house (LAN)` |
+
+  A device then picks its mode by config: `home.phone` (isolated) or
+  `homelan.laptop` (LAN).
 
 ### 2D.3 Watch for overlapping subnets
 
@@ -671,10 +763,17 @@ Go to phase 3.
 ## 3.1 The full test, on a phone hotspot
 
 Move the Pi onto a **phone hotspot**. It copies the friend's network: a NAT
-you don't control and no open ports. Use a USB-to-ethernet adapter, or set up
-the hotspot's Wi-Fi temporarily with `sudo nmtui` (and remove it after, so the
-Pi uses only ethernet at the friend's). Run the tests from your Mac and client
-on a **different** network from the hotspot.
+you don't control and no open ports. Any of these works:
+
+- a travel router joined to the hotspot, with the Pi's ethernet plugged into
+  it (closest to the friend's setup);
+- a USB-to-ethernet adapter tethered to the phone;
+- the hotspot's Wi-Fi, set up with `sudo nmtui`. **Remove it after** (also
+  with `nmtui`), so at the friend's the Pi uses ethernet only.
+
+After the move, reboot the Pi, so `tunnel-pi-exit` picks up the new uplink
+(2A.3). Run the tests from your Mac and client on a **different** network from
+the hotspot.
 
 Here, "the Pi network's public IP" is the hotspot's: check it on the phone, or
 run `curl https://ifconfig.me` on the Pi. At the friend's it becomes theirs.
@@ -687,6 +786,7 @@ run `curl https://ifconfig.me` on the Pi. At the friend's it becomes theirs.
 | 4 | **[client]** `curl -6 -m 10 https://ifconfig.me` | fails (IPv6 blocked) |
 | 5 | **[Pi]** `sudo systemctl stop wg-quick@wgpi`, then **[client]** `curl -m 10 https://ifconfig.me` | times out. It must **not** print the VPS's IP |
 | 6 | with wgpi still stopped: **[Mac]** `ssh ADMIN_HOST` | still a shell. Then **[Pi]** `sudo systemctl start wg-quick@wgpi` |
+| 6b | 2B only: **[VPS]** `systemctl stop wg-quick@wgpi`, then **[client]** `curl -m 10 https://ifconfig.me`, then **[VPS]** `systemctl start wg-quick@wgpi` | times out (the kill switch, rule 901). It must **not** print the VPS's IP |
 | 7 | **[client]** `ping -c2` an address on the Pi's LAN (for example its router, `192.168.1.1`) | isolated: no reply. LAN mode (2D): replies |
 | 8 | **[client]** a config that is **not** a Pi exit: `curl https://ifconfig.me` | unchanged: the VPS's or WARP's IP, as before |
 
@@ -724,7 +824,10 @@ If it doesn't come up, ask the friend to check that the ethernet link lights
 are on and to unplug the power and plug it back in. If it still doesn't come
 up, their network is blocking something the hotspot didn't: usually outbound
 UDP to `PI_PORT`, which an occasional router or ISP filters. You can still
-reach the Pi over `ssh ADMIN_HOST`: see Troubleshooting.
+reach the Pi over `ssh ADMIN_HOST`. Check with `sudo wg show wgpi`: no
+handshake means the port is blocked. Move the link to UDP `443` if it's free
+on the VPS: change `ListenPort` on the VPS and `Endpoint` on the Pi, open the
+new port on the VPS, and restart `wg-quick@wgpi` on both.
 
 ---
 
@@ -740,8 +843,8 @@ rm /etc/systemd/system/tunnel-pi-killswitch.service; systemctl daemon-reload
 **2C [VPS]**
 
 ```sh
-wgt client remove JUMP_CODE.DEVICE     # each config using the jump
-wgt jump remove JUMP_CODE
+wgt client remove JUMP_CODE.DEVICE     # each config using the jump (wgt client list shows them)
+wgt jump remove JUMP_CODE              # and the LAN jump's code, if you made one (2D.2)
 systemctl disable --now wg-quick@wgpi
 ```
 
@@ -752,8 +855,15 @@ rm /etc/wireguard/wgpi.conf /etc/wireguard/wgpi.key /etc/wireguard/wgpi.pub
 ufw delete allow PI_PORT/udp
 ```
 
-**[Pi]** `sudo systemctl disable --now wg-quick@wgpi wg-quick@wgjump`. This
-leaves only the base and admin from phase 1. To retire the Pi completely, also run
+**[Pi]**
+
+```sh
+sudo systemctl disable --now wg-quick@wgpi wg-quick@wgjump wg-quick@wgjumplan 2>/dev/null
+sudo rm -f /etc/wireguard/wgpi.* /etc/wireguard/wgjump* /usr/local/sbin/tunnel-pi-exit
+sudo rm -f /etc/unbound/unbound.conf.d/tunnel-pi.conf     # 2B
+```
+
+This leaves only the base and admin from phase 1. To retire the Pi completely, also run
 `sudo systemctl disable --now cloudflared`, then delete the tunnel and the
 Access application in the dashboard.
 
@@ -769,6 +879,7 @@ longer shows `JUMP_CODE`, and the clients are back on their normal routes.
 | 2B: handshake, but the client has no internet | **[VPS]** `ip rule` (900 first?), `ip route show table 260`, the `FORWARD` counters. **[Pi]** `sysctl net.ipv4.ip_forward`, `sudo iptables -t nat -L -v` |
 | 2B: sites load but names don't resolve | **[Pi]** `systemctl status unbound`, `dig @10.99.0.2 example.com`. **[VPS]** `iptables -t nat -L PREROUTING -v` |
 | 2C: `jump add` fails its check | **[VPS]** `ping 10.99.0.2` (the link first), then `wg show px-JUMP_CODE`. **[Pi]** `sudo wg show wgjump` (a handshake from 10.99.0.1?), `sysctl net.ipv4.ip_forward` |
+| **[Pi]** `wg-quick@wgpi` (or `@wgjump`) keeps restarting | `journalctl -u wg-quick@wgpi -n 20`. `no default route yet` means no network on any interface. A failed name lookup means `VPS_HOST` doesn't resolve |
 | Some sites hang (usually large pages) | MTU. wgt's client configs use 1280, which fits through both tunnels. A config with a larger `MTU` needs lowering |
 | A client shows the VPS's IP | 2B: `systemctl status tunnel-pi-killswitch`, `ip rule` (901). 2C: is the config named `JUMP_CODE.<device>`? |
 
