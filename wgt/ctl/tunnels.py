@@ -237,38 +237,43 @@ def report(server: str, actions: List[Action]) -> None:
             out.warn(f"{server} {a.config}: {shown(a.path)}: {a.note}")
 
 
-def fetch(s: Server) -> Dict[str, str]:
-    """Every client config the server has: config name -> text. The name comes
-    from each file's header (the file name also holds the server's own name)."""
+def fetch(s: Server) -> Tuple[Dict[str, str], str]:
+    """Every client config the server has (config name -> text), and the server's
+    own SERVER_NAME ("" if unset). A config's name comes from its header (the file
+    name also holds the server's own name)."""
     d = remote.REMOTE.client_dir
-    rc, o = remote.ssh(s.target, f"cd {remote.q(d)} 2>/dev/null || exit 0; for f in *.conf; do "
+    rc, o = remote.ssh(s.target, f"sed -n 's/^SERVER_NAME=//p' {remote.q(remote.STATE_FILE)} 2>/dev/null | tail -n 1; "
+                                 f"cd {remote.q(d)} 2>/dev/null || exit 0; for f in *.conf; do "
                                  f"[ -f \"$f\" ] || continue; printf '{MARK}%s\\n' \"$f\"; cat \"$f\"; done",
                        batch=True, capture=True)
     if rc != 0:
         raise WgtError(f"can't read {s.name}'s client configs" + (" (unreachable)" if rc == 255 else ""))
+    own, *chunks = o.split(MARK)
     issued = {}
-    for chunk in o.split(MARK)[1:]:
+    for chunk in chunks:
         file, _, text = chunk.partition("\n")
         h = header_of(text)
         if h:
             issued[h[0]] = text
         else:
             out.warn(f"{s.name}: {file} has no '# wireguard-tools client:' line; not delivered")
-    return issued
+    return issued, own.strip()
 
 
-def server_name(issued: Dict[str, str], s: Server) -> str:
-    """The name the server writes in its configs (its own setting; usually the list's name)."""
+def server_name(issued: Dict[str, str], s: Server, own: str = "") -> str:
+    """The name the server writes in its configs: the one their headers give, else
+    its own SERVER_NAME <own> (with no configs left, its copies still name it),
+    else the list's name."""
     names = {h[1] for h in (header_of(t) for t in issued.values()) if h}
-    return names.pop() if len(names) == 1 else s.name
+    return names.pop() if len(names) == 1 else own or s.name
 
 
 def deliver(s: Server) -> int:
     """Copy <s>'s client configs into devices/<device>/config/. 0, or 1 if any
     file was refused or the server couldn't be read."""
-    issued = fetch(s)
+    issued, own = fetch(s)
     anchor(s.name)
-    name = server_name(issued, s)
+    name = server_name(issued, s, own)
     devices = sorted(set(all_devices()) | {store.device_of(c) for c in issued})
     actions = plan(name, issued, local_files(devices), complete=True)
     apply(actions)
