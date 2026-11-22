@@ -313,13 +313,18 @@ def do_sync(s: Server, args: List[str]) -> int:
 
 
 CHANGES = {"client": ("add", "rotate", "rename", "remove"), "device": ("rename",)}
+REWRITES_ALL = ("setup", "restore")   # sync_client_configs: settings and, after --name, every header
 
 
 def changes_configs(cmd: str, args: List[str]) -> bool:
     """A wgt command that may have changed client configs. `client` alone and
-    `client list` count: their action menu can rotate, rename or remove one."""
-    if remote.dry_run(args) or "--tsv" in args:
+    `client list` count: their action menu can rotate, rename or remove one. setup
+    and restore rewrite every config: a copy must follow before its header's old
+    server name stops matching (a rotate or remove after `setup --name`)."""
+    if remote.dry_run(args) or "--tsv" in remote.wgt_words(args):
         return False
+    if cmd in REWRITES_ALL:
+        return True
     if cmd == "client" and (not args or args[0] == "list"):
         return True
     return bool(args) and args[0] in CHANGES.get(cmd, ())

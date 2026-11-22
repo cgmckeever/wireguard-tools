@@ -745,8 +745,11 @@ server's client configs in `devices/`: delete those by hand.
 **Client configs follow the server.** After `client add`, `rotate`, `rename` and
 `remove`, the `client` list and its action menu, and `device rename` (on one
 server or `all`), `wgt-ctl` copies that server's client configs into
-`devices/<device>/config/`; `wgt-ctl <server> sync` (or `all sync`) does it on
-demand, such as after `setup` or a `move` rewrites configs. The server's copy is the live one,
+`devices/<device>/config/`. So do `setup` and `restore`, which rewrite every
+config. `wgt-ctl <server> sync` (or `all sync`) does it on demand, such as after a
+`move`, or after `wgt setup` run on the server itself: sync before the next client
+change there, since after `--name` a rotated or removed config's old copy no longer
+matches. The server's copy is the live one,
 so it wins:
 
 | On your machine | What happens |

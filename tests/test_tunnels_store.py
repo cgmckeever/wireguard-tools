@@ -313,6 +313,8 @@ def test_a_renamed_servers_last_config_still_retires(store, monkeypatch):
     ("device", ["rename", "phone", "iphone"], True), ("client", ["add", "phone", "--dry-run"], False),
     ("client", ["list"], True), ("client", [], True), ("client", ["list", "--tsv"], False),
     ("client", ["disable", "a.phone"], False), ("device", ["set", "phone"], False),
+    ("setup", [], True), ("setup", ["--name", "dengar2"], True), ("setup", ["--dry-run"], False),
+    ("restore", ["/root/x.tar.gz"], True),
 ])
 def test_which_commands_deliver(cmd, args, delivers):
     assert tunnels.changes_configs(cmd, args) is delivers
