@@ -260,6 +260,13 @@ def test_add_takes_the_next_low_number_and_remembers_it(local, monkeypatch):
     assert (local / "devices").read_text().splitlines()[1:] == ["mac 2", "phone 3"]
 
 
+def test_a_dry_run_add_doesnt_use_up_a_number(local, monkeypatch):
+    calls = answers_from(monkeypatch, {"dengar": {"mac": 2}, "boba": {"mac": 2}})
+    assert ctl.on("boba", "client", ["add", "phone", "--dry-run"]) == 0
+    assert calls[0][1][-2:] == ["--device-number", "3"]
+    assert "phone" not in (local / "devices").read_text()
+
+
 def test_add_reuses_the_number_the_fleet_has_for_the_device(local, monkeypatch):
     calls = answers_from(monkeypatch, {"dengar": {"mac": 2, "phone": 5}, "boba": {"mac": 2}})
     ctl.on("boba", "client", ["add", "warp.phone", "--yes"])
