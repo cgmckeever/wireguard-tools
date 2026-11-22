@@ -278,6 +278,11 @@ def with_client_name(cfg: Config, snap: Snapshot, text: str, name: str) -> str:
     return _set_line(r"(?m)^# exit: .*$", f"# exit: {exit_desc(snap, name)}", text)
 
 
+def with_first_line(text: str, prefix: str, line: str) -> str:
+    """<text> with <line> first, and any earlier line starting with <prefix> dropped."""
+    return line + "\n" + "".join(x + "\n" for x in text.splitlines() if not x.startswith(prefix))
+
+
 def with_device_network(text: str) -> str:
     """The config with its "# device-network:" header line, added before
     [Interface] in configs written before the line existed, and without the

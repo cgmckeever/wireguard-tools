@@ -25,8 +25,7 @@ def link_of(path: str) -> Optional[Tuple[str, str]]:
 
 def with_jump_line(text: str, code: str, label: str) -> str:
     """The config with its "# jump:" line first (any earlier one replaced)."""
-    body = "".join(line + "\n" for line in text.splitlines() if not line.startswith("# jump: "))
-    return f"# jump: {code} {label}\n" + body
+    return render.with_first_line(text, "# jump: ", f"# jump: {code} {label}")
 
 
 def make_link(server: str, path: str) -> Tuple[str, str]:
@@ -63,8 +62,7 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
 def with_local_file_comment(text: str, file: str) -> str:
     """The config with a "# local file: <name>" line naming where it came from
     (any earlier one replaced)."""
-    body = "".join(line + "\n" for line in text.splitlines() if not line.startswith("# local file: "))
-    return f"# local file: {file}\n" + body
+    return render.with_first_line(text, "# local file: ", f"# local file: {file}")
 
 
 def add_one_exit(s: Server, path: str) -> None:

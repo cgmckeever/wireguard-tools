@@ -265,8 +265,8 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     if not warp.register(ctx, ctx.paths.exit_wgcf_dir(code)):
         raise WgtError(f"could not register a WARP account for jump '{code}'")
     # The stored copy carries its label as the first line, for whoever opens the file.
-    body = "".join(line + "\n" for line in raw.splitlines() if not line.startswith(f"# exit {code}: "))
-    ctx.files.write(ctx.paths.jump_source(code), 0o600, f"# exit {code}: {label}\n" + body)
+    ctx.files.write(ctx.paths.jump_source(code), 0o600,
+                    render.with_first_line(raw, f"# exit {code}: ", f"# exit {code}: {label}"))
     e = store.Exit(code, idx, label)
     ops.save_exit(ctx, e)
     if ctx.runner.dry_run:
