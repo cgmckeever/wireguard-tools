@@ -61,10 +61,22 @@ def test_naming_a_jump_writes_it_into_the_file_and_refuses_a_taken_code(local, m
     path = local / "wg-tunnels" / "servers" / "boba" / "carriers" / "unnamed.conf"
     replies = iter(["Paris, France", "par-fr", "par"])
     monkeypatch.setattr(ui, "have_tty", lambda: True)
-    monkeypatch.setattr(ui, "ask", lambda prompt: next(replies))
+    monkeypatch.setattr(ui, "ask", lambda prompt, gone="": next(replies))
     assert jumpfiles.make_link("boba", str(path)) == ("par", "Paris, France")
     assert path.read_text() == "# jump: par Paris, France\n[Interface]\nPrivateKey = K2\n"
     assert oct(path.stat().st_mode & 0o777) == "0o600"
+
+
+def test_naming_a_jump_stops_at_end_of_input_instead_of_asking_forever(local, monkeypatch):
+    path = local / "wg-tunnels" / "servers" / "boba" / "carriers" / "unnamed.conf"
+    replies = iter(["Paris, France", "par-fr"])   # taken by paris.france.conf
+    monkeypatch.setattr(ui, "have_tty", lambda: True)
+    monkeypatch.setattr(ui, "ask", lambda prompt, gone="": next(replies, gone))
+    with pytest.raises(WgtError, match="no code given"):
+        jumpfiles.make_link("boba", str(path))
+    assert path.read_text() == "[Interface]\nPrivateKey = K2\n"
+
+
 
 
 def test_reserved_names():

@@ -45,8 +45,9 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
     code = city + (f"-{m.group(1).lower()}" if m else "")
     taken = {link[0] for f in tunnels.staged(server) if f != path for link in [link_of(f)] if link}
     while True:
-        reply = ui.ask(f"    Short code on the server [{code}]: ")
-        if not reply and not store.valid_exit_code(code):
+        reply = ui.ask(f"    Short code on the server [{code}]: ", gone="\0")
+        # Ctrl-D or a lost terminal stops here; otherwise a taken default would ask forever.
+        if reply == "\0" or (not reply and not store.valid_exit_code(code)):
             raise WgtError("no code given")
         code = reply or code
         if not store.valid_exit_code(code):
