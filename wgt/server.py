@@ -266,11 +266,13 @@ def record_baseline(ctx: Ctx) -> None:
     if host.route_dev(route) == ctx.cfg.WARP_IF:
         raise WgtError(f"default route already points at {ctx.cfg.WARP_IF}; fix routing first")
     if not store.state_get(ctx.snap.state, "DEFAULT_ROUTE"):
-        ops.state_set(ctx, "DEFAULT_ROUTE", route)
-        ops.state_set(ctx, "PUB_IF", host.route_dev(route))
+        # DEFAULT_ROUTE last: it marks the baseline recorded, so a stop before it records
+        # all of it again (forwarding isn't changed until later) rather than none of the rest.
         ops.state_set(ctx, "ORIG_IP_FORWARD", live.sysctl(ctx.runner, "net.ipv4.ip_forward"))
         if ctx.facts.kernel_ipv6:
             ops.state_set(ctx, "ORIG_IP6_FORWARD", live.sysctl(ctx.runner, "net.ipv6.conf.all.forwarding"))
+        ops.state_set(ctx, "PUB_IF", host.route_dev(route))
+        ops.state_set(ctx, "DEFAULT_ROUTE", route)
     ctx.out.info(f"default route: {route} (public interface {host.route_dev(route)})")
 
 
