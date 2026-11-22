@@ -126,12 +126,19 @@ def sweep_owned(file: str, device: str) -> bool:
 
 
 def local_files(devices: List[str]) -> Dict[str, str]:
-    """Every *.conf in those devices' config/ folders, the sweep's aside: path -> text."""
+    """Every *.conf in those devices' config/ folders, the sweep's aside: path -> text.
+    Each folder once: on a Mac, devices/iPhone and devices/iphone are one folder, whose
+    files listed twice would each be retired twice."""
     found = {}
+    seen = set()
     for device in devices:
         d = config_dir(device)
         if not os.path.isdir(d):
             continue
+        st = os.stat(d)
+        if (st.st_dev, st.st_ino) in seen:
+            continue
+        seen.add((st.st_dev, st.st_ino))
         for f in sorted(os.listdir(d)):
             p = os.path.join(d, f)
             if f.endswith(".conf") and not sweep_owned(f, device) and os.path.isfile(p):

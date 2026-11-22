@@ -106,6 +106,19 @@ def test_a_copy_the_server_no_longer_has_retires_to_bak(store):
     assert sorted(f.endswith(".bak") for f in os.listdir(gone.parent)) == [False, False, True]
 
 
+def test_a_folder_two_device_names_reach_is_read_once(store):
+    # On a Mac devices/iPhone is devices/iphone: a server's "iphone" next to the folder
+    # "iPhone" listed its files twice, and the second retire of one failed (it was gone).
+    gone = put(store, "phone", "dengar.old.phone.conf", conf("old.phone", "GONE"))
+    os.symlink("phone", store / "devices" / "phone2")   # one folder, two names, on any system
+    assert list(tunnels.local_files(["phone", "phone2"])) == [str(gone)]
+    actions = tunnels.plan("dengar", {}, tunnels.local_files(["phone", "phone2"]), True)
+    tunnels.apply(actions)
+    assert kinds(actions) == [("retire", "dengar.old.phone.conf", "old.phone")]
+
+
+
+
 def test_nothing_retires_unless_the_list_is_complete(store):
     put(store, "iphone", "dengar.old.iphone.conf", conf("old.iphone", "GONE"))
     assert run(store, {}, complete=False) == []
