@@ -67,6 +67,15 @@ def test_naming_a_jump_writes_it_into_the_file_and_refuses_a_taken_code(local, m
     assert oct(path.stat().st_mode & 0o777) == "0o600"
 
 
+def test_naming_a_jump_refuses_a_code_the_server_already_has(local, monkeypatch):
+    # the push runs `wgt jump add <code> --yes`, which would replace that jump
+    path = local / "wg-tunnels" / "servers" / "boba" / "carriers" / "unnamed.conf"
+    replies = iter(["Paris, France", "", "pa2"])   # the default "par" is on the server
+    monkeypatch.setattr(ui, "have_tty", lambda: True)
+    monkeypatch.setattr(ui, "ask", lambda prompt, gone="": next(replies))
+    assert jumpfiles.make_link("boba", str(path), ["par"]) == ("pa2", "Paris, France")
+
+
 def test_naming_a_jump_stops_at_end_of_input_instead_of_asking_forever(local, monkeypatch):
     path = local / "wg-tunnels" / "servers" / "boba" / "carriers" / "unnamed.conf"
     replies = iter(["Paris, France", "par-fr"])   # taken by paris.france.conf

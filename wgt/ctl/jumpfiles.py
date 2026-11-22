@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 import re
 import tempfile
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from .. import render, store, ui
 from ..errors import WgtError
@@ -28,10 +28,11 @@ def with_jump_line(text: str, code: str, label: str) -> str:
     return render.with_first_line(text, "# jump: ", f"# jump: {code} {label}")
 
 
-def make_link(server: str, path: str) -> Tuple[str, str]:
+def make_link(server: str, path: str, on_server: Sequence[str] = ()) -> Tuple[str, str]:
     """First push of a staged config: ask what it is and pick its code (the name's
     first 3 letters + a country tag like Proton's "FR#252", e.g. par-fr), then write
-    both into the file. A code another of this server's files already uses is refused."""
+    both into the file. A code another of this server's files already uses, or a
+    jump the server already has (<on_server>: the push would replace it), is refused."""
     file = os.path.basename(path)
     text = store.read_text(path) or ""
     hint = render.peer_hint(text)
@@ -43,7 +44,7 @@ def make_link(server: str, path: str) -> Tuple[str, str]:
     m = re.match(r"^([A-Za-z]{2})#", hint)
     city = re.sub(r"[^a-z]", "", name.lower())[:3]
     code = city + (f"-{m.group(1).lower()}" if m else "")
-    taken = {link[0] for f in tunnels.staged(server) if f != path for link in [link_of(f)] if link}
+    taken = {link[0] for f in tunnels.staged(server) if f != path for link in [link_of(f)] if link} | set(on_server)
     while True:
         reply = ui.ask(f"    Short code on the server [{code}]: ", gone="\0")
         # Ctrl-D or a lost terminal stops here; otherwise a taken default would ask forever.
@@ -71,7 +72,7 @@ def add_one_exit(s: Server, path: str) -> None:
     the uploaded copy is deleted once imported."""
     file = os.path.basename(path)
     os.chmod(path, 0o600)
-    code, label = link_of(path) or make_link(s.name, path)
+    code, label = link_of(path) or make_link(s.name, path, remote_exit_codes(s))
     if not store.valid_exit_code(code):
         raise WgtError(f"bad code '{code}' in {file}'s '# jump:' line")
     out.log(f"{s.name}: {file} -> jump {code} ({label})")
