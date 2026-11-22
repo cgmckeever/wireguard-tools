@@ -292,6 +292,19 @@ def test_fetch_reads_every_config_by_its_header(store, monkeypatch):
         tunnels.fetch(remote.Server("dengar", "root@h"))
 
 
+def test_a_non_utf8_byte_in_a_config_is_delivered_as_it_was(store, monkeypatch):
+    m, seen = tunnels.MARK, {}
+    text = conf("iphone", "K1", body="# exit: Z\udce9rich\n")   # a Latin-1 é, as surrogateescape reads it
+
+    def ssh(target, command, **k):
+        seen.update(k)
+        return 0, f"{m}dengar.iphone.conf\n{text}"
+    monkeypatch.setattr(remote, "ssh", ssh)
+    assert tunnels.deliver(remote.Server("dengar", "root@h")) == 0
+    assert seen["errors"] == "surrogateescape"
+    assert b"Z\xe9rich" in (store / "devices" / "iphone" / "config" / "dengar.iphone.conf").read_bytes()
+
+
 def test_the_name_in_the_configs_is_the_servers_own(store):
     issued = {"a.x": conf("a.x", "K", server="crash")}
     assert tunnels.server_name(issued, remote.Server("boba", "root@h")) == "crash"

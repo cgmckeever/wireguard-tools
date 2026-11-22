@@ -269,11 +269,13 @@ def fetch(s: Server) -> Tuple[Dict[str, str], str]:
     d = remote.REMOTE.client_dir
     # SERVER_NAME= kept on its line: whatever else a login script prints first isn't read as the name
     # (the echo starts that line even after a banner with no newline of its own).
+    # A non-UTF-8 byte (a jump's label) is kept as it was: copies are the server's files as is,
+    # and a decoding error would escape after()'s warning as a traceback.
     rc, o = remote.ssh(s.target, "echo; "
                                  f"sed -n '/^SERVER_NAME=/p' {remote.q(remote.STATE_FILE)} 2>/dev/null | tail -n 1; "
                                  f"cd {remote.q(d)} 2>/dev/null || exit 0; for f in *.conf; do "
                                  f"[ -f \"$f\" ] || continue; printf '{MARK}%s\\n' \"$f\"; cat \"$f\"; done",
-                       batch=True, capture=True)
+                       batch=True, capture=True, errors="surrogateescape")
     if rc != 0:
         raise WgtError(f"can't read {s.name}'s client configs" + (" (unreachable)" if rc == 255 else ""))
     head, *chunks = o.split(MARK)
