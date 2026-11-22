@@ -192,7 +192,12 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
 
 
 def bak_path(path: str) -> str:
-    return f"{path}.{time.strftime('%Y%m%d-%H%M%S')}.bak"
+    """<path>.<YYYYmmdd-HHMMSS>.bak, plus .<pid> while that name is taken (a second
+    change within the second), so an earlier copy is never overwritten."""
+    bak = f"{path}.{time.strftime('%Y%m%d-%H%M%S')}.bak"
+    while os.path.exists(bak):
+        bak = bak[: -len(".bak")] + f".{os.getpid()}.bak"
+    return bak
 
 
 def apply(actions: List[Action]) -> None:

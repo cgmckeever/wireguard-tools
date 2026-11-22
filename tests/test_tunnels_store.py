@@ -204,6 +204,17 @@ def test_a_name_that_differs_only_in_case_is_the_same_file_on_a_mac(store):
     assert mine.read_text() == "[Interface]\nPrivateKey = MINE\n"
 
 
+def test_two_updates_in_one_second_keep_both_old_copies(store, monkeypatch):
+    monkeypatch.setattr(tunnels.time, "strftime", lambda fmt: "20260101-000000")
+    path = put(store, "iphone", "dengar.iphone.conf", conf("iphone", "K1"))
+    run(store, {"iphone": conf("iphone", "K1", body="MTU = 1280\n")})
+    run(store, {"iphone": conf("iphone", "K1", body="MTU = 1300\n")})
+    baks = sorted(f for f in os.listdir(path.parent) if f.endswith(".bak"))
+    assert len(baks) == 2
+    assert {(path.parent / b).read_text() for b in baks} == {conf("iphone", "K1"),
+                                                            conf("iphone", "K1", body="MTU = 1280\n")}
+
+
 def test_the_store_is_wg_tunnels_as_written(monkeypatch):
     # wireguard-tunnels (store.root, tunnel.sh) doesn't expand a "~" in it: neither do we
     monkeypatch.setenv("WG_TUNNELS", "~/elsewhere")
