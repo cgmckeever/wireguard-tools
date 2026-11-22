@@ -122,8 +122,8 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
     name = fleet_cmds.client_name(args)
     # Nothing to offer when the exit is given (--exit, or a <code>.<name>
     # client name), there must be no prompts (--yes), or nothing may change (--dry-run).
-    if "--exit" in args or any(a.startswith("--exit=") for a in args) or "." in name \
-            or any(a in remote.YES for a in args) or remote.dry_run(args):
+    if remote.flag_given(args, "--exit") or "." in name \
+            or any(a in remote.YES for a in remote.wgt_words(args)) or remote.dry_run(args):
         return
     files = tunnels.staged(s.name)
     if not files or not ui.have_tty():

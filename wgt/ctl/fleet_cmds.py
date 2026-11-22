@@ -84,7 +84,7 @@ def numbered_add(args: List[str]) -> Tuple[List[str], str]:
     this just gave it a new number (forget_number: a failed add gives it back). A
     server that can't be reached is covered by local/devices."""
     device = store.device_of(client_name(args))
-    if not device or "--device-number" in args or any(a.startswith("--device-number=") for a in args):
+    if not device or remote.flag_given(args, "--device-number"):
         return args, ""
     remote.ensure_local()
     seen, missed = sweep()

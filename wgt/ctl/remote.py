@@ -230,13 +230,17 @@ YES = ("--yes", "-y")
 
 def wgt_words(args: Sequence[str]) -> Iterator[str]:
     """wgt's words and flags as wgt reads them: a value flag's value (--label --dry-run,
-    --warp off) is skipped, not read as a word or flag of its own."""
+    --warp off) is skipped, not read as a word or flag of its own (the flag itself is kept)."""
     words = iter(args)
     for a in words:
+        yield a
         if a in VALUE_FLAGS:
             next(words, None)
-        else:
-            yield a
+
+
+def flag_given(args: Sequence[str], flag: str) -> bool:
+    """<flag> (or <flag>=value) among wgt's flags, not as another flag's value."""
+    return any(a == flag or a.startswith(flag + "=") for a in wgt_words(args))
 
 
 def dry_run(args: Sequence[str]) -> bool:
