@@ -85,8 +85,11 @@ def cmd_warp_rotate(ctx: Ctx, words: List[str]) -> int:
                        f"{', '.join(e.code for e in ctx.snap.exits) or 'no jumps'})")
     jumps = ctx.snap.exits if which == "all" else [e for e in ctx.snap.exits if e.code == which]
     names = (["this server"] if which in ("host", "all") else []) + [f"jump {e.code}" for e in jumps]
+    # As README says: a jump goes down whole, its plain configs too, not only its warp. ones.
+    pauses = (["this server's warp. configs pause for a few seconds"] if which in ("host", "all") else []) \
+        + (["a jump's configs, plain ones too, stop until the watchdog brings it back"] if jumps else [])
     ctx.runner.step(f"New WARP accounts for: {', '.join(names)} (the old ones are backed up; "
-                    "their warp. configs pause for a few seconds)", "restore the backed-up wgcf files, then wgt setup")
+                    f"{'; '.join(pauses)})", "restore the backed-up wgcf files, then wgt setup")
     ops.confirm(ctx, "Rotate WARP now?")
     if not warp.install_wgcf(ctx):
         raise WgtError("wgcf is needed to register WARP")
