@@ -67,8 +67,19 @@ def routed_overlap(subnet: str, routes: str, own_if: str) -> str:
 
 
 def _routed(net: str, routes: str) -> bool:
-    """A route in <routes> already points into 10.a.b (<net>)."""
-    return bool(re.search(r"(^|[^0-9.])" + re.escape(net) + r"\.", routes, re.M))
+    """A route in <routes> already points into 10.a.b (<net>), or covers it (10.0.0.0/8:
+    setup's refuse_routed_subnet would refuse the pick, as routed_overlap sees it)."""
+    if re.search(r"(^|[^0-9.])" + re.escape(net) + r"\.", routes, re.M):
+        return True
+    want = ipaddress.ip_network(f"{net}.0/24")
+    for line in routes.splitlines():
+        fields = line.split()
+        try:
+            if fields and want.overlaps(ipaddress.ip_network(fields[0], strict=False)):
+                return True
+        except ValueError:
+            continue   # default, or a "blackhole x" line
+    return False
 
 
 def next_free_subnet(routes: str, used: List[str]) -> str:

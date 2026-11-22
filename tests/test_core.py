@@ -265,6 +265,14 @@ def test_next_free_subnet():
     assert net.next_free_subnet("", ["10.200.200.0/24", "10.200.201.0/24"]) == "10.200.202.0/24"
     assert net.next_free_subnet("10.200.200.0/24 dev eth1", ["10.200.202.0/23"]) == "10.200.201.0/24"
     assert net.next_free_subnet("", ["192.168.250.0/24", "junk"]) == "10.200.200.0/24"
+    # a wider route covers candidates without naming them: setup would refuse those
+    assert net.next_free_subnet("10.200.200.0/23 dev eth1\n", []) == "10.200.202.0/24"
+
+
+def test_random_subnet_avoids_a_wider_route():
+    for seed in range(50):
+        s = net.random_subnet("10.200.0.0/16 dev eth1\ndefault via 192.0.2.1 dev eth0", random.Random(seed))
+        assert not s.startswith("10.200."), s
 
 
 def test_fleet_subnets_pick_next_free():
