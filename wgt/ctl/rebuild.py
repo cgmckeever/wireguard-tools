@@ -185,21 +185,22 @@ def do_move(s: Server, args: List[str]) -> int:
     if not in_place:
         remote.set_target(s.name, new)
         out.log(f"6. {s.name} is now {new} in {remote.LIST}")
-    # The restore rewrote its configs (a new machine's address, setup flags): copies
-    # follow, as after `wgt-ctl <server> restore`. Only once the list points at the new
-    # machine: a delivery stopped part-way (Ctrl-C) mustn't leave it on the old one.
-    tunnels.after(Server(s.name, new, s.dir), "restore", [])
     if in_place:
         out.log(f"{s.name} rebuilt")
-        return 0
-    out.info(f"the old machine ({s.target}) is down, its keys kept")
-    # No by default: Enter, or a lost terminal, must not destroy the way back.
-    # Its tests can't see a provider's firewall blocking the new machine's UDP port.
-    if sure or ui.yes(f"Tear wireguard-tools off the old machine ({s.target}) now?", default=False):
-        if teardown(s.target, s.dir) != 0:
-            out.warn(f"teardown failed on {s.target}; run there: wgt rollback --purge")
     else:
-        out.info(f"later: ssh {s.target} wgt rollback --purge (it shares WARP and jump keys with the new one)")
+        out.info(f"the old machine ({s.target}) is down, its keys kept")
+        # No by default: Enter, or a lost terminal, must not destroy the way back.
+        # Its tests can't see a provider's firewall blocking the new machine's UDP port.
+        if sure or ui.yes(f"Tear wireguard-tools off the old machine ({s.target}) now?", default=False):
+            if teardown(s.target, s.dir) != 0:
+                out.warn(f"teardown failed on {s.target}; run there: wgt rollback --purge")
+        else:
+            out.info(f"later: ssh {s.target} wgt rollback --purge (it shares WARP and jump keys with the new one)")
+    # The restore rewrote its configs (a new machine's address, setup flags): copies
+    # follow, as after `wgt-ctl <server> restore`. Last, once the list points at the new
+    # machine and the old one is settled: a delivery stopped part-way (Ctrl-C) leaves
+    # nothing of the move undone (wgt-ctl <server> sync finishes it).
+    tunnels.after(Server(s.name, new, s.dir), "restore", [])
     return 0
 
 

@@ -211,8 +211,8 @@ def test_move_to_new_machine(mover):
     restore = next(c for t, c in calls if "restore" in c)
     assert "--endpoint vpn.example.com" in restore
     # its configs, rewritten by the restore, are delivered from the new machine
-    assert any(t == "root@9.9.9.9" and "SERVER_NAME" in c for t, c in calls)
-    assert calls[-1] == ("root@1.2.3.4", "teardown")
+    fetched = next(i for i, (t, c) in enumerate(calls) if t == "root@9.9.9.9" and "SERVER_NAME" in c)
+    assert calls.index(("root@1.2.3.4", "teardown")) < fetched == len(calls) - 1   # teardown, then delivery
     assert remote.find("dengar").target == "root@9.9.9.9"
 
 
@@ -224,6 +224,7 @@ def test_move_interrupted_while_delivering_already_lists_the_new_machine(mover, 
     with pytest.raises(KeyboardInterrupt):
         rebuild.do_move(remote.find("dengar"), ["--to", "9.9.9.9", "--yes"])
     assert remote.find("dengar").target == "root@9.9.9.9"
+    assert ("root@1.2.3.4", "teardown") in mover[0]   # the old machine was settled before it
 
 
 def test_move_failed_restore_keeps_list(mover):
