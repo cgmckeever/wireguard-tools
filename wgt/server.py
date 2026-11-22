@@ -218,21 +218,35 @@ def renumber_clients(ctx: Ctx) -> None:
         return
     old = ctx.cfg.saved["WG_SUBNET"]
     old_int = net.network_int(old)
+    in_new = range(ctx.cfg.first_host, ctx.cfg.last_host + 1)
     moves, entries = [], []
     for c in ctx.snap.clients:
-        n = ctx.cfg.net_int + net.ip2int(c.ip) - old_int
-        if not ctx.cfg.first_host <= n <= ctx.cfg.last_host:
+        ip = net.ip2int(c.ip)
+        n = ctx.cfg.net_int + ip - old_int
+        if n not in in_new and ip in in_new:
+            # Already in the new subnet, and shifted it would leave it: an earlier run moved
+            # it, then stopped before saving the subnet (a client still to move always shifts
+            # into it). Shrinking into part of the old subnet, it may also be one that never
+            # moved but is already there. Either way it keeps its address (two the same: below).
+            n = ip
+        if n not in in_new:
             raise WgtError(f"config '{c.name}' ({c.ip}) has no matching address in {ctx.cfg.WG_SUBNET}; "
                            f"use a subnet at least as large as {old}")
         new_ip = net.int2ip(n)
         allowed = ",".join(ctx.cfg.WG_SUBNET if a == old else a for a in c.allowed.split(",")) if c.allowed else ""
-        moves.append(f"{c.name} {c.ip} -> {new_ip}")
+        if new_ip != c.ip:
+            moves.append(f"{c.name} {c.ip} -> {new_ip}")
         entries.append(store.Client(c.name, new_ip, c.pub, allowed))
-    ctx.runner.step(f"Move {len(moves)} client(s) from {old} to {ctx.cfg.WG_SUBNET} (same host numbers and keys; "
-                    "their configs change, re-send them)", f"wgt setup --subnet {old}")
-    for m in moves:
-        ctx.out.info(m)
-    ops.confirm(ctx, f"Move the configs to {ctx.cfg.WG_SUBNET}?")
+    clash = sorted({e.ip for e in entries if sum(x.ip == e.ip for x in entries) > 1})
+    if clash:
+        raise WgtError(f"moving the configs to {ctx.cfg.WG_SUBNET} would give two of them {', '.join(clash)}; "
+                       f"use a subnet at least as large as {old}")
+    if moves:
+        ctx.runner.step(f"Move {len(moves)} client(s) from {old} to {ctx.cfg.WG_SUBNET} (same host numbers and "
+                        "keys; their configs change, re-send them)", f"wgt setup --subnet {old}")
+        for m in moves:
+            ctx.out.info(m)
+        ops.confirm(ctx, f"Move the configs to {ctx.cfg.WG_SUBNET}?")
     ctx.files.write(ctx.paths.client_db, 0o600, store.format_clients(e.fields_line() for e in entries))
     ctx.reload()
 

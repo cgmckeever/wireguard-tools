@@ -262,6 +262,9 @@ CRASHES = [
     (["device", "set", "mbp-1", "99"], lambda s: s.device_number("mbp-1") == 99, None),
     (["device", "group", "mbp-1", "server"], lambda s: "server" in s.device_groups("mbp-1"), None),
     (["setup"], lambda s: store.state_get(s.state, "SETUP_DONE") == "1", None),
+    (["setup", "--subnet", "10.3.10.0/24"],   # renumbered, then stopped before the subnet is saved: re-runnable
+     lambda s: store.state_get(s.state, "WG_SUBNET") == "10.3.10.0/24"
+     and all(c.ip.startswith("10.3.10.") for c in s.clients), None),
     (["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"], lambda s: s.exit("lon-gb"), None),
     (["jump", "remove", "nyc-us"], lambda s: not s.exit("nyc-us"), None),
 ]
