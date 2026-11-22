@@ -183,8 +183,13 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         if sweep_owned(os.path.basename(path).lower(), device.lower()):   # server "warp", config "<device>"
             actions.append(Action("refuse", path, config, note="wireguard-tunnels' own name (its sweep writes it)"))
             continue
-        if path.lower() in {p.lower() for p in [*local, *claimed]}:
+        if path.lower() in {p.lower() for p in local}:
             actions.append(Action("refuse", path, config, note="a file by that name that isn't this config"))
+            continue
+        if path.lower() in {p.lower() for p in claimed}:   # another device whose name differs only in case
+            actions.append(Action("refuse", path, config,
+                                  note="also another of this server's configs (names differing only in case "
+                                       "are one file on a Mac)"))
             continue
         claimed.add(path)
         actions.append(Action("new", path, config, text))

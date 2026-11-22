@@ -117,6 +117,10 @@ def test_a_folder_two_device_names_reach_is_read_once(store):
     assert kinds(actions) == [("retire", "dengar.old.phone.conf", "old.phone")]
 
 
+def test_two_devices_differing_only_in_case_are_told_apart_in_the_refusal(store):
+    actions = tunnels.plan("dengar", {"Phone": conf("Phone", "K1"), "phone": conf("phone", "K2")}, {}, True)
+    assert kinds(actions) == [("new", "dengar.Phone.conf", "Phone"), ("refuse", "dengar.phone.conf", "phone")]
+    assert "another of this server's configs" in actions[1].note
 
 
 def test_nothing_retires_unless_the_list_is_complete(store):
