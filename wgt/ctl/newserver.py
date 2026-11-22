@@ -163,7 +163,9 @@ def record(name: str, target: str) -> None:
     """Add a server to local/servers, and its (empty) folder for jump files in
     ~/wg-tunnels, so wireguard-tunnels knows it exists."""
     remote.ensure_local()
+    text = store.read_text(remote.LIST) or ""
+    sep = "\n" if text and not text.endswith("\n") else ""   # a hand-edited last line must stay its own
     with open(remote.LIST, "a") as f:
-        f.write(f"{name:<10} {target}\n")
+        f.write(f"{sep}{name:<10} {target}\n")
     tunnels.anchor(name)
     out.log(f"Added '{name}' ({target}) to {remote.LIST}")

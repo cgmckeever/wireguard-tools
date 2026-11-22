@@ -77,6 +77,11 @@ def test_naming_a_jump_stops_at_end_of_input_instead_of_asking_forever(local, mo
     assert path.read_text() == "[Interface]\nPrivateKey = K2\n"
 
 
+def test_record_keeps_a_last_line_without_a_newline_its_own(local, monkeypatch):
+    monkeypatch.setattr(tunnels, "anchor", lambda name: "")
+    (local / "servers").write_text("dengar  root@1.2.3.4")
+    newserver.record("lando", "root@9.9.9.9")
+    assert [s.name for s in remote.servers()] == ["dengar", "lando"]
 
 
 def test_reserved_names():
