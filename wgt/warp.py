@@ -117,15 +117,19 @@ def _fetch(url: str, timeout: int) -> bytes:
         return r.read()
 
 
-def register(ctx: Ctx, directory: Optional[str] = None, regenerate: bool = False) -> bool:
+def register(ctx: Ctx, directory: Optional[str] = None, regenerate: bool = False, home: str = "") -> bool:
     """Register a WARP account and generate its WireGuard profile (once) in
     <directory> (default the main one; each jump has its own; with
     <regenerate> the profile is made again from the same account). False if
-    WARP refuses (setup can carry on without WARP)."""
+    WARP refuses (setup can carry on without WARP). <home>: the account's own
+    directory when <directory> is a scratch one removed afterwards (warp rotate):
+    wgcf's log goes there, and the hints name it, so neither points at what's gone."""
     d = directory or ctx.paths.wgcf_dir
-    log = os.path.join(d, "wgcf.log")
+    home = home or d
+    log = os.path.join(home, "wgcf.log")
     if not ctx.runner.dry_run:
         os.makedirs(d, mode=0o700, exist_ok=True)
+        os.makedirs(home, mode=0o700, exist_ok=True)
     if os.path.isfile(ctx.paths.wgcf_account(d)):
         ctx.out.info(f"WARP account exists ({ctx.paths.wgcf_account(d)}); not re-registering")
     else:
@@ -133,7 +137,7 @@ def register(ctx: Ctx, directory: Optional[str] = None, regenerate: bool = False
         if not ctx.runner.dry_run and not _wgcf(ctx, d, ["register", "--accept-tos"], log, append=False):
             ctx.out.warn(f"wgcf register failed; see {log}. WARP may refuse registrations from some server IPs:\n"
                          "       retry later (re-run 'wgt setup'), or register on another machine and copy\n"
-                         f"       wgcf-account.toml and wgcf-profile.conf into {d}/ (see README)")
+                         f"       wgcf-account.toml and wgcf-profile.conf into {home}/ (see README)")
             return False
     if os.path.isfile(ctx.paths.wgcf_profile(d)) and not regenerate:
         ctx.out.info("WARP profile exists")

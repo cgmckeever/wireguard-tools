@@ -284,7 +284,7 @@ def rotating(make_ctx, monkeypatch):
     from wgt import warp
     state = {"refuse": False}
 
-    def fake_register(ctx, directory=None, regenerate=False):
+    def fake_register(ctx, directory=None, regenerate=False, home=""):
         if state["refuse"]:
             return False
         os.makedirs(directory, exist_ok=True)

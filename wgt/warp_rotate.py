@@ -23,7 +23,7 @@ def new_warp_account(ctx: Ctx, d: str) -> None:
     if not ctx.runner.dry_run:
         shutil.rmtree(tmp, ignore_errors=True)
     try:
-        if not warp.register(ctx, tmp):
+        if not warp.register(ctx, tmp, home=d):   # its log outlives tmp
             raise WgtError("WARP refused a new registration; nothing changed (retry later)")
         if ctx.runner.dry_run:
             return
