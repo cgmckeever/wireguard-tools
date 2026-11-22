@@ -178,6 +178,19 @@ def test_the_sweeps_warp_alone_config_is_never_matched_updated_or_retired(store)
     assert "warp.iphone.conf" in os.listdir(warp.parent)
 
 
+@pytest.mark.parametrize("there", [False, True])
+def test_a_server_named_warp_never_writes_the_sweeps_warp_alone_name(store, there):
+    # server "warp" + config "iphone" would be warp.iphone.conf: the sweep's file
+    if there:
+        put(store, "iphone", "warp.iphone.conf", WARP_ALONE)
+    actions = tunnels.plan("warp", {"iphone": conf("iphone", "K1", server="warp")},
+                           tunnels.local_files(tunnels.all_devices()), True)
+    tunnels.apply(actions)
+    assert kinds(actions) == [("refuse", "warp.iphone.conf", "iphone")]
+    d = store / "devices" / "iphone" / "config"
+    assert (d / "warp.iphone.conf").read_text() == WARP_ALONE if there else not d.exists()
+
+
 def test_a_renamed_devices_copy_stays_put_with_a_note(store):
     put(store, "phone", "dengar.warp.phone.conf", conf("warp.phone", "K1"))
     [a] = run(store, {"warp.iphone": conf("warp.iphone", "K1")})

@@ -16,9 +16,10 @@ A file that would be overwritten but isn't a copy of that config is left alone.
 A copy whose config the server no longer has becomes a .bak, as does the old
 text of a copy that changes.
 
-warped.* files are wireguard-tunnels' own: a carrier it swept, which keeps the
+warped.* and warp.<device>.conf are wireguard-tunnels' own (its sweep writes
+them; store.sweep_owned there): a warped.* is a carrier it swept, which keeps the
 server config's key and header line but not its text. Delivery never matches,
-updates or retires one."""
+updates or retires one, and never writes a file by either name."""
 
 from __future__ import annotations
 
@@ -117,8 +118,14 @@ class Action:
 WARPED = "warped."   # wireguard-tunnels' prefix for a swept carrier
 
 
+def sweep_owned(file: str, device: str) -> bool:
+    """A config/ file name wireguard-tunnels' sweep writes: warped.*, or
+    warp.<device>.conf (the device's WARP alone)."""
+    return file.startswith(WARPED) or file == f"warp.{device}.conf"
+
+
 def local_files(devices: List[str]) -> Dict[str, str]:
-    """Every *.conf in those devices' config/ folders, warped.* aside: path -> text."""
+    """Every *.conf in those devices' config/ folders, the sweep's aside: path -> text."""
     found = {}
     for device in devices:
         d = config_dir(device)
@@ -126,7 +133,7 @@ def local_files(devices: List[str]) -> Dict[str, str]:
             continue
         for f in sorted(os.listdir(d)):
             p = os.path.join(d, f)
-            if f.endswith(".conf") and not f.startswith(WARPED) and os.path.isfile(p):
+            if f.endswith(".conf") and not sweep_owned(f, device) and os.path.isfile(p):
                 found[p] = store.read_text(p) or ""
     return found
 
@@ -153,17 +160,20 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
     claimed = set()
     for config in sorted(issued, key=store.device_key):
         text = issued[config]
+        device = store.device_of(config)
         k = key_of(text)
         match = (by_key.get(k) if k else None) or by_header.get((config, server))
         if match and match not in claimed:
             claimed.add(match)
             kind = "same" if local[match] == text else "update"
-            device = store.device_of(config)
             moved = os.path.dirname(match) != config_dir(device)
             note = f"left in its folder; the device is now '{device}' (rename the folder to match)" if moved else ""
             actions.append(Action(kind, match, config, text, note))
             continue
-        path = os.path.join(config_dir(store.device_of(config)), f"{server}.{config}.conf")
+        path = os.path.join(config_dir(device), f"{server}.{config}.conf")
+        if sweep_owned(os.path.basename(path), device):   # server "warp", config "<device>"
+            actions.append(Action("refuse", path, config, note="wireguard-tunnels' own name (its sweep writes it)"))
+            continue
         if path in local or path in claimed:
             actions.append(Action("refuse", path, config, note="a file by that name that isn't this config"))
             continue
