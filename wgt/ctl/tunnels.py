@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .. import store, system
+from ..ctx import SETTINGS_COMMANDS
 from ..errors import WgtError
 from . import remote
 from .remote import Server, out
@@ -320,7 +321,10 @@ def do_sync(s: Server, args: List[str]) -> int:
 
 
 CHANGES = {"client": ("add", "rotate", "rename", "remove"), "device": ("rename",)}
-REWRITES_ALL = ("setup", "restore")   # sync_client_configs: settings and, after --name, every header
+REWRITES_ALL = SETTINGS_COMMANDS   # sync_client_configs: settings and, after --name, every header
+# setup can stop (a declined restart) after it rewrote every config: its copies follow
+# even then. Not restore: one that stopped may have extracted only part of an archive.
+FOLLOW_EVEN_IF_STOPPED = ("setup",)
 
 
 def changes_configs(cmd: str, args: List[str]) -> bool:

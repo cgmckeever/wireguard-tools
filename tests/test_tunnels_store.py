@@ -349,6 +349,19 @@ def test_a_client_command_delivers_only_when_it_worked(store, monkeypatch):
     assert ctl._run(s, "client", ["rotate", "warp.phone"]) == 0 and done == ["dengar"]
 
 
+def test_a_setup_that_stopped_still_delivers(store, monkeypatch):
+    # a declined restart after --name stops setup once every header names the new server:
+    # copies must follow before a rotate leaves one behind under the old name
+    done = []
+    monkeypatch.setattr(tunnels, "deliver", lambda s: done.append(s.name))
+    s = remote.Server("dengar", "root@h")
+    monkeypatch.setattr(remote, "do_wgt", lambda s, args: 1)
+    assert ctl._run(s, "setup", ["--name", "dengar2"]) == 1 and done == ["dengar"]
+    assert ctl._run(s, "restore", ["/root/x.tar.gz"]) == 1 and done == ["dengar"]   # maybe half extracted
+    monkeypatch.setattr(remote, "do_wgt", lambda s, args: 255)
+    assert ctl._run(s, "setup", []) == 255 and done == ["dengar"]                   # unreachable
+
+
 def test_sync_takes_no_arguments(store):
     with pytest.raises(WgtError):
         tunnels.do_sync(remote.Server("dengar", "root@h"), ["extra"])

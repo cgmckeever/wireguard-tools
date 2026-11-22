@@ -127,7 +127,7 @@ def _run(s: Server, cmd: str, args: List[str]) -> int:
     if fn:
         return fn(s, args)
     rc = remote.do_wgt(s, [cmd] + args)
-    if rc == 0:
+    if rc == 0 or (cmd in tunnels.FOLLOW_EVEN_IF_STOPPED and rc != 255):
         tunnels.after(s, cmd, args)
     return rc
 
