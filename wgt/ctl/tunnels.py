@@ -122,7 +122,10 @@ NOT_A_COPY = "a file by that name that isn't this config"
 
 def sweep_owned(file: str, device: str) -> bool:
     """A config/ file name wireguard-tunnels' sweep writes: warped.*, or
-    warp.<device>.conf (the device's WARP alone)."""
+    warp.<device>.conf (the device's WARP alone). Without case: on a Mac's file
+    system Warp.iphone.conf is warp.iphone.conf, and <device> may be another
+    spelling of the folder."""
+    file, device = file.lower(), device.lower()
     return file.startswith(WARPED) or file == f"warp.{device}.conf"
 
 
@@ -142,8 +145,7 @@ def local_files(devices: List[str]) -> Dict[str, str]:
         seen.add((st.st_dev, st.st_ino))
         for f in sorted(os.listdir(d)):
             p = os.path.join(d, f)
-            # Without case, as plan() compares: <device> may be another spelling of the folder.
-            if f.endswith(".conf") and not sweep_owned(f.lower(), device.lower()) and os.path.isfile(p):
+            if f.endswith(".conf") and not sweep_owned(f, device) and os.path.isfile(p):
                 found[p] = store.read_text(p) or ""
     return found
 
@@ -182,7 +184,7 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
             continue
         path = os.path.join(config_dir(device), f"{server}.{config}.conf")
         # Names compare without case: on a Mac's file system Warp.iphone.conf is warp.iphone.conf.
-        if sweep_owned(os.path.basename(path).lower(), device.lower()):   # server "warp", config "<device>"
+        if sweep_owned(os.path.basename(path), device):   # server "warp", config "<device>"
             actions.append(Action("refuse", path, config, note="wireguard-tunnels' own name (its sweep writes it)"))
             continue
         if path.lower() in {p.lower() for p in local}:
