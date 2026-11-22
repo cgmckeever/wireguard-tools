@@ -110,20 +110,19 @@ def drop_if_unused(ctx: Ctx, device: str) -> None:
 
 def config_renamed(ctx: Ctx, old: str, new: str) -> None:
     """One config moved from device <old> to device <new>. The number follows
-    if that was <old>'s last config and <new> has none."""
-    number = ctx.snap.device_number(old)
-    groups = ctx.snap.device_groups(old)
+    if that was <old>'s last config and <new> has none: in one write, as a stop
+    between dropping it from <old> and giving it to <new> would lose it (and its
+    groups) to a fresh number on the re-run."""
     if ctx.snap.device_clients(old):
         if ctx.snap.device_number(new) is None:
             ensure_number(ctx, new)
         return
-    if number is not None:
-        ops.set_device(ctx, old, None)
-    if ctx.snap.device_number(new) is None:
-        if number is not None:
-            ops.set_device(ctx, new, number, groups)
-        else:
-            ensure_number(ctx, new)
+    if ctx.snap.device_number(new) is not None:
+        drop_if_unused(ctx, old)
+    elif ctx.snap.device_number(old) is not None:
+        ops.rename_device(ctx, old, new)
+    else:
+        ensure_number(ctx, new)
 
 
 # --- the watchdog's rules ---

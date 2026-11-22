@@ -292,6 +292,38 @@ def test_killed_at_any_step_a_rerun_finishes_the_job(tmp_path, monkeypatch, argv
         assert w.problems() == [], f"{argv} killed at step {die_at}"
 
 
+# A device's last config, the device numbered and grouped: its number must move to
+# the new device (rename) or go (remove), wherever the first run stopped.
+LAST_CONFIG_CRASHES = [
+    (["client", "rename", "warp.par-fr.tv", "warp.par-fr.tablet"],
+     lambda s: s.device_number("tablet") == 41 and s.device_groups("tablet") == ("home",)
+     and s.device_number("tv") is None),
+    (["client", "remove", "warp.par-fr.tv"], lambda s: s.device_number("tv") is None),
+]
+
+
+@pytest.mark.parametrize("argv,holds", LAST_CONFIG_CRASHES, ids=lambda x: " ".join(x) if isinstance(x, list) else "")
+def test_killed_on_a_devices_last_config_a_rerun_keeps_its_number_right(tmp_path, monkeypatch, argv, holds):
+    monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
+
+    def numbered(where):
+        w = World(where, monkeypatch)
+        w.run(["device", "set", "tv", "41"])
+        w.run(["device", "group", "tv", "home"])
+        return w
+    w = numbered(tmp_path / "count")
+    w.run(argv)
+    total = w.host.steps
+    assert total > 0
+    for die_at in range(1, total + 1):
+        w = numbered(tmp_path / str(die_at))
+        with pytest.raises(Died):
+            w.run(argv, die_at=die_at)
+        w.run(argv)
+        assert holds(store.load(w.paths)), f"{argv} killed at step {die_at}"
+        assert w.problems() == [], f"{argv} killed at step {die_at}"
+
+
 _current: list = []
 
 

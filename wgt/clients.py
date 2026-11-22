@@ -428,6 +428,8 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
         ctx.out.info(f"finishing an earlier remove of '{name}'")
     if ctx.snap.is_disabled(name):
         ops.set_disabled(ctx, name, False)
+    # Before the files go: once they're gone, a re-run finds nothing left to finish.
+    devices.drop_if_unused(ctx, store.device_of(name))
     # Not set up (after rollback): the next setup rebuilds wg0.conf from clients.db.
     if ops.is_set_up(ctx):
         ops.write_wg_conf(ctx)
@@ -442,7 +444,6 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     # forget: the file, its change copies and its backup record (nothing for rollback to restore).
     ctx.files.forget(client_conf(ctx, name))
     ctx.files.forget(ctx.paths.psk(name))
-    devices.drop_if_unused(ctx, store.device_of(name))
     # Its address can be reused: a new config there mustn't inherit what this one was allowed.
     if ops.is_set_up(ctx):
         devices.apply_now(ctx)
