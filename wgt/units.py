@@ -35,7 +35,10 @@ def start_unit(ctx: Ctx, ifc: str, changed: bool, ask: bool = True) -> None:
         r.step(f"Bring up {ifc} ({unit}, enabled at boot)", f"systemctl disable --now {unit}")
         if ask:
             ops.confirm(ctx, f"Bring up {ifc} now?", default_yes=True)   # the setup is useless without it
-        r.run(["systemctl", "enable", "--now", unit])
+        # Restart, not enable --now: a wg-quick unit stays "active" with its link gone
+        # (wg-quick down by hand), and a start would then do nothing.
+        r.run(["systemctl", "enable", unit])
+        r.run(["systemctl", "restart", unit])
         enabled = True
     elif changed:
         r.step(f"Restart {unit} to apply its new config",

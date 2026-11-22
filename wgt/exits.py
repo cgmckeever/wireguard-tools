@@ -108,9 +108,14 @@ def unhold(ctx: Ctx, code: str) -> None:
 
 
 def up(ctx: Ctx, e: store.Exit) -> None:
-    """Start an exit's tunnels, held from the watchdog until the caller is done."""
+    """Start an exit's tunnels, held from the watchdog until the caller is done.
+    Restart, not start, as the watchdog does: a wg-quick unit stays "active" with its
+    link gone, and start does nothing then. Only the ones not up: a running jump
+    tunnel may carry WARP-off clients."""
     hold(ctx, e.code)
-    ctx.runner.run(["systemctl", "start", *e.units])
+    down_units = [unit for unit, ifc in zip(e.units, (e.px, e.wx)) if not live.if_exists(ctx.runner, ifc)]
+    if down_units:
+        ctx.runner.run(["systemctl", "restart", *down_units])
 
 
 def down(ctx: Ctx, e: store.Exit, check: bool = True) -> bool:
