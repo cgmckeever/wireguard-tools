@@ -261,8 +261,10 @@ def fetch(s: Server) -> Tuple[Dict[str, str], str]:
     own SERVER_NAME ("" if unset). A config's name comes from its header (the file
     name also holds the server's own name)."""
     d = remote.REMOTE.client_dir
-    # SERVER_NAME= kept on its line: whatever else a login script prints first isn't read as the name.
-    rc, o = remote.ssh(s.target, f"sed -n '/^SERVER_NAME=/p' {remote.q(remote.STATE_FILE)} 2>/dev/null | tail -n 1; "
+    # SERVER_NAME= kept on its line: whatever else a login script prints first isn't read as the name
+    # (the echo starts that line even after a banner with no newline of its own).
+    rc, o = remote.ssh(s.target, "echo; "
+                                 f"sed -n '/^SERVER_NAME=/p' {remote.q(remote.STATE_FILE)} 2>/dev/null | tail -n 1; "
                                  f"cd {remote.q(d)} 2>/dev/null || exit 0; for f in *.conf; do "
                                  f"[ -f \"$f\" ] || continue; printf '{MARK}%s\\n' \"$f\"; cat \"$f\"; done",
                        batch=True, capture=True)
