@@ -117,6 +117,7 @@ class Action:
 
 
 WARPED = "warped."   # wireguard-tunnels' prefix for a swept carrier
+NOT_A_COPY = "a file by that name that isn't this config"
 
 
 def sweep_owned(file: str, device: str) -> bool:
@@ -184,7 +185,7 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
             actions.append(Action("refuse", path, config, note="wireguard-tunnels' own name (its sweep writes it)"))
             continue
         if path.lower() in {p.lower() for p in local}:
-            actions.append(Action("refuse", path, config, note="a file by that name that isn't this config"))
+            actions.append(Action("refuse", path, config, note=NOT_A_COPY))
             continue
         if path.lower() in {p.lower() for p in claimed}:   # another device whose name differs only in case
             actions.append(Action("refuse", path, config,
@@ -200,6 +201,16 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
             if path in claimed or not h or h[1] != server or key_of(text) in live_keys:
                 continue
             actions.append(Action("retire", path, h[0], note="the server no longer has it"))
+    return actions
+
+
+def refuse_taken(actions: List[Action]) -> List[Action]:
+    """A new copy whose name is already on disk is refused too: local_files lists a
+    folder once, so one reached by another path (a symlinked device folder) holds
+    files plan() saw under that other path, not this one."""
+    for a in actions:
+        if a.kind == "new" and os.path.lexists(a.path):
+            a.kind, a.text, a.note = "refuse", "", NOT_A_COPY
     return actions
 
 
@@ -275,7 +286,7 @@ def deliver(s: Server) -> int:
     anchor(s.name)
     name = server_name(issued, s, own)
     devices = sorted(set(all_devices()) | {store.device_of(c) for c in issued})
-    actions = plan(name, issued, local_files(devices), complete=True)
+    actions = refuse_taken(plan(name, issued, local_files(devices), complete=True))
     apply(actions)
     report(s.name, actions)
     same = sum(a.kind == "same" for a in actions)

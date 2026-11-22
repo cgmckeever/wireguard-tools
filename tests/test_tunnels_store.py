@@ -221,6 +221,16 @@ def test_a_name_that_differs_only_in_case_is_the_same_file_on_a_mac(store):
     assert mine.read_text() == "[Interface]\nPrivateKey = MINE\n"
 
 
+def test_a_folder_reached_another_way_still_refuses_a_hand_made_file(store, monkeypatch):
+    # devices/phone -> iphone: local_files lists that folder once, as iphone's
+    mine = put(store, "iphone", "dengar.phone.conf", "[Interface]\nPrivateKey = MINE\n")
+    os.symlink("iphone", store / "devices" / "phone")
+    out = f"SERVER_NAME=dengar\n{tunnels.MARK}dengar.phone.conf\n{conf('phone', 'K1')}"
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, out))
+    assert tunnels.deliver(remote.Server("dengar", "root@h")) == 1
+    assert mine.read_text() == "[Interface]\nPrivateKey = MINE\n"
+
+
 def test_an_update_whose_write_fails_leaves_the_config_in_place(store, monkeypatch):
     path = put(store, "iphone", "dengar.iphone.conf", conf("iphone", "K1"))
 
