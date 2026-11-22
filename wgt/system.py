@@ -68,7 +68,7 @@ def free_bak(path: str, when: float) -> str:
     is taken (a second copy within the same second), so an earlier copy is never
     overwritten. Sorted without the .bak, the later copy comes last (prune)."""
     bak = f"{path}.{time.strftime('%Y%m%d-%H%M%S', time.localtime(when))}.bak"
-    while os.path.exists(bak):
+    while os.path.lexists(bak):   # a dangling link too: a copy would be written through it
         bak = bak[: -len(".bak")] + f".{os.getpid() % 32768}.bak"
     return bak
 
