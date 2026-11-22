@@ -202,13 +202,19 @@ def offer_hostname(ctx: Ctx) -> None:
                         "preserve_hostname: true\n")
 
 
+def renumbering(ctx: Ctx) -> bool:
+    """A new --subnet with clients present: renumber_clients will move them."""
+    old = ctx.cfg.saved.get("WG_SUBNET", "")
+    return bool(old) and old != ctx.cfg.WG_SUBNET and bool(ctx.snap.clients)
+
+
 def renumber_clients(ctx: Ctx) -> None:
     """A new --subnet with clients present: move each client to the same host
     number in the new subnet (keys unchanged) and rewrite allowed-IPs entries
     naming the old subnet. Their configs are updated afterwards; re-send them."""
-    old = ctx.cfg.saved.get("WG_SUBNET", "")
-    if not old or old == ctx.cfg.WG_SUBNET or not ctx.snap.clients:
+    if not renumbering(ctx):
         return
+    old = ctx.cfg.saved["WG_SUBNET"]
     old_int = net.network_int(old)
     moves, entries = [], []
     for c in ctx.snap.clients:
@@ -410,11 +416,15 @@ def refuse_routed_subnet(ctx: Ctx) -> None:
 
 def restart_needed(ctx: Ctx) -> bool:
     """wg0 is running and its settings are about to change. Asks first: nothing
-    can be asked once it's down."""
+    can be asked once it's down. Asked before the settings are saved and the
+    client configs rewritten, so a no leaves both as wg0 runs them. A subnet
+    move (renumbering, not yet done) always changes wg0's Address."""
     unit = f"wg-quick@{ctx.cfg.WG_IF}"
     current = ctx.files.read(ctx.cfg.wg_conf)
-    if not ops.wg_up(ctx) or current is None or store.entries(current) == store.entries(ops.render_wg_conf(ctx)):
-        return False   # down, new, or only comments differ: no restart needed
+    if not ops.wg_up(ctx) or current is None:
+        return False   # down or new: nothing to restart
+    if not renumbering(ctx) and store.entries(current) == store.entries(ops.render_wg_conf(ctx)):
+        return False   # only comments differ
     ctx.runner.step(f"Restart {ctx.cfg.WG_IF} for its new config (clients reconnect in a few seconds)",
                     f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
     ops.confirm(ctx, f"Restart {ctx.cfg.WG_IF} now?")
@@ -468,13 +478,14 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
     write_sysctl(ctx)
     write_dropin(ctx)
     # Late: until here a failure (WARP, a checksum) leaves the running wg0 and the
-    # databases agreeing about the subnet and settings.
+    # databases agreeing about the subnet and settings. The restart is asked first:
+    # a no stops before the settings and the configs devices get change.
+    was_up = ops.wg_up(ctx)
+    restarting = restart_needed(ctx)
     renumber_clients(ctx)
     units.remember_opened_ports(ctx)   # before save_config replaces the saved WG_PORT
     save_config(ctx)
     sync_client_configs(ctx, old_name)
-    was_up = ops.wg_up(ctx)
-    restarting = restart_needed(ctx)
     changed = keys_changed
     # From the stop until wg0 is back, nothing may end this: it would stay down.
     with ops.ignoring(*((signal.SIGINT, signal.SIGTERM) if restarting and not ctx.runner.dry_run else ())):
