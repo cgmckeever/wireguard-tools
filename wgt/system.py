@@ -63,6 +63,16 @@ def read_marker(path: str) -> int:
     return int(value) if store.is_uint(value) else 0
 
 
+def free_bak(stem: str) -> str:
+    """<stem>.bak, plus .<pid> while that name is taken (a second copy within the
+    same second, stem ending in its timestamp), so an earlier copy is never
+    overwritten. Sorted without the .bak, the later copy comes last (prune)."""
+    bak = f"{stem}.bak"
+    while os.path.exists(bak):
+        bak = bak[: -len(".bak")] + f".{os.getpid() % 32768}.bak"
+    return bak
+
+
 def is_copy_of(name: str, base: str) -> bool:
     """True for <base>.<anything>.bak (a change copy); a plain <base>.bak someone made by hand is not one.
     A <base> containing glob characters matches nothing: those would be read
@@ -312,9 +322,7 @@ class Files:
             os.chmod(self.paths.backup_dir, 0o700)
             os.makedirs(d, exist_ok=True)
             stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(self.clock()))
-            bak = os.path.join(d, f"{os.path.basename(path)}.{stamp}.bak")
-            while os.path.exists(bak):   # two changes within the same second
-                bak = bak[: -len(".bak")] + f".{os.getpid() % 32768}.bak"
+            bak = free_bak(os.path.join(d, f"{os.path.basename(path)}.{stamp}"))
             shutil.copy2(path, bak)
             self.out.info(f"backup: {bak}")
             orig = bak
