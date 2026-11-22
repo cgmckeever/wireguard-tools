@@ -170,6 +170,7 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
             by_header.setdefault(h, path)
     actions = []
     claimed = set()
+    live_keys = {key_of(t) for t in issued.values()} - {""}
     for config in sorted(issued, key=store.device_key):
         text = issued[config]
         device = store.device_of(config)
@@ -187,9 +188,11 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         if sweep_owned(os.path.basename(path), device):   # server "warp", config "<device>"
             actions.append(Action("refuse", path, config, note="wireguard-tunnels' own name (its sweep writes it)"))
             continue
-        # Claimed first: the name of another config's copy, new or already matched (a
-        # renamed config's copy keeps its name), is another of this server's, not a stranger's.
-        other = next((p for p in claimed if p.lower() == path.lower()), "")
+        # Claimed first: the name of another config's copy, new, already matched or still
+        # to be (it holds a live key; a renamed config's copy keeps its name), is another
+        # of this server's, not a stranger's.
+        other = next((p for p in claimed if p.lower() == path.lower()), "") \
+            or next((p for p in local if p.lower() == path.lower() and key_of(local[p]) in live_keys), "")
         if other:
             case = "" if other == path else " (names differing only in case are one file on a Mac)"
             actions.append(Action("refuse", path, config, note=f"also another of this server's configs{case}"))
@@ -200,7 +203,6 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         claimed.add(path)
         actions.append(Action("new", path, config, text))
     if complete:
-        live_keys = {key_of(t) for t in issued.values()} - {""}
         for path, text in sorted(local.items()):
             h = header_of(text)
             if path in claimed or not h or h[1] != server or key_of(text) in live_keys:
