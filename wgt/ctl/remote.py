@@ -228,7 +228,8 @@ YES = ("--yes", "-y")
 
 
 def dry_run(args: Sequence[str]) -> bool:
-    """A wgt command run with --dry-run: wgt-ctl changes nothing for it either."""
+    """A wgt command run with --dry-run: wgt-ctl takes no number, offers no push and
+    delivers nothing for it either (what a sweep reads still refreshes local/devices)."""
     return "--dry-run" in args
 
 
