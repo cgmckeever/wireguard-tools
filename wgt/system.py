@@ -75,9 +75,10 @@ def free_bak(path: str, when: float) -> str:
     names = os.listdir(d or ".") if os.path.isdir(d or ".") else []
     used = [copy_order(f, os.path.basename(path))[1] for f in names
             if f.startswith(head + ".") and f.endswith(".bak")]
-    if not used:
+    # The listing compares case; a Mac's file system doesn't: the plain name is checked too.
+    if not used and not os.path.lexists(f"{stem}.bak"):
         return f"{stem}.bak"
-    n = max(used) + 1
+    n = max(used, default=0) + 1
     while os.path.lexists(f"{stem}.{n}.bak"):
         n += 1
     return f"{stem}.{n}.bak"
