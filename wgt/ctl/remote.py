@@ -13,6 +13,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 from .. import store, ui
 from ..const import Paths
+from ..ctx import VALUE_FLAGS
 from ..errors import WgtError
 from ..system import Out, atomic_write
 
@@ -229,8 +230,15 @@ YES = ("--yes", "-y")
 
 def dry_run(args: Sequence[str]) -> bool:
     """A wgt command run with --dry-run: wgt-ctl takes no number, offers no push and
-    delivers nothing for it either (what a sweep reads still refreshes local/devices)."""
-    return "--dry-run" in args
+    delivers nothing for it either (what a sweep reads still refreshes local/devices).
+    Read as wgt reads it: after a value flag (--label --dry-run) it's that flag's value."""
+    words = iter(args)
+    for a in words:
+        if a in VALUE_FLAGS:
+            next(words, None)
+        elif a == "--dry-run":
+            return True
+    return False
 
 
 def only_yes(cmd: str, args: List[str]) -> bool:

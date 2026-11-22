@@ -318,6 +318,15 @@ def test_which_commands_deliver(cmd, args, delivers):
     assert tunnels.changes_configs(cmd, args) is delivers
 
 
+@pytest.mark.parametrize("args,dry", [
+    (["add", "phone", "--dry-run"], True), (["add", "phone", "--label=x", "--dry-run"], True),
+    (["add", "phone", "--label", "--dry-run"], False),   # wgt reads it as the label: a real add
+    (["add", "phone"], False),
+])
+def test_a_dry_run_is_read_as_wgt_reads_it(args, dry):
+    assert remote.dry_run(args) is dry
+
+
 def test_a_failed_delivery_warns_and_doesnt_fail_the_command(store, monkeypatch):
     def boom(s):
         raise WgtError("unreachable")
