@@ -113,7 +113,7 @@ def up(ctx: Ctx, e: store.Exit) -> None:
     link gone, and start does nothing then. Only the ones not up: a running jump
     tunnel may carry WARP-off clients."""
     hold(ctx, e.code)
-    down_units = [unit for unit, ifc in zip(e.units, (e.px, e.wx)) if not live.if_exists(ctx.runner, ifc)]
+    down_units = units_running(ctx, e, running=False)
     if down_units:
         ctx.runner.run(["systemctl", "restart", *down_units])
 
@@ -197,6 +197,11 @@ def mark_started(ctx: Ctx, e: store.Exit, now: int) -> None:
     ctx.files.write_marker(ctx.paths.exit_marker(e.code), str(now))
 
 
+def units_running(ctx: Ctx, e: store.Exit, running: bool = True) -> List[str]:
+    """<e>'s wg-quick units whose interface is up (<running>), or isn't."""
+    return [unit for unit, ifc in zip(e.units, (e.px, e.wx)) if live.if_exists(ctx.runner, ifc) == running]
+
+
 def sync(ctx: Ctx) -> None:
     """Setup re-run: re-render every exit's configs (MTU, IPv6 may have changed),
     restart the tunnels that are up and changed (a jump's WARP that's down stays
@@ -207,7 +212,7 @@ def sync(ctx: Ctx) -> None:
     for e in ctx.snap.exits:
         if not write_confs(ctx, e):
             continue
-        running = [unit for unit, ifc in zip(e.units, (e.px, e.wx)) if live.if_exists(ctx.runner, ifc)]
+        running = units_running(ctx, e)
         if not running:
             continue
         if ctx.runner.attempt(["systemctl", "restart", *running]):
