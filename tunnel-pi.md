@@ -29,7 +29,8 @@ fixes if something stops working.
 3. That client's DNS lookups also leave from the friend's IP.
 4. When the Pi's link is down, that client loses its connection rather than
    showing the VPS's IP (it fails closed).
-5. No traffic from the tunnel can reach devices on the friend's LAN.
+5. No traffic from the tunnel can reach devices on the friend's LAN, unless
+   you turn on LAN mode (2D), in which case clients reach them by IP.
 6. Clients that aren't chosen are unaffected.
 
 ## How it works
@@ -110,7 +111,7 @@ after checking wgt's own values:
 | Fixed value | What it is |
 |---|---|
 | `10.99.0.0/30` | the link: VPS `10.99.0.1`, Pi `10.99.0.2`. It must be unused on the VPS (`ip route`) |
-| `10.98.0.0/30`, UDP `51822` | 2C only: the jump server on the Pi (`10.98.0.1`) and the VPS's jump address (`10.98.0.2`) |
+| `10.98.0.0/30`, UDP `51822` | 2C only: the jump server on the Pi (`10.98.0.1`) and the VPS's jump address (`10.98.0.2`). A second, LAN-mode jump (2D.2) uses `10.98.0.4/30` and `51823` |
 | table `260`, priorities `900`/`901` | 2B only: wgt uses tables `100` and `200`–`250`, and priorities `9300`–`10000` |
 | interface names `wgpi`, `wgjump` | wgt's are `wg0`, `warp`, `px-*`, `wx-*` |
 
@@ -225,26 +226,55 @@ Call the Pi's output `PI_PUBKEY` and the VPS's `VPS_PUBKEY`.
 ### 2A.3 The exit rules script (Pi)
 
 Both 2B and 2C use this script to send traffic arriving on a WireGuard
-interface out of `eth0`, and never into the friend's LAN.
+interface out of `eth0`. Its third word is the **LAN mode**:
+
+- **`isolated`** (the default): the internet only. Nothing on the friend's
+  LAN can be reached.
+- **`lan`**: also the friend's LAN, meaning the subnet `eth0` is on (see 2D).
 
 **[Pi]** Create `/usr/local/sbin/tunnel-pi-exit` with mode `755`:
 
 ```sh
 #!/bin/sh
-# tunnel-pi-exit up|down <interface>: traffic arriving on <interface> leaves
-# through eth0 with the friend's IP, and never reaches their LAN.
+# tunnel-pi-exit up <interface> [isolated|lan] | down <interface>
+# Traffic arriving on <interface> leaves through eth0 with the friend's IP.
+# isolated: never into their LAN (or any private range). lan: their LAN
+# (eth0's subnet) too, still no other private range.
 set -e
+IF="$2"; MODE="${3:-isolated}"
+[ -n "$IF" ] || { echo "usage: $0 up <interface> [isolated|lan] | down <interface>" >&2; exit 2; }
+PRIVATE=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10
+SAVED="/run/tunnel-pi-lan.$IF"      # the LAN let in at up, so down removes the same rule
 case "$1" in
-  up)   ADD=-A; INS=-I ;;
-  down) ADD=-D; INS=-D ;;
-  *)    echo "usage: $0 up|down <interface>" >&2; exit 2 ;;
+  up)
+    iptables -I FORWARD -i "$IF" -d "$PRIVATE" -j DROP
+    if [ "$MODE" = lan ]; then
+      LAN=$(ip -4 -o addr show dev eth0 | awk '{print $4; exit}')   # e.g. 192.168.1.50/24
+      if [ -n "$LAN" ]; then
+        iptables -I FORWARD -i "$IF" -o eth0 -d "$LAN" -j ACCEPT    # above the DROP
+        echo "$LAN" > "$SAVED"
+      else
+        echo "tunnel-pi-exit: eth0 has no IPv4 address yet; $IF stays isolated" >&2
+      fi
+    elif [ "$MODE" != isolated ]; then
+      echo "tunnel-pi-exit: mode must be isolated or lan" >&2; exit 2
+    fi
+    iptables -A FORWARD -i "$IF" -o eth0 -j ACCEPT
+    iptables -A FORWARD -i eth0 -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -t nat -C POSTROUTING -o eth0 -j MASQUERADE 2>/dev/null \
+      || iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+    ;;
+  down)
+    if [ -r "$SAVED" ]; then
+      iptables -D FORWARD -i "$IF" -o eth0 -d "$(cat "$SAVED")" -j ACCEPT || true
+      rm -f "$SAVED"
+    fi
+    iptables -D FORWARD -i "$IF" -d "$PRIVATE" -j DROP || true
+    iptables -D FORWARD -i "$IF" -o eth0 -j ACCEPT || true
+    iptables -D FORWARD -i eth0 -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true
+    ;;
+  *) echo "usage: $0 up <interface> [isolated|lan] | down <interface>" >&2; exit 2 ;;
 esac
-IF="$2"
-LAN=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10
-iptables $INS FORWARD -i "$IF" -d "$LAN" -j DROP
-iptables $ADD FORWARD -i "$IF" -o eth0 -j ACCEPT
-iptables $ADD FORWARD -i eth0 -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-iptables -t nat $ADD POSTROUTING -o eth0 -j MASQUERADE
 ```
 
 ### 2A.4 The Pi's link: `/etc/wireguard/wgpi.conf` (mode `600`)
@@ -397,7 +427,7 @@ systemctl restart wg-quick@wgpi
 `/etc/wireguard/wgpi.conf`:
 
 ```ini
-PostUp = /usr/local/sbin/tunnel-pi-exit up %i
+PostUp = /usr/local/sbin/tunnel-pi-exit up %i isolated
 PostDown = /usr/local/sbin/tunnel-pi-exit down %i
 ```
 
@@ -431,7 +461,7 @@ sudo systemctl restart unbound wg-quick@wgpi
 > make alone. Check `ip rule` after any `wgt setup`. Don't also give this
 > client a jump: priority 900 wins, so the jump would never be used.
 
-Go to phase 3.
+Then 2D if the clients should reach the friend's LAN; otherwise go to phase 3.
 
 ---
 
@@ -459,7 +489,7 @@ Address = 10.98.0.1/30
 ListenPort = 51822
 MTU = 1420
 PostUp = wg set %i private-key /etc/wireguard/wgjump.key
-PostUp = /usr/local/sbin/tunnel-pi-exit up %i
+PostUp = /usr/local/sbin/tunnel-pi-exit up %i isolated
 PostDown = /usr/local/sbin/tunnel-pi-exit down %i
 
 [Peer]
@@ -548,6 +578,90 @@ also leave from the friend's IP.
 > `wgpi.conf` and its key go in, but `wgt restore` or `move` won't enable
 > `wg-quick@wgpi`. Run `systemctl enable --now wg-quick@wgpi` afterwards.
 
+Then 2D if the clients should reach the friend's LAN; otherwise go to phase 3.
+
+---
+
+## 2D. Optional: LAN mode (reach the friend's LAN)
+
+By default the Pi is **isolated**: clients get the friend's internet
+connection, and nothing on the friend's LAN can be reached. In **LAN mode**,
+clients can also reach devices on that LAN by IP: a NAS, a printer, a Plex
+server, the router's admin page. **Ask the friend first:** this lets your
+devices into their home network.
+
+**What LAN mode is, and isn't:**
+
+- **One way.** Your clients can open connections to LAN devices. LAN devices
+  can't open connections to your clients, and see every connection as coming
+  from the Pi's address.
+- **By IP, not discovery.** It works at the IP layer, so broadcast and mDNS
+  discovery don't cross it: AirPlay, Chromecast, "Network" browsing in Finder.
+  Connect by address instead (`smb://192.168.1.20`, `http://192.168.1.1`).
+- **Local names don't resolve.** Names like `nas.lan` belong to the friend's
+  router. Use IPs, or in 2B, forward their local domain to the router in
+  unbound (a `forward-zone` for `lan.` pointing at the router's address).
+- **Not full membership.** A client doesn't get an address on their LAN. That
+  would need a layer-2 bridge over the tunnel, which is beyond this guide.
+
+### 2D.1 Turn it on (or off)
+
+The mode belongs to the interface that runs `tunnel-pi-exit`: `wgpi` in 2B,
+`wgjump` in 2C.
+
+**[Pi]** In that interface's `.conf`, change `isolated` to `lan` on the
+`PostUp = /usr/local/sbin/tunnel-pi-exit up %i ...` line, then restart it:
+
+```sh
+sudo systemctl restart wg-quick@wgpi      # 2B
+sudo systemctl restart wg-quick@wgjump    # 2C
+```
+
+Changing `lan` back to `isolated` and restarting turns it off again.
+cloudflared doesn't depend on either interface, so this is safe to do over
+`ssh ADMIN_HOST` after drop-off.
+
+**Check [Pi]:** `sudo iptables -L FORWARD -n` shows an `ACCEPT` to the LAN
+subnet (for example `192.168.1.0/24`) **above** the `DROP` lines for the
+private ranges.
+
+### 2D.2 Who gets it
+
+The Pi sees every client as one address (the VPS's NAT), so on the Pi the mode
+applies to **all** Pi-exit clients. For some clients only:
+
+- **2B:** keep the Pi in `lan` mode, and on the VPS block the clients that
+  shouldn't have it. Add these lines to the VPS's `wgpi.conf`, one pair per
+  client, with `FRIEND_LAN` the subnet from the check above:
+
+  ```ini
+  PostUp = iptables -I FORWARD -i wg0 -o %i -s CLIENT_IP -d FRIEND_LAN -j REJECT
+  PostDown = iptables -D FORWARD -i wg0 -o %i -s CLIENT_IP -d FRIEND_LAN -j REJECT
+  ```
+
+  If the friend's DHCP ever moves their LAN to another subnet, update
+  `FRIEND_LAN` here.
+
+- **2C:** run **two** jump servers on the Pi, one in each mode, as two jumps.
+  Repeat 2C.1–2C.2 with a second interface (`wgjumplan`; addresses
+  `10.98.0.5/30` on the Pi, `10.98.0.6/32` in its jump file; port `51823`) in
+  `lan` mode, and a second code (for example `homelan`). A device then picks
+  its mode by config: `home.phone` (isolated) or `homelan.laptop` (LAN).
+
+### 2D.3 Watch for overlapping subnets
+
+LAN mode only works when the friend's LAN subnet (often `192.168.0.0/24` or
+`192.168.1.0/24`) doesn't overlap any of these:
+
+- **The client's own local network.** A laptop on a café network that also
+  uses `192.168.1.0/24` sends those addresses to the café, not to the tunnel.
+- **The VPS's client subnet or wgt's `10.9.8.0/24`.**
+- **The tunnel's links**, `10.99.0.0/30` and `10.98.0.0/29`.
+
+There's no fix on your side for the first one: the friend's subnet is what it
+is. When the client's network is the same, use the client from another network
+(a phone hotspot works).
+
 Go to phase 3.
 
 ---
@@ -573,7 +687,7 @@ run `curl https://ifconfig.me` on the Pi. At the friend's it becomes theirs.
 | 4 | **[client]** `curl -6 -m 10 https://ifconfig.me` | fails (IPv6 blocked) |
 | 5 | **[Pi]** `sudo systemctl stop wg-quick@wgpi`, then **[client]** `curl -m 10 https://ifconfig.me` | times out. It must **not** print the VPS's IP |
 | 6 | with wgpi still stopped: **[Mac]** `ssh ADMIN_HOST` | still a shell. Then **[Pi]** `sudo systemctl start wg-quick@wgpi` |
-| 7 | **[client]** `ping -c2` an address on the Pi's LAN (for example its router, `192.168.1.1`) | no reply |
+| 7 | **[client]** `ping -c2` an address on the Pi's LAN (for example its router, `192.168.1.1`) | isolated: no reply. LAN mode (2D): replies |
 | 8 | **[client]** a config that is **not** a Pi exit: `curl https://ifconfig.me` | unchanged: the VPS's or WARP's IP, as before |
 
 ## 3.2 Survive a reboot
