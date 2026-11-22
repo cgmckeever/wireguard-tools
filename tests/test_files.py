@@ -58,6 +58,19 @@ def test_prune_keeps_original_and_five_newest(files):
     assert Path(orig).read_text() == "0\n"
 
 
+def test_prune_keeps_a_second_copy_within_the_same_second(files):
+    """<stamp>.<pid>.bak is newer than <stamp>.bak, though it sorts before it as a name."""
+    f = files()
+    f.clock = lambda: 0
+    p = f.paths.wg("c.conf")
+    Path(p).write_text("0\n")
+    for i in range(1, 8):
+        f.write(p, 0o600, f"{i}\n")
+    d = f.change_dir(p)
+    kept = {Path(os.path.join(d, n)).read_text() for n in os.listdir(d) if is_copy_of(n, "c.conf")}
+    assert kept == {"0\n", "2\n", "3\n", "4\n", "5\n", "6\n"}   # the original and the five newest
+
+
 def test_dry_run_hides_secret_files(files, capsys):
     f = files(dry_run=True)
     psk = os.path.join(f.paths.psk_dir, "phone.psk")

@@ -334,9 +334,12 @@ class Files:
         if not os.path.isdir(copies_dir):
             return
         base = os.path.basename(path)
-        copies = sorted(os.path.join(copies_dir, n) for n in os.listdir(copies_dir) if is_copy_of(n, base))
+        # Names end in a timestamp (plus .<pid> for a second copy within that second),
+        # then .bak: sorted without the .bak, newest is last.
+        copies = sorted((os.path.join(copies_dir, n) for n in os.listdir(copies_dir) if is_copy_of(n, base)),
+                        key=lambda p: p[: -len(".bak")])
         kept = 0
-        for copy in reversed(copies):   # names end in a timestamp: newest last
+        for copy in reversed(copies):
             if copy == orig:
                 continue
             kept += 1
