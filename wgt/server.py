@@ -568,9 +568,15 @@ def _remove_rules(ctx: Ctx) -> None:
     """wg0's PostDown (routing, NAT, firewall) run directly, and the ufw rules setup added."""
     run_down_hooks(ctx)
     if store.state_get(ctx.snap.state, "UFW") == "1":
-        units.close_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits), port=True)
-        ops.state_unset(ctx, "UFW_PORTS")
-        ops.state_unset(ctx, "UFW")
+        left = units.close_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits), port=True)
+        if left:
+            # As in open_firewall: only a port ufw closed leaves the record, so a later
+            # rollback or setup still closes the rest (--purge deletes the record, hence the warning).
+            ops.state_set(ctx, "UFW_PORTS", " ".join(left))
+            ctx.out.warn(f"ufw didn't close {', '.join(p + '/udp' for p in left)} (ufw delete allow <port>/udp)")
+        else:
+            ops.state_unset(ctx, "UFW_PORTS")
+            ops.state_unset(ctx, "UFW")
 
 
 def _remove_units(ctx: Ctx) -> None:

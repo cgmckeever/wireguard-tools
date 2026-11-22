@@ -538,6 +538,23 @@ def test_ufw_follows_jumps_and_rollback(world, monkeypatch):
     assert not store.state_get(store.load(world.paths).state, "UFW")
 
 
+def test_a_port_ufw_didnt_close_at_rollback_stays_recorded(world, monkeypatch):
+    """As in setup: only a port ufw closed leaves UFW_PORTS, so the next rollback retries it."""
+    monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")
+    world.kernel.ufw_active = True
+    world.run(["setup"])
+    real = Host._ufw
+    monkeypatch.setattr(Host, "_ufw", lambda self, a: (1, "") if a[1:3] == ["delete", "allow"] else real(self, a))
+    world.run(["rollback"])
+    state = store.load(world.paths).state
+    assert store.state_get(state, "UFW") == "1" and store.state_get(state, "UFW_PORTS") == "51820"
+    assert "51820/udp" in world.kernel.ufw
+    monkeypatch.setattr(Host, "_ufw", real)
+    world.run(["rollback"])
+    assert "51820/udp" not in world.kernel.ufw
+    assert not store.state_get(store.load(world.paths).state, "UFW_PORTS")
+
+
 def test_a_new_port_closes_the_old_one_in_ufw(world, monkeypatch):
     """Rollback only knows the current port: the old one must not stay open."""
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")

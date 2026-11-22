@@ -159,15 +159,19 @@ def remember_opened_ports(ctx: Ctx) -> None:
             _record_ports(ctx, ports)
 
 
-def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:
+def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> List[str]:
     """Remove the ufw rules open_firewall added: routing wg0 -> each of <outs>,
-    and with <port> the WireGuard port too. Only if setup recorded opening
-    them (state UFW=1); a rule already gone is fine."""
+    and with <port> the WireGuard ports too. Only if setup recorded opening
+    them (state UFW=1); a rule already gone is fine. Returns the ports ufw
+    didn't close (still open)."""
     if store.state_get(ctx.snap.state, "UFW") != "1" or not shutil.which("ufw"):
-        return
+        return []
+    left = []
     if port:
         for p in _in_order(opened_ports(ctx) + [ctx.cfg.WG_PORT]):
-            ctx.runner.run(["ufw", "delete", "allow", f"{p}/udp"], check=False)
+            if ctx.runner.run(["ufw", "delete", "allow", f"{p}/udp"], check=False)[0] != 0:
+                left.append(p)
     for o in outs:
         ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", o], check=False)
+    return left
 
