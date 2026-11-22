@@ -81,7 +81,8 @@ def add_one_exit(s: Server, path: str) -> None:
         raise WgtError(f"cannot reach {s.target}")
     fd, tmp = tempfile.mkstemp()
     try:
-        with os.fdopen(fd, "w") as f:
+        # As store.read_text read it: any non-UTF-8 byte goes up as it was, not a traceback.
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as f:
             f.write(with_local_file_comment(store.read_text(path) or "", file))
         os.chmod(tmp, 0o600)
         if not remote.scp(tmp, f"{s.target}:{remote.INBOX}/{code}.conf"):
