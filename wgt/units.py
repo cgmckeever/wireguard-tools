@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, Iterable, List, Tuple
 
 from . import live, ops, render, store
 from .const import WATCHDOGS, Watchdog
@@ -139,8 +139,13 @@ def opened_ports(ctx: Ctx) -> List[str]:
     return recorded or ([saved] if saved else [])
 
 
+def _in_order(ports: Iterable[str]) -> List[str]:
+    """Each port once, in numeric order."""
+    return sorted(set(ports), key=lambda p: (len(p), p))
+
+
 def _record_ports(ctx: Ctx, ports: List[str]) -> None:
-    value = " ".join(sorted(set(ports), key=lambda p: (len(p), p)))   # numeric order
+    value = " ".join(_in_order(ports))
     if store.state_get(ctx.snap.state, "UFW_PORTS") != value:
         ops.state_set(ctx, "UFW_PORTS", value)
 
@@ -161,7 +166,7 @@ def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> None:
     if store.state_get(ctx.snap.state, "UFW") != "1" or not shutil.which("ufw"):
         return
     if port:
-        for p in sorted(set(opened_ports(ctx)) | {ctx.cfg.WG_PORT}, key=lambda p: (len(p), p)):
+        for p in _in_order(opened_ports(ctx) + [ctx.cfg.WG_PORT]):
             ctx.runner.run(["ufw", "delete", "allow", f"{p}/udp"], check=False)
     for o in outs:
         ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", o], check=False)
