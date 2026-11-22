@@ -149,9 +149,10 @@ def state_unset(ctx: Ctx, key: str) -> None:
 
 def resolve_endpoint(ctx: Ctx, save: bool) -> str:
     """Client endpoint: --endpoint / ENDPOINT, the saved value, or the detected
-    public IPv4 (saved only when <save>, i.e. by setup)."""
+    public IPv4 (saved only when <save>, i.e. by setup; detected once, by setup's
+    review, which shows it before it's confirmed)."""
     src = ctx.cfg.sources.get("ENDPOINT", "")
-    ep = ctx.cfg.values.get("ENDPOINT", "") if src in ("flag", "env") else ""
+    ep = ctx.cfg.values.get("ENDPOINT", "") if src in ("flag", "env", "detected") else ""
     ep = ep or store.state_get(ctx.snap.state, "ENDPOINT")
     if not ep:
         ep = live.trace_field(live.trace(ctx.runner, "-4"), "ip")

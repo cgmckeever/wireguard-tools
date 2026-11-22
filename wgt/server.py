@@ -150,7 +150,9 @@ def review_settings(ctx: Ctx, subnet_asked: bool) -> None:
     --yes, unless there's no terminal; --dry-run doesn't ask)."""
     fresh = not ctx.cfg.saved.get("WG_SUBNET")
     if not ctx.cfg.values.get("ENDPOINT"):
-        ctx.cfg.values["ENDPOINT"] = live.trace_field(live.trace(ctx.runner, "-4"), "ip")
+        detected = live.trace_field(live.trace(ctx.runner, "-4"), "ip")
+        if detected:   # what's confirmed below is what resolve_endpoint saves, not a second lookup
+            ctx.cfg.values["ENDPOINT"], ctx.cfg.sources["ENDPOINT"] = detected, "detected"
     ctx.out.log("Settings (first setup)" if fresh else f"Settings (re-run; saved in {ctx.paths.state})")
     rep = checks.settings_table(ctx, running=False, subnet_asked=subnet_asked)
     for line in rep.lines:
