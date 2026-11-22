@@ -172,10 +172,11 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
             actions.append(Action(kind, match, config, text, note))
             continue
         path = os.path.join(config_dir(device), f"{server}.{config}.conf")
-        if sweep_owned(os.path.basename(path), device):   # server "warp", config "<device>"
+        # Names compare without case: on a Mac's file system Warp.iphone.conf is warp.iphone.conf.
+        if sweep_owned(os.path.basename(path).lower(), device.lower()):   # server "warp", config "<device>"
             actions.append(Action("refuse", path, config, note="wireguard-tunnels' own name (its sweep writes it)"))
             continue
-        if path in local or path in claimed:
+        if path.lower() in {p.lower() for p in [*local, *claimed]}:
             actions.append(Action("refuse", path, config, note="a file by that name that isn't this config"))
             continue
         claimed.add(path)

@@ -26,7 +26,7 @@ The other side's rules are in that repo's `wgtun/store.py` (`sweep_owned`).
   and header line, so only the name tells them apart) or
   `config/warp.<device>.conf` (the sweep's WARP alone). `tunnels.sweep_owned`
   mirrors theirs: those names are never matched, and a config that would land
-  on one (a server named `warp`) is refused. Nor anything else in the store.
+  on one (a server named `warp`, in any case: the Mac's file system ignores it) is refused. Nor anything else in the store.
 - **Matching** a local file to a server's config: the same private key (rename
   keeps keys), else the same header line. A matched file keeps its name.
   Retiring needs the server's complete list, a header naming this server, and a

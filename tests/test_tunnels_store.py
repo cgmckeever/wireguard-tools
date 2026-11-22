@@ -191,6 +191,19 @@ def test_a_server_named_warp_never_writes_the_sweeps_warp_alone_name(store, ther
     assert (d / "warp.iphone.conf").read_text() == WARP_ALONE if there else not d.exists()
 
 
+def test_a_name_that_differs_only_in_case_is_the_same_file_on_a_mac(store):
+    # Warp.iphone.conf would land on the sweep's warp.iphone.conf, and dengar.iphone.conf
+    # on a hand-made Dengar.iphone.conf, on a case-insensitive file system
+    put(store, "iphone", "warp.iphone.conf", WARP_ALONE)
+    mine = put(store, "iphone", "Dengar.iphone.conf", "[Interface]\nPrivateKey = MINE\n")
+    actions = tunnels.plan("Warp", {"iphone": conf("iphone", "K1", server="Warp")},
+                           tunnels.local_files(tunnels.all_devices()), True)
+    assert kinds(actions) == [("refuse", "Warp.iphone.conf", "iphone")]
+    actions = run(store, {"iphone": conf("iphone", "K2")})
+    assert kinds(actions) == [("refuse", "dengar.iphone.conf", "iphone")]
+    assert mine.read_text() == "[Interface]\nPrivateKey = MINE\n"
+
+
 def test_the_store_is_wg_tunnels_as_written(monkeypatch):
     # wireguard-tunnels (store.root, tunnel.sh) doesn't expand a "~" in it: neither do we
     monkeypatch.setenv("WG_TUNNELS", "~/elsewhere")
