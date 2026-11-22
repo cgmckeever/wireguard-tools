@@ -106,13 +106,16 @@ def open_firewall(ctx: Ctx, outs: List[str]) -> None:
         ctx.out.info(f"ufw not active; {ctx.cfg.WG_IF}'s PostUp opens udp/{ctx.cfg.WG_PORT} in iptables INPUT")
         return
     wg = ctx.cfg.WG_IF
-    ctx.runner.step(f"Open ufw: allow {ctx.cfg.WG_PORT}/udp and routing {wg} -> {' '.join(outs)}",
-                    f"ufw delete allow {ctx.cfg.WG_PORT}/udp; ufw route delete allow in on {wg} out on <each>")
-    ctx.runner.run(["ufw", "allow", f"{ctx.cfg.WG_PORT}/udp", "comment", "wireguard-tools"])
     # A new --port: close the one ufw was opened for. UFW_PORT records it, since the
     # saved WG_PORT is already the new one if a setup stopped after saving it.
     old_port = opened_port(ctx)
-    if old_port and old_port != ctx.cfg.WG_PORT:
+    if old_port == ctx.cfg.WG_PORT:
+        old_port = ""
+    closing, reopen = (f" (closing the old {old_port}/udp)", f"; ufw allow {old_port}/udp") if old_port else ("", "")
+    ctx.runner.step(f"Open ufw: allow {ctx.cfg.WG_PORT}/udp{closing} and routing {wg} -> {' '.join(outs)}",
+                    f"ufw delete allow {ctx.cfg.WG_PORT}/udp{reopen}; ufw route delete allow in on {wg} out on <each>")
+    ctx.runner.run(["ufw", "allow", f"{ctx.cfg.WG_PORT}/udp", "comment", "wireguard-tools"])
+    if old_port:
         ctx.runner.run(["ufw", "delete", "allow", f"{old_port}/udp"], check=False)
     for o in outs:
         ctx.runner.run(["ufw", "route", "allow", "in", "on", wg, "out", "on", o, "comment", "wireguard-tools"])
