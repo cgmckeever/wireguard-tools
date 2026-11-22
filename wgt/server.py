@@ -61,7 +61,7 @@ def guard_default_route(ctx: Ctx) -> None:
     if ctx.runner.dry_run:
         return
     rec = store.state_get(ctx.snap.state, "DEFAULT_ROUTE")
-    now = (ctx.runner.query(["ip", "-4", "route", "show", "default"]).splitlines() or [""])[0]
+    now = host.default_route(ctx.runner)
     if host.route_key(now) != host.route_key(rec):
         ctx.out.warn(f"default route changed (was: {rec}, now: {now})")
         ctx.runner.run(["systemctl", "stop", f"wg-quick@{ctx.cfg.WARP_IF}"], check=False)

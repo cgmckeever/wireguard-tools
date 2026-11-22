@@ -252,7 +252,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     raw = _read_jump(src)
     existing = ctx.snap.exit(code)
     label = (ctx.args.exit_label or (existing.label if existing else "") or render.peer_hint(raw) or code)
-    label = " ".join(label.split())   # one line in exits.db, whatever the file's comment holds
+    label = store.one_line(label)   # one line in exits.db, whatever the file's comment holds
     if existing is None:
         idx = free_idx(ctx)
         ctx.runner.step(f"Add jump '{code}' ({label}): {render.profile_endpoint(raw)} -> its own WARP",

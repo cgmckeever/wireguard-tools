@@ -37,6 +37,11 @@ def ipv6_on_quick() -> bool:
         return False
 
 
+def default_route(runner: Runner) -> str:
+    """The main table's first IPv4 default route, as it is now ("" if none)."""
+    return (runner.query(["ip", "-4", "route", "show", "default"]).splitlines() or [""])[0]
+
+
 def gather(runner: Runner) -> Facts:
     """Read this machine's facts (read-only commands)."""
     disabled = runner.query(["sysctl", "-n", "net.ipv6.conf.all.disable_ipv6"]).strip()
@@ -45,7 +50,7 @@ def gather(runner: Runner) -> Facts:
         has_ipv6=bool(runner.query(["ip", "-6", "route", "show", "default"]).strip()),
         hostname=socket.gethostname(),
         routes4=runner.query(["ip", "-4", "route", "show", "table", "all"]),
-        default_route=(runner.query(["ip", "-4", "route", "show", "default"]).splitlines() or [""])[0],
+        default_route=default_route(runner),
     )
 
 

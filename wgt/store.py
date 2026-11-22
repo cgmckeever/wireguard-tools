@@ -83,6 +83,11 @@ def saved_settings(text: Optional[str], keys: Iterable[str]) -> Dict[str, str]:
 
 # --- names ---
 
+def one_line(value: str) -> str:
+    """<value> on one line, runs of whitespace as one space (a label in exits.db, a location)."""
+    return " ".join(value.split())
+
+
 def is_uint(word: str) -> bool:
     """Plain ASCII digits (str.isdigit also takes "²", which int() refuses)."""
     return bool(re.fullmatch(r"[0-9]+", word))

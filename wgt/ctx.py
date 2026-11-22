@@ -23,10 +23,6 @@ SETTING_FLAGS = {
 }
 
 
-def _one_line(value: str) -> str:
-    return " ".join(value.split())
-
-
 def _warp_choice(value: str) -> str:
     choice = value.replace(" ", "")
     if choice not in ("on", "off", "on,off", "off,on", "both"):
@@ -36,8 +32,8 @@ def _warp_choice(value: str) -> str:
 
 # Flags that take a value but aren't settings: the Args field, and how to read it.
 ARG_FLAGS: Dict[str, Tuple[str, Callable[[str], str]]] = {
-    "--exit": ("exit_codes", str), "--label": ("exit_label", _one_line), "--warp": ("warp", _warp_choice),
-    "--location": ("location", _one_line), "--device-number": ("device_number", str), "--group": ("groups", str),
+    "--exit": ("exit_codes", str), "--label": ("exit_label", store.one_line), "--warp": ("warp", _warp_choice),
+    "--location": ("location", store.one_line), "--device-number": ("device_number", str), "--group": ("groups", str),
 }
 VALUE_FLAGS = (*SETTING_FLAGS, *ARG_FLAGS)
 BOOL_FLAGS = {
