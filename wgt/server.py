@@ -290,7 +290,9 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
     stale: List[str] = []
     for c in ctx.snap.clients:
         conf = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
-        src = conf if os.path.isfile(conf) else _move_to_current_name(ctx, c.name, conf, old_name)
+        # Before the move: once moved (not in a dry run) src is conf, and a renamed one must still be listed.
+        moved = not os.path.isfile(conf)
+        src = conf if not moved else _move_to_current_name(ctx, c.name, conf, old_name)
         if not src:
             continue
         text = store.read_text(src) or ""
@@ -300,7 +302,7 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
         new = render.with_device_network(render.with_client_header(ctx.cfg, new, c.name))
         if new != text:
             ctx.files.write(conf, 0o600, new)
-        if (changed or src != conf) and c.name not in stale:
+        if (changed or moved) and c.name not in stale:
             stale.append(c.name)
     if stale:
         ctx.out.warn(f"configs changed (now {ctx.cfg.SERVER_NAME}.<config>.conf at {endpoint}); re-send them "
