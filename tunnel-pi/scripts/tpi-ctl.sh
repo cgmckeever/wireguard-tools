@@ -83,9 +83,9 @@ elif ! is_command "$1"; then
 else
     ask_pi "$1"
     CONF="$CONFIGS/$PICK.conf"
-    log "Pi: $PICK (configs/$PICK.conf)"
 fi
 PI_NAME=$(basename "$CONF" .conf)
+if [ "$CONF" = "$CONFIGS/$PI_NAME.conf" ]; then log "Pi: $PI_NAME (configs/$PI_NAME.conf)"; else log "Pi: $PI_NAME ($CONF)"; fi
 # shellcheck disable=SC1090
 . "$CONF"
 : "${TPI_LINK:=}" "${PI_PORT:=}"
