@@ -4,7 +4,7 @@
 #
 #   tpi-ctl.sh config              show the settings and check they're filled in
 #   tpi-ctl.sh ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
-#   tpi-ctl.sh base                1.3, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
+#   tpi-ctl.sh base                1.4, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
 #   tpi-ctl.sh link                2.1: the wgpi link (Pi and VPS), keys exchanged for you
 #   tpi-ctl.sh exit                2.1, by TPI_ROUTING: tpi's DNS resolver, or the wgt jump(s)
 #   tpi-ctl.sh client <device> [lan]   2.2, TPI_ROUTING=wgt: a config for <device> through the Pi (lan: the LAN jump)
@@ -155,7 +155,7 @@ cmd_config() {
     esac
     if [ -n "$SSH_CLOUDFLARE" ]; then
         require SSH_CLOUDFLARE CF_TOKEN_FILE
-        [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tpi-ctl.sh base needs it: step 1.2)"
+        [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tpi-ctl.sh base needs it: step 1.3)"
     else
         log "note: no SSH_CLOUDFLARE, so no emergency door: if the link is down after drop-off, the friend power-cycles the Pi"
     fi
@@ -178,7 +178,7 @@ EOF
 cmd_base() {
     require SSH_LAN
     if [ -n "$SSH_CLOUDFLARE" ]; then
-        [ -r "$CF_TOKEN_FILE" ] || die "SSH_CLOUDFLARE is set but CF_TOKEN_FILE ($CF_TOKEN_FILE) isn't readable: do step 1.2 first, or empty SSH_CLOUDFLARE"
+        [ -r "$CF_TOKEN_FILE" ] || die "SSH_CLOUDFLARE is set but CF_TOKEN_FILE ($CF_TOKEN_FILE) isn't readable: do step 1.3 first, or empty SSH_CLOUDFLARE"
         CF_TOKEN=$(tr -d ' \n\r' < "$CF_TOKEN_FILE")
         [ -n "$CF_TOKEN" ] || die "CF_TOKEN_FILE ($CF_TOKEN_FILE) is empty"
     fi
