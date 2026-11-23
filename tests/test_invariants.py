@@ -957,6 +957,25 @@ def test_no_to_the_restart_changes_neither_the_settings_nor_the_configs(world, m
     assert "wg0" in world.kernel.links
 
 
+def test_no_to_restarting_warp_leaves_warp_conf_as_warp_runs_it(world, monkeypatch):
+    """Asked before warp.conf is written: written first, a re-run would find it unchanged
+    and never restart warp onto it."""
+    world.run(["setup"])
+    conf = world.paths.wg("warp.conf")
+    before = store.read_text(conf)
+
+    def no(ctx, question, default_yes=False):
+        if "Restart warp" in question:
+            raise WgtError("aborted")
+    monkeypatch.setattr(ops, "confirm", no)
+    with pytest.raises(WgtError):
+        world.run(["setup", "--warp-mtu", "1300"])
+    assert store.read_text(conf) == before
+    monkeypatch.setattr(ops, "confirm", lambda ctx, question, default_yes=False: None)
+    world.run(["setup", "--warp-mtu", "1300"])   # a yes on the re-run applies it
+    assert "MTU = 1300" in (store.read_text(conf) or "")
+
+
 def test_answering_no_about_warp_still_stops_setup(world, monkeypatch):
     world.kernel.links.discard("warp")
 

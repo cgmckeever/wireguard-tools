@@ -46,7 +46,9 @@ def rotate_host_warp(ctx: Ctx, res: results.Results) -> None:
         ctx.out.info(f"[dry-run] would rewrite {ctx.cfg.warp_conf} and restart {ctx.cfg.WARP_IF}")
         return
     changed = ctx.files.write_config(ctx.cfg.warp_conf, 0o600, warp.render_profile(ctx, ctx.paths.wgcf_profile()))
-    units.start_unit(ctx, ctx.cfg.WARP_IF, changed)
+    # "Rotate WARP now?" agreed to the restart (its step says warp. configs pause): asked
+    # again here, a no would leave the new account written and warp running the old one.
+    units.start_unit(ctx, ctx.cfg.WARP_IF, changed, agreed=True)
     for _ in range(15):   # a fresh account's first handshake
         if live.newest_hs(ctx.runner, ctx.cfg.WARP_IF) > 0:
             break

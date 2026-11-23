@@ -25,10 +25,28 @@ def wgt_command(ctx: Ctx) -> str:
     return link if os.path.exists(link) else checkout_wgt()
 
 
-def start_unit(ctx: Ctx, ifc: str, changed: bool, ask: bool = True) -> None:
+def agree_restart(ctx: Ctx, ifc: str) -> None:
+    """Announce and ask for a restart of <ifc> to load a new config. Asked before the
+    config is written: a no then leaves the file as the interface runs it, where after
+    the write a re-run would find it unchanged and never restart."""
+    unit = f"wg-quick@{ifc}"
+    ctx.runner.step(f"Restart {unit} to apply its new config",
+                    f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
+    ops.confirm(ctx, f"Restart {ifc} now?")
+
+
+def restart_due(ctx: Ctx, ifc: str, path: str, content: str) -> bool:
+    """<ifc> is up and writing <content> to its config <path> changes its settings."""
+    current = ctx.files.read(path)
+    return current is not None and live.if_exists(ctx.runner, ifc) \
+        and store.entries(current) != store.entries(content)
+
+
+def start_unit(ctx: Ctx, ifc: str, changed: bool, ask: bool = True, agreed: bool = False) -> None:
     """Enable an interface's wg-quick unit for boot and make it match its config.
     Not <ask>: it was stopped a moment ago with permission, so bring it straight
-    back (whoever would answer may be connected through it)."""
+    back (whoever would answer may be connected through it). <agreed>: a restart
+    for a changed config was already asked (agree_restart, before the write)."""
     r, unit = ctx.runner, f"wg-quick@{ifc}"
     enabled = False
     if not live.if_exists(r, ifc):
@@ -41,9 +59,8 @@ def start_unit(ctx: Ctx, ifc: str, changed: bool, ask: bool = True) -> None:
         r.run(["systemctl", "restart", unit])
         enabled = True
     elif changed:
-        r.step(f"Restart {unit} to apply its new config",
-               f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
-        ops.confirm(ctx, f"Restart {ifc} now?")
+        if not agreed:
+            agree_restart(ctx, ifc)
         if live.unit_active(r, unit):
             r.run(["systemctl", "restart", unit])
         else:

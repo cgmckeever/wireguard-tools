@@ -90,7 +90,7 @@ def provision_warp(ctx: Ctx) -> bool:
     if not warp.install_wgcf(ctx, reinstall=ctx.args.force) or not warp.register(ctx, regenerate=ctx.args.force):
         return False
     profile = ctx.paths.wgcf_profile()
-    changed = False
+    changed = agreed = False
     if not os.path.isfile(profile):
         if not ctx.runner.dry_run:
             raise WgtError(f"missing {profile}")
@@ -98,9 +98,13 @@ def provision_warp(ctx: Ctx) -> bool:
                      f"(Table = off, MTU {ctx.cfg.WARP_MTU}, no DNS)")
     else:
         ops.ensure_managed(ctx, ctx.cfg.warp_conf)
-        changed = ctx.files.write_config(ctx.cfg.warp_conf, 0o600, warp.render_profile(ctx, profile))
+        text = warp.render_profile(ctx, profile)
+        if units.restart_due(ctx, ctx.cfg.WARP_IF, ctx.cfg.warp_conf, text):
+            units.agree_restart(ctx, ctx.cfg.WARP_IF)   # before the write: a no leaves warp.conf as warp runs it
+            agreed = True
+        changed = ctx.files.write_config(ctx.cfg.warp_conf, 0o600, text)
     try:
-        units.start_unit(ctx, ctx.cfg.WARP_IF, changed)
+        units.start_unit(ctx, ctx.cfg.WARP_IF, changed, agreed=agreed)
     except CommandFailed as e:
         ctx.out.warn(f"WARP won't start: {e}")
         return False
