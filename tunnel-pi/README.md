@@ -59,8 +59,8 @@ Three choices, made once in the settings file:
   there. `scripts/tpi-ctl.sh` with no arguments lists its commands.
 - **Each Pi has a name:** its settings file, `configs/<name>.conf`. Commands
   take the name first, `scripts/tpi-ctl.sh home check`, but with only one Pi
-  you can leave it out, as the steps below do. More Pis: see
-  [More than one Pi](#more-than-one-pi).
+  you can leave it out, as the steps below do. More than one: see
+  [More than one tunnel-pi endpoint](#more-than-one-tunnel-pi-endpoint).
 - **A setting's name stands for its value:** `ssh SSH_LAN` means
   `ssh pi@tunnel-pi.local`.
 - **Every step ends with a Check.** Don't go on until it passes.
@@ -363,7 +363,7 @@ Without the door, bring the Pi home to change it.
 - **Look around on the Pi:** `scripts/tpi-ctl.sh ssh`, the first way that
   answers.
 
-## More than one Pi
+## More than one tunnel-pi endpoint
 
 One VPS can serve several Pis, say one at a friend's and one at your mom's.
 Each Pi gets its own settings file. Leave `TPI_LINK` and `PI_PORT` empty in
