@@ -1337,8 +1337,15 @@ def test_wg0_running_without_its_rules_is_restarted_by_the_device_watchdog(world
 
 
 def test_setup_keeps_networkd_off_wg0s_rules_and_rollback_takes_it_back(world):
-    world.run(["setup"])
+    old = os.umask(0o077)   # as wgt runs (cli.main)
+    try:
+        world.run(["setup"])
+    finally:
+        os.umask(old)
     text = store.read_text(world.paths.networkd_file) or ""
     assert "ManageForeignRoutingPolicyRules=no" in text and "ManageForeignRoutes=no" in text
+    # networkd runs as systemd-network: a folder made under wgt's umask (0700) hides the file from it
+    assert os.stat(os.path.dirname(world.paths.networkd_file)).st_mode & 0o777 == 0o755
+    assert os.stat(world.paths.networkd_file).st_mode & 0o777 == 0o644
     world.run(["rollback"])
     assert not os.path.exists(world.paths.networkd_file)

@@ -463,7 +463,13 @@ ManageForeignRoutes=no
 
 def write_networkd_conf(ctx: Ctx) -> None:
     """Keep systemd-networkd off wg0's rules and routes (NETWORKD_CONF). Read when networkd
-    starts, so nothing restarts it here: that restart is what this guards against."""
+    starts, so nothing restarts it here: that restart is what this guards against. It runs
+    as systemd-network, not root: its folder must be 0755 (made under wgt's umask 077 it
+    would be 0700, and networkd would silently skip the file)."""
+    folder = os.path.dirname(ctx.paths.networkd_file)
+    if not ctx.runner.dry_run:
+        os.makedirs(folder, exist_ok=True)
+        os.chmod(folder, 0o755)
     ctx.files.write(ctx.paths.networkd_file, 0o644, NETWORKD_CONF)
 
 
