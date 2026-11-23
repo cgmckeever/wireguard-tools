@@ -19,7 +19,7 @@ import pytest
 from conftest import FIXTURES, temp_paths
 from fakehost import Died, Host, Kernel
 
-from wgt import checks, cli, devices, exits, host, ops, render, results, rules, server, store, system, units
+from wgt import checks, cli, devices, exits, host, ops, render, results, rules, server, store, system, ui, units
 from wgt.const import ALL_WATCHDOGS, EXIT_WATCHDOG
 from wgt.errors import WgtError
 from wgt.host import Facts
@@ -233,8 +233,8 @@ def test_every_hook_line_is_something_wgt_test_or_setup_would_miss(world, monkey
 
 def test_commands_hold_the_lock_when_they_write(world, monkeypatch):
     """A writer without the lock can lose a watchdog's or another command's change."""
-    for name in ("_write_clients", "_write_exits", "set_disabled", "set_device", "rename_client", "rename_device",
-                 "write_wg_conf"):
+    for name in ("_write_clients", "replace_clients", "_write_exits", "set_disabled", "set_device", "rename_client",
+                 "rename_device", "write_wg_conf"):
         real = getattr(ops, name)
 
         def checked(ctx, *a, _real=real, _name=name, **k):
@@ -416,6 +416,47 @@ def test_a_dry_run_leaves_the_watchdogs_markers(world):
     assert file_contents(world.paths.run_dir) == before
 
 
+def test_the_longer_questions_dont_wait_with_the_lock_held(world, monkeypatch):
+    """The watchdogs skip every run while it's held: a question left waiting would keep
+    devices switching to an idle jump blocked. Setup's review (asked even with --yes) and
+    client add's exit menu come before it."""
+    import fcntl
+    asked = []
+
+    def locked():
+        fd = os.open(world.paths.lock_file, os.O_WRONLY | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return False
+        except BlockingIOError:
+            return True
+        finally:
+            os.close(fd)
+
+    def yes(question, default):
+        asked.append((question, locked()))
+        return True
+
+    def ask(prompt, gone=""):
+        asked.append((prompt, locked()))
+        return ""
+    monkeypatch.setattr(ui, "have_tty", lambda: True)
+    monkeypatch.setattr(ui, "yes", yes)
+    monkeypatch.setattr(ui, "ask", ask)
+    monkeypatch.setattr(ui, "say", lambda text: None)
+    world.run(["setup"])
+    assert [q for q, _ in asked] == ["Continue?"]
+    ctx = cli.load(cli.parse(["client", "add", "zed", "--no-qr"]), paths=world.paths,
+                   runner=Host(world.kernel, world.paths.wg_dir), env={}, facts=FACTS)   # no --yes: the menu
+    try:
+        cli.command("client")(ctx, ["add", "zed"])
+    finally:
+        ops.release_lock(ctx)
+    assert any(q.lstrip().startswith("Exit") for q, _ in asked) and store.load(world.paths).client("zed")
+    assert [q for q, held in asked if held] == []
+
+
 # --- restarting ---
 
 def test_setup_restarting_wg0_asks_once_before_it_stops(world, monkeypatch):
@@ -522,6 +563,52 @@ def test_rotate_killed_after_saving_doesnt_leave_the_old_key_connected(tmp_path,
             w.run(["client", "rotate", "warp.par-fr.mbp-1"], die_at=die_at)
         w.run(["client", "rotate", "warp.par-fr.mbp-1"])
         assert old not in w.kernel.peers, f"killed at step {die_at}"
+
+
+def test_a_stopped_warp_rotates_new_account_goes_with_purge_and_jump_remove(world):
+    """Its new account is registered in a scratch folder first, removed in a finally that a
+    kill or a lost terminal skips (Died here doesn't: it's an exception). What's left holds a
+    registered account's key: the jump's remove and rollback --purge delete it too."""
+    world.run(["setup"])
+    for d in (world.paths.wgcf_dir, world.paths.exit_wgcf_dir("par-fr")):
+        scratch = world.paths.wgcf_scratch(d)
+        os.makedirs(scratch)
+        with open(os.path.join(scratch, "wgcf-account.toml"), "w") as f:
+            f.write("account\n")
+    world.free_the_jump("par-fr")
+    world.run(["jump", "remove", "par-fr"])
+    assert not os.path.exists(world.paths.wgcf_scratch(world.paths.exit_wgcf_dir("par-fr")))
+    world.run(["rollback", "--purge"])
+    left = sorted(os.path.relpath(os.path.join(d, f), world.tmp) for d, _, fs in os.walk(world.tmp) for f in fs)
+    assert [f for f in left if f not in ("wgcf", "lock") and not f.startswith("run/")] == [], left
+
+
+def test_new_server_keys_stopped_anywhere_a_plain_setup_runs_them(tmp_path, monkeypatch):
+    """The flag is for one run: re-run without it (it would make yet another pair), setup
+    must still bring wg0 onto the key in server.key, with server.pub its own. Otherwise
+    every config issued meanwhile carries a key wg0 doesn't run, until some restart."""
+    monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
+
+    def set_up(where):
+        w = World(where, monkeypatch)
+        w.run(["setup"])
+        return w
+    w = set_up(tmp_path / "count")
+    w.run(["setup", "--new-server-keys"])
+    total = w.host.steps   # this run's own Host
+    assert total > 0
+
+    def pub_of(path):
+        return (store.read_text(path) or "").strip().replace("PRIV", "PUB")
+    for die_at in range(1, total + 1):
+        w = set_up(tmp_path / str(die_at))
+        with pytest.raises(Died):
+            w.run(["setup", "--new-server-keys"], die_at=die_at)
+        w.run(["setup"])
+        running = w.kernel.key.replace("PRIV", "PUB")
+        assert running == pub_of(w.paths.server_key) == store.read_text(w.paths.server_pub).strip(), \
+            f"killed at step {die_at}"
+        assert w.problems() == [], f"killed at step {die_at}"
 
 
 def test_setup_refuses_a_new_interface_name_while_the_old_one_runs(world):
@@ -926,6 +1013,22 @@ def test_a_restore_stopped_after_extracting_finishes_when_run_again(world, monke
     world.run(["rollback"])
     with pytest.raises(WgtError, match="would mix with the archive"):
         world.run(["restore", kept])
+
+
+def test_a_server_without_its_state_makes_no_archive(world, monkeypatch):
+    """Purged, or a restore stopped before the state: no restore takes such an archive, and
+    as the newest it would be the one `wgt-ctl move` (run again after stopping) restores."""
+    world.run(["setup"])
+    world.run(["backup"])
+
+    def archives():
+        return sorted(f for f in os.listdir(world.paths.backup_dir) if f.endswith(".tar.gz"))
+    kept = archives()
+    world.run(["rollback", "--purge"])
+    os.makedirs(world.paths.wg_dir, exist_ok=True)
+    with pytest.raises(WgtError, match="nothing to back up"):
+        world.run(["backup"])
+    assert archives() == kept
 
 
 def test_every_firewall_rule_going_missing_is_noticed(world):

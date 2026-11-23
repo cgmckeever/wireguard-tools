@@ -183,7 +183,7 @@ class Tests:
                 out.append(f"{f} plain host config rules")
         if not self.device_net_ok():
             out.append("static device addresses")
-        out += self.hooks_missing() + self.peers_wrong()
+        out += self.hooks_missing() + self.peers_wrong() + self.key_wrong()
         for x, t, ch, rule in rules.ipt_rules(c, self.ctx.pub_if, self.ctx.snap.exits):
             if live.ipt_count(self.runner, x, t, ch, rule) != 1:
                 out.append(f"{x} {t} {ch} {rule}")
@@ -225,6 +225,15 @@ class Tests:
         have = set(live.peers(self.runner, self.cfg.WG_IF))
         return ([f"peer missing: {name}" for pub, name in want.items() if pub not in have]
                 + [f"peer not in clients.db (or disabled): {pub}" for pub in have - set(want)])
+
+    def key_wrong(self) -> List[str]:
+        """wg0 runs another key than server.pub's (configs carry server.pub): new server
+        keys written by a setup that stopped before it restarted wg0. Only PostUp loads the
+        key, so nothing else would ever bring it in."""
+        running = live.public_key(self.runner, self.cfg.WG_IF)
+        want = (store.read_text(self.ctx.paths.server_pub) or "").strip()
+        return [f"{self.cfg.WG_IF} runs another key than {self.ctx.paths.server_pub}'s"] \
+            if running and want and running != want else []
 
     def boot_order_ok(self) -> bool:
         """wg0's unit starts after warp's (and wants it), via setup's drop-in."""
@@ -270,6 +279,8 @@ class Tests:
         wrong = self.peers_wrong()
         res.check(f"{c.WG_IF}'s running peers match clients.db" + (f" ({'; '.join(wrong[:3])})" if wrong else ""),
                   not wrong)
+        res.check(f"{c.WG_IF} runs the key configs name ({self.ctx.paths.server_pub}; restart: wgt setup)",
+                  not self.key_wrong())
         stale = devices.access_wrong(self.ctx)
         res.check("devices' firewall access matches their groups" + (f" ({'; '.join(stale[:3])})" if stale else ""),
                   not stale)

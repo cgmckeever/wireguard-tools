@@ -228,6 +228,12 @@ class Paths:
         """The WARP profile wgcf generated, in <directory> (default the main one)."""
         return os.path.join(directory or self.wgcf_dir, "wgcf-profile.conf")
 
+    def wgcf_scratch(self, directory: str) -> str:
+        """Where `warp rotate` registers <directory>'s new account first. Removed after,
+        but a run stopped there leaves it, a registered account's key inside: whatever
+        removes <directory> removes this too."""
+        return directory.rstrip("/") + ".new"
+
     def exit_wgcf_dir(self, code: str) -> str:
         """Jump <code>'s own WARP account."""
         return os.path.join(self.exit_dir, code)

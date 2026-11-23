@@ -9,6 +9,7 @@ when a process is killed: `die_at`."""
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import re
@@ -38,6 +39,7 @@ class Kernel:
         self.links: Set[str] = {"warp"}
         self.addrs: List[str] = []
         self.has_key = False
+        self.key = ""                  # the private key wg0 runs (PostUp loads it from server.key)
         self.ufw_active = False
         self.ufw: Set[str] = set()     # "<port>/udp" and "route <in> <out>"
 
@@ -130,6 +132,8 @@ class Host(FakeRunner):
                 return 0, "".join(f"{p}\t{v}\n" for p, v in k.peers.items())
             if a[3] == "listen-port":
                 return 0, "51820\n"
+            if a[3] == "public-key" and a[2] == "wg0":   # derived as `wg pubkey` derives it, above
+                return 0, k.key.replace("PRIV", "PUB") + "\n" if k.key and "wg0" in k.links else ""
             return 0, ""
         if a[0] in ("iptables", "ip6tables") and a[1] == "-t":
             return self._iptables(a)
@@ -205,6 +209,7 @@ class Host(FakeRunner):
         self.kernel.peers = {}
         self.kernel.addrs = []
         self.kernel.has_key = False
+        self.kernel.key = ""
 
     def _iptables(self, a: List[str]) -> Tuple[int, str]:
         k = self.kernel
@@ -302,6 +307,8 @@ class Host(FakeRunner):
         m = re.fullmatch(r"wg set (\S+) private-key (\S+)", line)
         if m:
             k.has_key = True
+            with contextlib.suppress(OSError), open(m.group(2)) as f:
+                k.key = f.read().strip()
             return 0
         if line.startswith("sysctl"):
             return 0

@@ -319,7 +319,7 @@ def test_warp_rotate_host(make_ctx, rotating):
     warp_rotate.cmd_warp(ctx, ["rotate"])
     assert Path(ctx.paths.wgcf_account()).read_text() == "account = 'new'\n"
     assert "NEWWARPKEY=" in Path(ctx.cfg.warp_conf).read_text()
-    assert not os.path.exists(ctx.paths.wgcf_dir + ".new")
+    assert not os.path.exists(ctx.paths.wgcf_scratch(ctx.paths.wgcf_dir))
     assert any("restart wg-quick@warp" in c or "wg-quick down warp" in c for c in ctx.runner.calls)
 
 

@@ -507,9 +507,9 @@ wgt rollback --purge  # ...and delete keys, configs, WARP accounts and jumps (ba
 
 `test` checks WARP (up, handshaking, and actually used by `warp.` configs but
 not by the server itself), every routing, NAT and firewall rule (each exactly
-once), the static addresses, that every config's jump exists, the services and
-watchdogs, and each jump's routing, plus its
-handshakes and a trace through it with and without WARP if it's up.
+once), the static addresses, that `wg0` runs the server key configs name, that
+every config's jump exists, the services and watchdogs, and each jump's routing,
+plus its handshakes and a trace through it with and without WARP if it's up.
 
 Backups go in `/var/backups/wireguard-tools/` (mode 700, outside the checkout,
 so re-cloning the tools keeps them); `backup <dir>` writes elsewhere. Each

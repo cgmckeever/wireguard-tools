@@ -307,12 +307,14 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
             raise WgtError(f"'{name}' is a full config name: leave out --exit and --warp "
                            f"(or give the device, {base}, with them)")
         exit_codes, warps = code0 or store.HOST_EXIT, [warp0]
+    if not exit_codes and ctx.snap.exits and not ctx.args.yes and not ctx.runner.dry_run and ui.have_tty():
+        # Asked before the lock: the watchdogs skip every run while it's held, and a menu
+        # may wait. The codes are checked against exits.db under it, below.
+        exit_codes = ",".join(pick_exits(ctx, base))
     ops.take_lock(ctx)
     ops.require_server(ctx)
     if exit_codes:
         codes = exit_codes.replace(",", " ").split()
-    elif ctx.snap.exits and not ctx.args.yes and not ctx.runner.dry_run and ui.have_tty():
-        codes = pick_exits(ctx, base)
     else:
         codes = [store.HOST_EXIT]
         if not ctx.snap.exits:

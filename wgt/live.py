@@ -65,6 +65,11 @@ def listen_port(r: Runner, ifc: str) -> str:
     return r.query(["wg", "show", ifc, "listen-port"]).strip()
 
 
+def public_key(r: Runner, ifc: str) -> str:
+    """The public half of the key an interface runs ("" if it has none or can't be read)."""
+    return r.query(["wg", "show", ifc, "public-key"]).strip()
+
+
 def rules(r: Runner, family: str = "ip") -> str:
     return r.query(family.split() + ["rule", "show"])
 

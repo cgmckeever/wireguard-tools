@@ -157,30 +157,30 @@ def do_move(s: Server, args: List[str]) -> int:
     down = f"{s.wgt} rollback --purge --yes" if in_place else f"{s.wgt} rollback --yes"
     if remote.ssh(s.target, down, tty=True)[0] != 0:
         if in_place:   # part of the purge may have run: the archive is the way back
-            return _move_failed(s, in_place, archive, "rollback failed")
+            return _move_failed(s, new, in_place, archive, "rollback failed")
         raise WgtError(f"rollback failed on {s.name}; it may be half down - bring it back with: "
                        f"wgt-ctl {s.name} setup --yes")
     if in_place:
         if remote.ssh(s.target, f"rm -rf {remote.DEF_DIR}")[0] != 0:
-            return _move_failed(s, in_place, archive, f"could not remove {remote.DEF_DIR}")
+            return _move_failed(s, new, in_place, archive, f"could not remove {remote.DEF_DIR}")
         try:
             newserver.install_checkout(new, opts["--branch"])
         except WgtError as e:
-            return _move_failed(s, in_place, archive, str(e))
+            return _move_failed(s, new, in_place, archive, str(e))
 
     out.log("4. Restoring" + ("" if in_place else f" on {new}"))
     uploaded = f"/root/{os.path.basename(archive)}"
     if not remote.scp(archive, f"{new}:{uploaded}"):
-        return _move_failed(s, in_place, archive, "upload failed")
+        return _move_failed(s, new, in_place, archive, "upload failed")
     rc, _ = remote.ssh(new, f"{remote.DEF_WGT} restore {q(uploaded)} --yes {q(*setup_args)}; rc=$?; "
                      f"rm -f {q(uploaded)}; exit $rc", tty=True)
     if rc != 0:
-        return _move_failed(s, in_place, archive, f"restore failed (exit {rc})")
+        return _move_failed(s, new, in_place, archive, f"restore failed (exit {rc})")
 
     out.log("5. Testing")
     tested = remote.ssh(new, f"{remote.DEF_WGT} test && {remote.DEF_WGT} tunnel test", tty=True)[0]
     if tested != 0:
-        return _move_failed(s, in_place, archive, "tests failed")
+        return _move_failed(s, new, in_place, archive, "tests failed")
 
     if not in_place:
         remote.set_target(s.name, new)
@@ -204,7 +204,7 @@ def do_move(s: Server, args: List[str]) -> int:
     return 0
 
 
-def _move_failed(s: Server, in_place: bool, archive: str, why: str) -> int:
+def _move_failed(s: Server, new: str, in_place: bool, archive: str, why: str) -> int:
     """A move stopped after the old server went down: say how to recover, and
     offer to bring the old machine back (a move to a new one only)."""
     out.error(f"{s.name}: {why}")
@@ -216,6 +216,10 @@ def _move_failed(s: Server, in_place: bool, archive: str, why: str) -> int:
                  f"{wgt} restore <archive>")
         return 1
     out.info(f"the old machine ({s.target}) is down but intact; the new one is left as it is to look at")
+    # The restore may have got as far as WARP, or all of setup (failed tests): both up would run
+    # one server key, WARP account and set of jump keys from two machines.
+    out.warn(f"bringing the old one back? first run {remote.DEF_WGT} rollback --purge on {new}: it may be running "
+             f"{s.name}'s keys and WARP account")
     if ui.have_tty() and ui.yes("Bring the old machine back up now (wgt setup there)?", default=True):
         remote.ssh(s.target, f"{s.wgt} setup --yes", tty=True)
     else:

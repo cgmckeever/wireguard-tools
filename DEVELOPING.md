@@ -30,7 +30,7 @@ wgt/                      the package (Python 3.8+, standard library only)
   server.py               setup, rollback (setup's inverse)
   warp_rotate.py          wgt warp rotate: new WARP accounts
   backup.py               backup, restore (archive checks)
-  clients.py              client commands, the clients table (and QR, share), `wgt device`'s table and rename
+  clients.py              client commands, the clients table (and QR, share), `wgt device`'s dispatch and rename
   devices.py              static device addresses and groups: numbers, `wgt device`'s other verbs, the watchdog's rules
   exits.py                `wgt jump` (alias `exit`) and `wgt tunnel test`: bringing a jump up/down, probing it
   checks.py               test, status, summary

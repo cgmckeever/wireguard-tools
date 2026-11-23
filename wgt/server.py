@@ -280,8 +280,7 @@ def renumber_clients(ctx: Ctx) -> None:
         for m in moves:
             ctx.out.info(m)
         ops.confirm(ctx, f"Move the configs to {ctx.cfg.WG_SUBNET}?")
-    ctx.files.write(ctx.paths.client_db, 0o600, store.format_clients(e.fields_line() for e in entries))
-    ctx.reload()
+    ops.replace_clients(ctx, entries)
 
 
 def save_config(ctx: Ctx) -> None:
@@ -325,15 +324,20 @@ def _public_key(ctx: Ctx, key: str) -> str:
 def server_keys_due(ctx: Ctx) -> bool:
     """New server keys are to be made: there are none, or --new-server-keys
     regenerates them (asked: every client then has to be rotated). Nothing is
-    written here, but a missing server.pub (it follows from the private key wg0
-    runs): write_server_keys does that once a restart of a running wg0 is agreed
-    (restart_needed), so a no keeps the key wg0 runs."""
+    written here, but a server.pub that is missing or isn't the key's (a run stopped
+    between writing the two): it follows from server.key, which wg0 loads. The
+    keys themselves: write_server_keys does that once a restart of a running wg0 is
+    agreed (restart_needed), so a no keeps the key wg0 runs."""
     p = ctx.paths
     if _have_server_key(ctx) and not ctx.args.new_server_keys:
-        if not store.is_nonempty(p.server_pub):
-            ctx.runner.step(f"Write {p.server_pub} from {p.server_key} (it was missing)", f"rm {p.server_pub}")
+        pub = _public_key(ctx, (store.read_text(p.server_key) or "").strip())
+        had = (store.read_text(p.server_pub) or "").strip()
+        if had != pub:
+            ctx.runner.step(f"Write {p.server_pub} from {p.server_key} ("
+                            + ("it was missing)" if not had else "it held another key's public half)"),
+                            f"rm {p.server_pub}" if not had else "none (configs need the key's own)")
             if not ctx.runner.dry_run:
-                write_private(p.server_pub, _public_key(ctx, (store.read_text(p.server_key) or "").strip()) + "\n")
+                write_private(p.server_pub, pub + "\n")
         ctx.out.info("server keys present")
         return False
     if _have_server_key(ctx):
@@ -540,11 +544,14 @@ def cmd_setup(ctx: Ctx, words: List[str]) -> None:
     """wgt setup: install or update everything; safe to re-run, and a change
     of settings is shown and confirmed first."""
     ops.no_more_words(words, "wgt setup [--name N] [--subnet ...] (settings are flags)")
-    ops.take_lock(ctx)
     old_name = ctx.cfg.saved.get("SERVER_NAME", "")
     asked = ask_subnet(ctx)
     ensure_subnet6(ctx)
     review_settings(ctx, asked)
+    # Not before the review: the watchdogs skip every run while the lock is held, and its
+    # Continue? may wait (a device switching to an idle jump would stay blocked). It changes
+    # nothing, and take_lock refuses if another setup changed the settings it showed.
+    ops.take_lock(ctx)
     # Confirmed, so finish whatever happens to the terminal: the session may be running
     # through wg0, and dying between its stop and its start would leave it down.
     with ops.ignoring(signal.SIGHUP):
@@ -728,7 +735,7 @@ def _purge(ctx: Ctx) -> None:
         if text is not None and MARKER in text:
             files.remove(path)
     files.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.state, p.backup_map, p.exit_db, p.device_db)
-    for d in (p.wgcf_dir, p.client_dir, p.psk_dir, p.exit_dir):
+    for d in (p.wgcf_dir, p.wgcf_scratch(p.wgcf_dir), p.client_dir, p.psk_dir, p.exit_dir):
         files.remove_tree(d)
     files.remove(p.wgt_link)
     ctx.out.info(f"left installed: packages and {p.wgcf_bin}")

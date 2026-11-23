@@ -19,7 +19,7 @@ def new_warp_account(ctx: Ctx, d: str) -> None:
     """Register a new WARP account for <d> (a wgcf directory): registered in a
     scratch directory first, so a refusal changes nothing; then its account and
     profile replace the old ones (which are backed up like any changed file)."""
-    tmp = d.rstrip("/") + ".new"
+    tmp = ctx.paths.wgcf_scratch(d)
     if not ctx.runner.dry_run:
         shutil.rmtree(tmp, ignore_errors=True)
     try:

@@ -7,6 +7,7 @@ import glob
 import ipaddress
 import os
 import re
+import shlex
 import tarfile
 import time
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
@@ -111,8 +112,11 @@ def cmd_backup(ctx: Ctx, words: List[str]) -> None:
     # Absolute: the scp hint below is read from another machine, where a relative one means ~.
     dest_dir = os.path.abspath(words[0]) if words else ctx.paths.backup_dir
     sources = [p for p in (ctx.paths.wg_dir, ctx.paths.sysctl_file, ctx.cfg.dropin_dir) if os.path.exists(p)]
-    if not sources:
-        raise WgtError("nothing to back up")
+    # No restore takes an archive without the state (check_archive). Made after a purge, or a
+    # restore stopped before writing it (a move stopped part-way, run again), it would be the
+    # newest and stand in for the real one: wgt-ctl backup and move fetch the newest.
+    if not sources or not os.path.isfile(ctx.paths.state):
+        raise WgtError(f"nothing to back up: no {ctx.paths.state} (not set up here, or purged)")
     ops.take_lock(ctx)   # don't archive mid-change
     short_host = host.short_name(ctx.facts.hostname)
     archive = os.path.join(dest_dir, archive_name(short_host, time.strftime("%Y%m%d-%H%M%S")))
@@ -193,8 +197,12 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
         ctx.out.warn("the jumps' keys and WARP accounts are now here too; remove them from the old server")
     ops.release_lock(ctx)
     ctx.out.log("Setting up")
-    ctx.out.info("if setup stops, fix the cause and run 'wgt setup' (the restored files stay in place)")
-    cmd = [units.wgt_command(ctx)] + (["--yes"] if ctx.args.yes else []) + ["setup"] + setup_flags(ctx)
+    flags = setup_flags(ctx)
+    # With the flags: a setup stopped before saving them would otherwise go on without them
+    # (--new-server-keys, say, the old server's keys kept).
+    again = " ".join(["wgt", "setup", *(shlex.quote(f) for f in flags)])
+    ctx.out.info(f"if setup stops, fix the cause and run: {again} (the restored files stay in place)")
+    cmd = [units.wgt_command(ctx)] + (["--yes"] if ctx.args.yes else []) + ["setup"] + flags
     os.execv(cmd[0], cmd)
 
 

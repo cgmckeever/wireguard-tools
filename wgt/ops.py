@@ -31,9 +31,10 @@ def _open_lock(ctx: Ctx) -> Optional[int]:
 
 
 def take_lock(ctx: Ctx) -> None:
-    """Serialize changing commands (and the exit watchdog), then re-read the
-    server's files: decisions must use what's there once we hold the lock.
-    Waits up to 15s (the exit watchdog holds it for a moment every 10s)."""
+    """Serialize changing commands (and the jump and device watchdogs), then re-read
+    the server's files: decisions must use what's there once we hold the lock.
+    Waits up to 15s (each watchdog holds it for a moment every 10s). A watchdog skips
+    its run while a command holds it, so a question that can come first does."""
     if ctx.lock_fd is not None:
         return
     fd = _open_lock(ctx)
@@ -217,6 +218,13 @@ def rename_client(ctx: Ctx, old: str, entry: store.Client) -> None:
     not lose its public key. Reloads ctx.snap."""
     db = ctx.paths.client_db
     ctx.files.write(db, 0o600, store.put_client(store.put_client(ctx.files.read(db), old, None), entry.name, entry))
+    ctx.reload()
+
+
+def replace_clients(ctx: Ctx, entries: List[store.Client]) -> None:
+    """clients.db as exactly <entries>, in one write (setup's subnet move: a stop part-way
+    must not leave some configs moved); reloads ctx.snap."""
+    ctx.files.write(ctx.paths.client_db, 0o600, store.format_clients(e.fields_line() for e in entries))
     ctx.reload()
 
 

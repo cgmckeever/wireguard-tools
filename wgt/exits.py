@@ -281,8 +281,8 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     code, src = words[0], words[1]
     if not store.valid_exit_code(code):
         raise WgtError(f"jump code must be {store.EXIT_CODE_RULE}: '{code}'")
+    raw = _read_jump(src)   # before the lock: "-" may wait on a terminal, and the watchdogs skip runs meanwhile
     ops.take_lock(ctx)
-    raw = _read_jump(src)
     existing = ctx.snap.exit(code)
     label = (ctx.args.exit_label or (existing.label if existing else "") or render.peer_hint(raw) or code)
     label = store.one_line(label)   # one line in exits.db, whatever the file's comment holds
@@ -398,11 +398,11 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
 
 def _jump_files(ctx: Ctx, code: str) -> Tuple[List[str], List[str]]:
     """What a jump leaves on disk, and _remove_jump_files deletes (cmd_remove finishes
-    a remove while any is left): its configs, then its WARP account's directory and
-    that account's change copies (a rotated account's old keys)."""
+    a remove while any is left): its configs, then its WARP account's directory, that
+    account's change copies (a rotated account's old keys) and a stopped rotate's new one."""
     wgcf_dir = ctx.paths.exit_wgcf_dir(code)
     return ([ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.jump_source(code)],
-            [wgcf_dir, ctx.files.copies_dir(wgcf_dir)])
+            [wgcf_dir, ctx.files.copies_dir(wgcf_dir), ctx.paths.wgcf_scratch(wgcf_dir)])
 
 
 def _remove_jump_files(ctx: Ctx, code: str) -> None:
@@ -413,7 +413,7 @@ def _remove_jump_files(ctx: Ctx, code: str) -> None:
     if not ctx.snap.exits:
         units.remove_timer(ctx, EXIT_WATCHDOG)
         ctx.runner.run(["systemctl", "daemon-reload"])
-    confs, (wgcf_dir, copies) = _jump_files(ctx, code)
+    confs, (wgcf_dir, copies, scratch) = _jump_files(ctx, code)
     for path in confs:
         ctx.files.forget(path)
     if os.path.isdir(wgcf_dir):
@@ -421,6 +421,7 @@ def _remove_jump_files(ctx: Ctx, code: str) -> None:
             ctx.files.forget(os.path.join(wgcf_dir, name))
     ctx.files.remove_tree(wgcf_dir)
     ctx.files.remove_tree(copies)
+    ctx.files.remove_tree(scratch)
 
 
 def cmd_test(ctx: Ctx, words: List[str]) -> int:
