@@ -1,0 +1,46 @@
+#!/bin/sh
+# tunnel-pi-exit up <interface> [isolated|lan] | down <interface>
+# Traffic arriving on <interface> leaves through the uplink (the interface with
+# the default route) with the friend's IP. isolated: never into their LAN or
+# any private range. lan: their LAN (the uplink's subnet) too, still no other
+# private range.
+set -e
+USAGE="usage: $0 up <interface> [isolated|lan] | down <interface>"
+IF="$2"; MODE="${3:-isolated}"
+[ -n "$IF" ] || { echo "$USAGE" >&2; exit 2; }
+PRIVATE=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10
+SAVED="/run/tunnel-pi-exit.$IF"     # "<uplink> <lan or ->" from up, so down removes the same rules
+case "$1" in
+  up)
+    case "$MODE" in isolated|lan) ;; *) echo "$USAGE" >&2; exit 2 ;; esac
+    UP=$(ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+    [ -n "$UP" ] || { echo "tunnel-pi-exit: no default route yet" >&2; exit 1; }
+    LAN=-
+    iptables -I FORWARD -i "$IF" -d "$PRIVATE" -j DROP
+    if [ "$MODE" = lan ]; then
+      LAN=$(ip -4 -o addr show dev "$UP" | awk '{print $4; exit}')   # e.g. 192.168.1.50/24
+      if [ -n "$LAN" ]; then
+        iptables -I FORWARD -i "$IF" -o "$UP" -d "$LAN" -j ACCEPT    # above the DROP
+      else
+        LAN=-; echo "tunnel-pi-exit: $UP has no IPv4 address; $IF stays isolated" >&2
+      fi
+    fi
+    iptables -A FORWARD -i "$IF" -o "$UP" -j ACCEPT
+    iptables -A FORWARD -i "$UP" -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    iptables -t nat -C POSTROUTING -o "$UP" -j MASQUERADE 2>/dev/null \
+      || iptables -t nat -A POSTROUTING -o "$UP" -j MASQUERADE
+    echo "$UP $LAN" > "$SAVED"
+    if [ "$LAN" = - ]; then echo "tunnel-pi-exit: $IF -> $UP, isolated" >&2
+    else echo "tunnel-pi-exit: $IF -> $UP, LAN $LAN reachable" >&2; fi
+    ;;
+  down)
+    [ -r "$SAVED" ] || exit 0
+    read -r UP LAN < "$SAVED"
+    [ "$LAN" = - ] || iptables -D FORWARD -i "$IF" -o "$UP" -d "$LAN" -j ACCEPT || true
+    iptables -D FORWARD -i "$IF" -d "$PRIVATE" -j DROP || true
+    iptables -D FORWARD -i "$IF" -o "$UP" -j ACCEPT || true
+    iptables -D FORWARD -i "$UP" -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true
+    rm -f "$SAVED"
+    ;;
+  *) echo "$USAGE" >&2; exit 2 ;;
+esac

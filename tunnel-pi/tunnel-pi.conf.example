@@ -1,0 +1,36 @@
+# tunnel-pi settings. Copy this file to tunnel-pi.conf (in this folder; git
+# ignores that name) and fill it in. Shell syntax: NAME="value".
+# scripts/tp reads it on your Mac and passes the values the Pi and VPS need.
+# No secrets go in here: the Cloudflare token stays in its own file.
+
+# --- Reaching the machines from your Mac ---------------------------------
+# PI_SSH: how ssh reaches the Pi. While you build it at home this can be its
+# LAN name (pi@tunnel-pi.local). Once `tp base` has run and the Cloudflare
+# steps are done, use ADMIN_HOST (the ~/.ssh/config entry `tp ssh-config` prints).
+PI_SSH="pi@tunnel-pi.local"
+VPS_SSH="root@bossk.example.com"    # root, or a user with sudo
+
+# --- Cloudflare (phase 1) -------------------------------------------------
+ADMIN_HOST="ssh.pi.example.com"     # the SSH hostname on your Cloudflare domain
+PI_USER="pi"                        # the user set in Raspberry Pi Imager
+# A file holding only the tunnel token from the Cloudflare dashboard (mode 600,
+# outside this repo). tp base sends it to the Pi; it never goes on a command line.
+CF_TOKEN_FILE="$HOME/.config/tunnel-pi/cloudflared.token"
+
+# --- The link (phase 2A) --------------------------------------------------
+VPS_HOST="bossk.example.com"        # the VPS's public name or IP, as the Pi dials it
+PI_PORT="51821"                     # a free UDP port on the VPS (443 if free: rarely filtered)
+
+# --- The exit (phase 2B or 2C) -------------------------------------------
+EXIT="jump"                         # jump: a wgt jump (2C). hand: hand-built routing (2B)
+
+# EXIT="jump" (the VPS runs wgt)
+JUMP_CODE="home"                    # 2-6 of a-z 0-9 -, not already in `wgt jump list`
+JUMP_LABEL="Friend's house"
+JUMP_LAN_CODE=""                    # optional second jump in LAN mode (2D), e.g. homelan
+JUMP_LAN_LABEL=""                   # e.g. "Friend's house (LAN)"
+
+# EXIT="hand"
+CLIENT_IPS=""                       # space-separated wg0 addresses (IPv4) that exit via the Pi
+CLIENT_IP6S=""                      # their IPv6 addresses, if any (blocked: the link is IPv4 only)
+WG_SUBNET=""                        # the VPS's client subnet; empty reads it from wg-tools.state
