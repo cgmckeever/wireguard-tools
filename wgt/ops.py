@@ -145,15 +145,17 @@ def state_set(ctx: Ctx, key: str, value: str) -> None:
     ctx.reload()
 
 
-def state_unset(ctx: Ctx, key: str) -> None:
-    """Drop <key> from wg-tools.state (dry-run aware)."""
+def state_unset(ctx: Ctx, *keys: str) -> None:
+    """Drop <keys> from wg-tools.state, in one write (dry-run aware)."""
     text = store.read_text(ctx.paths.state)
     if text is None:
         return
     if ctx.runner.dry_run:
-        ctx.out.info(f"[dry-run] would clear {key} in {ctx.paths.state}")
+        ctx.out.info(f"[dry-run] would clear {' '.join(keys)} in {ctx.paths.state}")
         return
-    write_private(ctx.paths.state, store.state_unset(text, key))
+    for key in keys:
+        text = store.state_unset(text, key)
+    write_private(ctx.paths.state, text)
     ctx.reload()
 
 

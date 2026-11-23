@@ -17,7 +17,7 @@ import sys
 from typing import TYPE_CHECKING, List, Optional
 
 from . import devices, live, net, ops, render, rules, store, system, ui, units
-from .const import MIB
+from .const import MIB, client_conf_name
 from .errors import WgtError
 
 if TYPE_CHECKING:
@@ -359,7 +359,7 @@ def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
     ctx.runner.step(f"Add config '{name}' at {ip} ({way_out(ctx, name)})",
                     f"wgt client remove {name}")
     issue_client(ctx, name, ip, allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS), endpoint)
-    tunnel = f"{ctx.cfg.SERVER_NAME}.{name}"
+    tunnel = client_conf_name(ctx.cfg.SERVER_NAME, name)[:-len(".conf")]   # the app names it after the file
     if len(tunnel) > 15:
         ctx.out.info(f"note: Android's WireGuard app takes tunnel names up to 15 characters; '{tunnel}' is "
                      f"{len(tunnel)}, so shorten it when importing there")

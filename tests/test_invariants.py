@@ -265,6 +265,9 @@ CRASHES = [
     (["setup", "--subnet", "10.3.10.0/24"],   # renumbered, then stopped before the subnet is saved: re-runnable
      lambda s: store.state_get(s.state, "WG_SUBNET") == "10.3.10.0/24"
      and all(c.ip.startswith("10.3.10.") for c in s.clients), None),
+    (["setup", "--subnet", "10.2.12.0/22"],   # just past the old one: shifted twice, a config would still be in it
+     lambda s: store.state_get(s.state, "WG_SUBNET") == "10.2.12.0/22"
+     and all(c.ip.startswith("10.2.12.") for c in s.clients), None),
     (["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"], lambda s: s.exit("lon-gb"), None),
     (["jump", "remove", "nyc-us"], lambda s: not s.exit("nyc-us"), None),
 ]
@@ -698,6 +701,24 @@ def test_a_new_server_name_reaches_every_config_header(world):
     for c in store.load(world.paths).clients:
         text = store.read_text(world.paths.client_conf("other", c.name)) or ""
         assert text.startswith(f"# wireguard-tools client: {c.name} on other\n"), c.name
+
+
+def test_killed_during_a_server_rename_a_rerun_moves_every_config(tmp_path, monkeypatch):
+    """setup saves the new name before it moves the configs: the re-run, whose saved name
+    is the new one by then, must still find the ones left under the name before."""
+    monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
+    argv = ["setup", "--name", "other"]
+    total = steps_of(tmp_path, monkeypatch, argv)
+    for die_at in range(1, total + 1):
+        w = World(tmp_path / str(die_at), monkeypatch)
+        with pytest.raises(Died):
+            w.run(argv, die_at=die_at)
+        w.run(argv)
+        for c in store.load(w.paths).clients:
+            text = store.read_text(w.paths.client_conf("other", c.name)) or ""
+            assert text.startswith(f"# wireguard-tools client: {c.name} on other\n"), f"killed at {die_at}: {c.name}"
+        left = [f for f in os.listdir(w.paths.client_dir) if not f.startswith("other.")]
+        assert left == [], f"killed at step {die_at}"
 
 
 def test_the_jump_watchdog_runs_only_while_there_are_jumps(world):

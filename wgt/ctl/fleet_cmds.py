@@ -101,7 +101,12 @@ def numbered_add(args: List[str]) -> Tuple[List[str], str]:
 
 
 def forget_number(device: str) -> None:
-    """Numbers are never reused, so one no add took shouldn't stay taken."""
+    """Numbers are never reused, so one no add took shouldn't stay taken. One a server
+    kept stays: an add that failed part way still made a config there, and the number
+    handed out again would be another device's on the next server."""
+    seen, _ = sweep()
+    if any(device in devices for devices in seen.values()):
+        return
     entries = read_entries()
     if entries.pop(device, None):
         write_entries(entries)

@@ -15,7 +15,7 @@ import re
 import signal
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from . import checks, devices, exits, host, live, net, ops, render, rules, store, ui, units, warp
+from . import checks, clients, devices, exits, host, live, net, ops, render, rules, store, ui, units, warp
 from .const import (
     ALL_WATCHDOGS,
     DEVICE_NET,
@@ -225,16 +225,19 @@ def renumber_clients(ctx: Ctx) -> None:
         return
     old = ctx.cfg.saved["WG_SUBNET"]
     old_int = net.network_int(old)
+    in_old = range(old_int, old_int + (1 << (32 - int(old.split("/")[1]))))
     in_new = range(ctx.cfg.first_host, ctx.cfg.last_host + 1)
     moves, entries = [], []
     for c in ctx.snap.clients:
         ip = net.ip2int(c.ip)
         n = ctx.cfg.net_int + ip - old_int
-        if n not in in_new and ip in in_new:
-            # Already in the new subnet, and shifted it would leave it: an earlier run moved
-            # it, then stopped before saving the subnet (a client still to move always shifts
-            # into it). Shrinking into part of the old subnet, it may also be one that never
-            # moved but is already there. Either way it keeps its address (two the same: below).
+        if ip in in_new and (ip not in in_old or n not in in_new):
+            # Already in the new subnet. Outside the old one, an earlier run moved it, then
+            # stopped before saving the subnet (clients.db moves in one write, and a client
+            # still to move is in the old one): shifted again it could land inside the new one
+            # once more. Inside both and shifted out of the new one: that earlier run, or a
+            # shrink into part of the old subnet left it there unmoved. Either way it keeps
+            # its address (two the same: below).
             n = ip
         if n not in in_new:
             raise WgtError(f"config '{c.name}' ({c.ip}) has no matching address in {ctx.cfg.WG_SUBNET}; "
@@ -365,11 +368,16 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
 
 
 def _move_to_current_name(ctx: Ctx, name: str, conf: str, old_name: str) -> str:
-    """A client config still under the server's previous name (setup --name):
-    move it to <conf>. Returns where its text is now ("" if there is none; in
+    """A client config still under the server's previous name (setup --name), or any
+    earlier one: move it to <conf>. Returns where its text is now ("" if there is none; in
     a dry run it is still at the old name)."""
     src = ctx.paths.client_conf(old_name, name) if old_name else ""
     if not src or not os.path.isfile(src):
+        # A setup --name that stopped after saving the new name left the rest under the
+        # name before it, which <old_name> (the saved one) no longer is: any other server's.
+        src = next((p for p in clients.removal_targets(name, ctx.paths.client_dir)
+                    if p.endswith(f".{name}.conf") and p != conf), "")
+    if not src:
         return ""
     ctx.runner.step(f"Rename {src} to {os.path.basename(conf)}", f"mv {conf} {src}")
     if ctx.runner.dry_run:

@@ -267,6 +267,8 @@ class FakeRunner(Runner):
         return rc, stdout or ""
 
     def run_logged(self, args: Sequence[str], log: str, cwd: str, append: bool = False) -> bool:
+        if self.dry_run:   # as Runner's: it only says so
+            return super().run_logged(args, log, cwd, append)
         return self._exec([*args], check=False)[0] == 0
 
     def changes(self) -> List[str]:

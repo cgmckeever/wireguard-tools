@@ -357,7 +357,10 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ops.take_lock(ctx)
     e = ctx.snap.exit(code)
     if e is None:
-        if not (os.path.exists(ctx.paths.jump_source(code)) or os.path.isdir(ctx.paths.exit_wgcf_dir(code))):
+        wgcf_dir = ctx.paths.exit_wgcf_dir(code)
+        left = [ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.jump_source(code), wgcf_dir,
+                ctx.files.copies_dir(wgcf_dir)]   # what _remove_jump_files deletes, in its order
+        if not any(os.path.exists(path) for path in left):
             raise WgtError(f"no jump '{code}' (see: wgt jump list)")
         ctx.out.info(f"finishing an earlier remove of jump '{code}'")
         _remove_jump_files(ctx, code)
@@ -379,8 +382,12 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
 
 def _remove_jump_files(ctx: Ctx, code: str) -> None:
     """A jump already out of exits.db: wg0.conf without it, its files and keys,
-    and the watchdog if it was the last. Safe to repeat."""
+    and the watchdog if it was the last. Safe to repeat: the watchdog goes first, as
+    once the files are gone a re-run finds nothing left to finish."""
     ops.write_wg_conf(ctx)
+    if not ctx.snap.exits:
+        units.remove_timer(ctx, EXIT_WATCHDOG)
+        ctx.runner.run(["systemctl", "daemon-reload"])
     for path in (ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.jump_source(code)):
         ctx.files.forget(path)
     wgcf_dir = ctx.paths.exit_wgcf_dir(code)
@@ -389,9 +396,6 @@ def _remove_jump_files(ctx: Ctx, code: str) -> None:
             ctx.files.forget(os.path.join(wgcf_dir, name))
     ctx.files.remove_tree(wgcf_dir)
     ctx.files.remove_tree(ctx.files.copies_dir(wgcf_dir))   # a rotated account's old keys
-    if not ctx.snap.exits:
-        units.remove_timer(ctx, EXIT_WATCHDOG)
-        ctx.runner.run(["systemctl", "daemon-reload"])
 
 
 def cmd_test(ctx: Ctx, words: List[str]) -> int:

@@ -157,11 +157,11 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
         return
     ctx.reload()
     # The old server's host facts, firewall note and detected IP don't apply here.
-    # Nor is this server set up until the setup below finishes.
-    for k in HOST_STATE_KEYS + SET_UP_KEYS:
-        ops.state_unset(ctx, k)
-    if _is_ip(store.state_get(ctx.snap.state, "ENDPOINT")):
-        ops.state_unset(ctx, "ENDPOINT")
+    # Nor is this server set up until the setup below finishes. One write: stopped
+    # part way, the archive's SETUP_DONE or DEFAULT_ROUTE would outlive the rest, and
+    # neither a re-run of restore nor the setup it suggests could get past them.
+    endpoint = ["ENDPOINT"] if _is_ip(store.state_get(ctx.snap.state, "ENDPOINT")) else []
+    ops.state_unset(ctx, *HOST_STATE_KEYS, *SET_UP_KEYS, *endpoint)
     rebuild_backup_map(ctx, keep_map, members)
     ctx.out.info("restored; configs: " + " ".join(c.name for c in store.load(ctx.paths).clients))
     if has_warp:
