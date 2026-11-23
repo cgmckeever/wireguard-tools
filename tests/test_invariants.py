@@ -970,6 +970,25 @@ def test_a_restore_stopped_after_extracting_leaves_none_of_the_old_hosts_state(w
         assert not store.state_get(state, gone), gone
 
 
+def test_a_restored_server_looks_up_its_own_location(world, monkeypatch):
+    """The city is the old machine's: setup looks up the new one's, unless restore is told."""
+    world.run(["setup", "--location", "Atlanta"])
+    world.run(["backup"])
+    archive = next(os.path.join(world.paths.backup_dir, f) for f in os.listdir(world.paths.backup_dir)
+                   if f.endswith(".tar.gz"))
+    kept = os.path.join(world.tmp, "kept.tar.gz")
+    shutil.copy(archive, kept)
+    execs = []
+    monkeypatch.setattr(os, "execv", lambda path, args: execs.append(args))
+    for told, want in (([], None), (["--location", "Paris"], "Paris")):
+        world.run(["rollback", "--purge"])
+        world.run(["restore", kept, *told])
+        assert not store.state_get(store.load(world.paths).state, "LOCATION")   # not Atlanta's
+        handed = execs.pop()
+        world.run(handed[handed.index("setup"):])   # the setup restore hands over to
+        assert (store.state_get(store.load(world.paths).state, "LOCATION") or None) == want
+
+
 def test_a_restore_stopped_after_extracting_finishes_when_run_again(world, monkeypatch):
     """Its databases are the archive's: they don't mix with it, so a re-run finishes
     (one that differs from the archive's still stops it)."""

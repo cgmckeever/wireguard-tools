@@ -117,10 +117,11 @@ ALL_WATCHDOGS = tuple(w.name for w in WATCHDOGS)
 MIB = 1024 * 1024
 KEEP_CHANGES = 5             # newest copies kept per file (plus its original)
 # What setup records about this host (wg-tools.state): restore drops them
-# (they belong to the old server) and rollback uses them.
+# (they belong to the old server) and rollback uses them. LOCATION too: setup
+# looks up the new machine's city (restore --location sets one).
 ORIG_HOSTNAME, SET_HOSTNAME = "ORIG_HOSTNAME", "SET_HOSTNAME"   # setup's rename, for rollback
 HOST_STATE_KEYS = ("DEFAULT_ROUTE", "PUB_IF", "ORIG_IP_FORWARD", "ORIG_IP6_FORWARD", "ORIG_ACCEPT_RA", "UFW",
-                   "UFW_PORTS", ORIG_HOSTNAME, SET_HOSTNAME)
+                   "UFW_PORTS", ORIG_HOSTNAME, SET_HOSTNAME, "LOCATION")
 KEEP_ARCHIVES = 10           # newest `backup` archives kept
 
 TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")

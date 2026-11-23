@@ -589,7 +589,7 @@ listed for re-sending, as for any [endpoint change](#changing-a-setting). With a
 Setup checks the restored subnet against this host's routes. If it overlaps one,
 setup stops with the files restored: run `/opt/wireguard-tools/bin/wgt setup --subnet
 <free subnet>` (configs move; re-send them), or pass `--subnet` to `restore` up
-front. The location comes across too: pass `--location` if the city changed.
+front. The location is looked up again for the new machine (or pass `--location`).
 
 ## Fleet management
 
