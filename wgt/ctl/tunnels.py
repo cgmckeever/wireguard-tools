@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
 from .. import store, system
+from ..const import client_conf_name
 from ..ctx import SETTINGS_COMMANDS
 from ..errors import WgtError
 from . import remote
@@ -168,7 +169,7 @@ def all_devices() -> List[str]:
 
 def own_path(server: str, config: str) -> str:
     """Where a new copy of <config> goes: devices/<device>/config/<server>.<config>.conf."""
-    return os.path.join(config_dir(store.device_of(config)), f"{server}.{config}.conf")
+    return os.path.join(config_dir(store.device_of(config)), client_conf_name(server, config))
 
 
 def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: bool) -> List[Action]:

@@ -377,7 +377,7 @@ def cmd_summary(ctx: Ctx, words: List[str]) -> None:
     Each line says what is wrong when something is (details: wgt status)."""
     ops.no_more_words(words, "wgt summary")
     if not ops.is_set_up(ctx):
-        ctx.out.line(ctx.facts.hostname.split(".")[0])
+        ctx.out.line(host.short_name(ctx.facts.hostname))
         ctx.out.line(SUMMARY_FMT.format("state", "not set up (wgt setup)"))
         return
     ctx.out.line(f"{ctx.cfg.SERVER_NAME}  ({ctx.cfg.values.get('ENDPOINT') or 'no endpoint saved'})")

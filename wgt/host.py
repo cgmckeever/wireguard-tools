@@ -54,6 +54,12 @@ def gather(runner: Runner) -> Facts:
     )
 
 
+def short_name(hostname: str) -> str:
+    """The host's name without its domain: what backup archives, the summary of a server
+    not set up, setup's hostname offer and the default server name go by."""
+    return hostname.split(".")[0]
+
+
 def route_key(route: str) -> str:
     """"via X dev Y" from a route line, ignoring volatile fields like metric/proto."""
     f = route.split()

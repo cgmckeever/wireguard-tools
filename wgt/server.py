@@ -189,7 +189,7 @@ def offer_hostname(ctx: Ctx) -> None:
     """Offer to rename the host to the server name when they differ (terminal
     only). /etc/hosts is updated and cloud-init kept from restoring the old name."""
     full = ctx.facts.hostname
-    cur = full.split(".")[0]
+    cur = host.short_name(full)
     want = ctx.cfg.SERVER_NAME.lower()
     if cur.lower() in (want, "localhost") or not re.match(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", want):
         return

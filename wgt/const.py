@@ -130,6 +130,12 @@ def archive_name(host: str, stamp: str) -> str:
     return f"wireguard-tools.{host}.{stamp}.tar.gz"
 
 
+def client_conf_name(server: str, name: str) -> str:
+    """A client config's file name, <server>.<name>.conf: on the server, and its copy in
+    ~/wg-tunnels (wgt-ctl), which keeps the server's name for it."""
+    return f"{server}.{name}.conf"
+
+
 def jump_source_name(code: str) -> str:
     """The file name of jump <code>'s config as given (any provider's: the name stays for running servers)."""
     return f"{code}.proton.conf"
@@ -207,7 +213,7 @@ class Paths:
 
     def client_conf(self, server: str, name: str) -> str:
         """A client's config as handed out: <server>.<name>.conf."""
-        return os.path.join(self.client_dir, f"{server}.{name}.conf")
+        return os.path.join(self.client_dir, client_conf_name(server, name))
 
     @property
     def wgt_link(self) -> str:

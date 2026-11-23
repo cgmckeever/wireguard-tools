@@ -11,7 +11,7 @@ import tarfile
 import time
 from typing import TYPE_CHECKING, List, Optional
 
-from . import clients, ops, store, units
+from . import clients, host, ops, store, units
 from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, LEGACY_SETUP_DONE, SET_UP_KEYS, SETUP_DONE, Paths, archive_name
 from .ctx import SETTING_FLAGS
 from .errors import WgtError
@@ -100,7 +100,7 @@ def cmd_backup(ctx: Ctx, words: List[str]) -> None:
     if not sources:
         raise WgtError("nothing to back up")
     ops.take_lock(ctx)   # don't archive mid-change
-    short_host = ctx.facts.hostname.split(".")[0]
+    short_host = host.short_name(ctx.facts.hostname)
     archive = os.path.join(dest_dir, archive_name(short_host, time.strftime("%Y%m%d-%H%M%S")))
     ctx.runner.step(f"Back up {' '.join(sources)} to {archive}", f"rm {archive}")
     if not ctx.runner.dry_run:

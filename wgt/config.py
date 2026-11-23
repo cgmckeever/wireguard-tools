@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Mapping, Optional
 
-from . import net, store
+from . import host, net, store
 from .const import (
     DEFAULTS,
     DEVICE_NET,
@@ -49,7 +49,7 @@ def _in_range(value: str, lo: int, hi: int) -> bool:
 def short_hostname_name(hostname: str) -> str:
     """The default server name: the short hostname, with anything outside
     [A-Za-z0-9_-] turned into '-', at most 32 characters; "wg" if empty."""
-    short = hostname.split(".")[0]
+    short = host.short_name(hostname)
     cleaned = re.sub(r"[^A-Za-z0-9_-]", "-", short)[:32]
     return cleaned or "wg"
 
@@ -163,10 +163,10 @@ class Config:
 
     def ip6_of(self, ip: str) -> str:
         """The client IPv6 matching an IPv4 address: same host number in WG_SUBNET6."""
-        host = net.ip2int(ip) - self.net_int
-        if not 0 <= host <= self.last_host - self.net_int:
+        number = net.ip2int(ip) - self.net_int
+        if not 0 <= number <= self.last_host - self.net_int:
             raise WgtError(f"{ip} is not in {self.WG_SUBNET}")
-        return f"{self.p6}::{format(host, 'x')}"
+        return f"{self.p6}::{format(number, 'x')}"
 
     def client_addrs(self, ip: str) -> str:
         """A client's addresses as "ip/32" or "ip/32,ip6/128" (comma list, no spaces)."""
