@@ -561,3 +561,13 @@ def test_a_vlans_sysctl_name_keeps_its_dot_out_of_the_path():
     assert render.accept_ra_key("eth0") == "net.ipv6.conf.eth0.accept_ra"
     assert render.accept_ra_key("eth0.100") == "net.ipv6.conf.eth0/100.accept_ra"
 
+
+
+def test_the_devices_static_network_routed_elsewhere_is_refused(make_ctx):
+    # wg0 takes 10.9.8.1/24 whatever its subnet: a host already routing it (a VPC) would clash
+    ctx = make_ctx(answers={"ip link show dev wg0": (1, "")})   # wg0 not up yet
+    ctx.facts.routes4 = "default via 192.0.2.1 dev eth0\n10.9.8.0/24 dev eth1 scope link\n"
+    with pytest.raises(WgtError, match="static addresses"):
+        srv.refuse_routed_subnet(ctx)
+
+

@@ -18,12 +18,15 @@ from typing import TYPE_CHECKING, List, Optional, Tuple
 from . import checks, devices, exits, host, live, net, ops, render, rules, store, ui, units, warp
 from .const import (
     ALL_WATCHDOGS,
+    DEVICE_NET,
+    DEVICE_SERVER,
     LEGACY_SETUP_DONE,
     MARKER,
     SET_UP_KEYS,
     SETTING_KEYS,
     SETUP_DONE,
     WATCHDOGS,
+    device_ip,
 )
 from .errors import CommandFailed, WgtError
 from .system import write_private
@@ -447,11 +450,18 @@ def refuse_interface_change(ctx: Ctx) -> None:
 
 
 def refuse_routed_subnet(ctx: Ctx) -> None:
-    """A subnet the host already routes could cut off the way to it (SSH included)."""
+    """A subnet the host already routes could cut off the way to it (SSH included).
+    The devices' static network too: wg0 takes its first address whatever the subnet."""
+    own_if = ctx.cfg.saved.get("WG_IF") or ctx.cfg.WG_IF
+    if not ops.wg_up(ctx):   # up, wg0 holds it already (its own routes don't count)
+        clash = net.routed_overlap(DEVICE_NET, ctx.facts.routes4, own_if)
+        if clash:
+            raise WgtError(f"this host already routes {clash}, which overlaps {DEVICE_NET}, the devices' static "
+                           f"addresses ({ctx.cfg.WG_IF} would take {device_ip(DEVICE_SERVER)}): free it first")
     subnet = ctx.cfg.WG_SUBNET
     if subnet == ctx.cfg.saved.get("WG_SUBNET") and ops.wg_up(ctx):
         return   # it's wg0's own route (a restored subnet is still new to this host)
-    clash = net.routed_overlap(subnet, ctx.facts.routes4, ctx.cfg.saved.get("WG_IF") or ctx.cfg.WG_IF)
+    clash = net.routed_overlap(subnet, ctx.facts.routes4, own_if)
     if clash:
         raise WgtError(f"subnet {subnet} overlaps {clash}, which this host already routes; pick another")
 
