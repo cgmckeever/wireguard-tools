@@ -121,7 +121,7 @@ prints them, and stops if a required one is empty or still the example.
 | `VPS_HOST` | required | the VPS's public name or IP, which the Pi dials. With `WGT_SERVER`: the host in its ssh target, unless you set it |
 | `PI_PORT` | required | a UDP port on the VPS that nothing listens on (check with `ss -ulpn`). wgt uses `51820`. Use `443` if it's free, above all without `SSH_CLOUDFLARE`: networks that filter UDP usually still allow it |
 | `TPI_ROUTING` | required | `tpi` or `wgt` (see How it works) |
-| `CLIENT_IPS` | `tpi` | the IPv4 `Address` of each client config that should exit through the Pi (on a wgt server: `wgt client list`) |
+| `CLIENT_IPS` | `tpi` | the IPv4 `Address` of each client config that should exit through the Pi. You make those configs yourself (2.2) |
 | `CLIENT_IP6S` | `tpi`, optional | those clients' IPv6 addresses, if they have any. They get blocked, because the link carries IPv4 only |
 | `WG_IF` | `tpi` | the VPS's WireGuard interface your clients use: `wg show interfaces` on the VPS (usually `wg0`) |
 | `WG_SUBNET` | `tpi`, optional | leave empty |
@@ -299,7 +299,15 @@ run `scripts/tpi-ctl.sh link` again afterwards. With `TPI_ROUTING=tpi`, don't al
 client in `CLIENT_IPS` a wgt jump: tunnel-pi's routing comes first, so the
 client would never use the jump.
 
-## 2.2 Give devices a config (`TPI_ROUTING=wgt` only) **[Computer]**
+## 2.2 Give devices a config
+
+**With `TPI_ROUTING=tpi`, this step is yours, by hand.** tunnel-pi makes no
+client configs. Each device that should exit through the Pi needs a WireGuard
+client config on your VPS, made however you normally make them, and its
+address in `CLIENT_IPS` (then `scripts/tpi-ctl.sh link` again). A device
+without one doesn't go through the Pi.
+
+**With `TPI_ROUTING=wgt`,** `tpi-ctl.sh` makes them **[Computer]**:
 
 ```sh
 scripts/tpi-ctl.sh client phone       # makes the config JUMP_CODE.phone
@@ -317,9 +325,6 @@ Cloudflare WARP inside the jump, and sites would see a Cloudflare IP instead of
 the friend's. wgt blocks traffic when the jump is down, and blocks IPv6
 through it. DNS goes to the config's `DNS` server (by default `1.1.1.1`)
 through the jump, so lookups also leave from the friend's IP.
-
-With `TPI_ROUTING=tpi` there's no `tpi-ctl.sh client`: every config listed in `CLIENT_IPS`
-already goes through the Pi.
 
 ## 2.3 Optional: LAN mode (reaching the friend's LAN)
 
