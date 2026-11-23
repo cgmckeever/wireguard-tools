@@ -511,6 +511,9 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
         elif act > 0:
             res.result("FAIL", f"jump {e.code}: not (fully) up while {act} client(s) are active "
                                "(the watchdog brings it up within 10s)")
+        elif any_up(ctx, e):   # one tunnel of it up, and nothing keeping it: not idle yet
+            res.result("WARN", f"jump {e.code}: {state(ctx, e)} with no active devices "
+                               "(the watchdog takes it down within 10s)")
         else:
             res.result("PASS", f"jump {e.code}: idle, no active devices (comes up when one connects; "
                                f"'wgt jump test' checks it live)")
