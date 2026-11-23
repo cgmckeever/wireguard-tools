@@ -609,3 +609,21 @@ def test_settings_changed_while_waiting_for_the_lock_stop_the_command(make_ctx):
     fresh = make_ctx()
     assert ops.try_lock(fresh) is True           # and the refusal let the lock go
     ops.release_lock(fresh)
+
+
+def test_the_devices_static_network_is_checked_with_wg0_up_too(make_ctx):
+    # a wg0 started before static addresses existed doesn't hold 10.9.8.1 yet
+    ctx = make_ctx()   # wg0 up
+    ctx.facts.routes4 = "default via 192.0.2.1 dev eth0\n10.9.8.0/24 dev eth1 scope link\n"
+    with pytest.raises(WgtError, match="static addresses"):
+        srv.refuse_routed_subnet(ctx)
+    ctx.facts.routes4 = "10.9.8.0/24 dev wg0 proto kernel scope link src 10.9.8.1\nlocal 10.9.8.1 dev wg0 table local\n"
+    srv.refuse_routed_subnet(ctx)   # wg0's own
+
+
+@pytest.mark.parametrize("answer", ['{"city": null}', "[]", '"Paris"', '{"city": " Atlanta\\n GA "}'])
+def test_a_location_lookup_saves_a_city_or_nothing(make_ctx, answer):
+    ctx = make_ctx(answers={"curl -fsS --max-time 8 https://ipinfo.io/json": (0, answer)})
+    ops.state_unset(ctx, "LOCATION")
+    srv.save_location(ctx)
+    assert store.state_get(ctx.snap.state, "LOCATION") == ("Atlanta GA" if "Atlanta" in answer else "")

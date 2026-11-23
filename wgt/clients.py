@@ -183,7 +183,7 @@ def ensure_jump_live(ctx: Ctx, c: store.Client) -> None:
         return
     ctx.runner.sh_lines(rules.jump_table_cmds(ctx.cfg, e))
     ctx.runner.sh_lines(rules.ipt_cmds(rules.exit_ipt_rules(ctx.cfg, e), up=True))
-    if store.state_get(ctx.snap.state, "UFW") == "1":
+    if units.ufw_recorded(ctx):
         units.open_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits))
 
 
@@ -335,9 +335,9 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
             for warp in warps:
                 add_one(ctx, store.config_name("" if code == store.HOST_EXIT else code, warp, base), planned,
                         endpoint)
-    except Exception:
-        # A device that got no config (no free address, say) mustn't keep the number: no
-        # list shows it, and it would turn away the fleet's next device given that number.
+    except BaseException:
+        # A device that got no config (no free address, say, or Ctrl-C) mustn't keep the number:
+        # no list shows it, and it would turn away the fleet's next device given that number.
         with contextlib.suppress(Exception):   # the add's own error is the one to show
             devices.drop_if_unused(ctx, base)
         raise
@@ -442,6 +442,10 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     # Not set up (after rollback): the next setup rebuilds wg0.conf from clients.db.
     if ops.is_set_up(ctx):
         ops.write_wg_conf(ctx)
+        # A remove stopped before wg0.conf was rewritten leaves the peer in it: a wg0
+        # restart before this re-run put it back live, and the device would keep its way in.
+        if ops.wg_up(ctx):
+            _drop_unknown_peers(ctx)
     else:
         ctx.out.info(f"server not set up; {ctx.cfg.wg_conf} is rebuilt at the next setup")
     # The config (under any of its names), its preshared key and every copy
@@ -710,10 +714,13 @@ def cmd_device_rename(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"a device '{new}' already exists (if a rename to it stopped half way, finish it with --force)")
     # --force can't tell a stopped rename from another device by its name alone. A stopped
     # one never left a config of <old> beside its new name (each moves in one write), and
-    # <new> gets its number only in the last write, while <old> still has configs.
+    # <new> gets its number only in the last write, which takes <old>'s: while <old> still
+    # has configs or a number, a numbered <new> is another device.
     targets = [store.config_name(*store.split_name(c.name)[:2], new) for c in configs]
     taken = [t for t in targets if ctx.snap.client(t)]
-    if taken or (configs and ctx.snap.device_clients(new) and ctx.snap.device_number(new) is not None):
+    numbered = ctx.snap.device_clients(new) and ctx.snap.device_number(new) is not None \
+        and (configs or ctx.snap.device_number(old) is not None)
+    if taken or numbered:
         why = f"configs {' '.join(taken)} already exist" if taken else "it has its own static address"
         raise WgtError(f"'{new}' is another device, not a rename that stopped half way ({why}): nothing renamed")
     # Checked first: a rename stopped half way couldn't be re-run ('<new>' would exist).

@@ -350,3 +350,28 @@ def test_a_failed_add_gives_the_new_devices_number_back(make_ctx, monkeypatch):
     with pytest.raises(WgtError, match="no free"):
         clients.cmd_add(ctx, ["newdev"])
     assert store.load(ctx.paths).device_number("newdev") is None
+
+
+def test_an_add_stopped_by_ctrl_c_gives_the_new_devices_number_back(make_ctx, monkeypatch):
+    # KeyboardInterrupt isn't an Exception: a stop before the first config must free the number too
+    ctx = make_ctx()
+
+    def stopped(*a, **k):
+        raise KeyboardInterrupt
+    monkeypatch.setattr(clients, "add_one", stopped)
+    with pytest.raises(KeyboardInterrupt):
+        clients.cmd_add(ctx, ["newdev"])
+    assert store.load(ctx.paths).device_number("newdev") is None
+
+
+def test_finishing_a_stopped_remove_takes_out_a_peer_wg0_put_back(make_ctx):
+    # stopped after clients.db, before wg0.conf: a wg0 restart from the old wg0.conf put the peer back
+    from wgt import ops
+    ctx = make_ctx(argv=["--warp", "off"])
+    clients.cmd_add(ctx, ["newdev"])
+    c = ctx.snap.client("newdev")
+    ops.remove_client(ctx, "newdev")
+    ops.release_lock(ctx)
+    ctx = make_ctx(answers={"wg show wg0 allowed-ips": (0, f"{c.pub}\t{c.ip}/32\n")})
+    clients.cmd_remove(ctx, ["newdev"])
+    assert f"wg set wg0 peer {c.pub} remove" in ctx.runner.changes()

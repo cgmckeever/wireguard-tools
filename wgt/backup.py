@@ -21,6 +21,11 @@ if TYPE_CHECKING:
     from .ctx import Ctx
 
 
+def _member_path(m: tarfile.TarInfo) -> str:
+    """Where an archive member goes: archives hold absolute paths (tar -P), with or without the leading /."""
+    return m.name if m.name.startswith("/") else "/" + m.name
+
+
 def check_archive(archive: str, paths: Paths) -> List[str]:
     """The archive's members as absolute paths, after checking it is safe to
     extract: it is extracted as root with absolute paths, so anything that
@@ -31,7 +36,7 @@ def check_archive(archive: str, paths: Paths) -> List[str]:
             infos = t.getmembers()
     except (tarfile.TarError, OSError):
         raise WgtError(f"{archive} is not a readable .tar.gz") from None
-    members = [m.name if m.name.startswith("/") else "/" + m.name for m in infos]
+    members = [_member_path(m) for m in infos]
     for m, name in zip(infos, members):
         if ".." in name.split("/") or m.issym() or m.islnk() or not (m.isfile() or m.isdir()):
             raise WgtError(f"{archive}: refusing an unsafe entry: {m.name}")
@@ -44,7 +49,7 @@ def _archive_state(archive: str, paths: Paths) -> str:
     """The archive's wg-tools.state (any non-UTF-8 byte kept as it was: restore writes it back)."""
     with tarfile.open(archive, "r:gz") as t:
         for m in t.getmembers():
-            if (m.name if m.name.startswith("/") else "/" + m.name) == paths.state:
+            if _member_path(m) == paths.state:
                 member = t.extractfile(m)
                 return member.read().decode("utf-8", errors="surrogateescape") if member else ""
     return ""
@@ -95,7 +100,8 @@ def cmd_backup(ctx: Ctx, words: List[str]) -> None:
     """Archive keys, configs, clients, jumps and state (mode 600: it holds
     private keys), then prune old archives and change copies."""
     ops.no_more_words(words[1:], "wgt backup [dir]")
-    dest_dir = words[0] if words else ctx.paths.backup_dir
+    # Absolute: the scp hint below is read from another machine, where a relative one means ~.
+    dest_dir = os.path.abspath(words[0]) if words else ctx.paths.backup_dir
     sources = [p for p in (ctx.paths.wg_dir, ctx.paths.sysctl_file, ctx.cfg.dropin_dir) if os.path.exists(p)]
     if not sources:
         raise WgtError("nothing to back up")

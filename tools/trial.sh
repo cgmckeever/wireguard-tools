@@ -10,6 +10,9 @@ set -uo pipefail
 [ $# -eq 1 ] || { echo "usage: $0 <jump.conf>" >&2; exit 2; }
 case "$1" in /*) jump="$1" ;; *) jump="$PWD/$1" ;; esac   # before the cd: relative to where it was run
 cd "$(dirname "$0")/.."
+# It starts and ends with rollback --purge (keys, clients, jumps): only on the throwaway.
+was=$(sed -n 's/^SERVER_NAME=//p' /etc/wireguard/wg-tools.state 2>/dev/null | tail -n 1)
+case "$was" in ""|bossk) ;; *) echo "this server is '$was', not the throwaway (bossk): refusing to purge it" >&2; exit 2 ;; esac
 W() { bin/wgt "$@"; }
 pass=0 fail=0
 exec 3>&1   # results go to fd 3, so a check's own output can be redirected to a log

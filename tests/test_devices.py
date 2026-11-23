@@ -706,3 +706,14 @@ def test_fleet_file_with_a_digit_int_refuses_is_a_bad_line():
     """"²" passes str.isdigit and int() raises: an error to print, not a traceback."""
     with pytest.raises(WgtError, match="bad line"):
         fleet.parse("tv ²\n")
+
+
+def test_device_rename_force_leaves_another_devices_number(make_ctx, again):
+    # <old> with a number and no configs (an add stopped before its first): not a stopped rename
+    ctx = make_ctx()
+    devices.cmd_set(ctx, ["tv", "12"])
+    ops.set_device(ctx, "ghost", 20)
+    ctx = again(ctx, ["--force"])
+    with pytest.raises(WgtError, match="another device"):
+        clients.cmd_device_rename(ctx, ["ghost", "tv"])
+    assert numbers(ctx) == {"tv": 12, "ghost": 20}

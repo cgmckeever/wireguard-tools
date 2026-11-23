@@ -122,6 +122,11 @@ def write_watchdog(ctx: Ctx, name: str) -> None:
     write_timer(ctx, w.name, w.step_what.format(warp_if=ctx.cfg.WARP_IF), *_watchdog_units(ctx, w))
 
 
+def ufw_recorded(ctx: Ctx) -> bool:
+    """Setup opened ufw for us (state UFW=1): what it opened is ours to keep open, and to close."""
+    return store.state_get(ctx.snap.state, "UFW") == "1"
+
+
 def open_firewall(ctx: Ctx, outs: List[str], move_port: bool = False) -> None:
     """ufw (if active): allow the WireGuard port and wg0 -> every way out. <move_port>:
     setup, which starts wg0 on the new port, also closes every other port it opened
@@ -140,7 +145,7 @@ def open_firewall(ctx: Ctx, outs: List[str], move_port: bool = False) -> None:
                     f"ufw delete allow {port}/udp{reopen}; ufw route delete allow in on {wg} out on <each>")
     # Recorded before opened: wherever this stops, the record covers what's open.
     _record_ports(ctx, before + [port])
-    if store.state_get(ctx.snap.state, "UFW") != "1":
+    if not ufw_recorded(ctx):
         ops.state_set(ctx, "UFW", "1")
     ctx.runner.run(["ufw", "allow", f"{port}/udp", "comment", "wireguard-tools"])
     # Only a port ufw closed leaves the record: one it didn't is still open.
@@ -155,7 +160,7 @@ def opened_ports(ctx: Ctx) -> List[str]:
     """The ports ufw may allow for us: UFW_PORTS, each recorded before it was opened,
     so after a stop anywhere it covers every one that's open. On a server set up
     before it was recorded, the saved WG_PORT."""
-    if store.state_get(ctx.snap.state, "UFW") != "1":
+    if not ufw_recorded(ctx):
         return []
     recorded = store.state_get(ctx.snap.state, "UFW_PORTS").split()
     saved = ctx.cfg.saved.get("WG_PORT", "")
@@ -188,7 +193,7 @@ def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> List[str]:
     them (state UFW=1); a rule already gone is fine. Returns the ports ufw
     didn't close (still open): as in open_firewall, only a port ufw closed
     leaves UFW_PORTS, so a later rollback or setup still closes the rest."""
-    if store.state_get(ctx.snap.state, "UFW") != "1":
+    if not ufw_recorded(ctx):
         return []
     if not shutil.which("ufw"):   # gone, and its rules with it
         if port:

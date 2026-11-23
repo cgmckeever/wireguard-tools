@@ -651,3 +651,15 @@ def test_pushing_a_named_file_over_another_files_jump_asks_first(monkeypatch, so
             jumpfiles.confirm_replace(s, "par-fr", "paris.conf")
     assert bool(asked) == (answer is not None)
     jumpfiles.confirm_replace(s, "nyc-us", "paris.conf")   # a code the server doesn't have: nothing to ask
+
+
+def test_adopt_records_the_checkout_its_wgt_link_names(initing):
+    initing["probe"] = {"finished": "1", "saved": "old", "link": "/srv/wgt/bin/wgt"}
+    newserver.cmd_init(INIT)
+    assert remote.find("old").dir == "/srv/wgt"
+    assert newserver.adopted_checkout("") == newserver.adopted_checkout("/usr/bin/python3") == remote.DEF_DIR
+
+
+def test_jump_add_refuses_leftover_words():
+    with pytest.raises(WgtError, match="usage"):
+        jumpfiles.do_exit_add(remote.Server("boba", "root@boba"), ["1", "2"])

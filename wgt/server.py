@@ -428,9 +428,12 @@ def save_location(ctx: Ctx) -> None:
     if not want:
         out = ctx.runner.query(["curl", "-fsS", "--max-time", "8", "https://ipinfo.io/json"])
         try:
-            want = str(json.loads(out or "{}").get("city", "")).strip()
+            found = json.loads(out or "{}")
         except ValueError:
-            want = ""
+            found = {}
+        # Not a traceback for an answer that isn't an object, nor "None" for a null city.
+        city = found.get("city") if isinstance(found, dict) else None
+        want = store.one_line(city) if isinstance(city, str) else ""
         if not want:
             ctx.out.info("location: not found (set one: wgt setup --location \"Atlanta, GA\")")
             return
@@ -465,11 +468,12 @@ def refuse_routed_subnet(ctx: Ctx) -> None:
     """A subnet the host already routes could cut off the way to it (SSH included).
     The devices' static network too: wg0 takes its first address whatever the subnet."""
     own_if = ctx.cfg.saved.get("WG_IF") or ctx.cfg.WG_IF
-    if not ops.wg_up(ctx):   # up, wg0 holds it already (its own routes don't count)
-        clash = net.routed_overlap(DEVICE_NET, ctx.facts.routes4, own_if)
-        if clash:
-            raise WgtError(f"this host already routes {clash}, which overlaps {DEVICE_NET}, the devices' static "
-                           f"addresses ({ctx.cfg.WG_IF} would take {device_ip(DEVICE_SERVER)}): free it first")
+    # Up or not: a wg0 started before static addresses existed doesn't hold it yet, and
+    # its own routes (once it does) are left out by routed_overlap.
+    clash = net.routed_overlap(DEVICE_NET, ctx.facts.routes4, own_if)
+    if clash:
+        raise WgtError(f"this host already routes {clash}, which overlaps {DEVICE_NET}, the devices' static "
+                       f"addresses ({ctx.cfg.WG_IF} would take {device_ip(DEVICE_SERVER)}): free it first")
     subnet = ctx.cfg.WG_SUBNET
     if subnet == ctx.cfg.saved.get("WG_SUBNET") and ops.wg_up(ctx):
         return   # it's wg0's own route (a restored subnet is still new to this host)
@@ -647,7 +651,7 @@ def _stop_everything(ctx: Ctx) -> None:
 def _remove_rules(ctx: Ctx) -> None:
     """wg0's PostDown (routing, NAT, firewall) run directly, and the ufw rules setup added."""
     run_down_hooks(ctx)
-    if store.state_get(ctx.snap.state, "UFW") == "1":
+    if units.ufw_recorded(ctx):
         left = units.close_firewall(ctx, rules.out_ifs(ctx.cfg, ctx.pub_if, ctx.snap.exits), port=True)
         if left:
             # close_firewall kept them in UFW_PORTS for a later rollback or setup

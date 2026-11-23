@@ -37,7 +37,7 @@ def cmd_init(argv: List[str]) -> None:
     facts = probe(target, address)
     saved = facts.get("saved", "")
     if facts.get("finished") == "1":
-        _adopt(name, saved, target)
+        _adopt(name, saved, target, facts.get("link", ""))
         return
     if saved or facts.get("checkout") == "1":
         out.info("an unfinished setup is there; running it again")
@@ -114,16 +114,18 @@ def login(target: str) -> None:
 
 def probe(target: str, address: str) -> Dict[str, str]:
     """What init needs to know about the server: uid, OS, an existing checkout,
-    a saved server name, whether setup finished there (SET_UP_KEYS). Refuses
-    non-root logins and unsupported systems."""
+    where its wgt link points (the checkout setup ran from), a saved server name,
+    whether setup finished there (SET_UP_KEYS). Refuses non-root logins and
+    unsupported systems."""
     rc, text = remote.ssh(target, f"""echo "uid=$(id -u)"
         . /etc/os-release 2>/dev/null && echo "os=$ID $VERSION_ID"
         [ -d {remote.DEF_DIR}/.git ] && echo checkout=1
+        [ -L {remote.REMOTE.wgt_link} ] && echo "link=$(readlink -f {remote.REMOTE.wgt_link})"
         cat {remote.STATE_FILE} 2>/dev/null; true""", capture=True)
     if rc != 0:
         raise WgtError(f"cannot reach {target}")
     facts = {k: v for k, v in (line.split("=", 1) for line in text.splitlines() if "=" in line)
-             if k in ("uid", "os", "checkout")}
+             if k in ("uid", "os", "checkout", "link")}
     if any(store.state_get(text, key) for key in SET_UP_KEYS):
         facts["finished"] = "1"
     if store.state_get(text, "SERVER_NAME"):
@@ -137,17 +139,26 @@ def probe(target: str, address: str) -> Dict[str, str]:
     return facts
 
 
-def _adopt(name: str, saved: str, target: str) -> None:
+def adopted_checkout(link: str) -> str:
+    """The checkout an adopted server runs: its wgt link's target, <checkout>/bin/wgt
+    (setup links the checkout it ran from), else the default."""
+    if link.endswith("/bin/wgt") and remote.CHECKOUT_DIR.match(link[:-len("/bin/wgt")]):
+        return link[:-len("/bin/wgt")]
+    return remote.DEF_DIR
+
+
+def _adopt(name: str, saved: str, target: str, link: str = "") -> None:
     """Setup finished on this server (at any version): record it under its
-    saved name; never re-install."""
+    saved name and its own checkout; never re-install."""
     if not remote.valid_server(saved):
         raise WgtError(f"the server's saved name '{saved}' isn't a valid name")
     out.log(f"wireguard-tools is already set up there as '{saved}'")
     if saved != name:
         out.info(f"recording it as '{saved}' (its saved name); rename it with: wgt-ctl {saved} setup --name {name}")
         _refuse_listed(saved)
-    record(saved, target)
-    tunnels.after(remote.Server(saved, target), "setup", [])   # its clients' copies, here too
+    checkout = adopted_checkout(link)
+    record(saved, target, checkout)
+    tunnels.after(remote.Server(saved, target, checkout), "setup", [])   # its clients' copies, here too
     out.info(f"update it to this version with: wgt-ctl {saved} pull")
 
 
@@ -174,13 +185,14 @@ def require_branch(target: str, branch: str) -> None:
         raise WgtError(f"{target} can't see branch '{branch}' of {url}; nothing has changed")
 
 
-def record(name: str, target: str) -> None:
-    """Add a server to local/servers, and its (empty) folder for jump files in
-    ~/wg-tunnels, so wireguard-tunnels knows it exists."""
+def record(name: str, target: str, checkout: str = remote.DEF_DIR) -> None:
+    """Add a server to local/servers (its checkout too, when not the default), and its
+    (empty) folder for jump files in ~/wg-tunnels, so wireguard-tunnels knows it exists."""
     remote.ensure_local()
     text = store.read_text(remote.LIST) or ""
     sep = "\n" if text and not text.endswith("\n") else ""   # a hand-edited last line must stay its own
+    where = f" {checkout}" if checkout != remote.DEF_DIR else ""
     with open(remote.LIST, "a") as f:
-        f.write(f"{sep}{name:<10} {target}\n")
+        f.write(f"{sep}{name:<10} {target}{where}\n")
     tunnels.anchor(name)
     out.log(f"Added '{name}' ({target}) to {remote.LIST}")
