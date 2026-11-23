@@ -8,6 +8,7 @@ Changes apply live; other configs stay connected."""
 from __future__ import annotations
 
 import base64
+import contextlib
 import os
 import re
 import shutil
@@ -329,9 +330,17 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     devices.ensure_number(ctx, base)
     devices.ensure_groups(ctx, base)
     planned: List[str] = []
-    for code in uniq:
-        for warp in warps:
-            add_one(ctx, store.config_name("" if code == store.HOST_EXIT else code, warp, base), planned, endpoint)
+    try:
+        for code in uniq:
+            for warp in warps:
+                add_one(ctx, store.config_name("" if code == store.HOST_EXIT else code, warp, base), planned,
+                        endpoint)
+    except Exception:
+        # A device that got no config (no free address, say) mustn't keep the number: no
+        # list shows it, and it would turn away the fleet's next device given that number.
+        with contextlib.suppress(Exception):   # the add's own error is the one to show
+            devices.drop_if_unused(ctx, base)
+        raise
     if ctx.snap.device_groups(base):
         devices.apply_now(ctx)   # its new configs get what its groups allow
 

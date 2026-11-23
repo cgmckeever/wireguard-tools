@@ -338,3 +338,15 @@ def test_a_digit_int_refuses_is_a_word_not_a_traceback(make_ctx, monkeypatch):
     monkeypatch.setattr(clients.ui, "say", lambda text: None)
     monkeypatch.setattr(clients.ui, "ask", lambda prompt: "²")
     assert clients.pick_exits(make_ctx(), "tv") == ["²"]
+
+
+def test_a_failed_add_gives_the_new_devices_number_back(make_ctx, monkeypatch):
+    # no list shows a number with no config, and the fleet's next device given it would be turned away
+    ctx = make_ctx()
+
+    def full(*a, **k):
+        raise WgtError("no free addresses")
+    monkeypatch.setattr(clients, "add_one", full)
+    with pytest.raises(WgtError, match="no free"):
+        clients.cmd_add(ctx, ["newdev"])
+    assert store.load(ctx.paths).device_number("newdev") is None
