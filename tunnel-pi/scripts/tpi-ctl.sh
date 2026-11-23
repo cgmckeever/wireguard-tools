@@ -1,7 +1,8 @@
 #!/bin/sh
 # tpi-ctl.sh: set up tunnel-pi from your computer (macOS or Linux). Reads the Pi's
 # settings from ../configs/<pi>.conf (or $TP_CONF) and runs pi.sh on the Pi and
-# vps.sh on the VPS over ssh. <pi> can be left out while configs/ holds only one.
+# vps.sh on the VPS over ssh. Without <pi>: the only one there is, else it asks
+# (TPI_PI=<pi> is the default, and the answer when there's no terminal).
 #
 #   tpi-ctl.sh [<pi>] config              show the settings and check they're filled in
 #   tpi-ctl.sh [<pi>] ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
@@ -30,7 +31,7 @@ CONFIGS=$(cd "$HERE/../configs" && pwd)
 
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'tpi-ctl.sh: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,26s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (cp configs/pi.conf.example configs/<name>.conf)')"; }
+usage() { sed -n '2,27s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (cp configs/pi.conf.example configs/<name>.conf)')"; }
 
 COMMANDS="config ssh-config base link exit client lan-mode wifi check ssh all undo"
 is_command() { case " $COMMANDS " in *" $1 "*) return 0 ;; esac; return 1; }
@@ -38,7 +39,41 @@ is_command() { case " $COMMANDS " in *" $1 "*) return 0 ;; esac; return 1; }
 pis() { for f in "$CONFIGS"/*.conf; do [ -e "$f" ] && basename "$f" .conf; done; return 0; }
 
 case "${1:-}" in ''|-h|--help|help) usage; exit 0 ;; esac
-# Which Pi: TP_CONF, else a first word that isn't a command, else the only one there is.
+# ask_pi <command>: which Pi, when the command line doesn't say. One: that one.
+# Several: a numbered list to choose from, TPI_PI (a name) the default for Enter;
+# without a terminal, TPI_PI itself, else stop.
+ask_pi() {
+    names=$(pis); count=$(printf '%s\n' "$names" | grep -c .)
+    default="${TPI_PI:-}"
+    if [ -n "$default" ] && ! printf '%s\n' "$names" | grep -qx -- "$default"; then
+        die "TPI_PI=$default, but there's no configs/$default.conf (configured: $(echo $names))"
+    fi
+    case "$count" in
+        0) die "no settings yet: cp configs/pi.conf.example configs/<name>.conf, and fill it in" ;;
+        1) PICK="$names"; return 0 ;;
+    esac
+    if ! (: < /dev/tty) 2>/dev/null; then    # no terminal to ask on
+        [ -n "$default" ] || die "which Pi? tpi-ctl.sh <pi> $1, or TPI_PI=<pi> (configured: $(echo $names))"
+        PICK="$default"; return 0
+    fi
+    printf 'Which Pi?\n' >&2
+    i=0
+    for n in $names; do
+        i=$((i + 1))
+        if [ "$n" = "$default" ]; then printf '  %d) %s  (default)\n' "$i" "$n" >&2; else printf '  %d) %s\n' "$i" "$n" >&2; fi
+    done
+    printf '[number or name%s]: ' "${default:+, Enter for $default}" >&2
+    read -r answer < /dev/tty || answer=""
+    [ -n "$answer" ] || answer="$default"
+    case "$answer" in
+        '') die "no Pi chosen" ;;
+        *[!0-9]*) PICK="$answer" ;;
+        *) PICK=$(printf '%s\n' "$names" | sed -n "${answer}p") ;;
+    esac
+    printf '%s\n' "$names" | grep -qx -- "$PICK" || die "no Pi '$answer' (configured: $(echo $names))"
+}
+
+# Which Pi: TP_CONF (a file), else a first word that isn't a command, else ask_pi.
 if [ -n "${TP_CONF:-}" ]; then
     CONF="$TP_CONF"
 elif ! is_command "$1"; then
@@ -46,11 +81,9 @@ elif ! is_command "$1"; then
     [ -r "$CONF" ] || die "no Pi '$1': configs/$1.conf doesn't exist (configured: $(pis | tr '\n' ' '))"
     shift
 else
-    case "$(pis | wc -l | tr -d ' ')" in
-        0) die "no settings yet: cp configs/pi.conf.example configs/<name>.conf, and fill it in" ;;
-        1) CONF="$CONFIGS/$(pis).conf" ;;
-        *) die "which Pi? tpi-ctl.sh <pi> $1 (configured: $(pis | tr '\n' ' '))" ;;
-    esac
+    ask_pi "$1"
+    CONF="$CONFIGS/$PICK.conf"
+    log "Pi: $PICK (configs/$PICK.conf)"
 fi
 PI_NAME=$(basename "$CONF" .conf)
 # shellcheck disable=SC1090

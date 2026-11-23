@@ -58,8 +58,10 @@ Three choices, made once in the settings file:
   this folder. It ssh-es to the Pi and the VPS and runs `pi.sh` and `vps.sh`
   there. `scripts/tpi-ctl.sh` with no arguments lists its commands.
 - **Each Pi has a name:** its settings file, `configs/<name>.conf`. Commands
-  take the name first, `scripts/tpi-ctl.sh home check`, but with only one Pi
-  you can leave it out, as the steps below do. More than one: see
+  take the name first, `scripts/tpi-ctl.sh home check`. Leave it out, as the
+  steps below do, and `tpi-ctl.sh` uses the only Pi there is, or with several
+  asks which (`TPI_PI=<name>` sets the default). It always says which Pi it
+  chose. More than one: see
   [More than one tunnel-pi endpoint](#more-than-one-tunnel-pi-endpoint).
 - **A setting's name stands for its value:** `ssh SSH_LAN` means
   `ssh pi@tunnel-pi.local`.
@@ -92,6 +94,8 @@ Three choices, made once in the settings file:
   **[Hands]**, the browser login on the first `ssh SSH_CLOUDFLARE`, making
   client configs with `TPI_ROUTING=tpi`, and typing a Wi-Fi password. Stop,
   say exactly what to do, and wait.
+- **Name the Pi** on every command (`scripts/tpi-ctl.sh home all`) once
+  there's more than one: with no terminal, `tpi-ctl.sh` can't ask.
 - **Dry run first:** `TP_DRY_RUN=1 scripts/tpi-ctl.sh all`.
 - **Secrets stay put.** Never print a `*.key` file, a `PrivateKey` line, a jump
   file, the Cloudflare token or a Wi-Fi password. The scripts never do.
@@ -465,7 +469,8 @@ Environment variables:
 | `TP_DRY_RUN=1` | shows what would run, and changes nothing |
 | `TP_YES=1` | answers yes to "This changes the VPS ... Continue?" |
 | `TP_RENEW=1` | with `exit`: makes new jump keys |
-| `TP_CONF=<file>` | reads that settings file instead of `configs/<name>.conf` |
+| `TPI_PI=<name>` | the Pi to offer as the default when it asks; with no terminal to ask on, the Pi it uses |
+| `TP_CONF=<file>` | reads that settings file, without asking |
 
 ## How tpi-ctl.sh reaches the machines
 
