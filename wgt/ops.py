@@ -132,7 +132,11 @@ def lock_as_seen(ctx: Ctx) -> None:
     lock_unless_asking). Another command that changed the server's files meanwhile
     stops this one: what it decided, or asked about, may no longer hold."""
     seen = ctx.snap
-    take_lock(ctx)
+    try:
+        take_lock(ctx)
+    except WgtError as e:   # after a yes, too: say it did nothing
+        raise WgtError(f"{e}; nothing was done" if "run it again" in str(e) else f"{e}: nothing was done, "
+                       "run it again") from None
     if ctx.snap is not seen and ctx.snap != seen:
         raise WgtError("another wireguard-tools command changed this server meanwhile; "
                        "nothing was done: run it again")

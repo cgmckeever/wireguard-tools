@@ -526,13 +526,35 @@ def test_the_rename_is_recorded_before_it_happens_and_keeps_the_first_name(make_
     ctx.args.yes = False
     monkeypatch.setattr(ui, "have_tty", lambda: True)
     monkeypatch.setattr(ui, "yes", lambda *a, **k: True)
-    ops.state_set(ctx, "ORIG_HOSTNAME", "racknerd-1a2b")   # an earlier rename's
+    ops.state_set(ctx, "ORIG_HOSTNAME", "racknerd-1a2b")   # an earlier rename's...
+    ops.state_set(ctx, "SET_HOSTNAME", "boba")             # ...to the name the host still has
     ctx.runner.answers["hostnamectl set-hostname dengar"] = (1, "")   # stopped there
     with pytest.raises(CommandFailed):
         srv.offer_hostname(ctx)
     state = store.read_text(ctx.paths.state)
     assert store.state_get(state, "ORIG_HOSTNAME") == "racknerd-1a2b"
     assert store.state_get(state, "SET_HOSTNAME") == "dengar"
+
+
+def test_a_rename_after_a_hand_rename_goes_back_to_the_hand_given_name(make_ctx, monkeypatch):
+    ctx = make_ctx(argv=["--name", "dengar"])
+    ctx.args.yes = False
+    monkeypatch.setattr(ui, "have_tty", lambda: True)
+    monkeypatch.setattr(ui, "yes", lambda *a, **k: True)
+    ops.state_set(ctx, "ORIG_HOSTNAME", "racknerd-1a2b")
+    ops.state_set(ctx, "SET_HOSTNAME", "ig88")   # setup's, but the host is boba now: renamed by hand
+    srv.offer_hostname(ctx)
+    assert store.state_get(ctx.snap.state, "ORIG_HOSTNAME") == "boba"
+
+
+def test_a_busy_lock_after_a_yes_says_nothing_was_done(make_ctx, monkeypatch):
+    ctx = make_ctx()
+
+    def busy(c):
+        raise WgtError("another wireguard-tools command is running")
+    monkeypatch.setattr(ops, "take_lock", busy)
+    with pytest.raises(WgtError, match="running: nothing was done, run it again"):
+        ops.lock_as_seen(ctx)
 
 
 def test_a_newline_cant_become_another_saved_key():

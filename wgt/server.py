@@ -225,8 +225,9 @@ def offer_hostname(ctx: Ctx) -> None:
     new = want + (full[len(cur):] if "." in full else "")   # keep the domain part
     ctx.runner.step(f"Rename host {full} -> {new} (and in {ctx.paths.hosts_file})", "wgt rollback")
     # Recorded first, so rollback can put the name back after a stop anywhere below. The
-    # first original stays (a second rename's "old" name is setup's own).
-    if not store.state_get(ctx.snap.state, ORIG_HOSTNAME):
+    # first original stays while the host has the name setup gave it (a second rename's
+    # "old" name is setup's own); renamed by hand since, that name is the one to go back to.
+    if not store.state_get(ctx.snap.state, ORIG_HOSTNAME) or full != store.state_get(ctx.snap.state, SET_HOSTNAME):
         ops.state_set(ctx, ORIG_HOSTNAME, full)
     ops.state_set(ctx, SET_HOSTNAME, new)
     ctx.runner.run(["hostnamectl", "set-hostname", new])
