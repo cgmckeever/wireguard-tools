@@ -1,7 +1,7 @@
 #!/bin/sh
 # vps.sh <step>: the VPS's side of tunnel-pi. Runs as root.
 #
-# scripts/tp on your computer streams this file to the VPS over ssh, with the
+# scripts/tp.sh on your computer streams this file to the VPS over ssh, with the
 # settings it needs set first. To run it on the VPS yourself instead:
 #   TP_CONF=/path/to/tunnel-pi.conf PI_PUBKEY=<the Pi's key> sh vps.sh <step>
 #
@@ -221,7 +221,7 @@ fail() { printf 'FAIL  %s\n' "$*"; FAILED=1; }
 check() { if eval "$2" >/dev/null 2>&1; then pass "$1"; else fail "$1"; fi; }
 
 do_check() {
-    if [ ! -f "$WG/wgpi.conf" ]; then fail "wgpi isn't set up (tp link)"; return 1; fi
+    if [ ! -f "$WG/wgpi.conf" ]; then fail "wgpi isn't set up (tp.sh link)"; return 1; fi
     check "wgpi is up" "ip link show wgpi"
     t=$(wg show wgpi latest-handshakes 2>/dev/null | awk '{print $2 + 0; exit}')
     if [ "${t:-0}" -gt 0 ] && [ $(( $(date +%s) - t )) -lt 180 ]; then
