@@ -642,14 +642,14 @@ def cmd_rollback(ctx: Ctx, words: List[str]) -> None:
     """Undo setup: stop everything, remove every rule, restore original files;
     --purge also deletes keys, clients, WARP accounts and jumps."""
     ops.no_more_words(words, "wgt rollback [--purge]")
-    ops.take_lock(ctx)
+    ops.lock_unless_asking(ctx)
     cfg = ctx.cfg
     ctx.runner.step(f"Roll back: stop {cfg.WG_IF}, {cfg.WARP_IF} and jumps, remove routing/NAT/firewall "
                     "rules, restore original files", "wgt setup")
     if ctx.args.purge:
         ctx.out.warn("--purge also deletes the WARP accounts, server and device keys, configs and "
                      "jumps (irreversible)")
-    ops.confirm(ctx, "Proceed with rollback?")
+    ops.confirm_then_lock(ctx, "Proceed with rollback?")
     state = ctx.snap.state   # the host facts, before the steps below reload ctx.snap
     _stop_everything(ctx)
     _remove_rules(ctx)

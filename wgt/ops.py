@@ -34,7 +34,8 @@ def take_lock(ctx: Ctx) -> None:
     """Serialize changing commands (and the jump and device watchdogs), then re-read
     the server's files: decisions must use what's there once we hold the lock.
     Waits up to 15s (each watchdog holds it for a moment every 10s). A watchdog skips
-    its run while a command holds it, so a question that can come first does."""
+    its run while a command holds it, so a question that can come first does
+    (lock_unless_asking, confirm_then_lock)."""
     if ctx.lock_fd is not None:
         return
     fd = _open_lock(ctx)
@@ -111,6 +112,36 @@ def confirm(ctx: Ctx, question: str, default_yes: bool = False) -> None:
         raise WgtError(f'no terminal to confirm "{question}"; re-run with --yes')
     if not ui.yes(question, default_yes):
         raise WgtError(f"aborted at: {ctx.runner.current_step} (nothing further changed; --yes skips prompts)")
+
+
+def will_ask(ctx: Ctx) -> bool:
+    """confirm would put its question to someone (not --yes, --dry-run, or no terminal)."""
+    return not (ctx.runner.dry_run or ctx.args.yes) and ui.have_tty()
+
+
+def lock_unless_asking(ctx: Ctx) -> None:
+    """Where a command's decisions start: with no one to ask, the lock comes first, as
+    for any change. With someone to ask, it waits for confirm_then_lock: a watchdog skips
+    its runs while a command holds it, and an answer may take an hour."""
+    if not will_ask(ctx):
+        take_lock(ctx)
+
+
+def lock_as_seen(ctx: Ctx) -> None:
+    """Take the lock for decisions already made on ctx.snap (read without it, after
+    lock_unless_asking). Another command that changed the server's files meanwhile
+    stops this one: what it decided, or asked about, may no longer hold."""
+    seen = ctx.snap
+    take_lock(ctx)
+    if ctx.snap is not seen and ctx.snap != seen:
+        raise WgtError("another wireguard-tools command changed this server meanwhile; "
+                       "nothing was done: run it again")
+
+
+def confirm_then_lock(ctx: Ctx, question: str, default_yes: bool = False) -> None:
+    """confirm, then lock_as_seen."""
+    confirm(ctx, question, default_yes)
+    lock_as_seen(ctx)
 
 
 def is_set_up(ctx: Ctx) -> bool:

@@ -81,7 +81,7 @@ def cmd_warp_rotate(ctx: Ctx, words: List[str]) -> int:
     if len(words) > 1:
         raise WgtError("usage: wgt warp rotate [host|<jump code>|all]")
     which = words[0] if words else "host"
-    ops.take_lock(ctx)   # first: the jumps are the ones exits.db lists once no one else is changing it
+    ops.lock_unless_asking(ctx)   # the jumps are the ones exits.db lists once no one else is changing it
     host_too = which in (store.HOST_EXIT, store.ALL_JUMPS)
     if not host_too and not ctx.snap.exit(which):
         raise WgtError(f"no jump '{which}' (host, all, or one of: "
@@ -93,7 +93,7 @@ def cmd_warp_rotate(ctx: Ctx, words: List[str]) -> int:
         + (["a jump's configs, plain ones too, stop until the watchdog brings it back"] if jumps else [])
     ctx.runner.step(f"New WARP accounts for: {', '.join(names)} (the old ones are backed up; "
                     f"{'; '.join(pauses)})", "restore the backed-up wgcf files, then wgt setup")
-    ops.confirm(ctx, "Rotate WARP now?")
+    ops.confirm_then_lock(ctx, "Rotate WARP now?")
     if not warp.install_wgcf(ctx):
         raise WgtError("wgcf is needed to register WARP")
     res = results.Results(out=ctx.out.line)

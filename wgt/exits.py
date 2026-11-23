@@ -282,7 +282,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     if not store.new_exit_code(code) and not (store.valid_exit_code(code) and ctx.snap.exit(code)):
         raise WgtError(f"jump code must be {store.EXIT_CODE_RULE}: '{code}'")
     raw = _read_jump(src)   # before the lock: "-" may wait on a terminal, and the watchdogs skip runs meanwhile
-    ops.take_lock(ctx)
+    ops.lock_unless_asking(ctx)
     existing = ctx.snap.exit(code)
     label = (ctx.args.exit_label or (existing.label if existing else "") or render.peer_hint(raw) or code)
     label = store.one_line(label)   # one line in exits.db, whatever the file's comment holds
@@ -295,7 +295,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         ctx.runner.step(f"Update jump '{code}' ({label})",
                         f"wgt jump add {code} <the previous copy in "
                         f"{ctx.files.change_dir(ctx.paths.jump_source(code))}>")
-    ops.confirm(ctx, f"Set up jump {code}?", default_yes=True)
+    ops.confirm_then_lock(ctx, f"Set up jump {code}?", default_yes=True)
     if not warp.install_wgcf(ctx):
         raise WgtError("wgcf is needed for the jump's WARP")
     if not ctx.runner.dry_run:
@@ -372,9 +372,10 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     code = words[0] if words else pick_exit(ctx, "remove")
     if not store.valid_exit_code(code):   # it names a directory that gets deleted below
         raise WgtError(f"no jump '{code}' (see: wgt jump list)")
-    ops.take_lock(ctx)
+    ops.lock_unless_asking(ctx)
     e = ctx.snap.exit(code)
     if e is None:
+        ops.lock_as_seen(ctx)
         confs, dirs = _jump_files(ctx, code)
         if not any(os.path.exists(path) for path in confs + dirs):
             raise WgtError(f"no jump '{code}' (see: wgt jump list)")
@@ -386,7 +387,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"configs use jump '{code}': {users}; remove them first (wgt client remove <config>)")
     ctx.runner.step(f"Remove jump '{code}' ({e.label}): its tunnels, routing, WARP account and jump config",
                     f"wgt jump add {code} <wg.conf>")
-    ops.confirm(ctx, f"Remove jump {code}?")
+    ops.confirm_then_lock(ctx, f"Remove jump {code}?")
     down(ctx, e)
     if ops.wg_up(ctx):
         ctx.runner.sh_lines(rules.ipt_cmds(reversed(rules.exit_ipt_rules(ctx.cfg, e)), up=False))

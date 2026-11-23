@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from wgt import clients, store
+from wgt import clients, ops, store
 from wgt.errors import WgtError
 
 
@@ -375,3 +375,45 @@ def test_finishing_a_stopped_remove_takes_out_a_peer_wg0_put_back(make_ctx):
     ctx = make_ctx(answers={"wg show wg0 allowed-ips": (0, f"{c.pub}\t{c.ip}/32\n")})
     clients.cmd_remove(ctx, ["newdev"])
     assert f"wg set wg0 peer {c.pub} remove" in ctx.runner.changes()
+
+
+ASKED_FIRST = [("clients", "cmd_remove", ["mbp-1"]), ("clients", "cmd_rotate", ["mbp-1"]),
+               ("clients", "cmd_disable", ["mbp-1"]), ("exits", "cmd_remove", ["nyc-us"]),
+               ("warp_rotate", "cmd_warp_rotate", ["host"]), ("server", "cmd_rollback", [])]
+
+
+@pytest.mark.parametrize("module, command, words", ASKED_FIRST)
+def test_a_question_waits_without_the_lock_and_a_change_meanwhile_stops_it(make_ctx, monkeypatch,
+                                                                             module, command, words):
+    """The watchdogs skip their runs while a command holds the lock, and an answer can
+    take an hour: the question comes first. Another command's change while it's open
+    stops this one before it does anything (what it asked about may no longer hold)."""
+    import importlib
+
+    from wgt import ui
+    ctx = make_ctx()
+    if module == "exits":
+        clients.cmd_remove(ctx, ["nyc-us.phone"])   # its only user, with --yes
+        ops.release_lock(ctx)
+    ctx.args.yes = False
+    monkeypatch.setattr(ui, "have_tty", lambda: True)
+    asked = []
+
+    def answer(question, default=False):
+        assert ctx.lock_fd is None, "the lock is held while asking"
+        asked.append(len(ctx.runner.changes()))
+        with open(ctx.paths.client_db, "a") as f:   # another command, meanwhile
+            f.write("late 10.2.10.66 LATEKEY 0.0.0.0/0,::/0\n")
+        return True
+    monkeypatch.setattr(ui, "yes", answer)
+    with pytest.raises(WgtError, match="changed this server meanwhile"):
+        getattr(importlib.import_module(f"wgt.{module}"), command)(ctx, words)
+    assert asked and ctx.runner.changes()[asked[0]:] == []
+
+
+def test_with_yes_the_lock_comes_first_as_before(make_ctx, monkeypatch):
+    ctx = make_ctx()   # --yes
+    held = []
+    monkeypatch.setattr(ops, "confirm", lambda c, q, d=False: held.append(c.lock_fd is not None))
+    clients.cmd_rotate(ctx, ["mbp-1"])
+    assert held == [True]

@@ -72,6 +72,13 @@ is per device, not per config, so it lives in `devices.db`.
   (`system.write_private`: no change copy on every write, only an explicit one
   before `--new-server-keys` replaces them; rollback reads the state rather
   than restoring it), and marker files in /run (`Files.write_marker`, which a dry run skips).
+- Changing commands hold the lock (`ops.take_lock`), which the jump and device
+  watchdogs skip their runs for, so a person's answer never waits under it. A
+  command that asks first calls `ops.lock_unless_asking` where it would have
+  locked (--yes, --dry-run and no terminal still lock there), decides on what it
+  read, then `ops.confirm_then_lock` (or `lock_as_seen` on a path that doesn't ask):
+  if another command changed the server's files meanwhile, it stops. Questions
+  after the first change (setup's restart) stay under the lock.
 - Database writes go through `ops` (`save_client`, `remove_client`,
   `set_disabled`, `save_exit`, `state_set`...), which reload `ctx.snap`:
   values read from the snapshot before such a call are stale after it.

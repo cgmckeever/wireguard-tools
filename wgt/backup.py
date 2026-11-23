@@ -163,14 +163,14 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"{archive} is from before config names said WARP: its configs named plainly (phone) "
                        "used WARP then, and would leave straight out now. Rename them after restoring, "
                        "and pass --old-names to go ahead")
-    ops.take_lock(ctx)
+    ops.lock_unless_asking(ctx)
     has_warp = ctx.paths.wgcf_account() in members
     has_exits = any(re.match(re.escape(ctx.paths.exit_dir) + r"/.*/wgcf-account\.toml$", m) for m in members)
     what = "keys, clients, settings"
     what += " and WARP account" if has_warp else ""
     what += ", jumps" if has_exits else ""
     ctx.runner.step(f"Restore {what} from {archive}", "wgt rollback --purge")
-    ops.confirm(ctx, "Restore from this backup?")
+    ops.confirm_then_lock(ctx, "Restore from this backup?")
     keep_map = store.read_text(ctx.paths.backup_map)
     # Everything but the state, which is written below without the old server's host
     # facts, firewall note and detected IP (they don't apply here), nor SETUP_DONE (this

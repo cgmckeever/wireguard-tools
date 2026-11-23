@@ -378,7 +378,7 @@ def get_name(ctx: Ctx, words: List[str], verb: str) -> str:
 def cmd_rotate(ctx: Ctx, words: List[str]) -> None:
     """New keys for an existing client: same address and exit, old config stops working."""
     name = get_name(ctx, words, "rotate")
-    ops.take_lock(ctx)
+    ops.lock_unless_asking(ctx)
     ops.require_server(ctx)
     c = ctx.snap.client(name)
     if c is None:
@@ -390,7 +390,7 @@ def cmd_rotate(ctx: Ctx, words: List[str]) -> None:
     endpoint = ops.resolve_endpoint(ctx)
     ctx.runner.step(f"Rotate keys for '{name}' ({c.ip}); its current config stops working",
                     "none (old keys are discarded)")
-    ops.confirm(ctx, f"Rotate keys for {name}?")
+    ops.confirm_then_lock(ctx, f"Rotate keys for {name}?")
     issue_client(ctx, name, c.ip, allowed, endpoint, c.pub)
 
 
@@ -437,14 +437,16 @@ def _drop_left_rules(ctx: Ctx, name: str) -> None:
 def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     """Remove a client: peer (live and wg0.conf), routing rules, keys and config."""
     name = get_name(ctx, words, "remove")
-    ops.take_lock(ctx)
+    ops.lock_unless_asking(ctx)
     c = ctx.snap.client(name)
+    if c is not None:
+        ctx.runner.step(f"Remove config '{name}' ({c.ip})", f"wgt client add {name} (issues new keys)")
+        ops.confirm(ctx, f"Remove {name}?")
+    ops.lock_as_seen(ctx)
     if c is None and not _left_behind(ctx, name):
         ctx.out.info(f"no config '{name}'")
         return
     if c is not None:
-        ctx.runner.step(f"Remove config '{name}' ({c.ip})", f"wgt client add {name} (issues new keys)")
-        ops.confirm(ctx, f"Remove {name}?")
         # Peer first, then its exit rules: no packet of it may fall back to the default exit.
         if ops.wg_up(ctx):
             ops.remove_live_peer(ctx, c.pub)
@@ -562,20 +564,22 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     only its peer leaves (or rejoins) wg0, live and in wg0.conf."""
     verb = "disable" if disable else "enable"
     name = get_name(ctx, words, verb)
-    ops.take_lock(ctx)
+    ops.lock_unless_asking(ctx)
     ops.require_server(ctx)
     c = ctx.snap.client(name)
     if c is None:
         raise WgtError(f"no config '{name}' (see: wgt client list)")
-    if ctx.snap.is_disabled(name) == disable:
+    already = ctx.snap.is_disabled(name) == disable
+    if already:
         ctx.out.info(f"'{name}' is already {verb}d")   # still applied below: an earlier one may have stopped
+    elif disable:
+        ctx.runner.step(f"Disable config '{name}' ({c.ip}): cut off now; keys, config and address kept",
+                        f"wgt client enable {name}")
+        ops.confirm(ctx, f"Disable {name}?")
     else:
-        if disable:
-            ctx.runner.step(f"Disable config '{name}' ({c.ip}): cut off now; keys, config and address kept",
-                            f"wgt client enable {name}")
-            ops.confirm(ctx, f"Disable {name}?")
-        else:
-            ctx.runner.step(f"Enable config '{name}' ({c.ip}) with its existing config", f"wgt client disable {name}")
+        ctx.runner.step(f"Enable config '{name}' ({c.ip}) with its existing config", f"wgt client disable {name}")
+    ops.lock_as_seen(ctx)
+    if not already:
         ops.set_disabled(ctx, name, disable)
     ops.write_wg_conf(ctx)
     if not ops.wg_up(ctx):
