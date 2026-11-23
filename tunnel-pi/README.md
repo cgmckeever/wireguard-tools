@@ -449,26 +449,26 @@ the VPS through a pipe.
 
 | File or setting | Routing | Made by | What it is |
 |---|---|---|---|
-| `/etc/wireguard/wgpi.*` | both | `link` | the link to the VPS: config and keys (with `tpi`, also the exit rules) |
-| `/usr/local/sbin/tunnel-pi-exit` | both | `link` | the exit's firewall rules |
-| `/etc/sysctl.d/99-tunnel-pi.conf` | both | `link` | IP forwarding on |
-| `/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf` | both | `link` | `wg-quick` keeps retrying at boot |
-| `/etc/NetworkManager/dispatcher.d/90-tunnel-pi` | both | `link` | moves the exit rules when the network changes |
+| `/etc/wireguard/wgpi.*` | `tpi` or `wgt` | `link` | the link to the VPS: config and keys (with `tpi`, also the exit rules) |
+| `/usr/local/sbin/tunnel-pi-exit` | `tpi` or `wgt` | `link` | the exit's firewall rules |
+| `/etc/sysctl.d/99-tunnel-pi.conf` | `tpi` or `wgt` | `link` | IP forwarding on |
+| `/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf` | `tpi` or `wgt` | `link` | `wg-quick` keeps retrying at boot |
+| `/etc/NetworkManager/dispatcher.d/90-tunnel-pi` | `tpi` or `wgt` | `link` | moves the exit rules when the network changes |
 | `/etc/unbound/unbound.conf.d/tunnel-pi.conf` | `tpi` | `exit` | the DNS resolver for Pi-exit clients |
 | `/etc/wireguard/wgjump*`, `wgjumplan*` | `wgt` | `exit` | the jump server(s): config, keys and exit rules |
 | `/etc/wireguard/jump-for-vps*.conf` | `wgt` | `exit`, briefly | the jump file for the VPS, deleted once wgt has it |
-| `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | both | `base` | the hardware watchdog |
-| `unattended-upgrades` | both | `base` | automatic security updates |
-| Cloudflare's apt repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` | both, with the door | `base` | cloudflared and its service |
-| `/etc/cloudflared/tunnel-pi.env` | both, with the door | `base` | the tunnel token (mode 600) |
-| `/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection` | both | `wifi add` | a saved Wi-Fi network, with its password (mode 600) |
+| `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpi` or `wgt` | `base` | the hardware watchdog |
+| `unattended-upgrades` | `tpi` or `wgt` | `base` | automatic security updates |
+| Cloudflare's apt repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` | `tpi` or `wgt`, with the door | `base` | cloudflared and its service |
+| `/etc/cloudflared/tunnel-pi.env` | `tpi` or `wgt`, with the door | `base` | the tunnel token (mode 600) |
+| `/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection` | `tpi` or `wgt` | `wifi add` | a saved Wi-Fi network, with its password (mode 600) |
 
 **On the VPS:**
 
 | File or setting | Routing | Made by | What it is |
 |---|---|---|---|
-| `/etc/wireguard/wgpi.*` | both | `link` | the link to the Pi: config and keys. With `tpi`, it also routes `CLIENT_IPS` to the Pi and redirects their DNS |
-| a ufw rule for `PI_PORT/udp` | both | `link`, if ufw is active | lets the Pi dial in |
+| `/etc/wireguard/wgpi.*` | `tpi` or `wgt` | `link` | the link to the Pi: config and keys. With `tpi`, it also routes `CLIENT_IPS` to the Pi and redirects their DNS |
+| a ufw rule for `PI_PORT/udp` | `tpi` or `wgt` | `link`, if ufw is active | lets the Pi dial in |
 | `/usr/local/sbin/tunnel-pi-killswitch`, `/etc/systemd/system/tunnel-pi-killswitch.service` | `tpi` | `link` | the kill switch (with `wgt`, wgt's own fail-closed does this) |
 | wgt's jumps and client configs | `wgt` | `exit`, `client` | made by wgt itself (`wgt jump add`, `wgt client add`) |
 
