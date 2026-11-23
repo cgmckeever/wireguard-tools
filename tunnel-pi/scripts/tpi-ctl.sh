@@ -1,22 +1,22 @@
 #!/bin/sh
-# tp.sh: set up tunnel-pi from your computer (macOS or Linux). Reads ../tunnel-pi.conf (or $TP_CONF)
+# tpi-ctl.sh: set up tunnel-pi from your computer (macOS or Linux). Reads ../tunnel-pi.conf (or $TP_CONF)
 # and runs pi.sh on the Pi and vps.sh on the VPS over ssh.
 #
-#   tp.sh config              show the settings and check they're filled in
-#   tp.sh ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
-#   tp.sh base                1.3, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
-#   tp.sh link                2.1: the wgpi link (Pi and VPS), keys exchanged for you
-#   tp.sh exit                2.1, by TPI_ROUTING: tpi's DNS resolver, or the wgt jump(s)
-#   tp.sh client <device> [lan]   2.2, TPI_ROUTING=wgt: a config for <device> through the Pi (lan: the LAN jump)
-#   tp.sh lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpi or wgjump)
-#   tp.sh wifi [list]         the Pi's saved Wi-Fi networks, and its uplink now
-#   tp.sh wifi add <name>     save a Wi-Fi network on the Pi (asks for the password)
-#   tp.sh wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
-#   tp.sh check               PASS/FAIL on the Pi and the VPS
-#   tp.sh all                 link, exit, check (after base)
-#   tp.sh undo [all]          remove it from the VPS and the Pi (all: cloudflared too)
+#   tpi-ctl.sh config              show the settings and check they're filled in
+#   tpi-ctl.sh ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
+#   tpi-ctl.sh base                1.3, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
+#   tpi-ctl.sh link                2.1: the wgpi link (Pi and VPS), keys exchanged for you
+#   tpi-ctl.sh exit                2.1, by TPI_ROUTING: tpi's DNS resolver, or the wgt jump(s)
+#   tpi-ctl.sh client <device> [lan]   2.2, TPI_ROUTING=wgt: a config for <device> through the Pi (lan: the LAN jump)
+#   tpi-ctl.sh lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpi or wgjump)
+#   tpi-ctl.sh wifi [list]         the Pi's saved Wi-Fi networks, and its uplink now
+#   tpi-ctl.sh wifi add <name>     save a Wi-Fi network on the Pi (asks for the password)
+#   tpi-ctl.sh wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
+#   tpi-ctl.sh check               PASS/FAIL on the Pi and the VPS
+#   tpi-ctl.sh all                 link, exit, check (after base)
+#   tpi-ctl.sh undo [all]          remove it from the VPS and the Pi (all: cloudflared too)
 #
-# tp.sh reaches the Pi the first way that answers: SSH_LAN (at home), then through
+# tpi-ctl.sh reaches the Pi the first way that answers: SSH_LAN (at home), then through
 # the VPS over the link, then SSH_CLOUDFLARE (Cloudflare, the emergency door for
 # when the link is down). Anything that changes the VPS asks first.
 # TP_YES=1 skips that question (only once the person has agreed to these changes
@@ -27,7 +27,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 CONF="${TP_CONF:-$HERE/../tunnel-pi.conf}"
 
 log() { printf '==> %s\n' "$*" >&2; }
-die() { printf 'tp.sh: %s\n' "$*" >&2; exit 1; }
+die() { printf 'tpi-ctl.sh: %s\n' "$*" >&2; exit 1; }
 usage() { sed -n '2,23s/^# \{0,1\}//p' "$0"; }
 
 case "${1:-}" in ''|-h|--help|help) usage; exit 0 ;; esac
@@ -155,7 +155,7 @@ cmd_config() {
     esac
     if [ -n "$SSH_CLOUDFLARE" ]; then
         require SSH_CLOUDFLARE CF_TOKEN_FILE
-        [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tp.sh base needs it: step 1.2)"
+        [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tpi-ctl.sh base needs it: step 1.2)"
     else
         log "note: no SSH_CLOUDFLARE, so no emergency door: if the link is down after drop-off, the friend power-cycles the Pi"
     fi
@@ -208,7 +208,7 @@ cmd_link() {
     run pi pi.sh link >/dev/null
     log "waiting for the first handshake"
     [ -n "$DRY" ] || sleep 8
-    run pi pi.sh check || log "the link isn't fully up yet: run tp.sh check in a minute"
+    run pi pi.sh check || log "the link isn't fully up yet: run tpi-ctl.sh check in a minute"
 }
 
 # add_jump <isolated|lan> <code> <label>
@@ -222,11 +222,11 @@ add_jump() {
         if to pi "$AS_ROOT cat $file" | wgt_vps jump add "$2" - --label "$3" --yes; then
             run pi pi.sh jump-done "$1"
         else
-            die "wgt jump add $2 failed; the jump file stays on the Pi ($file) so tp.sh exit can try again with TP_RENEW=1"
+            die "wgt jump add $2 failed; the jump file stays on the Pi ($file) so tpi-ctl.sh exit can try again with TP_RENEW=1"
         fi
     elif [ -z "$DRY" ]; then
         wgt_vps jump list | grep -qw -- "$2" \
-            || die "the Pi's jump server exists but the VPS has no jump '$2': run TP_RENEW=1 tp.sh exit"
+            || die "the Pi's jump server exists but the VPS has no jump '$2': run TP_RENEW=1 tpi-ctl.sh exit"
         log "jump '$2' is already on the VPS"
     fi
 }
@@ -243,13 +243,13 @@ cmd_exit() {
             require JUMP_LAN_LABEL
             add_jump lan "$JUMP_LAN_CODE" "$JUMP_LAN_LABEL"
         fi
-        log "next: tp.sh client <device> to give a device a config through the Pi"
+        log "next: tpi-ctl.sh client <device> to give a device a config through the Pi"
     fi
 }
 
 cmd_client() {
-    [ "$TPI_ROUTING" = wgt ] || die "tp.sh client is for TPI_ROUTING=wgt; with TPI_ROUTING=tpi, list the config's address in CLIENT_IPS and run tp.sh link"
-    device="${1:-}"; [ -n "$device" ] || die "tp.sh client <device> [lan]"
+    [ "$TPI_ROUTING" = wgt ] || die "tpi-ctl.sh client is for TPI_ROUTING=wgt; with TPI_ROUTING=tpi, list the config's address in CLIENT_IPS and run tpi-ctl.sh link"
+    device="${1:-}"; [ -n "$device" ] || die "tpi-ctl.sh client <device> [lan]"
     code="$JUMP_CODE"
     if [ "${2:-}" = lan ]; then code="$JUMP_LAN_CODE"; [ -n "$code" ] || die "JUMP_LAN_CODE isn't set"; fi
     confirm_vps "wgt client add $device --exit $code"
@@ -263,14 +263,14 @@ cmd_client() {
 
 cmd_lan_mode() {
     mode="${1:-}"
-    case "$mode" in isolated|lan) ;; *) die "tp.sh lan-mode isolated|lan [<interface>]" ;; esac
+    case "$mode" in isolated|lan) ;; *) die "tpi-ctl.sh lan-mode isolated|lan [<interface>]" ;; esac
     ifc="${2:-}"
     [ -n "$ifc" ] || { if [ "$TPI_ROUTING" = tpi ]; then ifc=wgpi; else ifc=wgjump; fi; }
     run pi pi.sh lan-mode "$ifc" "$mode"
 }
 
 # read_password <prompt>: from the terminal without echo, or one line of stdin
-# when it isn't a terminal (tp.sh wifi add name < file). Never an argument.
+# when it isn't a terminal (tpi-ctl.sh wifi add name < file). Never an argument.
 read_password() {
     if [ -t 0 ]; then
         printf '%s' "$1" >&2
@@ -284,7 +284,7 @@ cmd_wifi() {
     case "${1:-list}" in
         list) install_exit_script; run pi pi.sh wifi-list ;;
         add)
-            WIFI_SSID="${2:-}"; [ -n "$WIFI_SSID" ] || die "tp.sh wifi add <network name>"
+            WIFI_SSID="${2:-}"; [ -n "$WIFI_SSID" ] || die "tpi-ctl.sh wifi add <network name>"
             if [ -z "$DRY" ]; then
                 read_password "Password for '$WIFI_SSID' (empty for an open network): "
                 case "${#pw}" in 0|[89]|[1-5][0-9]|6[0-3]) ;; *) die "a Wi-Fi password is 8 to 63 characters" ;; esac
@@ -294,10 +294,10 @@ cmd_wifi() {
             run pi pi.sh wifi-add
             WIFI_PSK="" ;;
         remove)
-            WIFI_SSID="${2:-}"; [ -n "$WIFI_SSID" ] || die "tp.sh wifi remove <network name>|all"
+            WIFI_SSID="${2:-}"; [ -n "$WIFI_SSID" ] || die "tpi-ctl.sh wifi remove <network name>|all"
             install_exit_script
             run pi pi.sh wifi-remove ;;
-        *) die "tp.sh wifi [list] | add <name> | remove <name>|all" ;;
+        *) die "tpi-ctl.sh wifi [list] | add <name> | remove <name>|all" ;;
     esac
 }
 
@@ -315,7 +315,7 @@ cmd_check() {
 
 cmd_undo() {
     if [ -n "$PI_HOP" ]; then   # it removes the link, so it can't run through it
-        [ -n "$SSH_CLOUDFLARE" ] || die "tp.sh undo can't run through the link it removes: run it at home (SSH_LAN)"
+        [ -n "$SSH_CLOUDFLARE" ] || die "tpi-ctl.sh undo can't run through the link it removes: run it at home (SSH_LAN)"
         PI="$SSH_CLOUDFLARE" PI_HOP=""; log "Pi: $PI instead (undo removes the link)"
     fi
     confirm_vps "remove wgpi$( [ "$TPI_ROUTING" = tpi ] && echo " and the kill switch")"

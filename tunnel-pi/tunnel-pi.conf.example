@@ -1,10 +1,10 @@
 # tunnel-pi settings. Copy this file to tunnel-pi.conf (in this folder; git
 # ignores that name) and fill it in. Shell syntax: NAME="value".
-# scripts/tp.sh reads it on your computer and passes the values the Pi and VPS need.
+# scripts/tpi-ctl.sh reads it on your computer and passes the values the Pi and VPS need.
 # No secrets go in here: the Cloudflare token stays in its own file.
 
 # --- The Pi ------------------------------------------------------------------
-# tp.sh reaches the Pi the first way that answers, and says which it used:
+# tpi-ctl.sh reaches the Pi the first way that answers, and says which it used:
 #   1. SSH_LAN, on your home network while you build it
 #   2. through the VPS over the WireGuard link, the everyday way after drop-off
 #   3. SSH_CLOUDFLARE, the emergency door (below), when the link is down
@@ -20,8 +20,8 @@ CF_TOKEN_FILE="$HOME/.config/tunnel-pi/cloudflared.token"   # with SSH_CLOUDFLAR
 
 # --- The VPS -----------------------------------------------------------------
 # A VPS you manage with wgt-ctl: name it here (as `bin/wgt-ctl list` shows it),
-# and tp.sh drives it through wgt-ctl. VPS_SSH and VPS_HOST then come from that
-# list (VPS_HOST only if you leave it as the example). Empty: tp.sh uses ssh itself.
+# and tpi-ctl.sh drives it through wgt-ctl. VPS_SSH and VPS_HOST then come from that
+# list (VPS_HOST only if you leave it as the example). Empty: tpi-ctl.sh uses ssh itself.
 WGT_SERVER=""
 VPS_SSH="root@vps.example.com"      # how ssh reaches the VPS: root, or a user with passwordless sudo
 VPS_HOST="vps.example.com"          # the VPS's public name or IP, as the Pi dials it

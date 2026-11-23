@@ -1,13 +1,13 @@
 #!/bin/sh
 # pi.sh <step> [args]: the Raspberry Pi's side of tunnel-pi. Runs as root.
 #
-# scripts/tp.sh on your computer streams this file to the Pi over ssh, with the
+# scripts/tpi-ctl.sh on your computer streams this file to the Pi over ssh, with the
 # settings it needs set first. To run it on the Pi yourself instead:
 #   sudo TP_CONF=/path/to/tunnel-pi.conf sh pi.sh <step>
 #
 # Steps (each is safe to run again):
 #   base                 packages, automatic updates, watchdog; cloudflared too when
-#                        CF_TOKEN is set (tp.sh sends it when SSH_CLOUDFLARE is set)
+#                        CF_TOKEN is set (tpi-ctl.sh sends it when SSH_CLOUDFLARE is set)
 #   link                 WireGuard and the wgpi link to the VPS. Prints PUBKEY=<the Pi's
 #                        public key>; with VPS_PUBKEY set it also writes and starts wgpi
 #   jump isolated|lan    TPI_ROUTING=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
@@ -21,7 +21,7 @@
 #   check                PASS/FAIL for everything set up so far
 #   undo [all]           remove the WireGuard parts (all: cloudflared too)
 #
-# Logs go to stderr; only results meant for tp.sh (PUBKEY=, JUMPFILE=) go to stdout.
+# Logs go to stderr; only results meant for tpi-ctl.sh (PUBKEY=, JUMPFILE=) go to stdout.
 
 main() {
     set -eu
@@ -166,13 +166,13 @@ EOF
     fi
     echo "PUBKEY=$(keypair wgpi)"
     if [ -z "$VPS_PUBKEY" ]; then
-        log "keys ready; wgpi is written once VPS_PUBKEY is known (tp.sh link does this)"
+        log "keys ready; wgpi is written once VPS_PUBKEY is known (tpi-ctl.sh link does this)"
         return 0
     fi
 
     exit_lines=""
     if [ "$TPI_ROUTING" = tpi ]; then
-        [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tp.sh link installs it)"
+        [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpi-ctl.sh link installs it)"
         mode=$(current_mode wgpi)
         exit_lines="PostUp = $EXIT_SCRIPT up %i $mode
 PostDown = $EXIT_SCRIPT down %i"
@@ -208,7 +208,7 @@ jump_vars() {
 
 do_jump() {
     jump_vars "$1"
-    [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tp.sh link installs it)"
+    [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpi-ctl.sh link installs it)"
     if [ -f "$WG/$JIF.conf" ] && [ "${TP_RENEW:-}" != 1 ]; then
         systemctl enable -q --now "wg-quick@$JIF"
         log "$JIF already exists; its jump file was handed over when it was made (TP_RENEW=1 makes new keys)"
@@ -216,7 +216,7 @@ do_jump() {
         return 0
     fi
     # The VPS's private key for this jump is made here and leaves only in the jump
-    # file, which tp.sh pipes straight to `wgt jump add` and then deletes.
+    # file, which tpi-ctl.sh pipes straight to `wgt jump add` and then deletes.
     rm -f "$WG/$JIF.key"
     server_pub=$(keypair "$JIF")
     vps_key=$(wg genkey)
@@ -325,7 +325,7 @@ do_wifi_remove() {
     done <<EOF
 $list
 EOF
-    [ -n "$found" ] || { log "no saved Wi-Fi named '$WIFI_SSID' (tp.sh wifi lists them)"; return 0; }
+    [ -n "$found" ] || { log "no saved Wi-Fi named '$WIFI_SSID' (tpi-ctl.sh wifi lists them)"; return 0; }
     while IFS=: read -r n d; do
         [ -n "$n" ] || continue
         [ "$WIFI_SSID" = all ] || [ "$n" = "$WIFI_SSID" ] || continue
@@ -350,7 +350,7 @@ do_check() {
     if systemctl cat tunnel-pi-cloudflared.service >/dev/null 2>&1; then
         check "cloudflared (the emergency door) is running" "systemctl is-active -q tunnel-pi-cloudflared.service"
     elif [ -n "$SSH_CLOUDFLARE" ]; then
-        fail "cloudflared isn't set up, but SSH_CLOUDFLARE is (tp.sh base)"
+        fail "cloudflared isn't set up, but SSH_CLOUDFLARE is (tpi-ctl.sh base)"
     else
         printf 'INFO  no cloudflared (SSH_CLOUDFLARE is empty): no emergency door if the link goes down\n'
     fi
@@ -361,7 +361,7 @@ do_check() {
         if [ "$age" -lt 180 ]; then pass "wgpi handshake ${age}s ago"; else fail "wgpi has no recent handshake (is PI_PORT/udp open on the VPS?)"; fi
         check "the VPS answers on the link (ping 10.99.0.1)" "ping -c 2 -W 2 10.99.0.1"
     else
-        fail "wgpi isn't set up (tp.sh link)"
+        fail "wgpi isn't set up (tpi-ctl.sh link)"
     fi
     for ifc in wgjump wgjumplan; do
         [ -f "$WG/$ifc.conf" ] || continue
