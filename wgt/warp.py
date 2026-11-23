@@ -48,7 +48,7 @@ def install_wgcf(ctx: Ctx, reinstall: bool = False, fetch: Optional[Fetch] = Non
     if not url:
         ctx.out.warn(f"no linux_{arch} asset in wgcf release {version}")
         return False
-    sums_url = next((u for u in urls if re.search(r"checksums|sha256", u, re.I)), "")
+    sums_url = _sums_url(urls, url)
     try:
         data = fetch(url, 120)
     except OSError:
@@ -61,6 +61,16 @@ def install_wgcf(ctx: Ctx, reinstall: bool = False, fetch: Optional[Fetch] = Non
     return True
 
 
+def _sums_url(urls: List[str], url: str) -> str:
+    """The release's checksums for the binary at <url>: its own <binary>.sha256 if
+    published, else a file of checksums, else any other sha256 asset ("" if none). Not
+    simply the first that mentions sha256: another platform's own .sha256 doesn't list
+    this binary, and that stops the install."""
+    return (next((u for u in urls if u == url + ".sha256"), "")
+            or next((u for u in urls if re.search(r"checksums", u, re.I)), "")
+            or next((u for u in urls if re.search(r"sha256", u, re.I)), ""))
+
+
 def _published_sha256(fetch: Fetch, sums_url: str, name: str) -> str:
     """The sha256 to expect for <name>: WGCF_SHA256 if set (pinning), else the
     release's checksums file; "" if it publishes none. One it publishes but we
@@ -69,10 +79,11 @@ def _published_sha256(fetch: Fetch, sums_url: str, name: str) -> str:
     pinned = os.environ.get("WGCF_SHA256", "")
     if pinned or not sums_url:
         return pinned
+    own = sums_url.endswith("/" + name + ".sha256")   # the binary's own: it may hold the hash alone
     try:
         for line in fetch(sums_url, 30).decode().splitlines():
             fields = line.split()
-            if len(fields) == 2 and fields[1].lstrip("*") == name:
+            if (len(fields) == 2 and fields[1].lstrip("*") == name) or (own and len(fields) == 1):
                 return fields[0]
     except (OSError, UnicodeDecodeError) as e:   # not text: unreadable too, not a traceback
         raise WgtError(f"cannot fetch wgcf's checksums ({sums_url}): {e}; set WGCF_SHA256 to pin one") from None

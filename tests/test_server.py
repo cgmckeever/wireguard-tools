@@ -571,3 +571,22 @@ def test_the_devices_static_network_routed_elsewhere_is_refused(make_ctx):
         srv.refuse_routed_subnet(ctx)
 
 
+@pytest.mark.parametrize("assets,want", [
+    (["checksums.txt", "wgcf_2.3.1_darwin_amd64", "wgcf_2.3.1_linux_amd64"], "checksums.txt"),   # wgcf v2.3.1
+    (["wgcf_x_darwin_amd64.sha256", "checksums.txt", "wgcf_x_linux_amd64", "wgcf_x_linux_amd64.sha256"],
+     "wgcf_x_linux_amd64.sha256"),          # its own first, not another platform's that comes first
+    (["wgcf_x_darwin_amd64.sha256", "checksums.txt", "wgcf_x_linux_amd64"], "checksums.txt"),
+])
+def test_the_checksums_picked_are_the_ones_for_this_binary(assets, want):
+    from wgt import warp
+    urls = [f"https://h/d/{a}" for a in assets]
+    assert warp._sums_url(urls, next(u for u in urls if u.endswith("linux_amd64"))) == f"https://h/d/{want}"
+
+
+def test_a_binarys_own_sha256_may_hold_the_hash_alone(monkeypatch):
+    from wgt import warp
+    monkeypatch.delenv("WGCF_SHA256", raising=False)
+    fetch = lambda url, timeout: b"abc123\n"   # noqa: E731
+    assert warp._published_sha256(fetch, "https://h/d/wgcf_x_linux_amd64.sha256", "wgcf_x_linux_amd64") == "abc123"
+
+
