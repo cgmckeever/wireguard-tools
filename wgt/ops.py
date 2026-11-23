@@ -12,7 +12,7 @@ import time
 from typing import TYPE_CHECKING, Callable, Iterator, List, Mapping, Optional, Tuple
 
 from . import live, render, store, ui
-from .const import MARKER, SET_UP_KEYS
+from .const import MARKER, SET_UP_KEYS, SETTING_KEYS
 from .errors import WgtError
 from .system import write_private
 
@@ -51,6 +51,10 @@ def take_lock(ctx: Ctx) -> None:
             time.sleep(0.2)
     ctx.lock_fd = fd
     ctx.reload()
+    if settings_moved(ctx):
+        release_lock(ctx)
+        raise WgtError("the server's settings changed while this waited for another wireguard-tools "
+                       "command (setup); run it again")
 
 
 def try_lock(ctx: Ctx) -> bool:
@@ -66,7 +70,17 @@ def try_lock(ctx: Ctx) -> bool:
         return False
     ctx.lock_fd = fd
     ctx.reload()
+    if settings_moved(ctx):   # the next run loads the new ones
+        release_lock(ctx)
+        return False
     return True
+
+
+def settings_moved(ctx: Ctx) -> bool:
+    """The saved settings aren't the ones ctx.cfg was resolved from: they're read at
+    load, before the lock, and a setup that held it meanwhile may have changed them.
+    Carrying on would write the old ones into wg0.conf and new configs."""
+    return store.saved_settings(ctx.snap.state, SETTING_KEYS) != ctx.cfg.saved
 
 
 def release_lock(ctx: Ctx) -> None:

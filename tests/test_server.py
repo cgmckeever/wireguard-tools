@@ -590,3 +590,13 @@ def test_a_binarys_own_sha256_may_hold_the_hash_alone(monkeypatch):
     assert warp._published_sha256(fetch, "https://h/d/wgcf_x_linux_amd64.sha256", "wgcf_x_linux_amd64") == "abc123"
 
 
+def test_settings_changed_while_waiting_for_the_lock_stop_the_command(make_ctx):
+    from wgt import system
+    ctx, watchdog_ctx = make_ctx(), make_ctx(bare=True)   # both loaded before setup changed the port
+    system.write_private(ctx.paths.state, store.state_set(store.read_text(ctx.paths.state), "WG_PORT", "51999"))
+    with pytest.raises(WgtError, match="settings changed"):
+        ops.take_lock(ctx)
+    assert ops.try_lock(watchdog_ctx) is False   # a watchdog skips the run: the next one loads them
+    fresh = make_ctx()
+    assert ops.try_lock(fresh) is True           # and the refusal let the lock go
+    ops.release_lock(fresh)
