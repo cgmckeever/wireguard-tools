@@ -107,7 +107,7 @@ EOF
     log "wgpi up; it waits for the Pi to dial in"
 }
 
-# The 2B wgpi.conf: route CLIENT_IPS through the Pi, NAT onto the link, DNS to the Pi.
+# The EXIT=tpi wgpi.conf: route CLIENT_IPS through the Pi, NAT onto the link, DNS to the Pi.
 hand_conf() {
     need CLIENT_IPS
     if [ -z "$WG_SUBNET" ]; then

@@ -6,14 +6,15 @@
 #   sudo TP_CONF=/path/to/tunnel-pi.conf sh pi.sh <step>
 #
 # Steps (each is safe to run again):
-#   base                 packages, automatic updates, watchdog, cloudflared (CF_TOKEN)
+#   base                 packages, automatic updates, watchdog; cloudflared too when
+#                        CF_TOKEN is set (tp sends it when TPI_REMOTE is set)
 #   link                 WireGuard and the wgpi link to the VPS. Prints PUBKEY=<the Pi's
 #                        public key>; with VPS_PUBKEY set it also writes and starts wgpi
 #   jump isolated|lan    EXIT=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
 #                        JUMPFILE=<path> when it made a new jump file, else JUMP=exists
 #   jump-done isolated|lan   delete the jump file once the VPS has it
 #   dns                  EXIT=tpi: the DNS resolver for Pi-exit clients
-#   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2D)
+#   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2.3)
 #   check                PASS/FAIL for everything set up so far
 #   undo [all]           remove the WireGuard parts (all: cloudflared too)
 #
@@ -24,7 +25,7 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
-    : "${EXIT:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}"
+    : "${EXIT:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${TPI_REMOTE:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
@@ -89,6 +90,13 @@ do_base() {
         log "hardware watchdog on from the next reboot"
     fi
 
+    if [ -n "$CF_TOKEN" ]; then do_cloudflared
+    else log "no CF_TOKEN (TPI_REMOTE is empty): no cloudflared, so no emergency door"; fi
+    log "base done. Reboot once so the watchdog starts: sudo reboot"
+}
+
+# cloudflared, the emergency door: SSH through Cloudflare that doesn't depend on the link.
+do_cloudflared() {
     if ! command -v cloudflared >/dev/null; then
         log "installing cloudflared from Cloudflare's apt repository"
         mkdir -p --mode=0755 /usr/share/keyrings
@@ -101,10 +109,9 @@ do_base() {
         apt-get -y -q install cloudflared
     fi
 
-    if [ -n "$CF_TOKEN" ]; then
-        # The token lives in a root-only file the unit reads, never on a command line.
-        printf 'TUNNEL_TOKEN=%s\n' "$CF_TOKEN" | put 600 /etc/cloudflared/tunnel-pi.env
-        put 644 /etc/systemd/system/tunnel-pi-cloudflared.service <<EOF
+    # The token lives in a root-only file the unit reads, never on a command line.
+    printf 'TUNNEL_TOKEN=%s\n' "$CF_TOKEN" | put 600 /etc/cloudflared/tunnel-pi.env
+    put 644 /etc/systemd/system/tunnel-pi-cloudflared.service <<EOF
 [Unit]
 Description=tunnel-pi: Cloudflare Tunnel for admin SSH
 After=network-online.target
@@ -119,12 +126,8 @@ RestartSec=5
 [Install]
 WantedBy=multi-user.target
 EOF
-        systemctl daemon-reload
-        start_or_restart tunnel-pi-cloudflared.service
-    elif ! systemctl is-active -q tunnel-pi-cloudflared.service; then
-        log "no CF_TOKEN given: cloudflared is installed but not connected (set CF_TOKEN_FILE and run tp base again)"
-    fi
-    log "base done. Reboot once so the watchdog starts: sudo reboot"
+    systemctl daemon-reload
+    start_or_restart tunnel-pi-cloudflared.service
 }
 
 do_link() {
@@ -268,9 +271,11 @@ handshake_age() {   # seconds since <interface>'s newest handshake (99999: none)
 
 do_check() {
     if systemctl cat tunnel-pi-cloudflared.service >/dev/null 2>&1; then
-        check "cloudflared (admin SSH) is running" "systemctl is-active -q tunnel-pi-cloudflared.service"
+        check "cloudflared (the emergency door) is running" "systemctl is-active -q tunnel-pi-cloudflared.service"
+    elif [ -n "$TPI_REMOTE" ]; then
+        fail "cloudflared isn't set up, but TPI_REMOTE is (tp base)"
     else
-        fail "cloudflared isn't set up (tp base with CF_TOKEN_FILE)"
+        printf 'INFO  no cloudflared (TPI_REMOTE is empty): no emergency door if the link goes down\n'
     fi
     if [ -f "$WG/wgpi.conf" ]; then
         check "IP forwarding is on" "[ \"\$(sysctl -n net.ipv4.ip_forward)\" = 1 ]"
