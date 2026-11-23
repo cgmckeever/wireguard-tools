@@ -104,7 +104,36 @@ EOF
     open_port
     systemctl enable -q wg-quick@wgpi
     if [ "$CHANGED" = 1 ]; then systemctl restart wg-quick@wgpi; else systemctl start wg-quick@wgpi; fi
+    [ "$TPI_ROUTING" != tpi ] || prune
     log "wgpi up; it waits for the Pi to dial in"
+}
+
+# listed <address> <list>: is it in the list (a /32 or /128 written there or not)?
+listed() { for x in $2; do [ "${x%/*}" = "$1" ] && return 0; done; return 1; }
+
+# prune: remove the rules of clients taken out of CLIENT_IPS / CLIENT_IP6S. A
+# restart can't: it removes what the new files list, and they no longer list them.
+prune() {
+    ip rule show | awk -v ifc="$WG_IF" '($1 == "900:" || $1 == "901:") && $2 == "from" {
+        for (i = 3; i < NF; i++) if ($i == "iif" && $(i + 1) == ifc) { sub(":", "", $1); print $1, $3 } }' |
+    while read -r prio ip; do
+        listed "$ip" "$CLIENT_IPS" && continue
+        ip rule del priority "$prio" from "$ip" iif "$WG_IF" && log "removed rule $prio for $ip (no longer in CLIENT_IPS)"
+    done
+    iptables -t nat -S PREROUTING | grep -- "-i $WG_IF .*--to-destination 10.99.0.2\$" |
+    while read -r rule; do
+        ip=$(printf '%s\n' "$rule" | sed -n 's|.* -s \([0-9.]*\)/32 .*|\1|p')
+        [ -n "$ip" ] && ! listed "$ip" "$CLIENT_IPS" || continue
+        # shellcheck disable=SC2086
+        iptables -t nat $(printf '%s\n' "$rule" | sed 's/^-A /-D /') && log "removed the DNS redirect for $ip"
+    done
+    ip6tables -S FORWARD 2>/dev/null | grep -- "-i $WG_IF -j REJECT" |
+    while read -r rule; do
+        ip=$(printf '%s\n' "$rule" | sed -n 's|.* -s \([0-9a-fA-F:]*\)/128 .*|\1|p')
+        [ -n "$ip" ] && ! listed "$ip" "$CLIENT_IP6S" || continue
+        # shellcheck disable=SC2086
+        ip6tables $(printf '%s\n' "$rule" | sed 's/^-A /-D /') && log "removed the IPv6 block for $ip"
+    done
 }
 
 # The TPI_ROUTING=tpi wgpi.conf: route CLIENT_IPS through the Pi, NAT onto the link, DNS to the Pi.
