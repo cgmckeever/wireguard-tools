@@ -28,7 +28,7 @@ import re
 import shutil
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from .. import store, system
 from ..const import client_conf_name
@@ -172,13 +172,23 @@ def own_path(server: str, config: str) -> str:
     return os.path.join(config_dir(store.device_of(config)), client_conf_name(server, config))
 
 
-def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: bool) -> List[Action]:
+def delivered(path: str, text: str) -> bool:
+    """<path> is the name delivery gives a copy of the config its header names: one
+    wgt-ctl wrote, not one made by hand (which may sort first, in another device's folder)."""
+    h = header_of(text)
+    return h is not None and same_name(path, own_path(h[1], h[0]))
+
+
+def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: bool,
+         kept_keys: Iterable[str] = ()) -> List[Action]:
     """What to do to bring the local copies of <server>'s configs in line.
     issued: config name -> its text on the server; local: path -> text (devices/*/config/);
-    complete: issued is everything the server has, so copies of configs it lacks retire.
+    complete: issued is everything the server has, so copies of configs it lacks retire;
+    kept_keys: keys of configs the server has but issued lacks (fetch couldn't name them),
+    whose copies therefore stay.
     In three passes: each config's copy found (by key, else header), then what retires,
     then new copies, whose names may be ones this delivery retires."""
-    live_keys = {key_of(t) for t in issued.values()} - {""}
+    live_keys = ({key_of(t) for t in issued.values()} | set(kept_keys)) - {""}
     by_key: Dict[str, List[str]] = {}
     by_header: Dict[Tuple[str, str], str] = {}
     for path, text in local.items():
@@ -187,9 +197,10 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
             by_key.setdefault(k, []).append(path)
         h = header_of(text)
         # A copy holding a live key is that config's (a rename keeps keys): the key
-        # match wins, whichever config the loop below reaches first.
-        if h and k not in live_keys:
-            by_header.setdefault(h, path)
+        # match wins, whichever config the loop below reaches first. Of several with
+        # one header (a rotate changed the key), the delivered copy is the one.
+        if h and k not in live_keys and (h not in by_header or delivered(path, text)):
+            by_header[h] = path
     configs = sorted(issued, key=store.device_key)
     actions: List[Action] = []
     matched: Dict[str, str] = {}
@@ -197,8 +208,10 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
     for config in configs:
         k = key_of(issued[config])
         # Several files with its key (a copy made by hand): the one at its own name is
-        # its copy; the others are left as they are, with a warning.
-        keyed = sorted(by_key.get(k, []) if k else [], key=lambda p: not same_name(p, own_path(server, config)))
+        # its copy, else (renamed on the server) the one delivered under its old name;
+        # the others are left as they are, with a warning.
+        keyed = sorted(by_key.get(k, []) if k else [],
+                       key=lambda p: (not same_name(p, own_path(server, config)), not delivered(p, local[p])))
         match = keyed[0] if keyed else by_header.get((config, server))
         if match and match not in claimed:
             claimed.add(match)
@@ -296,10 +309,11 @@ def report(server: str, actions: List[Action]) -> None:
             out.warn(f"{server} {a.config}: {shown(a.path)}: {a.note}")
 
 
-def fetch(s: Server) -> Tuple[Dict[str, str], str]:
-    """Every client config the server has (config name -> text), and the server's
-    own SERVER_NAME ("" if unset). A config's name comes from its header (the file
-    name also holds the server's own name)."""
+def fetch(s: Server) -> Tuple[Dict[str, str], str, Set[str]]:
+    """Every client config the server has (config name -> text), the server's
+    own SERVER_NAME ("" if unset), and the private keys of the files it can't name
+    (no header): not delivered, but still the server's, so no copy of one retires.
+    A config's name comes from its header (the file name also holds the server's own name)."""
     d = remote.REMOTE.client_dir
     # A non-UTF-8 byte (a jump's label) is kept as it was: copies are the server's files as is,
     # and a decoding error would escape after()'s warning as a traceback.
@@ -311,6 +325,7 @@ def fetch(s: Server) -> Tuple[Dict[str, str], str]:
         raise WgtError(f"can't read {s.name}'s client configs" + (" (unreachable)" if rc == 255 else ""))
     head, *chunks = o.split(MARK)
     issued = {}
+    kept = set()
     for chunk in chunks:
         file, _, text = chunk.partition("\n")
         h = header_of(text)
@@ -318,7 +333,8 @@ def fetch(s: Server) -> Tuple[Dict[str, str], str]:
             issued[h[0]] = text
         else:
             out.warn(f"{s.name}: {file} has no '# wireguard-tools client:' line; not delivered")
-    return issued, store.state_get(head, "SERVER_NAME").strip()
+            kept.add(key_of(text))
+    return issued, store.state_get(head, "SERVER_NAME").strip(), kept - {""}
 
 
 def server_name(issued: Dict[str, str], s: Server, own: str = "") -> str:
@@ -332,7 +348,7 @@ def server_name(issued: Dict[str, str], s: Server, own: str = "") -> str:
 def deliver(s: Server) -> int:
     """Copy <s>'s client configs into devices/<device>/config/. 0, or 1 if any
     file was refused or the server couldn't be read."""
-    issued, own = fetch(s)
+    issued, own, kept = fetch(s)
     anchor(s.name)
     name = server_name(issued, s, own)
     # Another listed server's name (setup --name <its name>): its copies would retire
@@ -345,7 +361,7 @@ def deliver(s: Server) -> int:
                        f"nothing delivered (give {s.name} its own: wgt-ctl {s.name} setup --name <name>; "
                        f"or, if they're one machine, list it once)")
     devices = sorted(set(all_devices()) | {store.device_of(c) for c in issued})
-    actions = refuse_taken(plan(name, issued, local_files(devices), complete=True))
+    actions = refuse_taken(plan(name, issued, local_files(devices), complete=True, kept_keys=kept))
     apply(actions)
     report(s.name, actions)
     same = sum(a.kind == "same" for a in actions)

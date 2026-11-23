@@ -323,7 +323,7 @@ def test_fetch_reads_every_config_by_its_header(store, monkeypatch):
     m = tunnels.MARK
     text = f"{m}dengar.warp.iphone.conf\n{conf('warp.iphone', 'K1')}{m}stray.conf\n[Interface]\n"
     monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, text))
-    assert tunnels.fetch(remote.Server("dengar", "root@h")) == ({"warp.iphone": conf("warp.iphone", "K1")}, "")
+    assert tunnels.fetch(remote.Server("dengar", "root@h")) == ({"warp.iphone": conf("warp.iphone", "K1")}, "", set())
     monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, "SERVER_NAME=dengar2\n" + text))
     assert tunnels.fetch(remote.Server("dengar", "root@h"))[1] == "dengar2"
     # a login script's chatter before it isn't the name
@@ -332,6 +332,36 @@ def test_fetch_reads_every_config_by_its_header(store, monkeypatch):
     monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (255, ""))
     with pytest.raises(WgtError):
         tunnels.fetch(remote.Server("dengar", "root@h"))
+
+
+def test_a_config_without_a_header_keeps_its_copy(store, monkeypatch):
+    # The server still has it (just unnamed): its key is live, so its copy isn't retired.
+    kept = put(store, "iphone", "dengar.iphone.conf", conf("iphone", "K1"))
+    m = tunnels.MARK
+    headerless = conf("iphone", "K1").split("\n", 1)[1]
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, f"{m}dengar.iphone.conf\n{headerless}"))
+    monkeypatch.setattr(remote, "servers", lambda: [remote.Server("dengar", "root@h")])
+    issued, _, keys = tunnels.fetch(remote.Server("dengar", "root@h"))
+    assert issued == {} and keys == {"K1"}
+    tunnels.deliver(remote.Server("dengar", "root@h"))
+    assert kept.read_text() == conf("iphone", "K1")
+    assert not [f for f in os.listdir(kept.parent) if f.endswith(".bak")]
+
+
+def test_the_delivered_copy_wins_over_a_hand_copy_in_another_folder(store):
+    # A hand copy in a folder that sorts first: after a rotate (header match) or a
+    # rename (key match), the copy delivery named is the one kept up to date.
+    hand = put(store, "aaa", "my-copy.conf", conf("phone", "K1"))
+    own = put(store, "phone", "dengar.phone.conf", conf("phone", "K1"))
+    rotated = run(store, {"phone": conf("phone", "K2")})
+    assert ("update", "dengar.phone.conf", "phone") in kinds(rotated)
+    assert own.read_text() == conf("phone", "K2")
+    assert ("retire", "my-copy.conf", "phone") in kinds(rotated) and not hand.exists()
+    hand = put(store, "aaa", "my-copy.conf", conf("phone", "K2"))
+    renamed = run(store, {"tablet": conf("tablet", "K2")})
+    assert ("update", "dengar.phone.conf", "tablet") in kinds(renamed)
+    assert ("duplicate", "my-copy.conf", "tablet") in kinds(renamed)
+    assert own.read_text() == conf("tablet", "K2") and hand.read_text() == conf("phone", "K2")
 
 
 def test_flags_before_the_subcommand_are_read_as_wgt_reads_them():

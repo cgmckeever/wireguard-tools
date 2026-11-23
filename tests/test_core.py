@@ -315,6 +315,13 @@ def test_values_sent_to_devices_can_be_normal(key, value):
     resolve({key: value}, {}, {"WG_SUBNET": "10.1.1.0/24"}).finalize(kernel_ipv6=False)
 
 
+def test_a_bare_ipv6_endpoint_is_the_saved_bracketed_one():
+    # Not a change in setup's review ("re-send every config"): saved, it was bracketed.
+    c = resolve({"ENDPOINT": "2001:db8::1"}, {}, {"WG_SUBNET": "10.1.1.0/24", "ENDPOINT": "[2001:db8::1]"})
+    c.finalize(kernel_ipv6=False)
+    assert c.values["ENDPOINT"] == c.saved["ENDPOINT"] == "[2001:db8::1]"
+
+
 def test_a_terminal_gone_at_a_question_is_no_even_when_enter_means_yes(monkeypatch):
     """Otherwise a lost session renames the host, or brings an old server back."""
     import builtins

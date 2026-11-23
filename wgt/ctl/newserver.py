@@ -47,9 +47,11 @@ def cmd_init(argv: List[str]) -> None:
     out.log(f"Running wgt setup --name {name} on {address}")
     rc, _ = remote.ssh(target, f"{env}{remote.DEF_WGT} setup --name {q(name)} {q(*setup_args)}", tty=True)
     if rc != 0:
+        # With its setup flags: a first setup that stopped may not have saved them.
+        again = f" -- {q(*setup_args)}" if setup_args else ""
         raise WgtError(f"setup did not finish, so it isn't on the list; fix the cause and re-run: "
                        f"wgt-ctl init --address {address} "
-                       f"--name {name} --user {opts['--user']} --branch {opts['--branch']}")
+                       f"--name {name} --user {opts['--user']} --branch {opts['--branch']}{again}")
     if remote.dry_run(setup_args):
         # Nothing was set up: listed, it would take the name a real init needs.
         out.info("dry run: not added to the list (run init again without --dry-run)")

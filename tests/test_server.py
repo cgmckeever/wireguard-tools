@@ -549,6 +549,15 @@ def test_a_terminal_that_goes_away_doesnt_stop_a_command():
     out.error("still here")
 
 
+def test_warp_up_without_its_config_is_a_restart_asked_before_the_write(make_ctx):
+    # Asked after it, a no would leave a re-run an unchanged file and never a restart.
+    from wgt import units
+    missing = str(make_ctx().paths.wg("nowhere.conf"))
+    assert units.restart_due(make_ctx(), "warp", missing, "[Interface]\nMTU = 1280\n")
+    down = make_ctx(answers={"ip link show dev warp": (1, "")})
+    assert not units.restart_due(down, "warp", missing, "[Interface]\nMTU = 1280\n")
+
+
 @pytest.mark.parametrize("endpoint, is_ip", [("1.2.3.4", True), ("[2001:db8::1]", True), ("2001:db8::1", True),
                                              ("cafe.de", False), ("dead.beef", False), ("vpn.example.com", False)])
 def test_restore_only_forgets_an_endpoint_that_is_an_address(endpoint, is_ip):

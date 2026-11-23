@@ -37,8 +37,14 @@ for target in "${targets[@]}"; do
     ssh "$target" bash -s -- "$tmp" <<'REMOTE' || rc=1
 tmp="$1"
 installed=$(dirname "$(dirname "$(readlink -f /usr/local/sbin/wgt)")")
-WGT_SKIP_PREFLIGHT=1 python3 "$installed/bin/wgt" debug >"$tmp/installed.out" 2>&1
-WGT_SKIP_PREFLIGHT=1 python3 "$tmp/bin/wgt" debug >"$tmp/new.out" 2>&1
+WGT_SKIP_PREFLIGHT=1 python3 "$installed/bin/wgt" debug >"$tmp/installed.out" 2>&1; was=$?
+WGT_SKIP_PREFLIGHT=1 python3 "$tmp/bin/wgt" debug >"$tmp/new.out" 2>&1; now=$?
+# Two renders failing alike would diff as "identical", which only a render can mean.
+if [ "$was" -ne 0 ] || [ "$now" -ne 0 ]; then
+    echo "    wgt debug failed (installed: exit $was, this checkout: exit $now):"
+    tail -n 3 "$tmp/installed.out" "$tmp/new.out" | sed 's/^/    /' | cut -c1-160
+    exit 1
+fi
 if diff -u "$tmp/installed.out" "$tmp/new.out" >"$tmp/diff"; then
     echo "    identical ($(grep -c '^===' "$tmp/new.out") pieces, $(wc -l <"$tmp/new.out") lines)"
 else

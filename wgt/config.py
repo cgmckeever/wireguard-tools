@@ -41,6 +41,12 @@ def valid_allowed_ips(value: str) -> bool:
     return True
 
 
+def bracketed(endpoint: str) -> str:
+    """An endpoint as it's saved and written before ":<port>": a bare IPv6 address in
+    brackets, so a flag naming the saved one doesn't read as a change."""
+    return f"[{endpoint}]" if ":" in endpoint and not endpoint.startswith("[") else endpoint
+
+
 def _in_range(value: str, lo: int, hi: int) -> bool:
     """An integer of ASCII digits in [lo, hi]."""
     return store.is_uint(value) and lo <= int(value) <= hi
@@ -106,6 +112,7 @@ class Config:
             raise WgtError(f"bad allowed IPs (comma-separated CIDRs): {v['CLIENT_ALLOWED_IPS']!r}")
         if v["ENDPOINT"] and not _ENDPOINT.fullmatch(v["ENDPOINT"]):
             raise WgtError(f"bad endpoint (an address or hostname, no port; the port is --port): {v['ENDPOINT']!r}")
+        v["ENDPOINT"] = bracketed(v["ENDPOINT"])
         if not _SERVER_NAME.fullmatch(v["SERVER_NAME"]):
             raise WgtError(f"server name must be 1-32 of [A-Za-z0-9_-]: '{v['SERVER_NAME']}'")
         for k in ("WG_IF", "WARP_IF"):

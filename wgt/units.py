@@ -36,10 +36,13 @@ def agree_restart(ctx: Ctx, ifc: str) -> None:
 
 
 def restart_due(ctx: Ctx, ifc: str, path: str, content: str) -> bool:
-    """<ifc> is up and writing <content> to its config <path> changes its settings."""
+    """<ifc> is up and writing <content> to its config <path> changes its settings. Up
+    with no config there, what it runs is unknown: loading this one is a restart too
+    (asked after the write, a no would leave a re-run nothing to compare, and no restart)."""
+    if not live.if_exists(ctx.runner, ifc):
+        return False
     current = ctx.files.read(path)
-    return current is not None and live.if_exists(ctx.runner, ifc) \
-        and store.entries(current) != store.entries(content)
+    return current is None or store.entries(current) != store.entries(content)
 
 
 def start_unit(ctx: Ctx, ifc: str, changed: bool, ask: bool = True, agreed: bool = False) -> None:

@@ -11,7 +11,7 @@ import signal
 import time
 from typing import TYPE_CHECKING, Callable, Iterator, List, Mapping, Optional, Tuple
 
-from . import live, render, store, ui
+from . import config, live, render, store, ui
 from .const import MARKER, SET_UP_KEYS, SETTING_KEYS
 from .errors import WgtError
 from .system import write_private
@@ -173,8 +173,7 @@ def resolve_endpoint(ctx: Ctx) -> str:
         ep = live.trace_field(live.trace(ctx.runner, "-4"), "ip")
         if not ep:
             raise WgtError("could not detect the public IP; wgt setup --endpoint <ip-or-host>")
-    if ":" in ep and not ep.startswith("["):
-        ep = f"[{ep}]"
+    ep = config.bracketed(ep)
     ctx.cfg.values["ENDPOINT"] = ep
     ctx.out.info(f"client endpoint: {ep}:{ctx.cfg.WG_PORT}")
     return ep

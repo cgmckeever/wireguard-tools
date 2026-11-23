@@ -41,12 +41,12 @@ def check_archive(archive: str, paths: Paths) -> List[str]:
 
 
 def _archive_state(archive: str, paths: Paths) -> str:
-    """The archive's wg-tools.state."""
+    """The archive's wg-tools.state (any non-UTF-8 byte kept as it was: restore writes it back)."""
     with tarfile.open(archive, "r:gz") as t:
         for m in t.getmembers():
             if (m.name if m.name.startswith("/") else "/" + m.name) == paths.state:
                 member = t.extractfile(m)
-                return member.read().decode(errors="replace") if member else ""
+                return member.read().decode("utf-8", errors="surrogateescape") if member else ""
     return ""
 
 
@@ -151,17 +151,21 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     ctx.runner.step(f"Restore {what} from {archive}", "wgt rollback --purge")
     ops.confirm(ctx, "Restore from this backup?")
     keep_map = store.read_text(ctx.paths.backup_map)
-    ctx.runner.run(["tar", "-xzpf", archive, "-P", ctx.paths.wg_dir])
+    # Everything but the state, which is written below without the old server's host
+    # facts, firewall note and detected IP (they don't apply here), nor SETUP_DONE (this
+    # server isn't set up until the setup below finishes). Extracted with the rest, a stop
+    # before that one write would leave them here, where neither a re-run of restore nor
+    # the setup it suggests could get past them (and rollback would act on them).
+    ctx.runner.run(["tar", "-xzpf", archive, "-P", f"--exclude={p.state}", ctx.paths.wg_dir])
     if ctx.runner.dry_run:
         ctx.out.info("[dry-run] would then run: wgt setup")
         return
+    state = _archive_state(archive, p)
+    endpoint = ["ENDPOINT"] if _is_ip(store.state_get(state, "ENDPOINT")) else []
+    for key in (*HOST_STATE_KEYS, *SET_UP_KEYS, *endpoint):
+        state = store.state_unset(state, key)
+    write_private(p.state, state)
     ctx.reload()
-    # The old server's host facts, firewall note and detected IP don't apply here.
-    # Nor is this server set up until the setup below finishes. One write: stopped
-    # part way, the archive's SETUP_DONE or DEFAULT_ROUTE would outlive the rest, and
-    # neither a re-run of restore nor the setup it suggests could get past them.
-    endpoint = ["ENDPOINT"] if _is_ip(store.state_get(ctx.snap.state, "ENDPOINT")) else []
-    ops.state_unset(ctx, *HOST_STATE_KEYS, *SET_UP_KEYS, *endpoint)
     rebuild_backup_map(ctx, keep_map, members)
     ctx.out.info("restored; configs: " + " ".join(c.name for c in store.load(ctx.paths).clients))
     if has_warp:

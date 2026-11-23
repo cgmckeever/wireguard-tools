@@ -835,6 +835,34 @@ def test_backup_then_purge_then_restore_brings_the_same_server_back(world, monke
     assert world.problems() == []
 
 
+def test_a_restore_stopped_after_extracting_leaves_none_of_the_old_hosts_state(world, monkeypatch):
+    """The state goes in last, cleaned, in one write: stopped before it, the archive's
+    SETUP_DONE, DEFAULT_ROUTE, PUB_IF and UFW aren't here for rollback or setup to act on."""
+    world.run(["setup"])
+    with open(world.paths.state, "a") as f:
+        f.write("UFW=1\n")
+    world.run(["backup"])
+    archive = next(os.path.join(world.paths.backup_dir, f) for f in os.listdir(world.paths.backup_dir)
+                   if f.endswith(".tar.gz"))
+    kept = os.path.join(world.tmp, "kept.tar.gz")
+    shutil.copy(archive, kept)
+    world.run(["rollback", "--purge"])
+    os.makedirs(world.paths.wg_dir, exist_ok=True)
+
+    class Stopped(Exception):
+        pass
+
+    def stop(path, content, mode):   # the first write after tar extracts, whichever it is
+        raise Stopped
+    monkeypatch.setattr(system, "atomic_write", stop)
+    with pytest.raises(Stopped):
+        world.run(["restore", kept])
+    assert os.path.exists(world.paths.client_db)   # the rest was extracted
+    state = store.read_text(world.paths.state) or ""
+    for gone in ("UFW", "SETUP_DONE", "DEFAULT_ROUTE", "PUB_IF"):
+        assert not store.state_get(state, gone), gone
+
+
 def test_every_firewall_rule_going_missing_is_noticed(world):
     def wanted(ctx):
         return rules.ipt_rules(ctx.cfg, ctx.pub_if, ctx.snap.exits)
