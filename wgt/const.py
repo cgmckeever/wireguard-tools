@@ -114,6 +114,12 @@ WATCHDOGS = (
 )
 ALL_WATCHDOGS = tuple(w.name for w in WATCHDOGS)
 
+
+def error_tag(tag: str) -> str:
+    """The journal tag a watchdog's failed runs log under: its own tag is what it did
+    (the last WARP port change is the WARP watchdog's last entry)."""
+    return f"{tag}-error"
+
 MIB = 1024 * 1024
 KEEP_CHANGES = 5             # newest copies kept per file (plus its original)
 # What setup records about this host (wg-tools.state): restore drops them

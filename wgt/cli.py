@@ -9,7 +9,7 @@ import sys
 from typing import Callable, List, Optional
 
 from . import host, ops, render, rules, store
-from .const import ALL_WATCHDOGS, DEVICE_ADDRESS_FORM, EXIT_WATCHDOG, LOG_TAG, WATCHDOGS
+from .const import ALL_WATCHDOGS, DEVICE_ADDRESS_FORM, EXIT_WATCHDOG, LOG_TAG, WATCHDOGS, error_tag
 from .ctx import Args, Ctx, load, parse, settings_env
 from .errors import WgtError
 from .system import Out, Runner
@@ -97,7 +97,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
     if not store.is_uint(count):
         raise WgtError("usage: wgt log [lines] [--no-follow]")
     matches: List[str] = []
-    for tag in (LOG_TAG, *ALL_WATCHDOGS):
+    for tag in (LOG_TAG, *ALL_WATCHDOGS, *map(error_tag, ALL_WATCHDOGS)):
         matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
     ifcs = [ctx.cfg.WG_IF, ctx.cfg.WARP_IF]
     for e in ctx.snap.exits:
@@ -178,7 +178,7 @@ def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
         return command("watchdog")(ctx, rest) or 0
     except Exception as e:   # a timer job must log, not crash (a bad database line too: `wgt log` shows it)
         from .system import journal
-        journal(Runner(), tag, f"error: {type(e).__name__}: {e}")
+        journal(Runner(), error_tag(tag), f"error: {type(e).__name__}: {e}")
         out.error(f"{type(e).__name__}: {e}")
         return 1
 

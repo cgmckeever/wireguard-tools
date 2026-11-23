@@ -132,7 +132,7 @@ def test_watchdog_error_is_logged_not_raised(make, monkeypatch):
     from wgt import system
     monkeypatch.setattr(system, "journal", lambda runner, tag, msg: logged.append((tag, msg)))
     assert cli.main(["watchdog", "exits"]) == 1
-    assert ("wg-tools-exit-watchdog", "error: ValueError: bad wg output") in logged
+    assert ("wg-tools-exit-watchdog-error", "error: ValueError: bad wg output") in logged
 
 
 @pytest.mark.parametrize("active,px,wx,started,wx_hs,port_tried,want", [
@@ -300,7 +300,19 @@ def test_a_bad_database_reaches_the_watchdogs_log(make, monkeypatch):
     logged = []
     monkeypatch.setattr(system, "journal", lambda runner, tag, msg: logged.append((tag, msg)))
     assert cli.main(["watchdog", "devices"]) == 1
-    assert logged and logged[0][0] == "wg-tools-device-watchdog" and "devices.db" in logged[0][1]
+    assert logged and logged[0][0] == "wg-tools-device-watchdog-error" and "devices.db" in logged[0][1]
+    # Not under the watchdog's own tag: for WARP's, its last entry is "last WARP port change".
+    logged.clear()
+    assert cli.main(["watchdog", "warp"]) == 1
+    assert logged and logged[0][0] == f"{WARP_WATCHDOG}-error"
+
+
+def test_wgt_log_shows_the_watchdogs_errors(make, monkeypatch):
+    ran = []
+    monkeypatch.setattr(os, "execvp", lambda path, cmd: ran.extend(cmd))
+    cli.cmd_log(make({}), [])
+    for w in WATCHDOGS:
+        assert f"SYSLOG_IDENTIFIER={w.name}-error" in ran
 
 
 def test_a_watchdog_run_doesnt_import_the_http_stack():
