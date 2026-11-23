@@ -1052,6 +1052,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/wg-tools.state` | saved settings (including the location), recorded default route |
 | `/etc/wireguard/wg-tools.backups` | each changed file's original, for `rollback` |
 | `/usr/local/bin/wgcf` | the WARP client |
+| `/etc/systemd/networkd.conf.d/99-wg-tools.conf` | keeps systemd-networkd from removing wg0's routing rules and routes when it restarts (an upgrade can restart it; without them `warp.*` and jump configs would leave straight out) |
 | `/etc/sysctl.d/99-wg.conf` | `net.ipv4.ip_forward = 1`, plus IPv6 forwarding (and `accept_ra = 2` on the public interface) when IPv6 is on |
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
 | `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog (runs `wgt watchdog warp` every 30s) |
@@ -1059,7 +1060,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a jump file as given (from anywhere; the file name is historical) and its own WARP account |
 | `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a jump's tunnel and the WARP tunnel inside it |
 | `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | jump watchdog (runs `wgt watchdog exits` every 10s: jumps up on demand) |
-| `/etc/systemd/system/wg-tools-device-watchdog.{service,timer}` | device watchdog (runs `wgt watchdog devices` every 10s: static addresses follow the config in use) |
+| `/etc/systemd/system/wg-tools-device-watchdog.{service,timer}` | device watchdog (runs `wgt watchdog devices` every 10s: static addresses follow the config in use; restarts wg0 if its routing rules have gone, at most every 5 minutes) |
 | `/usr/local/sbin/wgt` | link to the checkout's `bin/wgt` |
 
 Secrets are mode 600 in 700 directories. Before a file is changed (not

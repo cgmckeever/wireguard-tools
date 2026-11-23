@@ -451,6 +451,22 @@ def write_dropin(ctx: Ctx) -> None:
         ctx.runner.run(["systemctl", "daemon-reload"])
 
 
+NETWORKD_CONF = """# Managed by wireguard-tools: wgt rollback removes it.
+# systemd-networkd, when it (re)starts (an upgrade can restart it), removes routing
+# rules and routes it didn't make: wg0's, which send warp.* and jump configs their
+# way and blackhole them when it's down. Without them those configs leave straight out.
+[Network]
+ManageForeignRoutingPolicyRules=no
+ManageForeignRoutes=no
+"""
+
+
+def write_networkd_conf(ctx: Ctx) -> None:
+    """Keep systemd-networkd off wg0's rules and routes (NETWORKD_CONF). Read when networkd
+    starts, so nothing restarts it here: that restart is what this guards against."""
+    ctx.files.write(ctx.paths.networkd_file, 0o644, NETWORKD_CONF)
+
+
 def save_location(ctx: Ctx) -> None:
     """Where this server is, for people (`host:Atlanta` in client lists):
     --location, else looked up once from the public IP (ipinfo.io city),
@@ -583,6 +599,7 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
     save_location(ctx)
     write_sysctl(ctx)
     write_dropin(ctx)
+    write_networkd_conf(ctx)
     # Late: until here a failure (WARP, a checksum) leaves the running wg0 and the
     # databases agreeing about the subnet and settings. The restart is asked first,
     # then a subnet move: a no to either stops before the settings, the server keys
@@ -712,6 +729,8 @@ def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
     """The sysctl file and the forwarding values recorded before setup."""
     r = ctx.runner
     ctx.files.restore_original(ctx.paths.sysctl_file, remove_new=True)
+    ctx.files.restore_original(ctx.paths.networkd_file, remove_new=True)
+    ctx.files.remove_empty_dir(os.path.dirname(ctx.paths.networkd_file))
     fwd, fwd6, ra = (store.state_get(state, k) for k in ("ORIG_IP_FORWARD", "ORIG_IP6_FORWARD", "ORIG_ACCEPT_RA"))
     if fwd:
         r.run(["sysctl", "-q", "-w", f"net.ipv4.ip_forward={fwd}"])

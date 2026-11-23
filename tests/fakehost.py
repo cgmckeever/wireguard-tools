@@ -182,7 +182,7 @@ class Host(FakeRunner):
         if starts and "wg0" not in self.kernel.links:
             self.wg0_up(conf)
         if verb == "is-active":
-            return (0 if "wg0" in self.kernel.links else 3), ""
+            return (0, "active\n") if "wg0" in self.kernel.links else (3, "inactive\n")   # as systemctl prints
         return 0, ""
 
     def conf(self) -> str:

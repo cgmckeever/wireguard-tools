@@ -8,7 +8,15 @@ import os
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
 from . import devices, exits, live, ops, store
-from .const import DEVICE_WATCHDOG, EXIT_HOLD, EXIT_IDLE, EXIT_WATCHDOG, WARP_WATCHDOG, WATCHDOG_STALE
+from .const import (
+    DEVICE_WATCHDOG,
+    EXIT_HOLD,
+    EXIT_IDLE,
+    EXIT_WATCHDOG,
+    RULES_RESTART_GAP,
+    WARP_WATCHDOG,
+    WATCHDOG_STALE,
+)
 from .errors import WgtError
 from .system import journal, read_marker
 
@@ -165,15 +173,40 @@ def _apply(ctx: Ctx, e: store.Exit, action: Optional[str], units: List[str], now
 
 
 def run_devices(ctx: Ctx) -> None:
-    """Point each device's static address at the config it's using. Skips the
-    run while wireguard-tools is changing things (its lock)."""
+    """Point each device's static address at the config it's using, and put back wg0's
+    rules if something removed them. Skips the run while wireguard-tools is changing
+    things (its lock)."""
     if not ops.try_lock(ctx):
         return
     try:
+        restore_wg0_rules(ctx)
         for msg in devices.sync(ctx):
             log_event(ctx, DEVICE_WATCHDOG, msg)
     finally:
         ops.release_lock(ctx)
+
+
+def restore_wg0_rules(ctx: Ctx) -> None:
+    """wg0 running without the rules and routes its PostUp put in (systemd-networkd
+    removes them when it restarts, `ip rule flush`...): warp.* and jump configs would
+    leave straight out, with no blackhole to stop them. Restart wg0 so PostUp puts them
+    back; at most once in RULES_RESTART_GAP, so a rule that won't stay doesn't restart it
+    every run (`wgt test` then shows what's missing)."""
+    from .checks import Tests  # only on this path: the checks module is the biggest import
+    unit = f"wg-quick@{ctx.cfg.WG_IF}"
+    if not ops.is_set_up(ctx) or live.unit_state(ctx.runner, unit)[0] != "active":
+        return   # not set up, or down or starting (its PostUp may be mid-way): nothing to compare
+    missing = Tests(ctx).hooks_missing()
+    if not missing:
+        return
+    now = int(ctx.clock())
+    if now - read_marker(ctx.paths.rules_marker) < RULES_RESTART_GAP:
+        return
+    ctx.files.write_marker(ctx.paths.rules_marker, str(now))
+    shown = "; ".join(missing[:3]) + (f" (+{len(missing) - 3} more)" if len(missing) > 3 else "")
+    ok = ctx.runner.attempt(["systemctl", "restart", unit])
+    log_event(ctx, DEVICE_WATCHDOG, f"{ctx.cfg.WG_IF} was running without its rules ({shown}); "
+              + ("restarted it to put them back" if ok else "restarting it failed"))
 
 
 def runs() -> Dict[str, Callable[[Ctx], None]]:

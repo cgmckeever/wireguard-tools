@@ -65,6 +65,7 @@ LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes
 WARP_WATCHDOG = "wg-tools-warp-watchdog"
 EXIT_WATCHDOG = "wg-tools-exit-watchdog"
 DEVICE_WATCHDOG = "wg-tools-device-watchdog"
+RULES_RESTART_GAP = 300      # seconds between the device watchdog's restarts of wg0 for missing rules
 EXIT_HOLD = 60               # seconds a hold file (jump test) keeps the watchdog off a jump
 # Seconds a jump check gives a just-started jump for its WARP handshake (it returns as
 # soon as there is one; usually 5-10s). Under EXIT_HOLD, so the watchdog stays off
@@ -156,6 +157,7 @@ class Paths:
     wg_dir: str = "/etc/wireguard"
     backup_dir: str = "/var/backups/wireguard-tools"   # mode 700; outside the checkout
     sysctl_file: str = "/etc/sysctl.d/99-wg.conf"
+    networkd_file: str = "/etc/systemd/networkd.conf.d/99-wg-tools.conf"
     systemd_dir: str = "/etc/systemd/system"
     sbin_dir: str = "/usr/local/sbin"
     wgcf_bin: str = "/usr/local/bin/wgcf"
@@ -259,6 +261,11 @@ class Paths:
     def exit_marker(self, code: str) -> str:
         """The exit watchdog's record of when it brought <code> up."""
         return os.path.join(self.run_dir, f"{EXIT_WATCHDOG}.{code}")
+
+    @property
+    def rules_marker(self) -> str:
+        """When the device watchdog last restarted wg0 for its missing rules."""
+        return os.path.join(self.run_dir, f"{DEVICE_WATCHDOG}.rules")
 
     @property
     def warp_marker(self) -> str:

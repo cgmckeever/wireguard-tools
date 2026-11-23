@@ -1315,3 +1315,30 @@ def test_debug_shows_what_setup_wrote(world, capsys):
             written.update({f"{w}.service": p.unit_file(f"{w}.service"), f"{w}.timer": p.unit_file(f"{w}.timer")})
     for piece, path in written.items():
         assert shown[piece] == system.redact(store.read_text(path) or ""), piece
+
+
+def test_wg0_running_without_its_rules_is_restarted_by_the_device_watchdog(world):
+    """systemd-networkd removes rules and routes it didn't make when it restarts (an
+    upgrade restarted it on ig88): warp.* and jump configs then left straight out. The
+    device watchdog restarts wg0 to put them back, once in RULES_RESTART_GAP."""
+    world.run(["setup"])
+    world.run(["watchdog", "devices"])
+    assert not any("restart wg-quick@wg0" in c for c in world.host.calls)   # healthy: left alone
+    world.kernel.rules.clear()   # what networkd's restart did
+    world.run(["watchdog", "devices"])
+    assert "systemctl restart wg-quick@wg0" in world.host.calls
+    assert world.problems() == []
+    world.kernel.rules.clear()   # again at once: not a restart every run
+    world.run(["watchdog", "devices"])
+    assert not any("restart wg-quick@wg0" in c for c in world.host.calls)
+    os.remove(world.paths.rules_marker)
+    world.run(["watchdog", "devices"])
+    assert "systemctl restart wg-quick@wg0" in world.host.calls and world.problems() == []
+
+
+def test_setup_keeps_networkd_off_wg0s_rules_and_rollback_takes_it_back(world):
+    world.run(["setup"])
+    text = store.read_text(world.paths.networkd_file) or ""
+    assert "ManageForeignRoutingPolicyRules=no" in text and "ManageForeignRoutes=no" in text
+    world.run(["rollback"])
+    assert not os.path.exists(world.paths.networkd_file)
