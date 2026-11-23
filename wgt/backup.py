@@ -9,7 +9,7 @@ import os
 import re
 import tarfile
 import time
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 from . import clients, host, ops, store, units
 from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, LEGACY_SETUP_DONE, SET_UP_KEYS, SETUP_DONE, Paths, archive_name
@@ -45,14 +45,22 @@ def check_archive(archive: str, paths: Paths) -> List[str]:
     return members
 
 
-def _archive_state(archive: str, paths: Paths) -> str:
-    """The archive's wg-tools.state (any non-UTF-8 byte kept as it was: restore writes it back)."""
+def _archive_files(archive: str, wanted: Sequence[str]) -> Dict[str, str]:
+    """The text of the archive's files at <wanted> paths, as store.read_text reads one
+    (any non-UTF-8 byte kept as it was); one the archive lacks is left out."""
+    found = {}
     with tarfile.open(archive, "r:gz") as t:
         for m in t.getmembers():
-            if _member_path(m) == paths.state:
+            path = _member_path(m)
+            if path in wanted and m.isfile():
                 member = t.extractfile(m)
-                return member.read().decode("utf-8", errors="surrogateescape") if member else ""
-    return ""
+                found[path] = member.read().decode("utf-8", errors="surrogateescape") if member else ""
+    return found
+
+
+def _archive_state(archive: str, paths: Paths) -> str:
+    """The archive's wg-tools.state (restore writes it back)."""
+    return _archive_files(archive, [paths.state]).get(paths.state, "")
 
 
 def old_name_meanings(state: str) -> bool:
@@ -139,9 +147,12 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     members = check_archive(archive, ctx.paths)
     if ops.is_set_up(ctx):
         raise WgtError("this server is already set up; run 'wgt rollback --purge' first")
-    # tar only adds, so a database the archive lacks would survive and mix with it.
+    # tar only adds, so a database the archive lacks would survive and mix with it. One
+    # just as the archive has it is this restore's own, stopped after extracting: a re-run finishes it.
     p = ctx.paths
-    left = [path for path in (p.client_db, p.exit_db, p.device_db, p.disabled_db) if os.path.exists(path)]
+    dbs = (p.client_db, p.exit_db, p.device_db, p.disabled_db)
+    archived = _archive_files(archive, dbs)
+    left = [path for path in dbs if os.path.exists(path) and store.read_text(path) != archived.get(path)]
     if left:
         raise WgtError(f"{' '.join(left)} would mix with the archive; run 'wgt rollback --purge' first")
     if old_name_meanings(_archive_state(archive, p)) and not ctx.args.old_names:
@@ -161,8 +172,10 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     # facts, firewall note and detected IP (they don't apply here), nor SETUP_DONE (this
     # server isn't set up until the setup below finishes). Extracted with the rest, a stop
     # before that one write would leave them here, where neither a re-run of restore nor
-    # the setup it suggests could get past them (and rollback would act on them).
-    ctx.runner.run(["tar", "-xzpf", archive, "-P", f"--exclude={p.state}", ctx.paths.wg_dir])
+    # the setup it suggests could get past them (and rollback would act on them). Nor the
+    # backup record: this server's own is kept (keep_map), and a re-run must read that one.
+    ctx.runner.run(["tar", "-xzpf", archive, "-P", f"--exclude={p.state}", f"--exclude={p.backup_map}",
+                    ctx.paths.wg_dir])
     if ctx.runner.dry_run:
         ctx.out.info("[dry-run] would then run: wgt setup")
         return

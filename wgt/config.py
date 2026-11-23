@@ -21,6 +21,7 @@ from .const import (
 from .errors import WgtError
 
 FLEET_SUBNETS_ENV = "WGT_FLEET_SUBNETS"   # set by wgt-ctl init: the other servers' subnets, comma-separated
+FLEET_SUBNET_SOURCE = "next free in the fleet"   # WG_SUBNET's source when picked from them
 
 _IFNAME = re.compile(r"[A-Za-z0-9_-]{1,15}")
 _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,32}")
@@ -209,7 +210,7 @@ def resolve(flags: Mapping[str, str], env: Mapping[str, str], saved: Mapping[str
     fleet = [u for u in env.get(FLEET_SUBNETS_ENV, "").split(",") if u.strip()]
     if subnet_defaulted and fleet:
         values["WG_SUBNET"] = net.next_free_subnet(routes, fleet)
-        sources["WG_SUBNET"] = "next free in the fleet"
+        sources["WG_SUBNET"] = FLEET_SUBNET_SOURCE
     elif subnet_defaulted:
         values["WG_SUBNET"] = net.random_subnet(routes)
         sources["WG_SUBNET"] = "random"

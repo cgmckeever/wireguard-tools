@@ -8,6 +8,7 @@ import random
 import re
 from typing import List, Optional
 
+from . import host
 from .errors import WgtError
 
 SUBNET_OCTETS = range(200, 256)   # picked subnets: high in 10.x, away from home and office LANs
@@ -56,7 +57,8 @@ def routed_overlap(subnet: str, routes: str, own_if: str) -> str:
     want = ipaddress.ip_network(subnet)
     for line in routes.splitlines():
         fields = line.split()
-        if not fields or f"dev {own_if}" in line:
+        # The route's own interface, not a substring: wg0's would also skip a wg0b's routes.
+        if not fields or host.route_dev(line) == own_if:
             continue
         try:
             if want.overlaps(ipaddress.ip_network(fields[0], strict=False)):

@@ -156,8 +156,10 @@ def rename_everywhere(args: List[str]) -> int:
     remote.ensure_local()
     entries = read_entries()
     if old in entries and rc == 0 and not remote.dry_run(passed):
-        moved = entries.pop(old)
-        entries.setdefault(new, moved)
+        # <old>'s number goes with it, whatever <new>'s line said (no server that answered
+        # has another number for <new>: a line here is a removed device's). Kept, it would
+        # leave the renamed device unrecorded, and the next add pass the stale number.
+        entries[new] = entries.pop(old)
         write_entries(entries)
     return rc
 

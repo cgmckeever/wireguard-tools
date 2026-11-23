@@ -417,6 +417,21 @@ def _left_behind(ctx: Ctx, name: str) -> bool:
         or ctx.snap.is_disabled(name) or f"\n# {name}\n" in (ctx.files.read(ctx.cfg.wg_conf) or "")
 
 
+def _drop_left_rules(ctx: Ctx, name: str) -> None:
+    """A remove that stopped before wg0.conf was rewritten, then a wg0 restart: its PostUp
+    put the config's rules back (and its peer: _drop_unknown_peers). Nothing else takes
+    them out, and a new config given its address would leave by them."""
+    ip = render.wg_conf_address(ctx.files.read(ctx.cfg.wg_conf) or "", name)
+    if not ip or not ops.wg_up(ctx) or not ctx.cfg.first_host <= net.ip2int(ip) <= ctx.cfg.last_host:
+        return
+    was = store.Client(name, ip, "")
+    table = rules.client_table(ctx.snap, was)
+    # A config at that address now, with the same way out, has these very rules.
+    if any(c.ip == ip and rules.client_table(ctx.snap, c) == table for c in ctx.snap.clients):
+        return
+    ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, was, up=False))
+
+
 def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     """Remove a client: peer (live and wg0.conf), routing rules, keys and config."""
     name = get_name(ctx, words, "remove")
@@ -435,6 +450,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
         ops.remove_client(ctx, name)
     else:
         ctx.out.info(f"finishing an earlier remove of '{name}'")
+        _drop_left_rules(ctx, name)   # before wg0.conf, which still names its address, is rewritten
     if ctx.snap.is_disabled(name):
         ops.set_disabled(ctx, name, False)
     # Before the files go: once they're gone, a re-run finds nothing left to finish.

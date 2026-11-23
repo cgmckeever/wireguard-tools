@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from . import clients, devices, exits, host, live, ops, results, rules, store, ui
+from . import clients, config, devices, exits, host, live, ops, results, rules, store, ui
 from .const import (
     CLIENT_CONFIG_KEYS,
     DEVICE_SERVER,
@@ -36,6 +36,8 @@ def setting_src(ctx: Ctx, key: str, subnet_asked: bool = False) -> str:
         return "entered"
     if ctx.cfg.saved.get(key):
         return "saved"
+    if key == "WG_SUBNET" and src == config.FLEET_SUBNET_SOURCE:
+        return "next free in the fleet (new)"
     if key in ("WG_SUBNET", "WG_SUBNET6"):
         return "random (new)"
     if key == "ENDPOINT":

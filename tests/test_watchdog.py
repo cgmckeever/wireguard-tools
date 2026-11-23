@@ -308,7 +308,7 @@ def test_a_setup_restart_leaves_a_jumps_warp_down_and_gets_the_watchdogs_patienc
     ctx = make({"ip link show dev px-nyc-us": UP, "ip link show dev wx-nyc-us": DOWN,
                 "ip link show dev px-par-fr": DOWN, "ip link show dev wx-par-fr": DOWN,
                 "wg show px-nyc-us latest-handshakes": (0, "K\t0\n")})
-    monkeypatch.setattr(exits, "write_confs", lambda ctx, e: True)
+    monkeypatch.setattr(exits, "write_confs", lambda ctx, e: [e.px, e.wx])
     port = Path(ctx.paths.exit_port_marker("nyc-us"))
     port.write_text("")
     exits.sync(ctx)

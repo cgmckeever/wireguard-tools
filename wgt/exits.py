@@ -80,16 +80,18 @@ def print_list(ctx: Ctx) -> None:
 
 # --- configs, up and down ---
 
-def write_confs(ctx: Ctx, e: store.Exit) -> bool:
-    """Write an exit's two tunnel configs; True if either changed."""
+def write_confs(ctx: Ctx, e: store.Exit) -> List[str]:
+    """Write an exit's two tunnel configs; the interfaces whose settings changed. Both
+    are rendered first: one that can't be (its WARP's endpoint won't resolve) writes
+    neither, so a re-run still finds the other changed and restarts it."""
     px, wx = ctx.paths.px_conf(e.code), ctx.paths.wx_conf(e.code)
     for path in (px, wx):
         ops.ensure_managed(ctx, path)
-    changed = ctx.files.write_config(px, 0o600, jump_tunnel_conf(ctx, e))
+    wanted = [(e.px, px, jump_tunnel_conf(ctx, e))]
     profile = ctx.paths.wgcf_profile(ctx.paths.exit_wgcf_dir(e.code))
     if os.path.isfile(profile):
-        changed |= ctx.files.write_config(wx, 0o600, warp.render_profile(ctx, profile, e))
-    return changed
+        wanted.append((e.wx, wx, warp.render_profile(ctx, profile, e)))
+    return [ifc for ifc, path, text in wanted if ctx.files.write_config(path, 0o600, text)]
 
 
 def jump_tunnel_conf(ctx: Ctx, e: store.Exit) -> str:
@@ -197,22 +199,28 @@ def mark_started(ctx: Ctx, e: store.Exit, now: int) -> None:
     ctx.files.write_marker(ctx.paths.exit_marker(e.code), str(now))
 
 
-def units_running(ctx: Ctx, e: store.Exit, running: bool = True) -> List[str]:
-    """<e>'s wg-quick units whose interface is up (<running>), or isn't."""
-    return [unit for unit, ifc in zip(e.units, (e.px, e.wx)) if live.if_exists(ctx.runner, ifc) == running]
+def units_running(ctx: Ctx, e: store.Exit, running: bool = True, only: Optional[List[str]] = None) -> List[str]:
+    """<e>'s wg-quick units whose interface is up (<running>), or isn't; of the
+    interfaces in <only>, if given."""
+    return [unit for unit, ifc in zip(e.units, (e.px, e.wx))
+            if (only is None or ifc in only) and live.if_exists(ctx.runner, ifc) == running]
 
 
 def sync(ctx: Ctx) -> None:
     """Setup re-run: re-render every exit's configs (MTU, IPv6 may have changed),
     restart the tunnels that are up and changed (a jump's WARP that's down stays
-    down: only WARP-off clients may be on it), and keep the watchdog on."""
+    down: only WARP-off clients may be on it; and they stay on a jump tunnel whose
+    own config didn't change), and keep the watchdog on."""
     if not ctx.snap.exits:
         return
     ctx.out.log("Jumps: " + " ".join(e.code for e in ctx.snap.exits))
     for e in ctx.snap.exits:
-        if not write_confs(ctx, e):
+        try:
+            changed = write_confs(ctx, e)
+        except WgtError as err:   # one jump's (its WARP's endpoint, say) mustn't stop the rest
+            ctx.out.warn(f"jump {e.code}: {err}; its configs are as they were (re-run setup)")
             continue
-        running = units_running(ctx, e)
+        running = units_running(ctx, e, only=changed)
         if not running:
             continue
         if ctx.runner.attempt(["systemctl", "restart", *running]):
@@ -336,13 +344,19 @@ def _wire_live(ctx: Ctx, e: store.Exit) -> None:
 
 
 def _check_new(ctx: Ctx, e: store.Exit) -> None:
-    """Bring the new exit up once and see traffic leave through its WARP."""
+    """Bring the new exit up once and see traffic leave through its WARP. Not with wg0
+    down: its WARP reaches the jump only by wg0's fwmark rule, and without it a trace
+    would pass straight out of this server."""
     ctx.out.log(f"Checking jump '{e.code}'")
-    ok, said = probe(ctx, e)
-    if ok:
-        ctx.out.info(f"jump '{e.code}' works: {said}")
+    if not ops.wg_up(ctx):
+        ctx.out.warn(f"{ctx.cfg.WG_IF} is down, and its routing through the jump with it: not checked "
+                     "(wgt jump test once it's up)")
     else:
-        ctx.out.warn(f"jump '{e.code}' isn't passing traffic yet ({said}); check: wgt jump test")
+        ok, said = probe(ctx, e)
+        if ok:
+            ctx.out.info(f"jump '{e.code}' works: {said}")
+        else:
+            ctx.out.warn(f"jump '{e.code}' isn't passing traffic yet ({said}); check: wgt jump test")
     ctx.out.info(f"it goes down when idle and comes up when a device connects; add one: "
                  f"wgt client add <device> --exit {e.code}")
 
@@ -357,10 +371,8 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     ops.take_lock(ctx)
     e = ctx.snap.exit(code)
     if e is None:
-        wgcf_dir = ctx.paths.exit_wgcf_dir(code)
-        left = [ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.jump_source(code), wgcf_dir,
-                ctx.files.copies_dir(wgcf_dir)]   # what _remove_jump_files deletes, in its order
-        if not any(os.path.exists(path) for path in left):
+        confs, dirs = _jump_files(ctx, code)
+        if not any(os.path.exists(path) for path in confs + dirs):
             raise WgtError(f"no jump '{code}' (see: wgt jump list)")
         ctx.out.info(f"finishing an earlier remove of jump '{code}'")
         _remove_jump_files(ctx, code)
@@ -380,6 +392,15 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     _remove_jump_files(ctx, code)
 
 
+def _jump_files(ctx: Ctx, code: str) -> Tuple[List[str], List[str]]:
+    """What a jump leaves on disk, and _remove_jump_files deletes (cmd_remove finishes
+    a remove while any is left): its configs, then its WARP account's directory and
+    that account's change copies (a rotated account's old keys)."""
+    wgcf_dir = ctx.paths.exit_wgcf_dir(code)
+    return ([ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.jump_source(code)],
+            [wgcf_dir, ctx.files.copies_dir(wgcf_dir)])
+
+
 def _remove_jump_files(ctx: Ctx, code: str) -> None:
     """A jump already out of exits.db: wg0.conf without it, its files and keys,
     and the watchdog if it was the last. Safe to repeat: the watchdog goes first, as
@@ -388,14 +409,14 @@ def _remove_jump_files(ctx: Ctx, code: str) -> None:
     if not ctx.snap.exits:
         units.remove_timer(ctx, EXIT_WATCHDOG)
         ctx.runner.run(["systemctl", "daemon-reload"])
-    for path in (ctx.paths.px_conf(code), ctx.paths.wx_conf(code), ctx.paths.jump_source(code)):
+    confs, (wgcf_dir, copies) = _jump_files(ctx, code)
+    for path in confs:
         ctx.files.forget(path)
-    wgcf_dir = ctx.paths.exit_wgcf_dir(code)
     if os.path.isdir(wgcf_dir):
         for name in os.listdir(wgcf_dir):
             ctx.files.forget(os.path.join(wgcf_dir, name))
     ctx.files.remove_tree(wgcf_dir)
-    ctx.files.remove_tree(ctx.files.copies_dir(wgcf_dir))   # a rotated account's old keys
+    ctx.files.remove_tree(copies)
 
 
 def cmd_test(ctx: Ctx, words: List[str]) -> int:

@@ -115,6 +115,14 @@ def render_wg_conf(cfg: Config, snap: Snapshot, pub_if: str, psk: Callable[[str]
     return text
 
 
+def wg_conf_address(text: str, name: str) -> str:
+    """Config <name>'s IPv4 address as a wg0.conf from render_wg_conf lists it ("" if it
+    doesn't): its peer's AllowedIPs, or its disabled line's."""
+    m = re.search(rf"(?m)^# {re.escape(name)}\n(?:\w+ = .*\n)*?AllowedIPs = ([0-9.]+)/32", text) \
+        or re.search(rf"(?m)^# {re.escape(name)} \(([0-9.]+)\): disabled", text)
+    return m.group(1) if m else ""
+
+
 # --- warp.conf and jumps' wx-<code>.conf ---
 
 def profile_endpoint(profile: str) -> str:
@@ -136,7 +144,9 @@ def render_warp_conf(cfg: Config, profile: str, has_ipv6: bool,
     For a jump's WARP give <table> and <mark>: its routes go to <table>,
     its packets carry <mark> (routed through the jump), and its endpoint is IPv4
     (the jump carries only IPv4 for it). Otherwise the endpoint is made IPv4 only
-    on hosts without IPv6."""
+    on hosts without IPv6. A jump's that won't resolve is an error: kept as a name,
+    wg-quick could resolve it to IPv6, which only the main table routes (the fwmark
+    rule is IPv4), so that WARP would bypass the jump."""
     ep = profile_endpoint(profile)
     if (mark is not None or not has_ipv6) and ep:
         host, _, port = ep.rpartition(":")
@@ -144,6 +154,9 @@ def render_warp_conf(cfg: Config, profile: str, has_ipv6: bool,
             ip4 = resolve4(host)
             if ip4:
                 ep = f"{ip4}:{port}"
+            elif mark is not None:
+                raise WgtError(f"could not resolve {host} to IPv4, which a jump's WARP needs (it reaches "
+                               "WARP through the jump, IPv4 only); check DNS, then retry")
             else:
                 warn(f"could not resolve {host} to IPv4; keeping it")
     if table is not None:

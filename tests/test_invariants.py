@@ -330,6 +330,26 @@ def test_killed_on_a_devices_last_config_a_rerun_keeps_its_number_right(tmp_path
         assert w.problems() == [], f"{argv} killed at step {die_at}"
 
 
+@pytest.mark.parametrize("name", ["mbp-1", "nyc-us.phone", "warp.par-fr.tv"])
+def test_a_remove_killed_then_a_wg0_restart_leaves_none_of_its_rules(tmp_path, monkeypatch, name):
+    """Killed before wg0.conf was rewritten, the config's peer and rules are still in it:
+    a wg0 restart (a reboot) puts them back live, and the re-run takes the rules out too,
+    or a config given that address next would leave by them."""
+    monkeypatch.setattr(system, "atomic_write", _ticking(system.atomic_write))
+    argv = ["client", "remove", name]
+    total = steps_of(tmp_path, monkeypatch, argv)
+    for die_at in range(1, total + 1):
+        w = World(tmp_path / str(die_at), monkeypatch)
+        with pytest.raises(Died):
+            w.run(argv, die_at=die_at)
+        restart = Host(w.kernel, w.paths.wg_dir)
+        restart.wg0_down(w.read_conf())
+        restart.wg0_up(w.read_conf())
+        w.run(argv)
+        assert store.load(w.paths).client(name) is None
+        assert w.problems() == [], f"{argv} killed at step {die_at}"
+
+
 _current: list = []
 
 
@@ -861,6 +881,51 @@ def test_a_restore_stopped_after_extracting_leaves_none_of_the_old_hosts_state(w
     state = store.read_text(world.paths.state) or ""
     for gone in ("UFW", "SETUP_DONE", "DEFAULT_ROUTE", "PUB_IF"):
         assert not store.state_get(state, gone), gone
+
+
+def test_a_restore_stopped_after_extracting_finishes_when_run_again(world, monkeypatch):
+    """Its databases are the archive's: they don't mix with it, so a re-run finishes
+    (one that differs from the archive's still stops it)."""
+    world.run(["setup"])
+    before = store.read_text(world.paths.client_db)
+    world.run(["backup"])
+    archive = next(os.path.join(world.paths.backup_dir, f) for f in os.listdir(world.paths.backup_dir)
+                   if f.endswith(".tar.gz"))
+    kept = os.path.join(world.tmp, "kept.tar.gz")
+    shutil.copy(archive, kept)
+    world.run(["rollback", "--purge"])
+    os.makedirs(world.paths.wg_dir, exist_ok=True)
+
+    class Stopped(Exception):
+        pass
+
+    real_write = system.atomic_write
+
+    def stop(path, content, mode):
+        raise Stopped
+    monkeypatch.setattr(system, "atomic_write", stop)
+    with pytest.raises(Stopped):
+        world.run(["restore", kept])
+    monkeypatch.setattr(system, "atomic_write", real_write)
+    assert not os.path.exists(world.paths.backup_map)   # this server's own record, not the archive's
+
+    class Exec(Exception):
+        pass
+
+    def no_exec(path, args):
+        raise Exec
+    monkeypatch.setattr(os, "execv", no_exec)
+    with pytest.raises(Exec):
+        world.run(["restore", kept])
+    world.run(["setup"])
+    assert ops_is_set_up(world)
+    assert store.read_text(world.paths.client_db) == before
+    assert world.problems() == []
+    with open(world.paths.disabled_db, "a") as f:
+        f.write("mbp-1\n")   # not the archive's: a re-run must still refuse it
+    world.run(["rollback"])
+    with pytest.raises(WgtError, match="would mix with the archive"):
+        world.run(["restore", kept])
 
 
 def test_every_firewall_rule_going_missing_is_noticed(world):
