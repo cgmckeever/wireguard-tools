@@ -57,16 +57,22 @@ Three choices, made once in the settings file:
 - **One command does the work:** `scripts/tpi-ctl.sh`, run on your computer in
   this folder. It ssh-es to the Pi and the VPS and runs `pi.sh` and `vps.sh`
   there. `scripts/tpi-ctl.sh` with no arguments lists its commands.
-- **Markers** say where a step happens: **[Computer]** your machine;
-  **[Pi]** a shell on the Pi; **[VPS]** a root shell on the VPS;
-  **[client]** a device connected to the VPS; **[Browser]** the Cloudflare
-  dashboard; **[Hands]** something physical.
 - **A setting's name stands for its value:** `ssh SSH_LAN` means
   `ssh pi@tunnel-pi.local`.
 - **Every step ends with a Check.** Don't go on until it passes.
-- **Safe to repeat:** every command can run again; files change only when they
+- **Safe to repeat:** every command can run again. Files change only when they
   must, and keys are kept. `TP_DRY_RUN=1 scripts/tpi-ctl.sh <command>` shows
   what would run without changing anything.
+- **Markers** say where a step happens:
+
+| Marker | Where |
+|---|---|
+| **[Computer]** | your machine, in this folder |
+| **[Pi]** | a shell on the Pi |
+| **[VPS]** | a root shell on the VPS |
+| **[client]** | a device connected to the VPS |
+| **[Browser]** | the Cloudflare dashboard |
+| **[Hands]** | something physical: flashing, plugging in, a phone hotspot |
 
 ### For an AI agent following this
 
@@ -402,42 +408,70 @@ All from **[Computer]**, as `scripts/tpi-ctl.sh <command>`:
 | `check` | PASS/FAIL on both ends |
 | `undo [all]` | remove it all (`all`: cloudflared too) |
 
-Environment: `TP_DRY_RUN=1` shows without doing; `TP_YES=1` answers the VPS
-question; `TP_RENEW=1` (with `exit`) makes new jump keys; `TP_CONF` names
-another settings file.
+Environment variables:
+
+| Variable | Does |
+|---|---|
+| `TP_DRY_RUN=1` | shows what would run, and changes nothing |
+| `TP_YES=1` | answers yes to "This changes the VPS ... Continue?" |
+| `TP_RENEW=1` | with `exit`: makes new jump keys |
+| `TP_CONF=<file>` | reads another settings file |
 
 ## How tpi-ctl.sh reaches the machines
 
-**The Pi:** the first way that answers, named on each run: `SSH_LAN`, then
-through the VPS over the link (`ssh -J VPS_SSH <user>@10.99.0.2`), then
-`SSH_CLOUDFLARE`. **The VPS:** `VPS_SSH`, or with `WGT_SERVER` through
-`wgt-ctl`: its server list and host-key checks, and every wgt command as
+**The Pi:** the first way that answers, and each run says which:
+
+1. `SSH_LAN`, on your home network.
+2. Through the VPS over the link: `ssh -J VPS_SSH <user>@10.99.0.2`.
+3. `SSH_CLOUDFLARE`, the emergency door.
+
+**The VPS:** `VPS_SSH`. With `WGT_SERVER`, through `wgt-ctl` instead: its
+server list and host-key checks, and every wgt command as
 `wgt-ctl WGT_SERVER ...`, so configs reach `~/wg-tunnels`. That needs
 `tunnel-pi/` inside the wireguard-tools checkout, next to `bin/wgt-ctl`.
 
-The scripts in `scripts/`: `tpi-ctl.sh` runs on your computer; `pi.sh` and
-`vps.sh` are sent to their machine and run there as root (the top of each says
-how to run it by hand); `tunnel-pi-exit` is installed on the Pi and holds the
-exit's firewall rules. Secrets never go on a command line: the token and Wi-Fi
-password travel inside ssh into root-only files, and the jump file goes from
-the Pi to the VPS through a pipe.
+**The scripts:**
+
+| Script | Runs |
+|---|---|
+| `scripts/tpi-ctl.sh` | on your computer: the one you run |
+| `scripts/pi.sh` | on the Pi, as root, sent by `tpi-ctl.sh` (the top says how to run it by hand) |
+| `scripts/vps.sh` | on the VPS, as root, sent by `tpi-ctl.sh` (likewise) |
+| `scripts/tunnel-pi-exit` | installed on the Pi: the exit's firewall rules |
+
+**Secrets** never go on a command line. The token and the Wi-Fi password
+travel inside ssh into root-only files, and the jump file goes from the Pi to
+the VPS through a pipe.
 
 ## What the scripts change
 
-**On the Pi:** `/etc/wireguard/wgpi.*`, `wgjump*`, `wgjumplan*` (and briefly
-`jump-for-vps*.conf`); `/usr/local/sbin/tunnel-pi-exit`;
-`/etc/sysctl.d/99-tunnel-pi.conf`;
-`/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf`;
-`/etc/NetworkManager/dispatcher.d/90-tunnel-pi`; with `tpi`,
-`/etc/unbound/unbound.conf.d/tunnel-pi.conf`. `base`: automatic updates and
-`RuntimeWatchdogSec=15` in `/etc/systemd/system.conf`; with the door,
-Cloudflare's apt repository, `tunnel-pi-cloudflared.service` and
-`/etc/cloudflared/tunnel-pi.env` (the token, mode 600). `wifi`:
-`/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection` (mode 600).
+**On the Pi:**
 
-**On the VPS:** `/etc/wireguard/wgpi.*` and a ufw rule for `PI_PORT/udp`; with
-`tpi`, `/usr/local/sbin/tunnel-pi-killswitch` and
-`tunnel-pi-killswitch.service`; with `wgt`, wgt's own jumps and client configs.
+| File or setting | When | What it is |
+|---|---|---|
+| `/etc/wireguard/wgpi.*` | `link` | the link to the VPS: config and keys |
+| `/etc/wireguard/wgjump*`, `wgjumplan*` | `wgt` | the jump server(s), config and keys |
+| `/etc/wireguard/jump-for-vps*.conf` | `wgt`, briefly | the jump file for the VPS, deleted once wgt has it |
+| `/usr/local/sbin/tunnel-pi-exit` | `link` | the exit's firewall rules |
+| `/etc/sysctl.d/99-tunnel-pi.conf` | `link` | IP forwarding on |
+| `/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf` | `link` | `wg-quick` keeps retrying at boot |
+| `/etc/NetworkManager/dispatcher.d/90-tunnel-pi` | `link` | moves the exit rules when the network changes |
+| `/etc/unbound/unbound.conf.d/tunnel-pi.conf` | `tpi` | the DNS resolver for Pi-exit clients |
+| `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `base` | the hardware watchdog |
+| `unattended-upgrades` | `base` | automatic security updates |
+| Cloudflare's apt repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` | `base`, with the door | cloudflared and its service |
+| `/etc/cloudflared/tunnel-pi.env` | `base`, with the door | the tunnel token (mode 600) |
+| `/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection` | `wifi add` | a saved Wi-Fi network, with its password (mode 600) |
+
+**On the VPS:**
+
+| File or setting | When | What it is |
+|---|---|---|
+| `/etc/wireguard/wgpi.*` | `link` | the link to the Pi: config and keys (with `tpi`, also the client routing) |
+| a ufw rule for `PI_PORT/udp` | `link`, if ufw is active | lets the Pi dial in |
+| `/usr/local/sbin/tunnel-pi-killswitch`, `/etc/systemd/system/tunnel-pi-killswitch.service` | `tpi` | the kill switch |
+| wgt's own jumps and client configs | `wgt` | made by `wgt jump add` and `wgt client add` |
+
 Nothing changes `WG_IF`'s configuration, existing client configs, or wgt's
 files.
 
