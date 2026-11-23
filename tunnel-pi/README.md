@@ -171,14 +171,15 @@ A marker says where each step runs:
   connects to that server. Follow any rules the person or the project has about
   which servers you may use.
 - **Some steps need a person:** everything marked **[Browser]** or
-  **[Hands]**, and the Cloudflare login in a browser on the first
-  `ssh SSH_CLOUDFLARE`. Stop at each one, say exactly what to do, and wait.
+  **[Hands]**, the Cloudflare login in a browser on the first
+  `ssh SSH_CLOUDFLARE`, and typing a Wi-Fi password at `tp wifi add`'s
+  prompt. Stop at each one, say exactly what to do, and wait.
 - **Settings first.** Fill in `tunnel-pi.conf` with the person, then run
   `scripts/tp config` until it says `settings look complete`.
 - **Dry run first.** `TP_DRY_RUN=1 scripts/tp all` shows every remote step
   without running it.
 - **Keys stay where they are.** Never print or log a `*.key` file, a
-  `PrivateKey` line, a jump file or the Cloudflare token. The scripts never do:
+  `PrivateKey` line, a jump file, the Cloudflare token or a Wi-Fi password. The scripts never do:
   the jump file goes from the Pi to the VPS through a pipe, and the token
   travels in ssh's input into a file only root can read.
 - **A FAIL means stop.** Report the command, its output and the matching
@@ -190,10 +191,11 @@ A marker says where each step runs:
 
 ## 1.1 Flash the Pi **[Hands]**
 
-Use Raspberry Pi Imager to write **Raspberry Pi OS Lite (64-bit)**. In its
-settings, set the hostname and user (they make up `SSH_LAN`), and turn on
-**SSH with your public key only**, with passwords off. Boot the Pi on your
-home network, on ethernet.
+Use Raspberry Pi Imager to write **Raspberry Pi OS Lite (64-bit)**, Bookworm
+or later (its NetworkManager is what lets the Pi switch networks on its own).
+In its settings, set the hostname and user (they make up `SSH_LAN`), and turn
+on **SSH with your public key only**, with passwords off. Skip Wi-Fi there:
+`tp wifi` handles it (3.3). Boot the Pi on your home network, on ethernet.
 
 **Check [Computer]:** `ssh SSH_LAN true` succeeds without a password prompt.
 
@@ -366,12 +368,12 @@ don't control, with no open ports. Any of these works:
 - a travel router joined to the hotspot, with the Pi's ethernet plugged into
   it (closest to the friend's setup);
 - a USB-to-ethernet adapter tethered to the phone;
-- the hotspot's Wi-Fi, set up on the Pi with `sudo nmtui`. **Remove it
-  afterwards** (also with `nmtui`), so that at the friend's the Pi uses
-  ethernet only.
+- the hotspot's Wi-Fi: while the Pi is still on ethernet, run
+  `scripts/tp wifi add "<hotspot name>"`, then unplug the ethernet. 3.3 removes
+  it again.
 
-Reboot the Pi after the move, so the exit rules pick up the new network. Keep
-your computer and the client on a **different** network from the hotspot. The
+No reboot is needed: when the Pi's network changes, the exit rules follow it
+on their own (a NetworkManager hook that `tp link` installs). Keep your computer and the client on a **different** network from the hotspot. The
 "Pi's public IP" below is the hotspot's: `tp check` prints it.
 
 | # | Test | Pass |
@@ -395,7 +397,30 @@ Unplug the Pi and plug it back in, as will happen at the friend's.
 `scripts/tp check` passes and test 2 passes again. A Pi that passes this is
 ready: drop-off is the same power-up on a different network.
 
-## 3.3 Harden
+## 3.3 Ethernet or Wi-Fi at the friend's **[Computer]**
+
+The Pi uses whatever network it has: ethernet when it's plugged in, else any
+saved Wi-Fi in range. Decide what it should have at the friend's, and set it
+now, while it's still with you:
+
+```sh
+scripts/tp wifi                              # the saved Wi-Fi networks, and the uplink now
+scripts/tp wifi remove all                   # ethernet only (the usual choice)
+scripts/tp wifi add "<friend's network>"     # or: their Wi-Fi too (asks for the password)
+```
+
+- **Ethernet only** is the most reliable, and the friend configures nothing.
+  `remove all` also clears a Wi-Fi network set in Raspberry Pi Imager and the
+  hotspot from 3.1. It won't remove the network the Pi is using right now:
+  plug in ethernet first.
+- **The friend's Wi-Fi** needs their password, and works when a cable can't
+  reach. With both, ethernet wins whenever it's plugged in, and the Pi moves
+  between them on its own.
+
+**Check:** `scripts/tp check` shows `INFO  uplink: eth0. Saved Wi-Fi: ...`
+with what you expect.
+
+## 3.4 Harden
 
 - **The SD card:** power cuts wear it out. The best fix is an SSD (USB boot).
   With an SD card, `sudo raspi-config` → Performance → Overlay file system
@@ -406,9 +431,10 @@ ready: drop-off is the same power-up on a different network.
   security fixes while the file system is writable.
 - After any change here, repeat 3.2.
 
-## 3.4 Drop-off **[Hands]**
+## 3.5 Drop-off **[Hands]**
 
-The friend plugs in ethernet and power. That's all.
+The friend plugs in ethernet and power (or just power, with their Wi-Fi saved
+in 3.3). That's all.
 
 **Check [Computer], within a few minutes:** `scripts/tp check` passes and
 shows the friend's IP, and a Pi-exit client's `curl https://ifconfig.me` shows
@@ -462,16 +488,19 @@ longer shows the code(s), and the clients are back on their usual routes.
 | `tpi`: sites load but names don't resolve | **[Pi]** `systemctl status unbound`. **[VPS]** `iptables -t nat -L PREROUTING -v` |
 | Some sites hang, usually large pages | MTU. wgt's client configs use 1280, which fits through both tunnels. A config with a larger `MTU` needs lowering |
 | A client shows the VPS's IP | `tpi`: is its address in `CLIENT_IPS`? `systemctl status tunnel-pi-killswitch`. `wgt`: is the config named `<code>.<device>`? |
-| Traffic stops after the Pi moves between networks | the exit rules follow the network the interface started on: reboot the Pi |
+| Traffic stops after the Pi changes networks | the exit rules should follow on their own: **[Pi]** `journalctl -t tunnel-pi-exit -n 20` shows each move. If nothing moved, reboot the Pi |
 
 ## What the scripts change
 
 **On the Pi:** `/etc/wireguard/wgpi.*`, `wgjump*` and `wgjumplan*`, and
 briefly `jump-for-vps*.conf`. Also `/usr/local/sbin/tunnel-pi-exit`,
 `/etc/sysctl.d/99-tunnel-pi.conf`,
-`/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf`, and with
-`EXIT=tpi` `/etc/unbound/unbound.conf.d/tunnel-pi.conf`. `tp base` turns on
-automatic updates and sets `RuntimeWatchdogSec=15` in
+`/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf`,
+`/etc/NetworkManager/dispatcher.d/90-tunnel-pi` (moves the exit rules when the
+network changes), and with `EXIT=tpi` `/etc/unbound/unbound.conf.d/tunnel-pi.conf`.
+`tp wifi add` writes `/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection`
+(mode 600, with the password), and `tp wifi remove` deletes Wi-Fi connections.
+`tp base` turns on automatic updates and sets `RuntimeWatchdogSec=15` in
 `/etc/systemd/system.conf`. With `SSH_CLOUDFLARE` it also adds Cloudflare's apt
 repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` and
 `/etc/cloudflared/tunnel-pi.env` (the token, mode 600).

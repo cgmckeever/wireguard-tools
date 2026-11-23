@@ -15,6 +15,9 @@
 #   jump-done isolated|lan   delete the jump file once the VPS has it
 #   dns                  EXIT=tpi: the DNS resolver for Pi-exit clients
 #   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2.3)
+#   wifi-list            the saved Wi-Fi networks, and which one is in use
+#   wifi-add             save the Wi-Fi network WIFI_SSID (password WIFI_PSK; empty: open)
+#   wifi-remove          remove the saved Wi-Fi network WIFI_SSID (all: every one)
 #   check                PASS/FAIL for everything set up so far
 #   undo [all]           remove the WireGuard parts (all: cloudflared too)
 #
@@ -25,7 +28,7 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
-    : "${EXIT:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}"
+    : "${EXIT:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
@@ -35,6 +38,9 @@ main() {
         jump-done) jump_vars "${1:-}"; rm -f "/etc/wireguard/$JFILE"; log "deleted $JFILE" ;;
         dns) do_dns ;;
         lan-mode) do_lan_mode "${1:-}" "${2:-}" ;;
+        wifi-list) do_wifi_list ;;
+        wifi-add) do_wifi_add ;;
+        wifi-remove) do_wifi_remove ;;
         check) do_check ;;
         undo) do_undo "${1:-}" ;;
         *) die "unknown step '$step' (see the top of pi.sh)" ;;
@@ -43,6 +49,8 @@ main() {
 
 WG=/etc/wireguard
 EXIT_SCRIPT=/usr/local/sbin/tunnel-pi-exit
+DISPATCHER=/etc/NetworkManager/dispatcher.d/90-tunnel-pi
+NM_CONNS=/etc/NetworkManager/system-connections
 
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'pi.sh: %s\n' "$*" >&2; exit 1; }
@@ -145,6 +153,17 @@ Restart=on-failure
 RestartSec=30
 EOF
     systemctl daemon-reload
+    # When a network comes or goes (ethernet unplugged, Wi-Fi joined), move the exit
+    # rules to the new uplink, so no reboot is needed.
+    if [ -d "${DISPATCHER%/*}" ]; then
+        put 755 "$DISPATCHER" <<'EOF'
+#!/bin/sh
+# tunnel-pi: when a network comes or goes, move the exit rules to the current uplink.
+case "$2" in up|down|dhcp4-change) /usr/local/sbin/tunnel-pi-exit refresh 2>&1 | logger -t tunnel-pi-exit ;; esac
+EOF
+    else
+        log "no NetworkManager: after the Pi changes networks, reboot it so the exit follows"
+    fi
     echo "PUBKEY=$(keypair wgpi)"
     if [ -z "$VPS_PUBKEY" ]; then
         log "keys ready; wgpi is written once VPS_PUBKEY is known (tp link does this)"
@@ -259,6 +278,64 @@ do_lan_mode() {
     journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-pi-exit:' | tail -n 1 >&2 || true
 }
 
+need_nm() { command -v nmcli >/dev/null || die "Wi-Fi needs NetworkManager (Raspberry Pi OS Bookworm or later)"; }
+uplink() { "$EXIT_SCRIPT" uplink 2>/dev/null || echo none; }
+
+# Saved Wi-Fi connections, one per line: <name>:<device it's on, or empty>
+wifi_conns() { nmcli -t -f NAME,TYPE,DEVICE connection show | awk -F: '$2 == "802-11-wireless" {print $1 ":" $3}'; }
+
+do_wifi_list() {
+    need_nm
+    up=$(uplink)
+    printf 'uplink now: %s\n' "$up"
+    list=$(wifi_conns)
+    if [ -z "$list" ]; then echo "saved Wi-Fi: none (the Pi uses ethernet only)"; return 0; fi
+    echo "saved Wi-Fi (the Pi joins any of these in range; ethernet wins when both work):"
+    printf '%s\n' "$list" | while IFS=: read -r n d; do
+        if [ -z "$d" ]; then echo "  $n"; elif [ "$d" = "$up" ]; then echo "  $n  (connected: the uplink)"; else echo "  $n  (connected)"; fi
+    done
+}
+
+do_wifi_add() {
+    need_nm; need WIFI_SSID
+    case "$WIFI_SSID" in *"
+"*) die "a network name can't hold a line break" ;; esac
+    name=$(printf '%s' "$WIFI_SSID" | tr -c 'A-Za-z0-9_-' _)
+    # A keyfile NetworkManager reads (root-only, mode 600): the password never goes on
+    # a command line. route-metric 600 keeps ethernet (100) first when both work.
+    {
+        printf '[connection]\nid=%s\ntype=wifi\nautoconnect=true\n\n[wifi]\nmode=infrastructure\nssid=%s\n\n' "$WIFI_SSID" "$WIFI_SSID"
+        [ -z "$WIFI_PSK" ] || printf '[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n' "$WIFI_PSK"
+        printf '[ipv4]\nmethod=auto\nroute-metric=600\n\n[ipv6]\nmethod=auto\n'
+    } | put 600 "$NM_CONNS/tunnel-pi-$name.nmconnection"
+    WIFI_PSK=""
+    nmcli connection reload
+    log "saved Wi-Fi '$WIFI_SSID': the Pi joins it when it's in range (ethernet still wins when both work)"
+}
+
+do_wifi_remove() {
+    need_nm; need WIFI_SSID
+    up=$(uplink) list=$(wifi_conns) found=""
+    # First make sure none of them is the connection the Pi is using right now.
+    while IFS=: read -r n d; do
+        [ -n "$n" ] || continue
+        [ "$WIFI_SSID" = all ] || [ "$n" = "$WIFI_SSID" ] || continue
+        found=1
+        [ -z "$d" ] || [ "$d" != "$up" ] || die "'$n' is the Pi's uplink right now: plug in ethernet first, then run this again"
+    done <<EOF
+$list
+EOF
+    [ -n "$found" ] || { log "no saved Wi-Fi named '$WIFI_SSID' (tp wifi lists them)"; return 0; }
+    while IFS=: read -r n d; do
+        [ -n "$n" ] || continue
+        [ "$WIFI_SSID" = all ] || [ "$n" = "$WIFI_SSID" ] || continue
+        nmcli connection delete id "$n" >/dev/null
+        log "removed Wi-Fi '$n'"
+    done <<EOF
+$list
+EOF
+}
+
 FAILED=0
 pass() { printf 'PASS  %s\n' "$*"; }
 fail() { printf 'FAIL  %s\n' "$*"; FAILED=1; }
@@ -297,6 +374,10 @@ do_check() {
         check "wgpi runs the exit rules ($(current_mode wgpi))" "grep -q '^PostUp = $EXIT_SCRIPT up' $WG/wgpi.conf"
         check "unbound answers on 10.99.0.2" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -q 10.99.0.2"
     fi
+    if command -v nmcli >/dev/null; then
+        wifi=$(wifi_conns | cut -d: -f1 | paste -sd, - | sed 's/,/, /g')
+        printf 'INFO  uplink: %s. Saved Wi-Fi: %s\n' "$(uplink)" "${wifi:-none (ethernet only)}"
+    fi
     ip=$(curl -s -m 10 https://ifconfig.me || true)
     printf 'INFO  this network'"'"'s public IP: %s\n' "${ip:-unknown}"
     return "$FAILED"
@@ -308,7 +389,7 @@ do_undo() {
     done
     rm -f "$WG"/wgpi.* "$WG"/wgjump* "$WG"/jump-for-vps*.conf "$EXIT_SCRIPT" \
           /etc/unbound/unbound.conf.d/tunnel-pi.conf /etc/sysctl.d/99-tunnel-pi.conf \
-          /etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf
+          /etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf "$DISPATCHER"
     systemctl restart unbound 2>/dev/null || true
     if [ "${1:-}" = all ]; then
         systemctl disable -q --now tunnel-pi-cloudflared.service 2>/dev/null || true
