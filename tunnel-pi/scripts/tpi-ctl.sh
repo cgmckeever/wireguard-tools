@@ -1,20 +1,22 @@
 #!/bin/sh
-# tpi-ctl.sh: set up tunnel-pi from your computer (macOS or Linux). Reads ../tunnel-pi.conf (or $TP_CONF)
-# and runs pi.sh on the Pi and vps.sh on the VPS over ssh.
+# tpi-ctl.sh: set up tunnel-pi from your computer (macOS or Linux). Reads the Pi's
+# settings from ../configs/<pi>.conf (or $TP_CONF) and runs pi.sh on the Pi and
+# vps.sh on the VPS over ssh. <pi> can be left out while configs/ holds only one.
 #
-#   tpi-ctl.sh config              show the settings and check they're filled in
-#   tpi-ctl.sh ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
-#   tpi-ctl.sh base                1.4, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
-#   tpi-ctl.sh link                2.1: the wgpi link (Pi and VPS), keys exchanged for you
-#   tpi-ctl.sh exit                2.1, by TPI_ROUTING: tpi's DNS resolver, or the wgt jump(s)
-#   tpi-ctl.sh client <device> [lan]   2.2, TPI_ROUTING=wgt: a config for <device> through the Pi (lan: the LAN jump)
-#   tpi-ctl.sh lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpi or wgjump)
-#   tpi-ctl.sh wifi [list]         the Pi's saved Wi-Fi networks, and its uplink now
-#   tpi-ctl.sh wifi add <name>     save a Wi-Fi network on the Pi (asks for the password)
-#   tpi-ctl.sh wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
-#   tpi-ctl.sh check               PASS/FAIL on the Pi and the VPS
-#   tpi-ctl.sh all                 link, exit, check (after base)
-#   tpi-ctl.sh undo [all]          remove it from the VPS and the Pi (all: cloudflared too)
+#   tpi-ctl.sh [<pi>] config              show the settings and check they're filled in
+#   tpi-ctl.sh [<pi>] ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
+#   tpi-ctl.sh [<pi>] base                1.4, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
+#   tpi-ctl.sh [<pi>] link                2.1: the wgpi link (Pi and VPS), keys exchanged for you
+#   tpi-ctl.sh [<pi>] exit                2.1, by TPI_ROUTING: tpi's DNS resolver, or the wgt jump(s)
+#   tpi-ctl.sh [<pi>] client <device> [lan]   2.2, TPI_ROUTING=wgt: a config for <device> through the Pi (lan: the LAN jump)
+#   tpi-ctl.sh [<pi>] lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpi or wgjump)
+#   tpi-ctl.sh [<pi>] wifi [list]         the Pi's saved Wi-Fi networks, and its uplink now
+#   tpi-ctl.sh [<pi>] wifi add <name>     save a Wi-Fi network on the Pi (asks for the password)
+#   tpi-ctl.sh [<pi>] wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
+#   tpi-ctl.sh [<pi>] check               PASS/FAIL on the Pi and the VPS
+#   tpi-ctl.sh [<pi>] ssh [<command>]     a shell (or a command) on the Pi, the first way that answers
+#   tpi-ctl.sh [<pi>] all                 link, exit, check (after base)
+#   tpi-ctl.sh [<pi>] undo [all]          remove it from the VPS and the Pi (all: cloudflared too)
 #
 # tpi-ctl.sh reaches the Pi the first way that answers: SSH_LAN (at home), then through
 # the VPS over the link, then SSH_CLOUDFLARE (Cloudflare, the emergency door for
@@ -24,16 +26,39 @@
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-CONF="${TP_CONF:-$HERE/../tunnel-pi.conf}"
+CONFIGS=$(cd "$HERE/../configs" && pwd)
 
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'tpi-ctl.sh: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,23s/^# \{0,1\}//p' "$0"; }
+usage() { sed -n '2,26s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (cp configs/pi.conf.example configs/<name>.conf)')"; }
+
+COMMANDS="config ssh-config base link exit client lan-mode wifi check ssh all undo"
+is_command() { case " $COMMANDS " in *" $1 "*) return 0 ;; esac; return 1; }
+# pis: the configured Pis, one name per line (configs/<name>.conf).
+pis() { for f in "$CONFIGS"/*.conf; do [ -e "$f" ] && basename "$f" .conf; done; return 0; }
 
 case "${1:-}" in ''|-h|--help|help) usage; exit 0 ;; esac
-[ -r "$CONF" ] || die "no settings at $CONF: cp tunnel-pi.conf.example tunnel-pi.conf, fill it in"
+# Which Pi: TP_CONF, else a first word that isn't a command, else the only one there is.
+if [ -n "${TP_CONF:-}" ]; then
+    CONF="$TP_CONF"
+elif ! is_command "$1"; then
+    CONF="$CONFIGS/$1.conf"
+    [ -r "$CONF" ] || die "no Pi '$1': configs/$1.conf doesn't exist (configured: $(pis | tr '\n' ' '))"
+    shift
+else
+    case "$(pis | wc -l | tr -d ' ')" in
+        0) die "no settings yet: cp configs/pi.conf.example configs/<name>.conf, and fill it in" ;;
+        1) CONF="$CONFIGS/$(pis).conf" ;;
+        *) die "which Pi? tpi-ctl.sh <pi> $1 (configured: $(pis | tr '\n' ' '))" ;;
+    esac
+fi
+PI_NAME=$(basename "$CONF" .conf)
 # shellcheck disable=SC1090
 . "$CONF"
+: "${TPI_LINK:=}" "${PI_PORT:=}"
+# shellcheck source=ids.sh
+. "$HERE/ids.sh"
+link_ids
 : "${SSH_LAN:=}" "${SSH_CLOUDFLARE:=}" "${CF_TOKEN_FILE:=}" "${WGT_SERVER:=}" "${VPS_SSH:=}"
 : "${VPS_HOST:=}" "${PI_PORT:=}" "${TPI_ROUTING:=tpi}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}"
 : "${WG_IF:=wg0}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
@@ -61,7 +86,7 @@ q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 # The settings pi.sh and vps.sh read, as sh assignments (sent ahead of the script).
 vars() {
-    for v in VPS_HOST PI_PORT TPI_ROUTING WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS CLIENT_IP6S WG_SUBNET \
+    for v in PI_NAME TPI_LINK VPS_HOST PI_PORT TPI_ROUTING WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS CLIENT_IP6S WG_SUBNET \
              SSH_CLOUDFLARE PI_PUBKEY VPS_PUBKEY CF_TOKEN WIFI_SSID WIFI_PSK; do
         eval "val=\${$v}"
         printf '%s=%s\n' "$v" "$(q "$val")"
@@ -78,8 +103,10 @@ pick_pi() {
     if [ -n "$DRY" ]; then PI="$SSH_LAN" PI_VIA="SSH_LAN (dry run: not tried)"
     elif probe "$SSH_LAN"; then
         PI="$SSH_LAN" PI_VIA="SSH_LAN"
-    elif [ -z "$SSH_CLOUDFLARE" ] || probe -o StrictHostKeyChecking=accept-new -J "$VPS_SSH" "$PI_USER@10.99.0.2"; then
-        PI="$PI_USER@10.99.0.2" PI_HOP="$VPS_SSH" PI_VIA="the link, through $VPS_SSH"
+    elif [ -z "$PI_LINK" ] && [ -z "$SSH_CLOUDFLARE" ]; then
+        die "can't reach the Pi: SSH_LAN ($SSH_LAN) didn't answer, and there's no link yet"
+    elif [ -n "$PI_LINK" ] && { [ -z "$SSH_CLOUDFLARE" ] || probe -o StrictHostKeyChecking=accept-new -J "$VPS_SSH" "$PI_USER@$PI_LINK"; }; then
+        PI="$PI_USER@$PI_LINK" PI_HOP="$VPS_SSH" PI_VIA="the link, through $VPS_SSH"
     else
         PI="$SSH_CLOUDFLARE" PI_VIA="SSH_CLOUDFLARE: Cloudflare, the emergency door (SSH_LAN and the link didn't answer)"
     fi
@@ -101,7 +128,7 @@ name() { if [ "$1" = vps ]; then echo "$VPS_SSH"; else echo "$PI"; fi; }
 run() {
     who="$1" script="$2"; shift 2
     if [ -n "$DRY" ]; then log "[dry-run] on $(name "$who"): $script $*"; return 0; fi
-    { vars; cat "$HERE/$script"; } | to "$who" \
+    { vars; cat "$HERE/ids.sh" "$HERE/$script"; } | to "$who" \
         "if [ \"\$(id -u)\" = 0 ]; then sh -s -- $*; else sudo sh -s -- $*; fi"
 }
 
@@ -141,12 +168,13 @@ pubkey_from() { sed -n 's/^PUBKEY=//p' | tail -n 1; }
 
 cmd_config() {
     printf '%s\n' "settings: $CONF"
-    for v in SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE WGT_SERVER VPS_SSH VPS_HOST PI_PORT TPI_ROUTING \
+    for v in TPI_LINK SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE WGT_SERVER VPS_SSH VPS_HOST PI_PORT TPI_ROUTING \
              CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET JUMP_CODE JUMP_LABEL JUMP_LAN_CODE JUMP_LAN_LABEL; do
         eval "val=\${$v}"
         printf '  %-15s %s\n' "$v" "${val:-(empty)}"
     done
-    require SSH_LAN VPS_SSH VPS_HOST PI_PORT
+    require SSH_LAN VPS_SSH VPS_HOST
+    case "$PI_PORT" in *[!0-9]*) die "PI_PORT must be a number, or empty (link picks one)" ;; esac
     case "$TPI_ROUTING" in
         wgt)  require JUMP_CODE JUMP_LABEL
               case "$JUMP_CODE" in *[!a-z0-9-]*) die "JUMP_CODE: only a-z, 0-9 and -" ;; esac ;;
@@ -159,7 +187,37 @@ cmd_config() {
     else
         log "note: no SSH_CLOUDFLARE, so no emergency door: if the link is down after drop-off, the friend power-cycles the Pi"
     fi
+    others
     log "settings look complete"
+}
+
+# others: refuse what another Pi on the same VPS already uses (TPI_LINK, PI_PORT,
+# a jump code, a client). The VPS checks again when link runs.
+others() {
+    for f in "$CONFIGS"/*.conf; do
+        [ -e "$f" ] && [ "$f" != "$CONF" ] || continue
+        o=$(basename "$f" .conf)
+        # shellcheck disable=SC1090,SC2030
+        set -- $( (TPI_LINK="" PI_PORT="" WGT_SERVER="" VPS_SSH=""
+                  . "$f"; printf '%s %s %s %s' "${TPI_LINK:--}" "${PI_PORT:--}" "${WGT_SERVER:--}" "${VPS_SSH:--}") )
+        same_vps=""
+        if [ -n "$WGT_SERVER" ] && [ "$3" = "$WGT_SERVER" ]; then same_vps=1; fi
+        [ "$4" != "$VPS_SSH" ] || same_vps=1
+        [ -n "$same_vps" ] || continue
+        [ -z "$TPI_LINK" ] || [ "$1" != "$TPI_LINK" ] || die "Pi '$o' on the same VPS also has TPI_LINK $TPI_LINK: empty it, and link picks a free one"
+        [ -z "$PI_PORT" ] || [ "$2" != "$PI_PORT" ] || die "Pi '$o' on the same VPS also uses PI_PORT $PI_PORT: empty it, and link picks a free one"
+        # By routing: wgt's jump codes, or tpi's client addresses, each belong to one Pi.
+        if [ "$TPI_ROUTING" = wgt ]; then mine="$JUMP_CODE $JUMP_LAN_CODE"
+            theirs=$( (TPI_ROUTING=tpi JUMP_CODE="" JUMP_LAN_CODE=""; . "$f"; [ "$TPI_ROUTING" != wgt ] || echo "$JUMP_CODE $JUMP_LAN_CODE") )
+        else mine="$CLIENT_IPS"
+            theirs=$( (TPI_ROUTING=tpi CLIENT_IPS=""; . "$f"; [ "$TPI_ROUTING" != tpi ] || echo "$CLIENT_IPS") )
+        fi
+        for x in $mine; do
+            for y in $theirs; do
+                [ "$x" != "$y" ] || die "Pi '$o' on the same VPS also uses $x: a jump code or client goes to one Pi"
+            done
+        done
+    done
 }
 
 cmd_ssh_config() {
@@ -193,17 +251,34 @@ install_exit_script() {
     to pi "$AS_ROOT install -m 755 /dev/stdin /usr/local/sbin/tunnel-pi-exit" < "$HERE/tunnel-pi-exit"
 }
 
+# save <NAME> <value>: set NAME="value" in this Pi's settings file (replacing its
+# line, or adding one), and say so.
+save() {
+    tmp=$(mktemp)
+    awk -v k="$1" -v line="$1=\"$2\"" 'index($0, k "=") == 1 && !done {print line; done = 1; next} {print}
+        END {if (!done) print line}' "$CONF" > "$tmp"
+    cat "$tmp" > "$CONF"; rm -f "$tmp"
+    log "saved $1=\"$2\" in $CONF"
+}
+
 cmd_link() {
     cmd_config >/dev/null
     install_exit_script
     log "Pi: WireGuard and its key"
     PI_PUBKEY=$(run pi pi.sh link | pubkey_from)
     [ -n "$PI_PUBKEY" ] || [ -n "$DRY" ] || die "the Pi didn't report its public key"
-    confirm_vps "a wgpi link$( [ "$TPI_ROUTING" = tpi ] && echo ", routing and a kill switch for $CLIENT_IPS")"
-    log "VPS: the wgpi link"
-    VPS_PUBKEY=$(run vps vps.sh link | pubkey_from)
+    confirm_vps "the link $LINK_IF$( [ "$TPI_ROUTING" = tpi ] && echo ", routing and a kill switch for $CLIENT_IPS")"
+    log "VPS: the link $LINK_IF"
+    out=$(run vps vps.sh link)
+    VPS_PUBKEY=$(printf '%s\n' "$out" | pubkey_from)
     [ -n "$VPS_PUBKEY" ] || [ -n "$DRY" ] || die "the VPS didn't report its public key"
     [ -n "$VPS_PUBKEY" ] || VPS_PUBKEY=dry-run
+    # What the VPS picked for an empty TPI_LINK or PI_PORT: kept in the settings for good.
+    picked=$(printf '%s\n' "$out" | sed -n 's/^LINK=//p' | tail -n 1)
+    if [ -n "$picked" ] && [ "$picked" != "$TPI_LINK" ]; then TPI_LINK="$picked"; save TPI_LINK "$TPI_LINK"; link_ids; fi
+    picked=$(printf '%s\n' "$out" | sed -n 's/^PORT=//p' | tail -n 1)
+    if [ -n "$picked" ] && [ "$picked" != "$PI_PORT" ]; then PI_PORT="$picked"; save PI_PORT "$PI_PORT"; fi
+    if [ -n "$DRY" ] && [ -z "$TPI_LINK" ]; then TPI_LINK="10.99.0.0/30"; link_ids; log "[dry-run] the VPS would pick TPI_LINK (and PI_PORT if empty)"; fi
     log "Pi: the wgpi link"
     run pi pi.sh link >/dev/null
     log "waiting for the first handshake"
@@ -301,6 +376,12 @@ cmd_wifi() {
     esac
 }
 
+# cmd_ssh [<command>]: a shell on the Pi (or one command), the way pick_pi found.
+cmd_ssh() {
+    if [ -n "$PI_HOP" ]; then exec ssh -t -o StrictHostKeyChecking=accept-new -J "$PI_HOP" "$PI" "$@"
+    else exec ssh -t "$PI" "$@"; fi
+}
+
 cmd_check() {
     rc=0
     log "Pi ($PI)"
@@ -340,6 +421,7 @@ case "${1:-}" in
     lan-mode) require SSH_LAN; pick_pi; shift; cmd_lan_mode "$@" ;;
     wifi) require SSH_LAN; pick_pi; shift; cmd_wifi "$@" ;;
     check) require SSH_LAN; pick_pi; cmd_check ;;
+    ssh) require SSH_LAN; pick_pi; shift; cmd_ssh "$@" ;;
     all) require SSH_LAN; pick_pi; cmd_link; cmd_exit; cmd_check ;;
     undo) require SSH_LAN; pick_pi; shift; cmd_undo "$@" ;;
     *) usage; exit 2 ;;

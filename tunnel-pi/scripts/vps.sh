@@ -1,16 +1,21 @@
 #!/bin/sh
 # vps.sh <step>: the VPS's side of tunnel-pi. Runs as root.
 #
-# scripts/tpi-ctl.sh on your computer streams this file to the VPS over ssh, with the
-# settings it needs set first. To run it on the VPS yourself instead:
-#   TP_CONF=/path/to/tunnel-pi.conf PI_PUBKEY=<the Pi's key> sh vps.sh <step>
+# scripts/tpi-ctl.sh on your computer streams this file to the VPS over ssh, after the
+# settings it needs and ids.sh. To run it on the VPS yourself instead:
+#   cat ids.sh vps.sh | TP_CONF=/path/to/configs/<name>.conf PI_PUBKEY=<the Pi's key> sh -s -- <step>
+#
+# Each Pi on this VPS has its own link, wgpi-<name>, with its own subnet,
+# routing table and rules (ids.sh); a step touches only its own Pi's. link picks
+# a free subnet (TPI_LINK) and UDP port (PI_PORT) when they're empty, and prints
+# them (LINK=, PORT=) for tpi-ctl.sh to save.
 #
 # Steps (each is safe to run again):
-#   link    the wgpi link to the Pi (PI_PUBKEY needed). Prints PUBKEY=<the VPS's
+#   link    the link to the Pi (PI_PUBKEY needed). Prints PUBKEY=<the VPS's
 #           public key>. With TPI_ROUTING=tpi it also writes the routing for CLIENT_IPS
 #           and the kill switch
 #   check   PASS/FAIL for the link and, by TPI_ROUTING, the routing or the wgt jump(s)
-#   undo    remove wgpi (and TPI_ROUTING=tpi's kill switch). wgt jumps are removed
+#   undo    remove the link (and TPI_ROUTING=tpi's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
 # It never changes WG_IF (the clients' interface) or wgt's files. Logs go to stderr; only PUBKEY= goes
@@ -21,6 +26,9 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
+    : "${PI_NAME:=$(basename "${TP_CONF:-pi}" .conf)}" "${TPI_LINK:=}" "${PI_PORT:=}"
+    link_ids
+    KILL="/usr/local/sbin/$KILL_NAME" KILL_UNIT="/etc/systemd/system/$KILL_NAME.service"
     : "${TPI_ROUTING:=tpi}" "${PI_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
     : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}" "${WG_IF:=wg0}"
     case "$WG_IF" in ''|*[!A-Za-z0-9_.-]*) die "WG_IF must be an interface name" ;; esac
@@ -34,8 +42,6 @@ main() {
 }
 
 WG=/etc/wireguard
-KILL=/usr/local/sbin/tunnel-pi-killswitch
-KILL_UNIT=/etc/systemd/system/tunnel-pi-killswitch.service
 
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'vps.sh: %s\n' "$*" >&2; exit 1; }
@@ -62,11 +68,11 @@ v6() { case "$1" in ''|*[!0-9a-fA-F:./]*) die "not an IPv6 address: '$1'" ;; esa
 preflight() {
     command -v wg >/dev/null || die "wg isn't installed (apt install wireguard-tools)"
     [ "$TPI_ROUTING" != tpi ] || ip link show "$WG_IF" >/dev/null 2>&1 || die "no interface $WG_IF here: set WG_IF to the WireGuard interface your clients connect to"
-    # 10.99.0.0/30 must be free (or already wgpi's)
-    other=$(ip -o -4 addr show | awk '$4 ~ /^10\.99\.0\.[0-3]\// && $2 != "wgpi" {print $2}')
-    [ -z "$other" ] || die "10.99.0.0/30 is already used on $other"
-    # PI_PORT must be free (or already wgpi's)
-    if [ "$(wg show wgpi listen-port 2>/dev/null || true)" != "$PI_PORT" ] \
+    # The link's addresses must be free (or already this link's)
+    other=$(link_users "$VPS_LINK" "$PI_LINK")
+    [ -z "$other" ] || die "$LINK_NET is already used here, by $other: empty TPI_LINK and link picks a free one"
+    # PI_PORT must be free (or already this link's)
+    if [ "$(wg show "$LINK_IF" listen-port 2>/dev/null || true)" != "$PI_PORT" ] \
         && ss -Hlun "sport = :$PI_PORT" | grep -q .; then
         die "UDP port $PI_PORT is already in use (ss -ulpn)"
     fi
@@ -75,37 +81,87 @@ preflight() {
     fi
 }
 
+# link_users <address>...: what else on this VPS has these addresses: an interface,
+# or a WireGuard config (up or not). Never this Pi's own link.
+link_users() {
+    for a in "$@"; do
+        ip -o -4 addr show | awk -v a="$a/" -v me="$LINK_IF" 'index($4, a) == 1 && $2 != me {print $2}'
+        for f in "$WG"/*.conf; do
+            [ -e "$f" ] && [ "$f" != "$WG/$LINK_IF.conf" ] || continue
+            grep -q "^Address *= *$a/" "$f" && basename "$f" .conf
+        done
+    done | sort -u | tr '\n' ' ' | sed 's/ $//'
+}
+
+# pick_link: TPI_LINK, if empty: this link's own (if it exists), else the first
+# /30 in 10.99.0.0/24 that nothing here uses.
+pick_link() {
+    [ -z "$TPI_LINK" ] || return 0
+    own=$(sed -n 's|^Address *= *10\.99\.0\.\([0-9]*\)/30$|\1|p' "$WG/$LINK_IF.conf" 2>/dev/null | head -n 1)
+    if [ -n "$own" ]; then TPI_LINK="10.99.0.$((own - 1))/30"
+    else
+        host=0
+        while [ "$host" -le 252 ]; do
+            [ -n "$(link_users "10.99.0.$((host + 1))" "10.99.0.$((host + 2))")" ] || break
+            host=$((host + 4))
+        done
+        [ "$host" -le 252 ] || die "every /30 in 10.99.0.0/24 is in use here"
+        TPI_LINK="10.99.0.$host/30"
+        log "picked TPI_LINK=$TPI_LINK"
+    fi
+    link_ids
+    echo "LINK=$TPI_LINK"
+}
+
+# pick_port: PI_PORT, if empty: this link's own, else the first UDP port from
+# 51821 up that nothing listens on and no WireGuard config here names.
+pick_port() {
+    [ -z "$PI_PORT" ] || return 0
+    PI_PORT=$(sed -n 's/^ListenPort *= *//p' "$WG/$LINK_IF.conf" 2>/dev/null | head -n 1)
+    if [ -z "$PI_PORT" ]; then
+        PI_PORT=51821
+        while ss -Hlun "sport = :$PI_PORT" | grep -q . \
+            || grep -qs "^ListenPort *= *$PI_PORT\$" "$WG"/*.conf; do
+            PI_PORT=$((PI_PORT + 1))
+        done
+        log "picked PI_PORT=$PI_PORT"
+    fi
+    echo "PORT=$PI_PORT"
+}
+
 do_link() {
-    need PI_PUBKEY PI_PORT
+    need PI_PUBKEY
+    pick_link
+    pick_port
     case "$PI_PORT" in *[!0-9]*) die "PI_PORT must be a number" ;; esac
     preflight
-    echo "PUBKEY=$(keypair wgpi)"
+    echo "PUBKEY=$(keypair "$LINK_IF")"
 
     CHANGED=0
     if [ "$TPI_ROUTING" = wgt ]; then
-        put 600 "$WG/wgpi.conf" <<EOF
+        put 600 "$WG/$LINK_IF.conf" <<EOF
 # tunnel-pi: the link the Pi dials (written by vps.sh link; not wgt's)
 [Interface]
-Address = 10.99.0.1/30
+Address = $VPS_LINK/30
 ListenPort = $PI_PORT
 MTU = 1420
-PostUp = wg set %i private-key $WG/wgpi.key
+PostUp = wg set %i private-key $WG/$LINK_IF.key
 
 [Peer]
 # the Pi
 PublicKey = $PI_PUBKEY
-AllowedIPs = 10.99.0.2/32
+AllowedIPs = $PI_LINK/32
 EOF
     else
         conf=$(hand_conf)    # not piped: a die inside must stop the script, not write half a file
-        printf '%s\n' "$conf" | put 600 "$WG/wgpi.conf"
+        printf '%s\n' "$conf" | put 600 "$WG/$LINK_IF.conf"
         killswitch
     fi
     open_port
-    systemctl enable -q wg-quick@wgpi
-    if [ "$CHANGED" = 1 ]; then systemctl restart wg-quick@wgpi; else systemctl start wg-quick@wgpi; fi
+    systemctl enable -q "wg-quick@$LINK_IF"
+    if [ "$CHANGED" = 1 ]; then systemctl restart "wg-quick@$LINK_IF"; else systemctl start "wg-quick@$LINK_IF"; fi
     [ "$TPI_ROUTING" != tpi ] || prune
-    log "wgpi up; it waits for the Pi to dial in"
+    log "$LINK_IF up; it waits for the Pi to dial in"
 }
 
 # listed <address> <list>: is it in the list (a /32 or /128 written there or not)?
@@ -114,13 +170,13 @@ listed() { for x in $2; do [ "${x%/*}" = "$1" ] && return 0; done; return 1; }
 # prune: remove the rules of clients taken out of CLIENT_IPS / CLIENT_IP6S. A
 # restart can't: it removes what the new files list, and they no longer list them.
 prune() {
-    ip rule show | awk -v ifc="$WG_IF" '($1 == "900:" || $1 == "901:") && $2 == "from" {
+    ip rule show | awk -v ifc="$WG_IF" -v r="$PRIO_ROUTE:" -v k="$PRIO_KILL:" '($1 == r || $1 == k) && $2 == "from" {
         for (i = 3; i < NF; i++) if ($i == "iif" && $(i + 1) == ifc) { sub(":", "", $1); print $1, $3 } }' |
     while read -r prio ip; do
         listed "$ip" "$CLIENT_IPS" && continue
         ip rule del priority "$prio" from "$ip" iif "$WG_IF" && log "removed rule $prio for $ip (no longer in CLIENT_IPS)"
     done
-    iptables -t nat -S PREROUTING | grep -- "-i $WG_IF .*--to-destination 10.99.0.2\$" |
+    iptables -t nat -S PREROUTING | grep -- "-i $WG_IF .*--to-destination $PI_LINK\$" |
     while read -r rule; do
         ip=$(printf '%s\n' "$rule" | sed -n 's|.* -s \([0-9.]*\)/32 .*|\1|p')
         [ -n "$ip" ] && ! listed "$ip" "$CLIENT_IPS" || continue
@@ -136,7 +192,7 @@ prune() {
     done
 }
 
-# The TPI_ROUTING=tpi wgpi.conf: route CLIENT_IPS through the Pi, NAT onto the link, DNS to the Pi.
+# The TPI_ROUTING=tpi link config: route CLIENT_IPS through the Pi, NAT onto the link, DNS to the Pi.
 hand_conf() {
     need CLIENT_IPS
     if [ -z "$WG_SUBNET" ]; then
@@ -149,17 +205,17 @@ hand_conf() {
     cat <<EOF
 # tunnel-pi: the link the Pi dials, and the clients routed through it (written by vps.sh link)
 [Interface]
-Address = 10.99.0.1/30
+Address = $VPS_LINK/30
 ListenPort = $PI_PORT
 MTU = 1420
 # Table = off: no routes from AllowedIPs; the rules below choose who uses the link
 Table = off
-PostUp = wg set %i private-key $WG/wgpi.key
-# Table 260: the Pi for everything, except the VPS's own clients, which stay on $WG_IF
-$(for net in $WG_SUBNET; do echo "PostUp = ip route replace $net dev $WG_IF table 260"; done)
-PostUp = ip route replace default dev %i table 260
-PostDown = ip route flush table 260
-# Forward into the link and NAT onto it (the Pi sees only 10.99.0.1)
+PostUp = wg set %i private-key $WG/$LINK_IF.key
+# Table $TABLE: the Pi for everything, except the VPS's own clients, which stay on $WG_IF
+$(for net in $WG_SUBNET; do echo "PostUp = ip route replace $net dev $WG_IF table $TABLE"; done)
+PostUp = ip route replace default dev %i table $TABLE
+PostDown = ip route flush table $TABLE
+# Forward into the link and NAT onto it (the Pi sees only $VPS_LINK)
 PostUp = iptables -I FORWARD -i $WG_IF -o %i -j ACCEPT
 PostUp = iptables -I FORWARD -i %i -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -o %i -j MASQUERADE
@@ -170,11 +226,11 @@ EOF
     for ip in $CLIENT_IPS; do
         v4 "$ip"
         echo "# $ip: through the Pi, its DNS answered by the Pi"
-        echo "PostUp = ip rule del iif $WG_IF from $ip lookup 260 priority 900 2>/dev/null; ip rule add iif $WG_IF from $ip lookup 260 priority 900"
-        echo "PostDown = ip rule del iif $WG_IF from $ip lookup 260 priority 900"
+        echo "PostUp = ip rule del iif $WG_IF from $ip lookup $TABLE priority $PRIO_ROUTE 2>/dev/null; ip rule add iif $WG_IF from $ip lookup $TABLE priority $PRIO_ROUTE"
+        echo "PostDown = ip rule del iif $WG_IF from $ip lookup $TABLE priority $PRIO_ROUTE"
         for proto in udp tcp; do
-            echo "PostUp = iptables -t nat -I PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination 10.99.0.2"
-            echo "PostDown = iptables -t nat -D PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination 10.99.0.2"
+            echo "PostUp = iptables -t nat -I PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination $PI_LINK"
+            echo "PostDown = iptables -t nat -D PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination $PI_LINK"
         done
     done
     cat <<EOF
@@ -186,16 +242,16 @@ AllowedIPs = 0.0.0.0/0
 EOF
 }
 
-# The kill switch: outside wgpi, so stopping wgpi blocks these clients rather
+# The kill switch: outside the link, so stopping it blocks these clients rather
 # than letting them out through the VPS's own IP.
 killswitch() {
     up="" down=""
     for ip in $CLIENT_IPS; do
         v4 "$ip"
-        up="${up}ip rule del iif $WG_IF from $ip unreachable priority 901 2>/dev/null || true
-ip rule add iif $WG_IF from $ip unreachable priority 901
+        up="${up}ip rule del iif $WG_IF from $ip unreachable priority $PRIO_KILL 2>/dev/null || true
+ip rule add iif $WG_IF from $ip unreachable priority $PRIO_KILL
 "
-        down="${down}ip rule del iif $WG_IF from $ip unreachable priority 901 2>/dev/null || true
+        down="${down}ip rule del iif $WG_IF from $ip unreachable priority $PRIO_KILL 2>/dev/null || true
 "
     done
     for ip in $CLIENT_IP6S; do
@@ -207,7 +263,7 @@ ip rule add iif $WG_IF from $ip unreachable priority 901
     done
     put 755 "$KILL" <<EOF
 #!/bin/sh
-# tunnel-pi-killswitch up|down (written by vps.sh link): Pi-exit clients never
+# $KILL_NAME up|down (written by vps.sh link, for the Pi $PI_NAME): Pi-exit clients never
 # fall back to the VPS's own IP, and their IPv6 is blocked (the link is IPv4 only).
 case "\$1" in
 up)
@@ -231,8 +287,8 @@ ExecStop=$KILL down
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
-    systemctl enable -q tunnel-pi-killswitch.service
-    systemctl restart tunnel-pi-killswitch.service
+    systemctl enable -q "$KILL_NAME.service"
+    systemctl restart "$KILL_NAME.service"
 }
 
 open_port() {
@@ -250,21 +306,22 @@ fail() { printf 'FAIL  %s\n' "$*"; FAILED=1; }
 check() { if eval "$2" >/dev/null 2>&1; then pass "$1"; else fail "$1"; fi; }
 
 do_check() {
-    if [ ! -f "$WG/wgpi.conf" ]; then fail "wgpi isn't set up (tpi-ctl.sh link)"; return 1; fi
-    check "wgpi is up" "ip link show wgpi"
-    t=$(wg show wgpi latest-handshakes 2>/dev/null | awk '{print $2 + 0; exit}')
+    if [ ! -f "$WG/$LINK_IF.conf" ]; then fail "$LINK_IF isn't set up (tpi-ctl.sh link)"; return 1; fi
+    if [ -z "$LINK_NET" ]; then fail "TPI_LINK is empty in this Pi's settings (tpi-ctl.sh link fills it in)"; return 1; fi
+    check "$LINK_IF is up" "ip link show $LINK_IF"
+    t=$(wg show "$LINK_IF" latest-handshakes 2>/dev/null | awk '{print $2 + 0; exit}')
     if [ "${t:-0}" -gt 0 ] && [ $(( $(date +%s) - t )) -lt 180 ]; then
-        pass "wgpi handshake $(( $(date +%s) - t ))s ago"
+        pass "$LINK_IF handshake $(( $(date +%s) - t ))s ago"
     else
-        fail "wgpi has no recent handshake from the Pi"
+        fail "$LINK_IF has no recent handshake from the Pi"
     fi
-    check "the Pi answers on the link (ping 10.99.0.2)" "ping -c 2 -W 2 10.99.0.2"
+    check "the Pi answers on the link (ping $PI_LINK)" "ping -c 2 -W 2 $PI_LINK"
     if [ "$TPI_ROUTING" = tpi ]; then
-        check "kill switch is on" "systemctl is-active -q tunnel-pi-killswitch.service"
-        check "table 260 sends to the Pi" "ip route show table 260 | grep -q 'default dev wgpi'"
+        check "kill switch is on" "systemctl is-active -q $KILL_NAME.service"
+        check "table $TABLE sends to the Pi" "ip route show table $TABLE | grep -q 'default dev $LINK_IF'"
         for ip in $CLIENT_IPS; do
-            check "$ip: routed through the Pi (rule 900)" "ip rule show | grep -q '^900:.*from $ip .*lookup 260'"
-            check "$ip: kill switch (rule 901)" "ip rule show | grep -q '^901:.*from $ip .*unreachable'"
+            check "$ip: routed through the Pi (rule $PRIO_ROUTE)" "ip rule show | grep -q '^$PRIO_ROUTE:.*from $ip .*lookup $TABLE'"
+            check "$ip: kill switch (rule $PRIO_KILL)" "ip rule show | grep -q '^$PRIO_KILL:.*from $ip .*unreachable'"
         done
     else
         for code in $JUMP_CODE $JUMP_LAN_CODE; do
@@ -275,18 +332,18 @@ do_check() {
 }
 
 do_undo() {
-    systemctl disable -q --now wg-quick@wgpi 2>/dev/null || true
+    systemctl disable -q --now "wg-quick@$LINK_IF" 2>/dev/null || true
     if [ -f "$KILL_UNIT" ]; then
-        systemctl disable -q --now tunnel-pi-killswitch.service 2>/dev/null || true
+        systemctl disable -q --now "$KILL_NAME.service" 2>/dev/null || true
         rm -f "$KILL_UNIT" "$KILL"
         systemctl daemon-reload
     fi
-    port=$(sed -n 's/^ListenPort = //p' "$WG/wgpi.conf" 2>/dev/null || true)
-    rm -f "$WG"/wgpi.conf "$WG"/wgpi.key "$WG"/wgpi.pub
+    port=$(sed -n 's/^ListenPort = //p' "$WG/$LINK_IF.conf" 2>/dev/null || true)
+    rm -f "$WG/$LINK_IF.conf" "$WG/$LINK_IF.key" "$WG/$LINK_IF.pub"
     if [ -n "$port" ] && command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
         ufw delete allow "$port/udp" >/dev/null || true
     fi
-    log "wgpi removed"
+    log "$LINK_IF removed"
 }
 
 main "$@" < /dev/null

@@ -1,9 +1,9 @@
 #!/bin/sh
 # pi.sh <step> [args]: the Raspberry Pi's side of tunnel-pi. Runs as root.
 #
-# scripts/tpi-ctl.sh on your computer streams this file to the Pi over ssh, with the
-# settings it needs set first. To run it on the Pi yourself instead:
-#   sudo TP_CONF=/path/to/tunnel-pi.conf sh pi.sh <step>
+# scripts/tpi-ctl.sh on your computer streams this file to the Pi over ssh, after the
+# settings it needs and ids.sh. To run it on the Pi yourself instead:
+#   cat ids.sh pi.sh | sudo TP_CONF=/path/to/configs/<name>.conf sh -s -- <step>
 #
 # Steps (each is safe to run again):
 #   base                 packages, automatic updates, watchdog; cloudflared too when
@@ -28,6 +28,8 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
+    : "${PI_NAME:=$(basename "${TP_CONF:-pi}" .conf)}"
+    link_ids
     : "${TPI_ROUTING:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
@@ -139,7 +141,6 @@ EOF
 }
 
 do_link() {
-    need VPS_HOST PI_PORT
     apt-get -y -q install wireguard-tools iptables >/dev/null
     printf 'net.ipv4.ip_forward=1\n' | put 644 /etc/sysctl.d/99-tunnel-pi.conf
     sysctl -q --system
@@ -169,6 +170,8 @@ EOF
         log "keys ready; wgpi is written once VPS_PUBKEY is known (tpi-ctl.sh link does this)"
         return 0
     fi
+    need VPS_HOST PI_PORT
+    need_link
 
     exit_lines=""
     if [ "$TPI_ROUTING" = tpi ]; then
@@ -181,7 +184,7 @@ PostDown = $EXIT_SCRIPT down %i"
     put 600 "$WG/wgpi.conf" <<EOF
 # tunnel-pi: the link to the VPS (written by pi.sh link)
 [Interface]
-Address = 10.99.0.2/30
+Address = $PI_LINK/30
 MTU = 1420
 PostUp = wg set %i private-key $WG/wgpi.key
 $exit_lines
@@ -190,7 +193,7 @@ $exit_lines
 # the VPS
 PublicKey = $VPS_PUBKEY
 Endpoint = $VPS_HOST:$PI_PORT
-AllowedIPs = 10.99.0.1/32
+AllowedIPs = $VPS_LINK/32
 PersistentKeepalive = 25
 EOF
     start_or_restart wg-quick@wgpi
@@ -200,13 +203,14 @@ EOF
 # jump_vars isolated|lan: the names and addresses of that jump server.
 jump_vars() {
     case "$1" in
-        isolated) JIF=wgjump    JADDR=10.98.0.1/30 JPEER=10.98.0.2 JPORT=51822 JFILE=jump-for-vps.conf ;;
-        lan)      JIF=wgjumplan JADDR=10.98.0.5/30 JPEER=10.98.0.6 JPORT=51823 JFILE=jump-for-vps-lan.conf ;;
+        isolated) JIF=wgjump    JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=51822 JFILE=jump-for-vps.conf ;;
+        lan)      JIF=wgjumplan JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=51823 JFILE=jump-for-vps-lan.conf ;;
         *) die "jump needs isolated or lan" ;;
     esac
 }
 
 do_jump() {
+    need_link
     jump_vars "$1"
     [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpi-ctl.sh link installs it)"
     if [ -f "$WG/$JIF.conf" ] && [ "${TP_RENEW:-}" != 1 ]; then
@@ -245,7 +249,7 @@ Address = $JPEER/32
 [Peer]
 # tunnel-pi ($JIF), reached over wgpi
 PublicKey = $server_pub
-Endpoint = 10.99.0.2:$JPORT
+Endpoint = $PI_LINK:$JPORT
 EOF
     vps_key=""
     start_or_restart "wg-quick@$JIF"
@@ -253,16 +257,17 @@ EOF
 }
 
 do_dns() {
+    need_link
     apt-get -y -q install unbound >/dev/null
     CHANGED=0
-    put 644 /etc/unbound/unbound.conf.d/tunnel-pi.conf <<'EOF'
+    put 644 /etc/unbound/unbound.conf.d/tunnel-pi.conf <<EOF
 # tunnel-pi: answers DNS for Pi-exit clients (the VPS redirects their port 53 here)
 server:
     interface: 127.0.0.1
-    interface: 10.99.0.2
+    interface: $PI_LINK
     ip-freebind: yes
     access-control: 127.0.0.0/8 allow
-    access-control: 10.99.0.0/30 allow
+    access-control: $LINK_NET allow
 EOF
     unbound-checkconf >/dev/null
     start_or_restart unbound
@@ -354,12 +359,14 @@ do_check() {
     else
         printf 'INFO  no cloudflared (SSH_CLOUDFLARE is empty): no emergency door if the link goes down\n'
     fi
-    if [ -f "$WG/wgpi.conf" ]; then
+    if [ -f "$WG/wgpi.conf" ] && [ -z "$LINK_NET" ]; then
+        fail "wgpi exists but TPI_LINK is empty in this Pi's settings (tpi-ctl.sh link fills it in)"
+    elif [ -f "$WG/wgpi.conf" ]; then
         check "IP forwarding is on" "[ \"\$(sysctl -n net.ipv4.ip_forward)\" = 1 ]"
         check "wgpi is up" "ip link show wgpi"
         age=$(handshake_age wgpi)
         if [ "$age" -lt 180 ]; then pass "wgpi handshake ${age}s ago"; else fail "wgpi has no recent handshake (is PI_PORT/udp open on the VPS?)"; fi
-        check "the VPS answers on the link (ping 10.99.0.1)" "ping -c 2 -W 2 10.99.0.1"
+        check "the VPS answers on the link (ping $VPS_LINK)" "ping -c 2 -W 2 $VPS_LINK"
     else
         fail "wgpi isn't set up (tpi-ctl.sh link)"
     fi
@@ -372,7 +379,7 @@ do_check() {
     done
     if [ "$TPI_ROUTING" = tpi ] && [ -f "$WG/wgpi.conf" ]; then
         check "wgpi runs the exit rules ($(current_mode wgpi))" "grep -q '^PostUp = $EXIT_SCRIPT up' $WG/wgpi.conf"
-        check "unbound answers on 10.99.0.2" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -q 10.99.0.2"
+        check "unbound answers on $PI_LINK" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -qF $PI_LINK"
     fi
     if command -v nmcli >/dev/null; then
         wifi=$(wifi_conns | cut -d: -f1 | paste -sd, - | sed 's/,/, /g')

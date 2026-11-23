@@ -1,7 +1,9 @@
-# tunnel-pi settings. Copy this file to tunnel-pi.conf (in this folder; git
-# ignores that name) and fill it in. Shell syntax: NAME="value".
-# scripts/tpi-ctl.sh reads it on your computer and passes the values the Pi and VPS need.
-# No secrets go in here: the Cloudflare token stays in its own file.
+# tunnel-pi settings for one Pi. Copy this file to configs/<name>.conf (git ignores
+# that name) and fill it in. The name is the Pi's: up to 10 of a-z, 0-9 and -,
+# starting with a letter, e.g. configs/home.conf. Shell syntax: NAME="value".
+# scripts/tpi-ctl.sh reads it on your computer: tpi-ctl.sh <name> <command> (the
+# name can be left out while there's only one). No secrets go in here: the
+# Cloudflare token stays in its own file.
 
 # --- The Pi ------------------------------------------------------------------
 # tpi-ctl.sh reaches the Pi the first way that answers, and says which it used:
@@ -25,7 +27,10 @@ CF_TOKEN_FILE="$HOME/.config/tunnel-pi/cloudflared.token"   # with SSH_CLOUDFLAR
 WGT_SERVER=""
 VPS_SSH="root@vps.example.com"      # how ssh reaches the VPS: root, or a user with passwordless sudo
 VPS_HOST="vps.example.com"          # the VPS's public name or IP, as the Pi dials it
-PI_PORT="51821"                     # a free UDP port on the VPS for the link (443 if free: rarely filtered, best without SSH_CLOUDFLARE)
+PI_PORT=""                          # the link's UDP port on the VPS. Empty: link picks a free one (from 51821) and saves it here. 443, if free, is rarely filtered
+# The link's subnet on the VPS, a /30 in 10.99.0.0/24. Leave it empty: link picks
+# one nothing on the VPS uses and saves it here. Never change it once set.
+TPI_LINK=""
 
 # --- Routing: what sends clients into the Pi ---------------------------------
 TPI_ROUTING="tpi"                   # tpi: tunnel-pi does the routing, on any WireGuard VPS. wgt: a wgt jump
