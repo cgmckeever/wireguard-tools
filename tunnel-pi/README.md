@@ -19,8 +19,9 @@ real Pi and VPS. Run it first on a VPS nobody else depends on.
 
 ## Done when
 
-1. A chosen client's public IP (`curl https://ifconfig.me`) is the friend's.
-2. Its DNS lookups also leave from the friend's IP.
+1. A chosen client's public IP (`curl https://ifconfig.me`) is the residential
+   (or other) IP of the network where the tunnel-pi sits.
+2. Its DNS lookups also leave from that IP.
 3. When the link is down, that client gets no connection at all. It never
    falls back to the VPS's IP.
 4. Nothing from the tunnel reaches devices on the friend's LAN, unless you
