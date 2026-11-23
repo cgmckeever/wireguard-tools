@@ -8,8 +8,8 @@
 # -> purge -> diff with the snapshot.
 set -uo pipefail
 [ $# -eq 1 ] || { echo "usage: $0 <jump.conf>" >&2; exit 2; }
+case "$1" in /*) jump="$1" ;; *) jump="$PWD/$1" ;; esac   # before the cd: relative to where it was run
 cd "$(dirname "$0")/.."
-jump="$1"
 W() { bin/wgt "$@"; }
 pass=0 fail=0
 exec 3>&1   # results go to fd 3, so a check's own output can be redirected to a log
