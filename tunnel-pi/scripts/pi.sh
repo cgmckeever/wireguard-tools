@@ -10,10 +10,10 @@
 #                        CF_TOKEN is set (tp sends it when SSH_CLOUDFLARE is set)
 #   link                 WireGuard and the wgpi link to the VPS. Prints PUBKEY=<the Pi's
 #                        public key>; with VPS_PUBKEY set it also writes and starts wgpi
-#   jump isolated|lan    EXIT=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
+#   jump isolated|lan    TPI_ROUTING=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
 #                        JUMPFILE=<path> when it made a new jump file, else JUMP=exists
 #   jump-done isolated|lan   delete the jump file once the VPS has it
-#   dns                  EXIT=tpi: the DNS resolver for Pi-exit clients
+#   dns                  TPI_ROUTING=tpi: the DNS resolver for Pi-exit clients
 #   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2.3)
 #   wifi-list            the saved Wi-Fi networks, and which one is in use
 #   wifi-add             save the Wi-Fi network WIFI_SSID (password WIFI_PSK; empty: open)
@@ -28,7 +28,7 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
-    : "${EXIT:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}"
+    : "${TPI_ROUTING:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
@@ -171,7 +171,7 @@ EOF
     fi
 
     exit_lines=""
-    if [ "$EXIT" = tpi ]; then
+    if [ "$TPI_ROUTING" = tpi ]; then
         [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tp link installs it)"
         mode=$(current_mode wgpi)
         exit_lines="PostUp = $EXIT_SCRIPT up %i $mode
@@ -272,7 +272,7 @@ do_lan_mode() {
     ifc="$1" mode="$2"
     case "$mode" in isolated|lan) ;; *) die "lan-mode <interface> isolated|lan" ;; esac
     grep -q "^PostUp = $EXIT_SCRIPT up %i " "$WG/$ifc.conf" 2>/dev/null \
-        || die "$ifc has no exit (it's wgpi with EXIT=tpi, or wgjump / wgjumplan)"
+        || die "$ifc has no exit (it's wgpi with TPI_ROUTING=tpi, or wgjump / wgjumplan)"
     sed -i "s|^PostUp = $EXIT_SCRIPT up %i .*|PostUp = $EXIT_SCRIPT up %i $mode|" "$WG/$ifc.conf"
     systemctl restart "wg-quick@$ifc"
     journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-pi-exit:' | tail -n 1 >&2 || true
@@ -370,7 +370,7 @@ do_check() {
         if [ "$age" -lt 180 ]; then pass "$ifc handshake ${age}s ago"
         else printf 'INFO  %s: no recent handshake (normal while no device uses the jump: wgt brings it up on demand)\n' "$ifc"; fi
     done
-    if [ "$EXIT" = tpi ] && [ -f "$WG/wgpi.conf" ]; then
+    if [ "$TPI_ROUTING" = tpi ] && [ -f "$WG/wgpi.conf" ]; then
         check "wgpi runs the exit rules ($(current_mode wgpi))" "grep -q '^PostUp = $EXIT_SCRIPT up' $WG/wgpi.conf"
         check "unbound answers on 10.99.0.2" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -q 10.99.0.2"
     fi

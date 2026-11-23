@@ -50,13 +50,13 @@ you ──ssh──▶ Cloudflare ──▶ cloudflared on the Pi        optiona
 - **wgpi** is a WireGuard link the Pi dials out to your VPS and keeps open.
   Over it, the VPS reaches the Pi at `10.99.0.2`.
 - **The exit:** the VPS sends the chosen clients' traffic over the link. The Pi
-  sends it out to the internet under the friend's IP (NAT). `EXIT` picks what
+  sends it out to the internet under the friend's IP (NAT). `TPI_ROUTING` picks what
   does the routing on the VPS:
-  - **`EXIT=tpi`** (tunnel-pi): works with any WireGuard VPS. `vps.sh` adds
+  - **`TPI_ROUTING=tpi`** (tunnel-pi): works with any WireGuard VPS. `vps.sh` adds
     the routing, a DNS redirect and a kill switch for the client addresses you
     list in `CLIENT_IPS`. Your WireGuard setup and client configs stay as they
     are.
-  - **`EXIT=wgt`**: for a VPS that runs wgt (the wireguard-tools in this
+  - **`TPI_ROUTING=wgt`**: for a VPS that runs wgt (the wireguard-tools in this
     repository). The Pi runs a small WireGuard "jump server" on the link, and
     the VPS adds it as an ordinary wgt jump. wgt then does the routing, fail
     closed and IPv6 blocking, and gives each device its own config.
@@ -91,7 +91,7 @@ other needs a helper on every client, which phones can't run.
   a power supply.
 - A Linux VPS running the WireGuard server your clients already connect to,
   with `wg-quick`, `iptables` and systemd (Debian and Ubuntu have all three).
-  `EXIT=wgt` also needs wgt. If other people use that VPS, try this on a test
+  `TPI_ROUTING=wgt` also needs wgt. If other people use that VPS, try this on a test
   server first: it adds routing next to theirs.
 - On your computer: `ssh` to the Pi (Raspberry Pi OS gives its user
   passwordless `sudo`) and to the VPS (as root, or a user with passwordless
@@ -119,7 +119,7 @@ prints them, and stops if a required one is empty or still the example.
 | `VPS_SSH` | required | how ssh reaches the VPS (`root@vps.example.com`) |
 | `VPS_HOST` | required | the VPS's public name or IP, which the Pi dials |
 | `PI_PORT` | required | a UDP port on the VPS that nothing listens on (check with `ss -ulpn`). wgt uses `51820`. Use `443` if it's free, above all without `SSH_CLOUDFLARE`: networks that filter UDP usually still allow it |
-| `EXIT` | required | `tpi` or `wgt` (see How it works) |
+| `TPI_ROUTING` | required | `tpi` or `wgt` (see How it works) |
 | `CLIENT_IPS` | `tpi` | the IPv4 `Address` of each client config that should exit through the Pi (on a wgt server: `wgt client list`) |
 | `CLIENT_IP6S` | `tpi`, optional | those clients' IPv6 addresses, if they have any. They get blocked, because the link carries IPv4 only |
 | `WG_IF` | `tpi` | the VPS's WireGuard interface your clients use: `wg show interfaces` on the VPS (usually `wg0`) |
@@ -265,32 +265,32 @@ on its own:
     key. Makes `wg-quick` keep retrying at boot, so a slow DHCP or DNS can't
     leave the link down.
   - On the VPS: makes its key, then writes and starts its end of `wgpi`, and
-    opens `PI_PORT/udp` in ufw if ufw is on. With `EXIT=tpi`, it also adds
+    opens `PI_PORT/udp` in ufw if ufw is on. With `TPI_ROUTING=tpi`, it also adds
     the routing for `CLIENT_IPS` and the kill switch.
   - Then it writes and starts the Pi's end. `tp` swaps the public keys for you.
 - **`tp exit`:**
-  - `EXIT=tpi`: installs a DNS resolver (unbound) on the Pi to answer the
+  - `TPI_ROUTING=tpi`: installs a DNS resolver (unbound) on the Pi to answer the
     clients' lookups.
-  - `EXIT=wgt`: makes the jump server on the Pi and pipes its jump file
+  - `TPI_ROUTING=wgt`: makes the jump server on the Pi and pipes its jump file
     straight into `wgt jump add JUMP_CODE` on the VPS, then deletes the file.
     With `JUMP_LAN_CODE` set, it does the same for a second jump in LAN mode
     (2.3).
 - **`tp check`:** PASS/FAIL lines for both ends.
 
-**Check:** `tp check` ends with `all checks passed`. With `EXIT=wgt`, the
+**Check:** `tp check` ends with `all checks passed`. With `TPI_ROUTING=wgt`, the
 `wgt jump add` output ended with `jump 'JUMP_CODE' works: ip=<your home IP>`.
 
-**Changing `CLIENT_IPS` later** (`EXIT=tpi`): edit it and run
+**Changing `CLIENT_IPS` later** (`TPI_ROUTING=tpi`): edit it and run
 `scripts/tp link` again.
 
 **If the VPS runs wgt:** wgt doesn't manage `wgpi`, and it leaves alone the
 rules it didn't make. Its backups include all of `/etc/wireguard`, `wgpi`
 included, but `wgt restore` and `wgt-ctl move` don't start the tunnel-pi parts:
-run `scripts/tp link` again afterwards. With `EXIT=tpi`, don't also give a
+run `scripts/tp link` again afterwards. With `TPI_ROUTING=tpi`, don't also give a
 client in `CLIENT_IPS` a wgt jump: tunnel-pi's routing comes first, so the
 client would never use the jump.
 
-## 2.2 Give devices a config (`EXIT=wgt` only) **[Computer]**
+## 2.2 Give devices a config (`TPI_ROUTING=wgt` only) **[Computer]**
 
 ```sh
 scripts/tp client phone          # makes the config JUMP_CODE.phone
@@ -307,7 +307,7 @@ the friend's. wgt blocks traffic when the jump is down, and blocks IPv6
 through it. DNS goes to the config's `DNS` server (by default `1.1.1.1`)
 through the jump, so lookups also leave from the friend's IP.
 
-With `EXIT=tpi` there's no `tp client`: every config listed in `CLIENT_IPS`
+With `TPI_ROUTING=tpi` there's no `tp client`: every config listed in `CLIENT_IPS`
 already goes through the Pi.
 
 ## 2.3 Optional: LAN mode (reaching the friend's LAN)
@@ -330,7 +330,7 @@ What LAN mode is, and isn't:
 **Turn it on or off [Computer]:**
 
 ```sh
-scripts/tp lan-mode lan          # on: wgpi with EXIT=tpi, wgjump with EXIT=wgt
+scripts/tp lan-mode lan          # on: wgpi with TPI_ROUTING=tpi, wgjump with TPI_ROUTING=wgt
 scripts/tp lan-mode isolated     # off again
 ```
 
@@ -338,7 +338,7 @@ This restarts that one interface. cloudflared doesn't depend on it, so it's
 safe to do after drop-off. "The LAN" means the subnet the Pi is on when the
 interface starts, so at home it's your own LAN.
 
-**For some clients only** (`EXIT=wgt`): the mode applies to every client of
+**For some clients only** (`TPI_ROUTING=wgt`): the mode applies to every client of
 an interface, because the Pi sees them all as one address. To choose per
 device, keep `wgjump` isolated and set `JUMP_LAN_CODE` (and `JUMP_LAN_LABEL`).
 `tp exit` then adds a second jump, `wgjumplan`, in LAN mode, and each device
@@ -461,10 +461,10 @@ scripts/tp undo all      # the same, plus cloudflared on the Pi
 `tp undo` removes the link, so it can't run through it: it uses `SSH_LAN`
 or, away from home, `SSH_CLOUDFLARE`.
 
-With `EXIT=wgt`, remove the devices' configs first: wgt won't remove a jump
+With `TPI_ROUTING=wgt`, remove the devices' configs first: wgt won't remove a jump
 that configs still use. On the VPS, run `wgt client remove <code>.<device>`
 for each one `wgt client list` shows. `tp undo` then removes the jump(s),
-`wgpi`, the kill switch (`EXIT=tpi`) and the ufw rule for `PI_PORT`. After
+`wgpi`, the kill switch (`TPI_ROUTING=tpi`) and the ufw rule for `PI_PORT`. After
 `undo all`, delete the tunnel and the Access application in the dashboard
 **[Browser]**.
 
@@ -497,7 +497,7 @@ briefly `jump-for-vps*.conf`. Also `/usr/local/sbin/tunnel-pi-exit`,
 `/etc/sysctl.d/99-tunnel-pi.conf`,
 `/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf`,
 `/etc/NetworkManager/dispatcher.d/90-tunnel-pi` (moves the exit rules when the
-network changes), and with `EXIT=tpi` `/etc/unbound/unbound.conf.d/tunnel-pi.conf`.
+network changes), and with `TPI_ROUTING=tpi` `/etc/unbound/unbound.conf.d/tunnel-pi.conf`.
 `tp wifi add` writes `/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection`
 (mode 600, with the password), and `tp wifi remove` deletes Wi-Fi connections.
 `tp base` turns on automatic updates and sets `RuntimeWatchdogSec=15` in
@@ -506,8 +506,8 @@ repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` and
 `/etc/cloudflared/tunnel-pi.env` (the token, mode 600).
 
 **On the VPS:** `/etc/wireguard/wgpi.*` and a ufw rule for `PI_PORT/udp`. With
-`EXIT=tpi`, also `/usr/local/sbin/tunnel-pi-killswitch` and
-`/etc/systemd/system/tunnel-pi-killswitch.service`. With `EXIT=wgt`, wgt's own
+`TPI_ROUTING=tpi`, also `/usr/local/sbin/tunnel-pi-killswitch` and
+`/etc/systemd/system/tunnel-pi-killswitch.service`. With `TPI_ROUTING=wgt`, wgt's own
 `jump add` and `client add`. Nothing changes `WG_IF`'s configuration, the
 client configs, or wgt's files.
 

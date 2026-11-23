@@ -6,8 +6,8 @@
 #   tp ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
 #   tp base                1.3, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
 #   tp link                2.1: the wgpi link (Pi and VPS), keys exchanged for you
-#   tp exit                2.1, by EXIT: tpi's DNS resolver, or the wgt jump(s)
-#   tp client <device> [lan]   2.2, EXIT=wgt: a config for <device> through the Pi (lan: the LAN jump)
+#   tp exit                2.1, by TPI_ROUTING: tpi's DNS resolver, or the wgt jump(s)
+#   tp client <device> [lan]   2.2, TPI_ROUTING=wgt: a config for <device> through the Pi (lan: the LAN jump)
 #   tp lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpi or wgjump)
 #   tp wifi [list]         the Pi's saved Wi-Fi networks, and its uplink now
 #   tp wifi add <name>     save a Wi-Fi network on the Pi (asks for the password)
@@ -35,7 +35,7 @@ case "${1:-}" in ''|-h|--help|help) usage; exit 0 ;; esac
 # shellcheck disable=SC1090
 . "$CONF"
 : "${SSH_LAN:=}" "${SSH_CLOUDFLARE:=}" "${CF_TOKEN_FILE:=}" "${VPS_SSH:=}"
-: "${VPS_HOST:=}" "${PI_PORT:=}" "${EXIT:=tpi}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}"
+: "${VPS_HOST:=}" "${PI_PORT:=}" "${TPI_ROUTING:=tpi}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}"
 : "${WG_IF:=wg0}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
 PI_PUBKEY="" VPS_PUBKEY="" CF_TOKEN="" WIFI_SSID="" WIFI_PSK=""
 DRY="${TP_DRY_RUN:-}"
@@ -47,7 +47,7 @@ q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 # The settings pi.sh and vps.sh read, as sh assignments (sent ahead of the script).
 vars() {
-    for v in VPS_HOST PI_PORT EXIT WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS CLIENT_IP6S WG_SUBNET \
+    for v in VPS_HOST PI_PORT TPI_ROUTING WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS CLIENT_IP6S WG_SUBNET \
              SSH_CLOUDFLARE PI_PUBKEY VPS_PUBKEY CF_TOKEN WIFI_SSID WIFI_PSK; do
         eval "val=\${$v}"
         printf '%s=%s\n' "$v" "$(q "$val")"
@@ -121,17 +121,17 @@ pubkey_from() { sed -n 's/^PUBKEY=//p' | tail -n 1; }
 
 cmd_config() {
     printf '%s\n' "settings: $CONF"
-    for v in SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE VPS_SSH VPS_HOST PI_PORT EXIT \
+    for v in SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE VPS_SSH VPS_HOST PI_PORT TPI_ROUTING \
              CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET JUMP_CODE JUMP_LABEL JUMP_LAN_CODE JUMP_LAN_LABEL; do
         eval "val=\${$v}"
         printf '  %-15s %s\n' "$v" "${val:-(empty)}"
     done
     require SSH_LAN VPS_SSH VPS_HOST PI_PORT
-    case "$EXIT" in
+    case "$TPI_ROUTING" in
         wgt)  require JUMP_CODE JUMP_LABEL
               case "$JUMP_CODE" in *[!a-z0-9-]*) die "JUMP_CODE: only a-z, 0-9 and -" ;; esac ;;
         tpi)  require CLIENT_IPS ;;
-        *) die "EXIT must be tpi or wgt" ;;
+        *) die "TPI_ROUTING must be tpi or wgt" ;;
     esac
     if [ -n "$SSH_CLOUDFLARE" ]; then
         require SSH_CLOUDFLARE CF_TOKEN_FILE
@@ -167,7 +167,7 @@ cmd_base() {
     CF_TOKEN=""
 }
 
-# Install the exit rules script on the Pi (every EXIT uses it).
+# Install the exit rules script on the Pi (every TPI_ROUTING uses it).
 install_exit_script() {
     if [ -n "$DRY" ]; then log "[dry-run] on $PI: install tunnel-pi-exit"; return 0; fi
     to pi "$AS_ROOT install -m 755 /dev/stdin /usr/local/sbin/tunnel-pi-exit" < "$HERE/tunnel-pi-exit"
@@ -179,7 +179,7 @@ cmd_link() {
     log "Pi: WireGuard and its key"
     PI_PUBKEY=$(run pi pi.sh link | pubkey_from)
     [ -n "$PI_PUBKEY" ] || [ -n "$DRY" ] || die "the Pi didn't report its public key"
-    confirm_vps "a wgpi link$( [ "$EXIT" = tpi ] && echo ", routing and a kill switch for $CLIENT_IPS")"
+    confirm_vps "a wgpi link$( [ "$TPI_ROUTING" = tpi ] && echo ", routing and a kill switch for $CLIENT_IPS")"
     log "VPS: the wgpi link"
     VPS_PUBKEY=$(run vps vps.sh link | pubkey_from)
     [ -n "$VPS_PUBKEY" ] || [ -n "$DRY" ] || die "the VPS didn't report its public key"
@@ -213,7 +213,7 @@ add_jump() {
 
 cmd_exit() {
     cmd_config >/dev/null
-    if [ "$EXIT" = tpi ]; then
+    if [ "$TPI_ROUTING" = tpi ]; then
         log "Pi: DNS for Pi-exit clients"
         run pi pi.sh dns
     else
@@ -228,7 +228,7 @@ cmd_exit() {
 }
 
 cmd_client() {
-    [ "$EXIT" = wgt ] || die "tp client is for EXIT=wgt; with EXIT=tpi, list the config's address in CLIENT_IPS and run tp link"
+    [ "$TPI_ROUTING" = wgt ] || die "tp client is for TPI_ROUTING=wgt; with TPI_ROUTING=tpi, list the config's address in CLIENT_IPS and run tp link"
     device="${1:-}"; [ -n "$device" ] || die "tp client <device> [lan]"
     code="$JUMP_CODE"
     if [ "${2:-}" = lan ]; then code="$JUMP_LAN_CODE"; [ -n "$code" ] || die "JUMP_LAN_CODE isn't set"; fi
@@ -241,7 +241,7 @@ cmd_lan_mode() {
     mode="${1:-}"
     case "$mode" in isolated|lan) ;; *) die "tp lan-mode isolated|lan [<interface>]" ;; esac
     ifc="${2:-}"
-    [ -n "$ifc" ] || { if [ "$EXIT" = tpi ]; then ifc=wgpi; else ifc=wgjump; fi; }
+    [ -n "$ifc" ] || { if [ "$TPI_ROUTING" = tpi ]; then ifc=wgpi; else ifc=wgjump; fi; }
     run pi pi.sh lan-mode "$ifc" "$mode"
 }
 
@@ -294,8 +294,8 @@ cmd_undo() {
         [ -n "$SSH_CLOUDFLARE" ] || die "tp undo can't run through the link it removes: run it at home (SSH_LAN)"
         PI="$SSH_CLOUDFLARE" PI_HOP=""; log "Pi: $PI instead (undo removes the link)"
     fi
-    confirm_vps "remove wgpi$( [ "$EXIT" = tpi ] && echo " and the kill switch")"
-    if [ "$EXIT" = wgt ]; then
+    confirm_vps "remove wgpi$( [ "$TPI_ROUTING" = tpi ] && echo " and the kill switch")"
+    if [ "$TPI_ROUTING" = wgt ]; then
         log "VPS: removing the wgt jump(s). wgt refuses while configs use them: remove those first (wgt client remove <code>.<device>)"
         for code in $JUMP_CODE $JUMP_LAN_CODE; do
             sshx vps "wgt jump list" | grep -qw -- "$code" || continue   # already gone
