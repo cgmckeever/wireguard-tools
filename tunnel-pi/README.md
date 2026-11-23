@@ -459,8 +459,8 @@ the VPS through a pipe.
 | `/etc/wireguard/jump-for-vps*.conf` | `wgt` | `exit`, briefly | the jump file for the VPS, deleted once wgt has it |
 | `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpi` or `wgt` | `base` | the hardware watchdog |
 | `unattended-upgrades` | `tpi` or `wgt` | `base` | automatic security updates |
-| Cloudflare's apt repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` | `tpi` or `wgt`, with the door | `base` | cloudflared and its service |
-| `/etc/cloudflared/tunnel-pi.env` | `tpi` or `wgt`, with the door | `base` | the tunnel token (mode 600) |
+| Cloudflare's apt repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpi` or `wgt` | `base` | cloudflared and its service |
+| `/etc/cloudflared/tunnel-pi.env` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpi` or `wgt` | `base` | the tunnel token (mode 600) |
 | `/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection` | `tpi` or `wgt` | `wifi add` | a saved Wi-Fi network, with its password (mode 600) |
 
 **On the VPS:**
