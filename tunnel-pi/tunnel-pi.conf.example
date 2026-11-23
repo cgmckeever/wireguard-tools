@@ -19,6 +19,10 @@ SSH_CLOUDFLARE=""                   # e.g. ssh.pi.example.com, a hostname on you
 CF_TOKEN_FILE="$HOME/.config/tunnel-pi/cloudflared.token"   # with SSH_CLOUDFLARE: the tunnel token alone, mode 600
 
 # --- The VPS -----------------------------------------------------------------
+# A VPS you manage with wgt-ctl: name it here (as `bin/wgt-ctl list` shows it),
+# and tp drives it through wgt-ctl. VPS_SSH and VPS_HOST then come from that
+# list (VPS_HOST only if you leave it as the example). Empty: tp uses ssh itself.
+WGT_SERVER=""
 VPS_SSH="root@vps.example.com"      # how ssh reaches the VPS: root, or a user with passwordless sudo
 VPS_HOST="vps.example.com"          # the VPS's public name or IP, as the Pi dials it
 PI_PORT="51821"                     # a free UDP port on the VPS for the link (443 if free: rarely filtered, best without SSH_CLOUDFLARE)

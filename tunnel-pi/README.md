@@ -116,8 +116,9 @@ prints them, and stops if a required one is empty or still the example.
 | `SSH_LAN` | required | `user@name` of the Pi on your home network: the user and hostname you set in Raspberry Pi Imager (`pi@tunnel-pi.local`) |
 | `SSH_CLOUDFLARE` | optional | the emergency door: an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no Cloudflare, and you skip 1.2 |
 | `CF_TOKEN_FILE` | with `SSH_CLOUDFLARE` | a file outside the repo, mode `600`, holding only the tunnel token from 1.2 |
-| `VPS_SSH` | required | how ssh reaches the VPS (`root@vps.example.com`) |
-| `VPS_HOST` | required | the VPS's public name or IP, which the Pi dials |
+| `WGT_SERVER` | optional | a VPS you already manage with `wgt-ctl`: its name in `bin/wgt-ctl list`. `tp` then works through `wgt-ctl` (see below), and you can leave `VPS_SSH` and `VPS_HOST` as the example |
+| `VPS_SSH` | required | how ssh reaches the VPS (`root@vps.example.com`). With `WGT_SERVER`: from `wgt-ctl`'s list |
+| `VPS_HOST` | required | the VPS's public name or IP, which the Pi dials. With `WGT_SERVER`: the host in its ssh target, unless you set it |
 | `PI_PORT` | required | a UDP port on the VPS that nothing listens on (check with `ss -ulpn`). wgt uses `51820`. Use `443` if it's free, above all without `SSH_CLOUDFLARE`: networks that filter UDP usually still allow it |
 | `TPI_ROUTING` | required | `tpi` or `wgt` (see How it works) |
 | `CLIENT_IPS` | `tpi` | the IPv4 `Address` of each client config that should exit through the Pi (on a wgt server: `wgt client list`) |
@@ -127,6 +128,14 @@ prints them, and stops if a required one is empty or still the example.
 | `JUMP_CODE`, `JUMP_LABEL` | `wgt` | a code of 2–6 characters (`a-z`, `0-9`, `-`) that `wgt jump list` doesn't already show, and a label for it |
 | `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode (2.3) |
 
+**With `WGT_SERVER`,** `tp` uses `wgt-ctl` for everything on the VPS: its
+server list, its host-key checks, and its handling of wgt commands. `tp client`
+then gives each device its fleet-wide number and puts its config straight into
+`~/wg-tunnels/devices/<device>/config/`, as `wgt-ctl SERVER client add` always
+does. Only `vps.sh` (the link, which wgt doesn't manage) is tunnel-pi's own, and
+it too runs through `wgt-ctl SERVER ssh`. This needs `tunnel-pi/` to stay inside
+the wireguard-tools checkout, next to `bin/wgt-ctl`.
+
 In the steps below, a setting's name stands for its value: `ssh SSH_LAN`
 means `ssh pi@tunnel-pi.local`.
 
@@ -135,7 +144,7 @@ means `ssh pi@tunnel-pi.local`.
 | File | Runs on | Does |
 |---|---|---|
 | `tunnel-pi.conf.example` | | the settings. Copy it to `tunnel-pi.conf`, which git ignores |
-| `scripts/tp` | your computer | drives everything over ssh. It sends `pi.sh` and `vps.sh` with the settings, swaps public keys between the ends, and pipes the jump file from the Pi to the VPS |
+| `scripts/tp` | your computer | drives everything over ssh (the VPS through `wgt-ctl`, with `WGT_SERVER`). It sends `pi.sh` and `vps.sh` with the settings, swaps public keys between the ends, and pipes the jump file from the Pi to the VPS |
 | `scripts/pi.sh` | the Pi (root) | `base`, `link`, `jump`, `dns`, `lan-mode`, `check`, `undo` |
 | `scripts/vps.sh` | the VPS (root) | `link`, `check`, `undo` |
 | `scripts/tunnel-pi-exit` | the Pi | the exit's firewall rules: forward to the uplink, NAT, isolated or LAN mode. `tp` installs it |
@@ -297,9 +306,11 @@ scripts/tp client phone          # makes the config JUMP_CODE.phone
 scripts/tp client laptop lan     # with JUMP_LAN_CODE: JUMP_LAN_CODE.laptop, in LAN mode
 ```
 
-This runs `wgt client add <device> --exit <code> --warp off` on the VPS. To get
-the config onto the device, run `wgt client show <code>.<device> --qr` or
-`wgt client share <code>.<device>` on the VPS.
+This runs `wgt client add <device> --exit <code> --warp off` on the VPS. With
+`WGT_SERVER` it goes through `wgt-ctl`, so the device keeps its fleet-wide
+number and the config lands in `~/wg-tunnels/devices/<device>/config/`. To show
+it as a QR code: `bin/wgt-ctl WGT_SERVER client show <code>.<device> --qr`
+(without `WGT_SERVER`, `wgt client show ... --qr` on the VPS).
 
 `--warp off` matters. Without it, wgt also makes a `warp.` config that puts
 Cloudflare WARP inside the jump, and sites would see a Cloudflare IP instead of
