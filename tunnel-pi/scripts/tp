@@ -1,5 +1,5 @@
 #!/bin/sh
-# tp: set up tunnel-pi from your Mac. Reads ../tunnel-pi.conf (or $TP_CONF)
+# tp: set up tunnel-pi from your computer (macOS or Linux). Reads ../tunnel-pi.conf (or $TP_CONF)
 # and runs pi.sh on the Pi and vps.sh on the VPS over ssh.
 #
 #   tp config              show the settings and check they're filled in
@@ -30,7 +30,7 @@ case "${1:-}" in ''|-h|--help|help) sed -n '2,19s/^# \{0,1\}//p' "$0"; exit 0 ;;
 . "$CONF"
 : "${PI_SSH:=}" "${VPS_SSH:=}" "${ADMIN_HOST:=}" "${PI_USER:=pi}" "${CF_TOKEN_FILE:=}"
 : "${VPS_HOST:=}" "${PI_PORT:=}" "${EXIT:=jump}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}"
-: "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
+: "${WG_IF:=wg0}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
 PI_PUBKEY="" VPS_PUBKEY="" CF_TOKEN=""
 DRY="${TP_DRY_RUN:-}"
 
@@ -39,7 +39,7 @@ q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 
 # The settings pi.sh and vps.sh read, as sh assignments (sent ahead of the script).
 vars() {
-    for v in VPS_HOST PI_PORT EXIT JUMP_CODE JUMP_LAN_CODE CLIENT_IPS CLIENT_IP6S WG_SUBNET \
+    for v in VPS_HOST PI_PORT EXIT WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS CLIENT_IP6S WG_SUBNET \
              PI_PUBKEY VPS_PUBKEY CF_TOKEN; do
         eval "val=\${$v}"
         printf '%s=%s\n' "$v" "$(q "$val")"
@@ -86,7 +86,7 @@ pubkey_from() { sed -n 's/^PUBKEY=//p' | tail -n 1; }
 
 cmd_config() {
     printf '%s\n' "settings: $CONF"
-    for v in PI_SSH VPS_SSH ADMIN_HOST PI_USER CF_TOKEN_FILE VPS_HOST PI_PORT EXIT \
+    for v in PI_SSH VPS_SSH ADMIN_HOST PI_USER CF_TOKEN_FILE VPS_HOST PI_PORT EXIT WG_IF \
              JUMP_CODE JUMP_LABEL JUMP_LAN_CODE JUMP_LAN_LABEL CLIENT_IPS CLIENT_IP6S WG_SUBNET; do
         eval "val=\${$v}"
         printf '  %-15s %s\n' "$v" "${val:-(empty)}"
@@ -104,9 +104,10 @@ cmd_config() {
 
 cmd_ssh_config() {
     require ADMIN_HOST
-    bin=$(command -v cloudflared || echo /opt/homebrew/bin/cloudflared)
+    bin=$(command -v cloudflared || echo cloudflared)
     cat <<EOF
-# Add to ~/.ssh/config (brew install cloudflared first):
+# Add to ~/.ssh/config. cloudflared must be installed on this computer first
+# (macOS: brew install cloudflared; Linux: Cloudflare's package for your system).
 
 Host $ADMIN_HOST
     User $PI_USER

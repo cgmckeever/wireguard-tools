@@ -1,7 +1,7 @@
 #!/bin/sh
 # pi.sh <step> [args]: the Raspberry Pi's side of tunnel-pi. Runs as root.
 #
-# scripts/tp on your Mac streams this file to the Pi over ssh, with the
+# scripts/tp on your computer streams this file to the Pi over ssh, with the
 # settings it needs set first. To run it on the Pi yourself instead:
 #   sudo TP_CONF=/path/to/tunnel-pi.conf sh pi.sh <step>
 #

@@ -1,7 +1,7 @@
 #!/bin/sh
 # vps.sh <step>: the VPS's side of tunnel-pi. Runs as root.
 #
-# scripts/tp on your Mac streams this file to the VPS over ssh, with the
+# scripts/tp on your computer streams this file to the VPS over ssh, with the
 # settings it needs set first. To run it on the VPS yourself instead:
 #   TP_CONF=/path/to/tunnel-pi.conf PI_PUBKEY=<the Pi's key> sh vps.sh <step>
 #
@@ -13,7 +13,7 @@
 #   undo    remove wgpi (and EXIT=hand's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
-# It never touches wg0 or wgt's own files. Logs go to stderr; only PUBKEY= goes
+# It never changes WG_IF (the clients' interface) or wgt's files. Logs go to stderr; only PUBKEY= goes
 # to stdout.
 
 main() {
@@ -22,7 +22,8 @@ main() {
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
     : "${EXIT:=jump}" "${PI_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
-    : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}"
+    : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}" "${WG_IF:=wg0}"
+    case "$WG_IF" in ''|*[!A-Za-z0-9_.-]*) die "WG_IF must be an interface name" ;; esac
     case "$EXIT" in jump|hand) ;; *) die "EXIT must be jump or hand" ;; esac
     case "${1:-}" in
         link) do_link ;;
@@ -60,7 +61,7 @@ v6() { case "$1" in ''|*[!0-9a-fA-F:./]*) die "not an IPv6 address: '$1'" ;; esa
 
 preflight() {
     command -v wg >/dev/null || die "wg isn't installed (apt install wireguard-tools)"
-    ip link show wg0 >/dev/null 2>&1 || die "no wg0 here: this needs the VPS your clients connect to"
+    ip link show $WG_IF >/dev/null 2>&1 || die "no interface $WG_IF here: set WG_IF to the WireGuard interface your clients connect to"
     # 10.99.0.0/30 must be free (or already wgpi's)
     other=$(ip -o -4 addr show | awk '$4 ~ /^10\.99\.0\.[0-3]\// && $2 != "wgpi" {print $2}')
     [ -z "$other" ] || die "10.99.0.0/30 is already used on $other"
@@ -110,10 +111,12 @@ EOF
 hand_conf() {
     need CLIENT_IPS
     if [ -z "$WG_SUBNET" ]; then
-        WG_SUBNET=$(awk -F= '/^WG_SUBNET=/ {v = $2} END {print v}' "$WG/wg-tools.state" 2>/dev/null)
-        [ -n "$WG_SUBNET" ] || die "WG_SUBNET is not set and isn't in $WG/wg-tools.state"
+        # Every IPv4 subnet WG_IF is on (its kernel routes), so traffic between
+        # clients stays on WG_IF
+        WG_SUBNET=$(ip -4 route show dev "$WG_IF" proto kernel scope link 2>/dev/null | awk '{printf "%s ", $1}')
+        [ -n "$WG_SUBNET" ] || die "WG_SUBNET is not set and $WG_IF has no IPv4 subnet to read"
     fi
-    v4 "$WG_SUBNET"
+    for net in $WG_SUBNET; do v4 "$net"; done
     cat <<EOF
 # tunnel-pi: the link the Pi dials, and the clients routed through it (written by vps.sh link)
 [Interface]
@@ -123,26 +126,26 @@ MTU = 1420
 # Table = off: no routes from AllowedIPs; the rules below choose who uses the link
 Table = off
 PostUp = wg set %i private-key $WG/wgpi.key
-# Table 260: the Pi for everything, except the VPS's own clients, which stay on wg0
-PostUp = ip route replace $WG_SUBNET dev wg0 table 260
+# Table 260: the Pi for everything, except the VPS's own clients, which stay on $WG_IF
+$(for net in $WG_SUBNET; do echo "PostUp = ip route replace $net dev $WG_IF table 260"; done)
 PostUp = ip route replace default dev %i table 260
 PostDown = ip route flush table 260
 # Forward into the link and NAT onto it (the Pi sees only 10.99.0.1)
-PostUp = iptables -I FORWARD -i wg0 -o %i -j ACCEPT
-PostUp = iptables -I FORWARD -i %i -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+PostUp = iptables -I FORWARD -i $WG_IF -o %i -j ACCEPT
+PostUp = iptables -I FORWARD -i %i -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -o %i -j MASQUERADE
-PostDown = iptables -D FORWARD -i wg0 -o %i -j ACCEPT
-PostDown = iptables -D FORWARD -i %i -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+PostDown = iptables -D FORWARD -i $WG_IF -o %i -j ACCEPT
+PostDown = iptables -D FORWARD -i %i -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 PostDown = iptables -t nat -D POSTROUTING -o %i -j MASQUERADE
 EOF
     for ip in $CLIENT_IPS; do
         v4 "$ip"
         echo "# $ip: through the Pi, its DNS answered by the Pi"
-        echo "PostUp = ip rule del iif wg0 from $ip lookup 260 priority 900 2>/dev/null; ip rule add iif wg0 from $ip lookup 260 priority 900"
-        echo "PostDown = ip rule del iif wg0 from $ip lookup 260 priority 900"
+        echo "PostUp = ip rule del iif $WG_IF from $ip lookup 260 priority 900 2>/dev/null; ip rule add iif $WG_IF from $ip lookup 260 priority 900"
+        echo "PostDown = ip rule del iif $WG_IF from $ip lookup 260 priority 900"
         for proto in udp tcp; do
-            echo "PostUp = iptables -t nat -I PREROUTING -i wg0 -s $ip -p $proto --dport 53 -j DNAT --to-destination 10.99.0.2"
-            echo "PostDown = iptables -t nat -D PREROUTING -i wg0 -s $ip -p $proto --dport 53 -j DNAT --to-destination 10.99.0.2"
+            echo "PostUp = iptables -t nat -I PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination 10.99.0.2"
+            echo "PostDown = iptables -t nat -D PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination 10.99.0.2"
         done
     done
     cat <<EOF
@@ -160,17 +163,17 @@ killswitch() {
     up="" down=""
     for ip in $CLIENT_IPS; do
         v4 "$ip"
-        up="${up}ip rule del iif wg0 from $ip unreachable priority 901 2>/dev/null || true
-ip rule add iif wg0 from $ip unreachable priority 901
+        up="${up}ip rule del iif $WG_IF from $ip unreachable priority 901 2>/dev/null || true
+ip rule add iif $WG_IF from $ip unreachable priority 901
 "
-        down="${down}ip rule del iif wg0 from $ip unreachable priority 901 2>/dev/null || true
+        down="${down}ip rule del iif $WG_IF from $ip unreachable priority 901 2>/dev/null || true
 "
     done
     for ip in $CLIENT_IP6S; do
         v6 "$ip"
-        up="${up}ip6tables -C FORWARD -i wg0 -s $ip -j REJECT 2>/dev/null || ip6tables -I FORWARD -i wg0 -s $ip -j REJECT
+        up="${up}ip6tables -C FORWARD -i $WG_IF -s $ip -j REJECT 2>/dev/null || ip6tables -I FORWARD -i $WG_IF -s $ip -j REJECT
 "
-        down="${down}ip6tables -D FORWARD -i wg0 -s $ip -j REJECT 2>/dev/null || true
+        down="${down}ip6tables -D FORWARD -i $WG_IF -s $ip -j REJECT 2>/dev/null || true
 "
     done
     put 755 "$KILL" <<EOF
