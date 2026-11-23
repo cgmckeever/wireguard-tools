@@ -246,6 +246,15 @@ def test_host_is_not_an_exit_code():
     assert store.valid_client_name("host.mac") is not None   # an error: host is not a jump
 
 
+def test_all_is_no_new_jump_code_but_an_old_one_still_reads(make_ctx):
+    from wgt import exits
+    assert not store.new_exit_code("all") and store.new_exit_code("par-fr")
+    assert store.valid_exit_code("all")   # a server that has one keeps working
+    assert store.valid_client_name("warp.all.mac") is None
+    with pytest.raises(WgtError, match="not 'warp', 'host' or 'all'"):
+        exits.cmd_add(make_ctx(), ["all", "/nonexistent.conf"])
+
+
 def test_client_table_per_cell():
     from wgt import rules
     snap = store.Snapshot(state="", clients=[store.Client("warp.a", "10.0.0.2", "K"),

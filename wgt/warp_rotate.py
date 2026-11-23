@@ -82,13 +82,14 @@ def cmd_warp_rotate(ctx: Ctx, words: List[str]) -> int:
         raise WgtError("usage: wgt warp rotate [host|<jump code>|all]")
     which = words[0] if words else "host"
     ops.take_lock(ctx)   # first: the jumps are the ones exits.db lists once no one else is changing it
-    if which not in ("host", "all") and not ctx.snap.exit(which):
+    host_too = which in (store.HOST_EXIT, store.ALL_JUMPS)
+    if not host_too and not ctx.snap.exit(which):
         raise WgtError(f"no jump '{which}' (host, all, or one of: "
                        f"{', '.join(e.code for e in ctx.snap.exits) or 'no jumps'})")
-    jumps = ctx.snap.exits if which == "all" else [e for e in ctx.snap.exits if e.code == which]
-    names = (["this server"] if which in ("host", "all") else []) + [f"jump {e.code}" for e in jumps]
+    jumps = ctx.snap.exits if which == store.ALL_JUMPS else [e for e in ctx.snap.exits if e.code == which]
+    names = (["this server"] if host_too else []) + [f"jump {e.code}" for e in jumps]
     # As README says: a jump goes down whole, its plain configs too, not only its warp. ones.
-    pauses = (["this server's warp. configs pause for a few seconds"] if which in ("host", "all") else []) \
+    pauses = (["this server's warp. configs pause for a few seconds"] if host_too else []) \
         + (["a jump's configs, plain ones too, stop until the watchdog brings it back"] if jumps else [])
     ctx.runner.step(f"New WARP accounts for: {', '.join(names)} (the old ones are backed up; "
                     f"{'; '.join(pauses)})", "restore the backed-up wgcf files, then wgt setup")
@@ -96,7 +97,7 @@ def cmd_warp_rotate(ctx: Ctx, words: List[str]) -> int:
     if not warp.install_wgcf(ctx):
         raise WgtError("wgcf is needed to register WARP")
     res = results.Results(out=ctx.out.line)
-    if which in ("host", "all"):
+    if host_too:
         rotate_host_warp(ctx, res)
     for e in jumps:
         rotate_jump_warp(ctx, res, e)

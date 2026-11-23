@@ -49,10 +49,10 @@ def make_link(server: str, path: str, on_server: Sequence[str] = ()) -> Tuple[st
     while True:
         reply = ui.ask(f"    Short code on the server [{code}]: ", gone="\0")
         # Ctrl-D or a lost terminal stops here; otherwise a taken default would ask forever.
-        if reply == "\0" or (not reply and not store.valid_exit_code(code)):
+        if reply == "\0" or (not reply and not store.new_exit_code(code)):
             raise WgtError("no code given")
         code = reply or code
-        if not store.valid_exit_code(code):
+        if not store.new_exit_code(code):
             out.info(f"the code must be {store.EXIT_CODE_RULE}")
         elif code in taken:
             whose = f"{server} already has a jump '{code}'" if code in on_server \

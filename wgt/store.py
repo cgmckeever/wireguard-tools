@@ -99,13 +99,22 @@ def is_uint(word: str) -> bool:
     return bool(re.fullmatch(r"[0-9]+", word))
 
 
-EXIT_CODE_RULE = "2-6 of a-z0-9 and -, starting with a letter, not ending in -, not 'warp' or 'host' (e.g. par-fr)"
+EXIT_CODE_RULE = ("2-6 of a-z0-9 and -, starting with a letter, not ending in -, not 'warp', 'host' or 'all' "
+                  "(e.g. par-fr)")
 HOST_EXIT = "host"   # the --exit word for this server's own way out
+ALL_JUMPS = "all"    # warp rotate's word for this server and every jump
 
 
 def valid_exit_code(code: str) -> bool:
-    """See EXIT_CODE_RULE (the code names interfaces px-<code>, wx-<code>)."""
+    """See EXIT_CODE_RULE (the code names interfaces px-<code>, wx-<code>). What a
+    server already has is read by this; a new code also passes new_exit_code."""
     return bool(_EXIT_CODE.fullmatch(code)) and code not in (HOST_EXIT, WARP_TAG)
+
+
+def new_exit_code(code: str) -> bool:
+    """A code a new jump may take: valid, and not ALL_JUMPS (reserved later: a jump
+    called that, if any, still reads, but couldn't be rotated alone)."""
+    return valid_exit_code(code) and code != ALL_JUMPS
 
 
 WARP_TAG = "warp"   # the name part of a config that goes through WARP

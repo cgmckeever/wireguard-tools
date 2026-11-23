@@ -463,7 +463,7 @@ NetShield off; Moderate NAT, NAT-PMP and VPN Accelerator off; pick a server in
 the city; Create; download (one per server per city).
 
 **Add the jump** on the server, giving it a code (2-6 of a-z, 0-9 and `-`,
-starting with a letter, not ending in `-`, and not `host` or `warp`) and a
+starting with a letter, not ending in `-`, and not `host`, `warp` or `all`) and a
 `--label`, its full name shown in client lists (a server can have up to 20 jumps):
 
 ```bash

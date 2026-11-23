@@ -279,7 +279,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"usage: {usage}")
     ops.no_more_words(words[2:], usage)
     code, src = words[0], words[1]
-    if not store.valid_exit_code(code):
+    if not store.new_exit_code(code) and not (store.valid_exit_code(code) and ctx.snap.exit(code)):
         raise WgtError(f"jump code must be {store.EXIT_CODE_RULE}: '{code}'")
     raw = _read_jump(src)   # before the lock: "-" may wait on a terminal, and the watchdogs skip runs meanwhile
     ops.take_lock(ctx)
