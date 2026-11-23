@@ -7,7 +7,7 @@
 #
 # Steps (each is safe to run again):
 #   base                 packages, automatic updates, watchdog; cloudflared too when
-#                        CF_TOKEN is set (tp sends it when TPI_REMOTE is set)
+#                        CF_TOKEN is set (tp sends it when SSH_CLOUDFLARE is set)
 #   link                 WireGuard and the wgpi link to the VPS. Prints PUBKEY=<the Pi's
 #                        public key>; with VPS_PUBKEY set it also writes and starts wgpi
 #   jump isolated|lan    EXIT=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
@@ -25,7 +25,7 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
-    : "${EXIT:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${TPI_REMOTE:=}"
+    : "${EXIT:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
@@ -91,7 +91,7 @@ do_base() {
     fi
 
     if [ -n "$CF_TOKEN" ]; then do_cloudflared
-    else log "no CF_TOKEN (TPI_REMOTE is empty): no cloudflared, so no emergency door"; fi
+    else log "no CF_TOKEN (SSH_CLOUDFLARE is empty): no cloudflared, so no emergency door"; fi
     log "base done. Reboot once so the watchdog starts: sudo reboot"
 }
 
@@ -272,10 +272,10 @@ handshake_age() {   # seconds since <interface>'s newest handshake (99999: none)
 do_check() {
     if systemctl cat tunnel-pi-cloudflared.service >/dev/null 2>&1; then
         check "cloudflared (the emergency door) is running" "systemctl is-active -q tunnel-pi-cloudflared.service"
-    elif [ -n "$TPI_REMOTE" ]; then
-        fail "cloudflared isn't set up, but TPI_REMOTE is (tp base)"
+    elif [ -n "$SSH_CLOUDFLARE" ]; then
+        fail "cloudflared isn't set up, but SSH_CLOUDFLARE is (tp base)"
     else
-        printf 'INFO  no cloudflared (TPI_REMOTE is empty): no emergency door if the link goes down\n'
+        printf 'INFO  no cloudflared (SSH_CLOUDFLARE is empty): no emergency door if the link goes down\n'
     fi
     if [ -f "$WG/wgpi.conf" ]; then
         check "IP forwarding is on" "[ \"\$(sysctl -n net.ipv4.ip_forward)\" = 1 ]"

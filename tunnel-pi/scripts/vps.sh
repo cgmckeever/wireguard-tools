@@ -61,7 +61,7 @@ v6() { case "$1" in ''|*[!0-9a-fA-F:./]*) die "not an IPv6 address: '$1'" ;; esa
 
 preflight() {
     command -v wg >/dev/null || die "wg isn't installed (apt install wireguard-tools)"
-    ip link show $WG_IF >/dev/null 2>&1 || die "no interface $WG_IF here: set WG_IF to the WireGuard interface your clients connect to"
+    [ "$EXIT" != tpi ] || ip link show "$WG_IF" >/dev/null 2>&1 || die "no interface $WG_IF here: set WG_IF to the WireGuard interface your clients connect to"
     # 10.99.0.0/30 must be free (or already wgpi's)
     other=$(ip -o -4 addr show | awk '$4 ~ /^10\.99\.0\.[0-3]\// && $2 != "wgpi" {print $2}')
     [ -z "$other" ] || die "10.99.0.0/30 is already used on $other"

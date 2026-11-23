@@ -5,24 +5,23 @@
 
 # --- The Pi ------------------------------------------------------------------
 # tp reaches the Pi the first way that answers, and says which it used:
-#   1. TPI_LAN, on your home network while you build it
+#   1. SSH_LAN, on your home network while you build it
 #   2. through the VPS over the WireGuard link, the everyday way after drop-off
-#   3. TPI_REMOTE, the emergency door (below), when the link is down
-TPI_LAN="pi@tunnel-pi.local"        # user@name of the Pi on your home network, as set in Raspberry Pi Imager
+#   3. SSH_CLOUDFLARE, the emergency door (below), when the link is down
+SSH_LAN="pi@tunnel-pi.local"        # user@name of the Pi on your home network, as set in Raspberry Pi Imager
 
 # Optional: the emergency door. SSH through a Cloudflare Tunnel, which doesn't
 # depend on the WireGuard link, so you can still get in and fix the Pi when the
 # link is down (a blocked port, a changed VPS IP, a bad change). Costs a domain
 # on Cloudflare and step 1.2. Empty: no Cloudflare; if the link is down after
 # drop-off, the friend power-cycles the Pi, or you take it home.
-TPI_REMOTE=""                       # e.g. ssh.pi.example.com, a hostname on your Cloudflare domain
-CF_TOKEN_FILE="$HOME/.config/tunnel-pi/cloudflared.token"   # with TPI_REMOTE: the tunnel token alone, mode 600
+SSH_CLOUDFLARE=""                   # e.g. ssh.pi.example.com, a hostname on your Cloudflare domain
+CF_TOKEN_FILE="$HOME/.config/tunnel-pi/cloudflared.token"   # with SSH_CLOUDFLARE: the tunnel token alone, mode 600
 
 # --- The VPS -----------------------------------------------------------------
 VPS_SSH="root@vps.example.com"      # how ssh reaches the VPS: root, or a user with passwordless sudo
 VPS_HOST="vps.example.com"          # the VPS's public name or IP, as the Pi dials it
-PI_PORT="51821"                     # a free UDP port on the VPS for the link (443 if free: rarely filtered, best without TPI_REMOTE)
-WG_IF="wg0"                         # the WireGuard interface your clients connect to on the VPS
+PI_PORT="51821"                     # a free UDP port on the VPS for the link (443 if free: rarely filtered, best without SSH_CLOUDFLARE)
 
 # --- The exit ----------------------------------------------------------------
 EXIT="tpi"                          # tpi: tunnel-pi does the routing, on any WireGuard VPS. wgt: a wgt jump
@@ -30,6 +29,7 @@ EXIT="tpi"                          # tpi: tunnel-pi does the routing, on any Wi
 # EXIT="tpi" only
 CLIENT_IPS=""                       # the clients that exit via the Pi: space-separated IPv4 addresses, as in each client's config
 CLIENT_IP6S=""                      # their IPv6 addresses, if any (blocked: the link is IPv4 only)
+WG_IF="wg0"                         # the WireGuard interface those clients connect to on the VPS
 WG_SUBNET=""                        # leave empty (it means every subnet WG_IF is on)
 
 # EXIT="wgt" only (the VPS runs wgt, the wireguard-tools in this repository)

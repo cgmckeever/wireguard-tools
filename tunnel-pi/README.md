@@ -20,7 +20,7 @@ comes up on its own.
    on LAN mode (2.3), clients can reach them by IP.
 5. Clients that aren't chosen are unaffected.
 6. `scripts/tp check` reaches the Pi from anywhere: through the VPS, or with
-   `TPI_REMOTE` through Cloudflare even when the link is down.
+   `SSH_CLOUDFLARE` through Cloudflare even when the link is down.
 
 ## Quick start
 
@@ -67,10 +67,10 @@ you ──ssh──▶ Cloudflare ──▶ cloudflared on the Pi        optiona
   it on a test server first if you can.
 - **Admin access:** `tp` reaches the Pi over ssh, by the first way that
   answers, and says which it used:
-  1. `TPI_LAN`: on your home network, while you build.
+  1. `SSH_LAN`: on your home network, while you build.
   2. Through the VPS over the link (`ssh -J VPS_SSH user@10.99.0.2`): the
      everyday way after drop-off. Nothing extra to set up.
-  3. `TPI_REMOTE`: SSH through a Cloudflare Tunnel, **the emergency door**.
+  3. `SSH_CLOUDFLARE`: SSH through a Cloudflare Tunnel, **the emergency door**.
 
   **Why Cloudflare, then?** The VPS way in only works while the link is up,
   and the link being down is exactly when you need to get in. The likely
@@ -96,7 +96,7 @@ other needs a helper on every client, which phones can't run.
 - On your computer: `ssh` to the Pi (Raspberry Pi OS gives its user
   passwordless `sudo`) and to the VPS (as root, or a user with passwordless
   `sudo`).
-- Only for the emergency door (`TPI_REMOTE`): a domain whose DNS is on Cloudflare, a Cloudflare
+- Only for the emergency door (`SSH_CLOUDFLARE`): a domain whose DNS is on Cloudflare, a Cloudflare
   Zero Trust account, and `cloudflared` on your computer
   (macOS: `brew install cloudflared`).
 
@@ -113,21 +113,21 @@ prints them, and stops if a required one is empty or still the example.
 
 | Setting | | What to put |
 |---|---|---|
-| `TPI_LAN` | required | `user@name` of the Pi on your home network: the user and hostname you set in Raspberry Pi Imager (`pi@tunnel-pi.local`) |
-| `TPI_REMOTE` | optional | the emergency door: an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no Cloudflare, and you skip 1.2 |
-| `CF_TOKEN_FILE` | with `TPI_REMOTE` | a file outside the repo, mode `600`, holding only the tunnel token from 1.2 |
+| `SSH_LAN` | required | `user@name` of the Pi on your home network: the user and hostname you set in Raspberry Pi Imager (`pi@tunnel-pi.local`) |
+| `SSH_CLOUDFLARE` | optional | the emergency door: an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no Cloudflare, and you skip 1.2 |
+| `CF_TOKEN_FILE` | with `SSH_CLOUDFLARE` | a file outside the repo, mode `600`, holding only the tunnel token from 1.2 |
 | `VPS_SSH` | required | how ssh reaches the VPS (`root@vps.example.com`) |
 | `VPS_HOST` | required | the VPS's public name or IP, which the Pi dials |
-| `PI_PORT` | required | a UDP port on the VPS that nothing listens on (check with `ss -ulpn`). wgt uses `51820`. Use `443` if it's free, above all without `TPI_REMOTE`: networks that filter UDP usually still allow it |
-| `WG_IF` | required | the VPS's WireGuard interface your clients use: `wg show interfaces` on the VPS (usually `wg0`) |
+| `PI_PORT` | required | a UDP port on the VPS that nothing listens on (check with `ss -ulpn`). wgt uses `51820`. Use `443` if it's free, above all without `SSH_CLOUDFLARE`: networks that filter UDP usually still allow it |
 | `EXIT` | required | `tpi` or `wgt` (see How it works) |
 | `CLIENT_IPS` | `tpi` | the IPv4 `Address` of each client config that should exit through the Pi (on a wgt server: `wgt client list`) |
 | `CLIENT_IP6S` | `tpi`, optional | those clients' IPv6 addresses, if they have any. They get blocked, because the link carries IPv4 only |
+| `WG_IF` | `tpi` | the VPS's WireGuard interface your clients use: `wg show interfaces` on the VPS (usually `wg0`) |
 | `WG_SUBNET` | `tpi`, optional | leave empty |
 | `JUMP_CODE`, `JUMP_LABEL` | `wgt` | a code of 2–6 characters (`a-z`, `0-9`, `-`) that `wgt jump list` doesn't already show, and a label for it |
 | `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode (2.3) |
 
-In the steps below, a setting's name stands for its value: `ssh TPI_LAN`
+In the steps below, a setting's name stands for its value: `ssh SSH_LAN`
 means `ssh pi@tunnel-pi.local`.
 
 ## What's here
@@ -153,7 +153,7 @@ A marker says where each step runs:
 | Marker | Where |
 |---|---|
 | **[Computer]** | your machine, in this folder. Every `scripts/tp` command runs here |
-| **[Pi]** | a shell on the Pi, for looking around (`tp` does the actual work): `ssh TPI_LAN` at home, `ssh -J VPS_SSH user@10.99.0.2` through the link, or `ssh TPI_REMOTE` |
+| **[Pi]** | a shell on the Pi, for looking around (`tp` does the actual work): `ssh SSH_LAN` at home, `ssh -J VPS_SSH user@10.99.0.2` through the link, or `ssh SSH_CLOUDFLARE` |
 | **[VPS]** | a root shell on the VPS |
 | **[client]** | a device connected to the VPS |
 | **[Browser]** | the Cloudflare dashboard. A person has to do this, because it needs a login |
@@ -172,7 +172,7 @@ A marker says where each step runs:
   which servers you may use.
 - **Some steps need a person:** everything marked **[Browser]** or
   **[Hands]**, and the Cloudflare login in a browser on the first
-  `ssh TPI_REMOTE`. Stop at each one, say exactly what to do, and wait.
+  `ssh SSH_CLOUDFLARE`. Stop at each one, say exactly what to do, and wait.
 - **Settings first.** Fill in `tunnel-pi.conf` with the person, then run
   `scripts/tp config` until it says `settings look complete`.
 - **Dry run first.** `TP_DRY_RUN=1 scripts/tp all` shows every remote step
@@ -191,15 +191,15 @@ A marker says where each step runs:
 ## 1.1 Flash the Pi **[Hands]**
 
 Use Raspberry Pi Imager to write **Raspberry Pi OS Lite (64-bit)**. In its
-settings, set the hostname and user (they make up `TPI_LAN`), and turn on
+settings, set the hostname and user (they make up `SSH_LAN`), and turn on
 **SSH with your public key only**, with passwords off. Boot the Pi on your
 home network, on ethernet.
 
-**Check [Computer]:** `ssh TPI_LAN true` succeeds without a password prompt.
+**Check [Computer]:** `ssh SSH_LAN true` succeeds without a password prompt.
 
 ## 1.2 Optional: the emergency door (Cloudflare) **[Browser]**
 
-Skip this step if `TPI_REMOTE` is empty. It gives you SSH to the Pi that
+Skip this step if `SSH_CLOUDFLARE` is empty. It gives you SSH to the Pi that
 doesn't need the WireGuard link (see How it works).
 
 Go to Cloudflare Zero Trust (`one.dash.cloudflare.com`). Cloudflare renames
@@ -216,9 +216,9 @@ these menus from time to time, so follow the nearest match:
 
    Don't run the dashboard's install command: `tp base` does that part.
 2. On the tunnel's **Public Hostname** tab (newer dashboards: **Published
-   application routes**), add `TPI_REMOTE`, type `SSH`, URL `localhost:22`.
+   application routes**), add `SSH_CLOUDFLARE`, type `SSH`, URL `localhost:22`.
 3. **Access → Applications → Add an application → Self-hosted** for
-   `TPI_REMOTE`, with one **Allow** policy: *Emails* = your email.
+   `SSH_CLOUDFLARE`, with one **Allow** policy: *Emails* = your email.
 
 **Check:** `CF_TOKEN_FILE` exists, and `scripts/tp config` no longer prints a
 note about it.
@@ -227,18 +227,18 @@ note about it.
 
 ```sh
 scripts/tp base
-ssh TPI_LAN sudo reboot          # once, so the hardware watchdog starts
-scripts/tp ssh-config            # only with TPI_REMOTE: paste what it prints into ~/.ssh/config
+ssh SSH_LAN sudo reboot          # once, so the hardware watchdog starts
+scripts/tp ssh-config            # only with SSH_CLOUDFLARE: paste what it prints into ~/.ssh/config
 ```
 
 `tp base` updates the Pi, and turns on automatic security updates and the
-hardware watchdog. With `TPI_REMOTE`, it also installs cloudflared and runs it
+hardware watchdog. With `SSH_CLOUDFLARE`, it also installs cloudflared and runs it
 as `tunnel-pi-cloudflared.service`, with the token in a file only root can
 read.
 
 **Check:** `tp base` ends with `base done`, and after the reboot
-`ssh TPI_LAN true` works again. With `TPI_REMOTE`: the dashboard shows the
-tunnel as **Healthy**, and `ssh TPI_REMOTE` opens a browser login once
+`ssh SSH_LAN true` works again. With `SSH_CLOUDFLARE`: the dashboard shows the
+tunnel as **Healthy**, and `ssh SSH_CLOUDFLARE` opens a browser login once
 **[Browser]**, then gives you a shell on the Pi.
 
 ---
@@ -376,13 +376,13 @@ your computer and the client on a **different** network from the hotspot. The
 
 | # | Test | Pass |
 |---|---|---|
-| 1 | **[Computer]** `scripts/tp check` | `all checks passed`, and the first line says `via the link` (not `TPI_LAN`) |
+| 1 | **[Computer]** `scripts/tp check` | `all checks passed`, and the first line says `via the link` (not `SSH_LAN`) |
 | 2 | **[client]** (a Pi-exit config) `curl https://ifconfig.me` | the Pi's public IP |
 | 3 | **[client]** a DNS leak test site (for example dnsleaktest.com) | `tpi`: only the Pi's ISP. `wgt`: Cloudflare's resolvers, reached from the Pi's IP |
 | 4 | **[client]** `curl -6 -m 10 https://ifconfig.me` | fails (IPv6 blocked) |
 | 5 | **[Pi]** `sudo systemctl stop wg-quick@wgpi`, then **[client]** `curl -m 10 https://ifconfig.me` | times out. It must **not** print the VPS's IP |
-| 6 | only with `TPI_REMOTE`, wgpi still stopped: **[Computer]** `scripts/tp check` | its first line says `via TPI_REMOTE`: the emergency door works |
-| 7 | **[Pi]** `sudo systemctl start wg-quick@wgpi` (without `TPI_REMOTE`, test 5 cut you off: power-cycle the Pi instead) | `tp check` passes again |
+| 6 | only with `SSH_CLOUDFLARE`, wgpi still stopped: **[Computer]** `scripts/tp check` | its first line says `via SSH_CLOUDFLARE`: the emergency door works |
+| 7 | **[Pi]** `sudo systemctl start wg-quick@wgpi` (without `SSH_CLOUDFLARE`, test 5 cut you off: power-cycle the Pi instead) | `tp check` passes again |
 | 8 | `tpi` only: **[VPS]** `systemctl stop wg-quick@wgpi`, then **[client]** `curl -m 10 https://ifconfig.me`, then **[VPS]** `systemctl start wg-quick@wgpi` | times out (the kill switch). It must **not** print the VPS's IP |
 | 9 | **[client]** `ping -c2` the Pi's router (on the Pi, `ip route` shows it after `default via`) | isolated: no reply. LAN mode: replies |
 | 10 | **[client]** a config that is **not** a Pi exit: `curl https://ifconfig.me` | unchanged: the same IP as before |
@@ -417,9 +417,9 @@ the same. Running tests 2–10 of 3.1 again is a good idea.
 If it doesn't come up, ask the friend to check that the ethernet lights are on,
 then to unplug the power and plug it back in. If it still doesn't come up,
 their network blocks something the hotspot didn't, usually outbound UDP to
-`PI_PORT`. If `ssh TPI_REMOTE` works but `tp check` shows no `wgpi` handshake,
+`PI_PORT`. If `ssh SSH_CLOUDFLARE` works but `tp check` shows no `wgpi` handshake,
 that's the cause: set `PI_PORT="443"` (if it's free on the VPS) and run
-`scripts/tp link` again, which updates both ends. Without `TPI_REMOTE` you
+`scripts/tp link` again, which updates both ends. Without `SSH_CLOUDFLARE` you
 can't reach the Pi to change it, so take it home, or choose `443` from the
 start.
 
@@ -432,8 +432,8 @@ scripts/tp undo          # removes the VPS's tunnel-pi parts, then the Pi's Wire
 scripts/tp undo all      # the same, plus cloudflared on the Pi
 ```
 
-`tp undo` removes the link, so it can't run through it: it uses `TPI_LAN`
-or, away from home, `TPI_REMOTE`.
+`tp undo` removes the link, so it can't run through it: it uses `SSH_LAN`
+or, away from home, `SSH_CLOUDFLARE`.
 
 With `EXIT=wgt`, remove the devices' configs first: wgt won't remove a jump
 that configs still use. On the VPS, run `wgt client remove <code>.<device>`
@@ -449,9 +449,9 @@ longer shows the code(s), and the clients are back on their usual routes.
 
 | Symptom | Look at |
 |---|---|
-| `tp` says `via the link` at home | `TPI_LAN` didn't answer: is the Pi on, and does `ssh TPI_LAN true` work without a prompt? |
-| `tp` says `via TPI_REMOTE` | the link is down, and you're in through the emergency door: run `scripts/tp check` and see the rows below |
-| `tp` can't reach the Pi at all | without `TPI_REMOTE`: the friend power-cycles the Pi. With it: is the tunnel Healthy in the dashboard? Does the Access policy include your email? Is the `tp ssh-config` entry in `~/.ssh/config`? |
+| `tp` says `via the link` at home | `SSH_LAN` didn't answer: is the Pi on, and does `ssh SSH_LAN true` work without a prompt? |
+| `tp` says `via SSH_CLOUDFLARE` | the link is down, and you're in through the emergency door: run `scripts/tp check` and see the rows below |
+| `tp` can't reach the Pi at all | without `SSH_CLOUDFLARE`: the friend power-cycles the Pi. With it: is the tunnel Healthy in the dashboard? Does the Access policy include your email? Is the `tp ssh-config` entry in `~/.ssh/config`? |
 | `tp` stops at "This changes the VPS ... Continue?" without a terminal | it needs an answer: run it in a terminal, or set `TP_YES=1` once the person has agreed |
 | `vps.sh: 10.99.0.0/30 is already used` or `port ... in use` | pick another `PI_PORT`, or free the link's addresses on the VPS |
 | FAIL `wgpi has no recent handshake` | **[VPS]** is `PI_PORT/udp` open (`ss -ulpn`, ufw, the provider's firewall)? **[Pi]** does `VPS_HOST` resolve? Then run `scripts/tp link` again, which swaps the keys again |
@@ -472,7 +472,7 @@ briefly `jump-for-vps*.conf`. Also `/usr/local/sbin/tunnel-pi-exit`,
 `/etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf`, and with
 `EXIT=tpi` `/etc/unbound/unbound.conf.d/tunnel-pi.conf`. `tp base` turns on
 automatic updates and sets `RuntimeWatchdogSec=15` in
-`/etc/systemd/system.conf`. With `TPI_REMOTE` it also adds Cloudflare's apt
+`/etc/systemd/system.conf`. With `SSH_CLOUDFLARE` it also adds Cloudflare's apt
 repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` and
 `/etc/cloudflared/tunnel-pi.env` (the token, mode 600).
 
@@ -499,8 +499,8 @@ client configs, or wgt's files.
 - **The friend's IP changes:** that's fine. The Pi dials out again, and the
   VPS learns the new address.
 - **Your VPS's IP changes:** `wg-quick` looks up `VPS_HOST` only when it
-  starts, so the link stays down until it restarts. With `TPI_REMOTE`, run
-  `ssh TPI_REMOTE sudo systemctl restart wg-quick@wgpi`. Without it, the friend
+  starts, so the link stays down until it restarts. With `SSH_CLOUDFLARE`, run
+  `ssh SSH_CLOUDFLARE sudo systemctl restart wg-quick@wgpi`. Without it, the friend
   power-cycles the Pi.
 - **Other things that give you away:** the IP, DNS and IPv6 are covered.
   WebRTC, the browser's time zone and language, phone location services and

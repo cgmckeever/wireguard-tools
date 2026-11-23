@@ -3,8 +3,8 @@
 # and runs pi.sh on the Pi and vps.sh on the VPS over ssh.
 #
 #   tp config              show the settings and check they're filled in
-#   tp ssh-config          print the ~/.ssh/config entry for TPI_REMOTE
-#   tp base                1.3, on the Pi: packages, updates, watchdog (and cloudflared, with TPI_REMOTE)
+#   tp ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
+#   tp base                1.3, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
 #   tp link                2.1: the wgpi link (Pi and VPS), keys exchanged for you
 #   tp exit                2.1, by EXIT: tpi's DNS resolver, or the wgt jump(s)
 #   tp client <device> [lan]   2.2, EXIT=wgt: a config for <device> through the Pi (lan: the LAN jump)
@@ -13,8 +13,8 @@
 #   tp all                 link, exit, check (after base)
 #   tp undo [all]          remove it from the VPS and the Pi (all: cloudflared too)
 #
-# tp reaches the Pi the first way that answers: TPI_LAN (at home), then through
-# the VPS over the link, then TPI_REMOTE (Cloudflare, the emergency door for
+# tp reaches the Pi the first way that answers: SSH_LAN (at home), then through
+# the VPS over the link, then SSH_CLOUDFLARE (Cloudflare, the emergency door for
 # when the link is down). Anything that changes the VPS asks first.
 # TP_YES=1 skips that question (only once the person has agreed to these changes
 # on this VPS). TP_DRY_RUN=1 shows what would run and changes nothing.
@@ -31,13 +31,13 @@ case "${1:-}" in ''|-h|--help|help) usage; exit 0 ;; esac
 [ -r "$CONF" ] || die "no settings at $CONF: cp tunnel-pi.conf.example tunnel-pi.conf, fill it in"
 # shellcheck disable=SC1090
 . "$CONF"
-: "${TPI_LAN:=}" "${TPI_REMOTE:=}" "${CF_TOKEN_FILE:=}" "${VPS_SSH:=}"
+: "${SSH_LAN:=}" "${SSH_CLOUDFLARE:=}" "${CF_TOKEN_FILE:=}" "${VPS_SSH:=}"
 : "${VPS_HOST:=}" "${PI_PORT:=}" "${EXIT:=tpi}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}"
 : "${WG_IF:=wg0}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
 PI_PUBKEY="" VPS_PUBKEY="" CF_TOKEN=""
 DRY="${TP_DRY_RUN:-}"
-# The Pi's user: the part of TPI_LAN before the @ (pi if there is none).
-case "$TPI_LAN" in *@*) PI_USER="${TPI_LAN%%@*}" ;; *) PI_USER=pi ;; esac
+# The Pi's user: the part of SSH_LAN before the @ (pi if there is none).
+case "$SSH_LAN" in *@*) PI_USER="${SSH_LAN%%@*}" ;; *) PI_USER=pi ;; esac
 
 # q <value>: the value quoted for sh.
 q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
@@ -45,7 +45,7 @@ q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 # The settings pi.sh and vps.sh read, as sh assignments (sent ahead of the script).
 vars() {
     for v in VPS_HOST PI_PORT EXIT WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS CLIENT_IP6S WG_SUBNET \
-             TPI_REMOTE PI_PUBKEY VPS_PUBKEY CF_TOKEN; do
+             SSH_CLOUDFLARE PI_PUBKEY VPS_PUBKEY CF_TOKEN; do
         eval "val=\${$v}"
         printf '%s=%s\n' "$v" "$(q "$val")"
     done
@@ -58,13 +58,13 @@ PI="" PI_VIA="" PI_HOP=""
 probe() { ssh -o BatchMode=yes -o ConnectTimeout=8 "$@" true 2>/dev/null; }
 pick_pi() {
     [ -z "$PI" ] || return 0
-    if [ -n "$DRY" ]; then PI="$TPI_LAN" PI_VIA="TPI_LAN (dry run: not tried)"
-    elif probe "$TPI_LAN"; then
-        PI="$TPI_LAN" PI_VIA="TPI_LAN"
-    elif [ -z "$TPI_REMOTE" ] || probe -o StrictHostKeyChecking=accept-new -J "$VPS_SSH" "$PI_USER@10.99.0.2"; then
+    if [ -n "$DRY" ]; then PI="$SSH_LAN" PI_VIA="SSH_LAN (dry run: not tried)"
+    elif probe "$SSH_LAN"; then
+        PI="$SSH_LAN" PI_VIA="SSH_LAN"
+    elif [ -z "$SSH_CLOUDFLARE" ] || probe -o StrictHostKeyChecking=accept-new -J "$VPS_SSH" "$PI_USER@10.99.0.2"; then
         PI="$PI_USER@10.99.0.2" PI_HOP="$VPS_SSH" PI_VIA="the link, through $VPS_SSH"
     else
-        PI="$TPI_REMOTE" PI_VIA="TPI_REMOTE: Cloudflare, the emergency door (TPI_LAN and the link didn't answer)"
+        PI="$SSH_CLOUDFLARE" PI_VIA="SSH_CLOUDFLARE: Cloudflare, the emergency door (SSH_LAN and the link didn't answer)"
     fi
     log "Pi: $PI, via $PI_VIA"
 }
@@ -118,44 +118,44 @@ pubkey_from() { sed -n 's/^PUBKEY=//p' | tail -n 1; }
 
 cmd_config() {
     printf '%s\n' "settings: $CONF"
-    for v in TPI_LAN TPI_REMOTE CF_TOKEN_FILE VPS_SSH VPS_HOST PI_PORT EXIT WG_IF \
-             JUMP_CODE JUMP_LABEL JUMP_LAN_CODE JUMP_LAN_LABEL CLIENT_IPS CLIENT_IP6S WG_SUBNET; do
+    for v in SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE VPS_SSH VPS_HOST PI_PORT EXIT \
+             CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET JUMP_CODE JUMP_LABEL JUMP_LAN_CODE JUMP_LAN_LABEL; do
         eval "val=\${$v}"
         printf '  %-15s %s\n' "$v" "${val:-(empty)}"
     done
-    require TPI_LAN VPS_SSH VPS_HOST PI_PORT
+    require SSH_LAN VPS_SSH VPS_HOST PI_PORT
     case "$EXIT" in
         wgt)  require JUMP_CODE JUMP_LABEL
               case "$JUMP_CODE" in *[!a-z0-9-]*) die "JUMP_CODE: only a-z, 0-9 and -" ;; esac ;;
         tpi)  require CLIENT_IPS ;;
         *) die "EXIT must be tpi or wgt" ;;
     esac
-    if [ -n "$TPI_REMOTE" ]; then
-        require TPI_REMOTE CF_TOKEN_FILE
+    if [ -n "$SSH_CLOUDFLARE" ]; then
+        require SSH_CLOUDFLARE CF_TOKEN_FILE
         [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tp base needs it: step 1.2)"
     else
-        log "note: no TPI_REMOTE, so no emergency door: if the link is down after drop-off, the friend power-cycles the Pi"
+        log "note: no SSH_CLOUDFLARE, so no emergency door: if the link is down after drop-off, the friend power-cycles the Pi"
     fi
     log "settings look complete"
 }
 
 cmd_ssh_config() {
-    require TPI_REMOTE
+    require SSH_CLOUDFLARE
     bin=$(command -v cloudflared || echo cloudflared)
     cat <<EOF
 # Add to ~/.ssh/config. cloudflared must be installed on this computer first
 # (macOS: brew install cloudflared; Linux: Cloudflare's package for your system).
 
-Host $TPI_REMOTE
+Host $SSH_CLOUDFLARE
     User $PI_USER
     ProxyCommand $bin access ssh --hostname %h
 EOF
 }
 
 cmd_base() {
-    require TPI_LAN
-    if [ -n "$TPI_REMOTE" ]; then
-        [ -r "$CF_TOKEN_FILE" ] || die "TPI_REMOTE is set but CF_TOKEN_FILE ($CF_TOKEN_FILE) isn't readable: do step 1.2 first, or empty TPI_REMOTE"
+    require SSH_LAN
+    if [ -n "$SSH_CLOUDFLARE" ]; then
+        [ -r "$CF_TOKEN_FILE" ] || die "SSH_CLOUDFLARE is set but CF_TOKEN_FILE ($CF_TOKEN_FILE) isn't readable: do step 1.2 first, or empty SSH_CLOUDFLARE"
         CF_TOKEN=$(tr -d ' \n\r' < "$CF_TOKEN_FILE")
         [ -n "$CF_TOKEN" ] || die "CF_TOKEN_FILE ($CF_TOKEN_FILE) is empty"
     fi
@@ -256,8 +256,8 @@ cmd_check() {
 
 cmd_undo() {
     if [ -n "$PI_HOP" ]; then   # it removes the link, so it can't run through it
-        [ -n "$TPI_REMOTE" ] || die "tp undo can't run through the link it removes: run it at home (TPI_LAN)"
-        PI="$TPI_REMOTE" PI_HOP=""; log "Pi: $PI instead (undo removes the link)"
+        [ -n "$SSH_CLOUDFLARE" ] || die "tp undo can't run through the link it removes: run it at home (SSH_LAN)"
+        PI="$SSH_CLOUDFLARE" PI_HOP=""; log "Pi: $PI instead (undo removes the link)"
     fi
     confirm_vps "remove wgpi$( [ "$EXIT" = tpi ] && echo " and the kill switch")"
     if [ "$EXIT" = wgt ]; then
@@ -274,13 +274,13 @@ cmd_undo() {
 case "${1:-}" in
     config) cmd_config ;;
     ssh-config) cmd_ssh_config ;;
-    base) require TPI_LAN; cmd_base ;;
-    link) require TPI_LAN; pick_pi; cmd_link ;;
-    exit) require TPI_LAN; pick_pi; cmd_exit ;;
+    base) require SSH_LAN; cmd_base ;;
+    link) require SSH_LAN; pick_pi; cmd_link ;;
+    exit) require SSH_LAN; pick_pi; cmd_exit ;;
     client) shift; cmd_client "$@" ;;
-    lan-mode) require TPI_LAN; pick_pi; shift; cmd_lan_mode "$@" ;;
-    check) require TPI_LAN; pick_pi; cmd_check ;;
-    all) require TPI_LAN; pick_pi; cmd_link; cmd_exit; cmd_check ;;
-    undo) require TPI_LAN; pick_pi; shift; cmd_undo "$@" ;;
+    lan-mode) require SSH_LAN; pick_pi; shift; cmd_lan_mode "$@" ;;
+    check) require SSH_LAN; pick_pi; cmd_check ;;
+    all) require SSH_LAN; pick_pi; cmd_link; cmd_exit; cmd_check ;;
+    undo) require SSH_LAN; pick_pi; shift; cmd_undo "$@" ;;
     *) usage; exit 2 ;;
 esac
