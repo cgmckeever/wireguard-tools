@@ -9,6 +9,7 @@ the WARP ones (fail closed: never leaked) until it's fixed."""
 from __future__ import annotations
 
 import copy
+import ipaddress
 import json
 import os
 import re
@@ -22,6 +23,7 @@ from .const import (
     DEVICE_SERVER,
     LEGACY_SETUP_DONE,
     MARKER,
+    SERVER_GROUP,
     SET_UP_KEYS,
     SETTING_KEYS,
     SETUP_DONE,
@@ -174,6 +176,11 @@ def review_settings(ctx: Ctx, subnet_asked: bool) -> None:
             ctx.out.info(f"  {c}")
         if rep.changes_client_configs and ctx.snap.clients:
             ctx.out.info("Client configs will be rewritten; re-send them.")
+    own_dns = dns_on_server(ctx)
+    if own_dns:
+        ctx.out.warn(f"DNS {', '.join(own_dns)} is this server's tunnel address, which only devices in the "
+                     f"'{SERVER_GROUP}' group can reach: the others get no DNS (wgt device group <device> "
+                     f"{SERVER_GROUP}, or another --dns)")
     ctx.runner.current_step = "review settings"
     if ctx.runner.dry_run:
         return
@@ -183,6 +190,22 @@ def review_settings(ctx: Ctx, subnet_asked: bool) -> None:
         return
     if not ui.yes("Continue?", default=True):
         raise WgtError("aborted at: review settings (nothing changed)")
+
+
+def dns_on_server(ctx: Ctx) -> List[str]:
+    """The WG_DNS entries that are this server's own tunnel addresses (WGT-SERVER
+    guards them: devices outside the server group are refused there)."""
+    own = {ipaddress.ip_address(a) for a in (ctx.cfg.server_ip, device_ip(DEVICE_SERVER))}
+    if ctx.cfg.ipv6:
+        own.add(ipaddress.ip_address(f"{ctx.cfg.p6}::1"))
+    found = []
+    for entry in (d.strip() for d in ctx.cfg.WG_DNS.split(",")):
+        try:
+            if ipaddress.ip_address(entry) in own:
+                found.append(entry)
+        except ValueError:
+            continue   # a search domain
+    return found
 
 
 def offer_hostname(ctx: Ctx) -> None:

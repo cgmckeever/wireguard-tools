@@ -163,7 +163,11 @@ def probing(ctx: Ctx, e: store.Exit) -> Iterator[None]:
     """Have a jump up (and held from the watchdog) for a check, then leave it
     as it was: what this started is stopped again, but a jump tunnel that was
     already up (WARP-off clients on it) stays. Raises WgtError if it can't be
-    brought up (and takes down what it started)."""
+    brought up (and takes down what it started). Not with wg0 down: its WARP reaches
+    the jump only by wg0's fwmark rule, and without it would pass straight out of
+    this server (and a trace through it pass as the jump's)."""
+    if not ops.wg_up(ctx):
+        raise WgtError(f"{ctx.cfg.WG_IF} is down, and its routing through the jump with it")
     px_was, wx_was = live.if_exists(ctx.runner, e.px), live.if_exists(ctx.runner, e.wx)
     hold(ctx, e.code)
     try:

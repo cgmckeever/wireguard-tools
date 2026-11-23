@@ -159,7 +159,16 @@ def rename_everywhere(args: List[str]) -> int:
         # <old>'s number goes with it, whatever <new>'s line said (no server that answered
         # has another number for <new>: a line here is a removed device's). Kept, it would
         # leave the renamed device unrecorded, and the next add pass the stale number.
+        # That removed device's number stays taken, under a name no device can have
+        # (no dot): handed out again, an old config for it would reach a new device.
+        was = entries.get(new)
         entries[new] = entries.pop(old)
+        if was is not None and was.number != entries[new].number:
+            keep, n = f"{new}.removed", 1
+            while keep in entries:
+                n += 1
+                keep = f"{new}.removed{n}"
+            entries[keep] = fleet.Entry(was.number, was.removed or time.strftime("%Y-%m-%d"))
         write_entries(entries)
     return rc
 

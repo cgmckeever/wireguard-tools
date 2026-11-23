@@ -246,6 +246,21 @@ def test_tunnel_test_without_jumps(make_ctx, monkeypatch, tmp_path):
     assert "plain" in rows[0] and "warp" in rows[1].split()[2]
 
 
+def test_a_jump_is_not_probed_with_wg0_down(make_ctx, monkeypatch):
+    """Without wg0's fwmark rule a jump's WARP goes straight out: no trace may pass as the jump's."""
+    from wgt import exits
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    ctx = make_ctx(answers={"ip link show dev wg0": (1, ""),
+                            "curl -fsS --max-time 10 --interface*": (0, "ip=104.28.1.1\nloc=US\nwarp=on\n"),
+                            "curl -fsS --max-time 10 https*": (0, "ip=192.0.2.1\nloc=US\nwarp=off\n")})
+    got = []
+    ctx.out.line = lambda text="": got.append(text)
+    assert exits.cmd_tunnel_test(ctx, []) == 1
+    jumps = [g for g in got if "jump:" in g]
+    assert jumps and all(g.split()[0] == "FAIL" and "is down" in g for g in jumps)
+    assert not any(c.startswith("systemctl restart wg-quick@") for c in ctx.runner.calls)
+
+
 def test_a_recovered_warp_starts_over_with_a_new_port(make):
     """The port marker means a new port was tried during this silence, not ever."""
     ctx = make({"ip link show dev px-nyc-us": DOWN, "ip link show dev wx-nyc-us": DOWN,

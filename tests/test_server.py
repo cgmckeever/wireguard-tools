@@ -627,3 +627,12 @@ def test_a_location_lookup_saves_a_city_or_nothing(make_ctx, answer):
     ops.state_unset(ctx, "LOCATION")
     srv.save_location(ctx)
     assert store.state_get(ctx.snap.state, "LOCATION") == ("Atlanta GA" if "Atlanta" in answer else "")
+
+
+def test_dns_on_the_servers_own_tunnel_address_is_named(make_ctx):
+    """WGT-SERVER refuses devices outside the server group there: DNS on it fails for them."""
+    ctx = make_ctx()
+    assert srv.dns_on_server(ctx) == []
+    for own in (ctx.cfg.server_ip, "10.9.8.1", f"{ctx.cfg.p6}::1"):
+        ctx.cfg.values["WG_DNS"] = f"1.1.1.1, {own}, home.lan"
+        assert srv.dns_on_server(ctx) == [own]

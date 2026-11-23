@@ -404,6 +404,15 @@ def test_rename_everywhere(local, monkeypatch):
     assert (local / "devices").read_text().splitlines()[1:] == ["pixel 5"]
 
 
+def test_rename_everywhere_keeps_a_removed_devices_number_taken(local, monkeypatch):
+    """Renaming onto a removed device's name: its number must not be handed out again."""
+    (local / "devices").write_text("phone 5\npixel 9 removed 2026-01-01\n")
+    answers_from(monkeypatch, {"dengar": {"phone": 5}, "boba": {}})
+    assert ctl.on("all", "client", ["rename", "phone", "pixel"]) == 0
+    lines = (local / "devices").read_text().splitlines()[1:]
+    assert "pixel 5" in lines and "pixel.removed 9 removed 2026-01-01" in lines
+
+
 def test_rename_everywhere_refuses_config_names_clashes_and_a_missing_server(local, monkeypatch):
     calls = answers_from(monkeypatch, {"dengar": {"phone": 5, "pixel": 6}, "boba": {}})
     with pytest.raises(WgtError, match="device names"):
