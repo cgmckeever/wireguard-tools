@@ -683,6 +683,28 @@ def test_ufw_follows_jumps_and_rollback(world, monkeypatch):
     assert not store.state_get(store.load(world.paths).state, "UFW")
 
 
+def test_a_jumps_new_label_reaches_its_configs_and_an_old_bad_byte_goes(world):
+    """Its configs' "# exit:" line names the label: jump add rewrites it (wgt-ctl then
+    delivers), which also clears a byte that isn't UTF-8 from an older label."""
+    world.run(["setup"])
+    world.run(world.words(["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"]))
+    world.run(["client", "add", "tab", "--exit", "lon-gb"])
+    conf = os.path.join(world.paths.client_dir, "boba.lon-gb.tab.conf")
+    assert "# exit: lon-gb = London (jump" in store.read_text(conf)
+    with open(world.paths.exit_db, encoding="utf-8", errors="surrogateescape") as f:
+        db = f.read()
+    with open(world.paths.exit_db, "w", encoding="utf-8", errors="surrogateescape") as f:
+        f.write(db.replace("London", "L\udce9ndon"))   # as an older wgt saved a Latin-1 label
+    text = store.read_text(conf)
+    with open(conf, "w", encoding="utf-8", errors="surrogateescape") as f:
+        f.write(text.replace("London", "L\udce9ndon"))
+    world.run(world.words(["jump", "add", "lon-gb", "JUMPFILE"]))
+    assert "# exit: lon-gb = L?ndon (jump" in store.read_text(conf) and store.is_utf8(store.read_text(conf))
+    world.run(world.words(["jump", "add", "lon-gb", "JUMPFILE", "--label", "London, UK"]))
+    assert "# exit: lon-gb = London, UK (jump" in store.read_text(conf)
+    assert world.problems() == []
+
+
 def test_a_port_ufw_didnt_close_at_rollback_stays_recorded(world, monkeypatch):
     """As in setup: only a port ufw closed leaves UFW_PORTS, so the next rollback retries it."""
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: "/usr/sbin/ufw")

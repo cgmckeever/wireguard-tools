@@ -357,3 +357,10 @@ def test_eof_isnt_enter(monkeypatch, line, want):
 def test_a_jump_check_waits_out_two_lost_warp_handshakes_inside_the_hold():
     from wgt.const import EXIT_HOLD, EXIT_WARP_WAIT
     assert 15 < EXIT_WARP_WAIT < EXIT_HOLD
+
+
+def test_a_label_is_made_utf8_where_it_comes_in_and_where_its_read():
+    assert store.one_line("Z\udce9rich  \n x") == "Z?rich x"
+    assert store.is_utf8("Zürich") and not store.is_utf8("Z\udce9rich")
+    e = store.parse_exits("par-fr 1 Z\udce9rich\n")[0]
+    assert e.label == "Z?rich" and e.raw == "par-fr 1 Z\udce9rich"   # the line itself kept as it was

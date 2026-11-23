@@ -90,8 +90,16 @@ def saved_settings(text: Optional[str], keys: Iterable[str]) -> Dict[str, str]:
 # --- names ---
 
 def one_line(value: str) -> str:
-    """<value> on one line, runs of whitespace as one space (a label in exits.db, a location)."""
-    return " ".join(value.split())
+    """<value> on one line, runs of whitespace as one space (a label in exits.db, a
+    location), and UTF-8: a byte that isn't (read_text keeps it as a surrogate, from
+    an old export's comment, say) becomes "?". Labels reach every config of a jump,
+    and wireguard-tunnels refuses a config that isn't UTF-8."""
+    return " ".join(re.sub(r"[\ud800-\udfff]", "?", value).split())
+
+
+def is_utf8(text: str) -> bool:
+    """<text> (read with read_text, or ssh's "surrogateescape") was UTF-8 throughout."""
+    return not re.search(r"[\ud800-\udfff]", text)
 
 
 def is_uint(word: str) -> bool:
@@ -286,7 +294,7 @@ def parse_exits(text: Optional[str]) -> List[Exit]:
         if len(f) < 2 or not valid_exit_code(f[0]) or not is_uint(f[1]) \
                 or not 1 <= int(f[1]) <= EXIT_MAX:
             raise WgtError(f"exits.db: bad line (want 'code index label', index 1-{EXIT_MAX}): {line}")
-        out.append(Exit(f[0], int(f[1]), " ".join(f[2:]), raw=line))
+        out.append(Exit(f[0], int(f[1]), one_line(" ".join(f[2:])), raw=line))   # the line itself kept as is
     return out
 
 

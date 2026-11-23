@@ -28,8 +28,15 @@ The other side's rules are in that repo's `wgtun/store.py` (`sweep_owned`).
 - **Never touches** `config/warped.*` (the sweep's: they keep the carrier's key
   and header line, so only the name tells them apart) or
   `config/warp.<device>.conf` (the sweep's WARP alone). `tunnels.sweep_owned`
-  mirrors theirs: those names are never matched, and a config that would land
-  on one (a server named `warp`, in any case: the Mac's file system ignores it) is refused. Nor anything else in the store.
+  is the same rule as theirs, without case on both sides (the Mac's file system
+  ignores it; pinned by the same examples in both repos' tests): those names
+  are never matched, and a config that would land on one (a server named
+  `warp`) is refused. Nor anything else in the store.
+- **UTF-8.** wireguard-tunnels refuses a config that isn't. A copy is the
+  server's file byte for byte, so the server's files are kept UTF-8: a jump
+  label is made so where it comes in and where it's read (`store.one_line`),
+  and `jump add` rewrites its configs' `# exit:` line. Delivery warns about any
+  that still isn't, naming that `jump add`.
 - **Matching** a local file to a server's config: the same private key (rename
   keeps keys), else the same header line. A matched file keeps its name.
   Retiring needs the server's complete list, a header naming this server, and a

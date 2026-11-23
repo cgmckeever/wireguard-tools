@@ -384,6 +384,18 @@ def test_a_non_utf8_byte_in_a_config_is_delivered_as_it_was(store, monkeypatch):
     assert b"Z\xe9rich" in (store / "devices" / "iphone" / "config" / "dengar.iphone.conf").read_bytes()
 
 
+def test_a_config_that_isnt_utf8_is_named_with_the_way_to_fix_it(store, monkeypatch):
+    """wireguard-tunnels refuses it: the warning says which jump add rewrites its "# exit:" line."""
+    told = io.StringIO()
+    monkeypatch.setattr(remote.out, "err", told)
+    m = tunnels.MARK
+    text = conf("par-fr.iphone", "K1", body="# exit: par-fr = Z\udce9rich (jump)\n")
+    monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, f"{m}dengar.par-fr.iphone.conf\n{text}"))
+    tunnels.deliver(remote.Server("dengar", "root@h"))
+    err = told.getvalue()
+    assert "par-fr.iphone isn't UTF-8" in err and "jump add par-fr /etc/wireguard/exits/par-fr.proton.conf" in err
+
+
 def test_the_name_in_the_configs_is_the_servers_own(store):
     issued = {"a.x": conf("a.x", "K", server="crash")}
     assert tunnels.server_name(issued, remote.Server("boba", "root@h")) == "crash"
@@ -409,6 +421,8 @@ def test_a_renamed_servers_last_config_still_retires(store, monkeypatch):
     ("client", ["--yes", "add", "phone"], True), ("client", ["--yes", "remove", "a.phone"], True),
     ("client", ["--yes", "disable", "a.phone"], False), ("client", ["--yes"], True),
     ("restore", ["/root/x.tar.gz"], True),
+    ("jump", ["add", "par-fr", "/tmp/p.conf"], True), ("jump", ["remove", "par-fr"], False),
+    ("jump", ["add", "par-fr", "-", "--dry-run"], False),
 ])
 def test_which_commands_deliver(cmd, args, delivers):
     assert tunnels.changes_configs(cmd, args) is delivers
@@ -502,3 +516,12 @@ def test_an_empty_anchor_goes_and_one_with_jump_files_stays(store):
     assert tunnels.drop_anchor("kept").endswith("kept")
     assert (store / "servers" / "kept" / "carriers" / "paris.conf").exists()
     assert tunnels.drop_anchor("never") == ""
+
+
+@pytest.mark.parametrize("name,owned", [
+    ("warped.x.iphone", True), ("warp.iphone", True), ("warp.mbp-1", False), ("dengar.warp.iphone", False),
+    ("Warped.x.iphone", True), ("WARP.iPhone", True)])
+def test_the_sweeps_names_as_wireguard_tunnels_owns_them(name, owned):
+    """The same cases as wireguard-tunnels' test_sweep_owned_by_name (its store.sweep_owned,
+    on names without .conf): one rule on both sides, without case."""
+    assert tunnels.sweep_owned(f"{name}.conf", "iphone") is owned

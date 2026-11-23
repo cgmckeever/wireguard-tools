@@ -477,7 +477,7 @@ rm paris.conf                                     # it holds the jump's key
 into `wg0` live (devices stay connected), and checks the result:
 `jump 'par-fr' works: ip=104.28.x.x colo=CDG loc=FR warp=on` (`colo` is
 Cloudflare's data centre: CDG is Paris). Adding the same code again replaces
-its jump file. It makes no device configs: add those with
+its jump file, and a new `--label` goes into its configs' `# exit:` line too. It makes no device configs: add those with
 `wgt client add <device> --exit par-fr`.
 
 ```bash
@@ -745,8 +745,8 @@ it. That's how wireguard-tunnels knows which servers exist. `remove` leaves the
 server's client configs in `devices/`: delete those by hand.
 
 **Client configs follow the server.** After `client add`, `rotate`, `rename` and
-`remove`, the `client` list and its action menu, and `device rename` (on one
-server or `all`), `wgt-ctl` copies that server's client configs into
+`remove`, the `client` list and its action menu, `device rename` (on one
+server or `all`), and `jump add` or `jump-add` (a label is in its configs), `wgt-ctl` copies that server's client configs into
 `devices/<device>/config/`. So do `setup` and `restore`, which rewrite every
 config. `wgt-ctl <server> sync` (or `all sync`) does it on demand, such as after a
 `move`, or after `wgt setup` run on the server itself: sync before the next client

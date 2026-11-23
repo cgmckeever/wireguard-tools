@@ -105,6 +105,7 @@ def add_one_exit(s: Server, path: str) -> None:
                                  f"rc=$?; rm -f {uploaded}; exit $rc")
     if rc != 0:
         raise WgtError(f"jump add failed for {code}")
+    tunnels.after(s, "jump", ["add"])   # a replaced jump's label is in its configs' "# exit:" line
 
 
 def confirm_replace(s: Server, code: str, file: str) -> None:

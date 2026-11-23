@@ -285,10 +285,14 @@ def with_client_header(cfg: Config, text: str, name: str) -> str:
                      text)
 
 
+def with_exit_line(snap: Snapshot, text: str, name: str) -> str:
+    """A client config's "# exit:" line as its name and the jump's label say now."""
+    return _set_line(r"(?m)^# exit: .*$", f"# exit: {exit_desc(snap, name)}", text)
+
+
 def with_client_name(cfg: Config, snap: Snapshot, text: str, name: str) -> str:
     """A client config's comments for its new name (its way out is in the name)."""
-    text = with_client_header(cfg, text, name)
-    return _set_line(r"(?m)^# exit: .*$", f"# exit: {exit_desc(snap, name)}", text)
+    return with_exit_line(snap, with_client_header(cfg, text, name), name)
 
 
 def with_first_line(text: str, prefix: str, line: str) -> str:

@@ -307,6 +307,7 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
                     render.with_first_line(raw, f"# exit {code}: ", f"# exit {code}: {label}"))
     e = store.Exit(code, idx, label)
     ops.save_exit(ctx, e)
+    _refresh_exit_lines(ctx, code)
     if ctx.runner.dry_run:
         # Its WARP profile doesn't exist yet in a dry run, so wx-<code>.conf
         # can't be rendered; wg0.conf (its routing) still shows as a diff.
@@ -321,6 +322,16 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     if changed and any_up(ctx, e):
         down(ctx, e)
     _check_new(ctx, e)
+
+
+def _refresh_exit_lines(ctx: Ctx, code: str) -> None:
+    """The "# exit:" line of <code>'s configs, for its label now (a new --label, or an
+    old one made UTF-8): only a comment, so nothing else changes, and wgt-ctl delivers."""
+    for c in ctx.snap.exit_clients(code):
+        path = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
+        text = store.read_text(path)
+        if text is not None and render.with_exit_line(ctx.snap, text, c.name) != text:
+            ctx.files.write(path, 0o600, render.with_exit_line(ctx.snap, text, c.name))
 
 
 def _read_jump(src: str) -> str:

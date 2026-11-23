@@ -360,6 +360,12 @@ def deliver(s: Server) -> int:
         raise WgtError(f"{s.name}'s configs name the server '{name}', which is {other.name} in {remote.LIST}: "
                        f"nothing delivered (give {s.name} its own: wgt-ctl {s.name} setup --name <name>; "
                        f"or, if they're one machine, list it once)")
+    for config in sorted(c for c, text in issued.items() if not store.is_utf8(text)):
+        # Delivered as is all the same (a copy is the server's file): the fix is on the server.
+        code = store.client_exit(config) or "<its jump>"
+        out.warn(f"{s.name}: {config} isn't UTF-8 (a jump label from before labels were made so), and "
+                 f"wireguard-tunnels refuses it. Its '# exit:' line is rewritten by: wgt-ctl {s.name} "
+                 f"jump add {code} {remote.REMOTE.jump_source(code)} (or with --label)")
     devices = sorted(set(all_devices()) | {store.device_of(c) for c in issued})
     actions = refuse_taken(plan(name, issued, local_files(devices), complete=True, kept_keys=kept))
     apply(actions)
@@ -378,7 +384,9 @@ def do_sync(s: Server, args: List[str]) -> int:
     return deliver(s)
 
 
-CHANGES = {"client": ("add", "rotate", "rename", "remove"), "device": ("rename",)}
+# jump add: a new label is in its configs' "# exit:" line (exits._refresh_exit_lines).
+CHANGES = {"client": ("add", "rotate", "rename", "remove"), "device": ("rename",), "jump": ("add",),
+           "exit": ("add",)}
 REWRITES_ALL = SETTINGS_COMMANDS   # sync_client_configs: settings and, after --name, every header
 
 
