@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 from conftest import FIXTURES, KEYS, temp_paths
 
-from wgt import backup, cli, host, ops, render, store, warp_rotate
+from wgt import backup, cli, host, ops, render, store, ui, warp_rotate
 from wgt import server as srv
-from wgt.errors import WgtError
+from wgt.errors import CommandFailed, WgtError
 from wgt.host import Facts
 from wgt.system import FakeRunner, Out
 
@@ -500,6 +500,39 @@ def test_rollback_puts_the_hosts_file_back(make_ctx, tmp_path, monkeypatch):
     ctx.files.write(str(hosts), 0o644, "127.0.0.1 localhost\n127.0.1.1 dengar\n")
     srv._restore_host_files(ctx)
     assert "oldname" in hosts.read_text()
+
+
+def test_rollback_puts_back_the_hostname_setup_set(make_ctx):
+    ctx = make_ctx()
+    ops.state_set(ctx, "ORIG_HOSTNAME", "racknerd-1a2b")
+    ops.state_set(ctx, "SET_HOSTNAME", "boba")   # make_ctx's host is boba
+    srv._restore_host_files(ctx)
+    assert "hostnamectl set-hostname racknerd-1a2b" in ctx.runner.calls
+    assert not store.state_get(ctx.snap.state, "ORIG_HOSTNAME")
+    assert not store.state_get(ctx.snap.state, "SET_HOSTNAME")
+
+
+def test_rollback_leaves_a_hostname_someone_else_set(make_ctx):
+    ctx = make_ctx()
+    ops.state_set(ctx, "ORIG_HOSTNAME", "racknerd-1a2b")
+    ops.state_set(ctx, "SET_HOSTNAME", "dengar")   # renamed boba since, by hand
+    srv._restore_host_files(ctx)
+    assert not any("hostnamectl" in c for c in ctx.runner.calls)
+    assert not store.state_get(ctx.snap.state, "ORIG_HOSTNAME")
+
+
+def test_the_rename_is_recorded_before_it_happens_and_keeps_the_first_name(make_ctx, monkeypatch):
+    ctx = make_ctx(argv=["--name", "dengar"])
+    ctx.args.yes = False
+    monkeypatch.setattr(ui, "have_tty", lambda: True)
+    monkeypatch.setattr(ui, "yes", lambda *a, **k: True)
+    ops.state_set(ctx, "ORIG_HOSTNAME", "racknerd-1a2b")   # an earlier rename's
+    ctx.runner.answers["hostnamectl set-hostname dengar"] = (1, "")   # stopped there
+    with pytest.raises(CommandFailed):
+        srv.offer_hostname(ctx)
+    state = store.read_text(ctx.paths.state)
+    assert store.state_get(state, "ORIG_HOSTNAME") == "racknerd-1a2b"
+    assert store.state_get(state, "SET_HOSTNAME") == "dengar"
 
 
 def test_a_newline_cant_become_another_saved_key():

@@ -23,7 +23,9 @@ from .const import (
     DEVICE_SERVER,
     LEGACY_SETUP_DONE,
     MARKER,
+    ORIG_HOSTNAME,
     SERVER_GROUP,
+    SET_HOSTNAME,
     SET_UP_KEYS,
     SETTING_KEYS,
     SETUP_DONE,
@@ -221,9 +223,12 @@ def offer_hostname(ctx: Ctx) -> None:
     if not ui.yes(f"Update hostname {cur} to {want}?", default=True):
         return
     new = want + (full[len(cur):] if "." in full else "")   # keep the domain part
-    ctx.runner.step(f"Rename host {full} -> {new} (and in {ctx.paths.hosts_file})",
-                    f"hostnamectl set-hostname {full}; put {cur} back in {ctx.paths.hosts_file}; "
-                    f"rm {os.path.join(ctx.paths.cloud_cfg_dir, HOSTNAME_CFG)}")
+    ctx.runner.step(f"Rename host {full} -> {new} (and in {ctx.paths.hosts_file})", "wgt rollback")
+    # Recorded first, so rollback can put the name back after a stop anywhere below. The
+    # first original stays (a second rename's "old" name is setup's own).
+    if not store.state_get(ctx.snap.state, ORIG_HOSTNAME):
+        ops.state_set(ctx, ORIG_HOSTNAME, full)
+    ops.state_set(ctx, SET_HOSTNAME, new)
     ctx.runner.run(["hostnamectl", "set-hostname", new])
     hosts = store.read_text(ctx.paths.hosts_file) or ""
     word = rf"(?<![\w.-]){re.escape(cur)}(?![\w-])"   # not inside ip6-localhost, or a longer name
@@ -718,9 +723,20 @@ def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
 
 
 def _restore_host_files(ctx: Ctx) -> None:
-    """What offer_hostname changed. The hostname itself stays (its step said how to put it back)."""
+    """What offer_hostname changed: the hostname (unless renamed again since, by someone
+    else), /etc/hosts and the cloud-init file. The name first: a stop after it leaves the
+    records, and a re-run finds the name already back and restores the files."""
+    orig, set_to = (store.state_get(ctx.snap.state, k) for k in (ORIG_HOSTNAME, SET_HOSTNAME))
+    if orig and set_to:
+        now = ctx.facts.hostname
+        if now == set_to:
+            ctx.runner.run(["hostnamectl", "set-hostname", orig])
+            ctx.out.info(f"hostname {now} -> {orig}")
+        elif now != orig:
+            ctx.out.warn(f"hostname is {now}, not the {set_to} setup set: left as is (it was {orig})")
     ctx.files.restore_original(ctx.paths.hosts_file, remove_new=False)
     ctx.files.restore_original(os.path.join(ctx.paths.cloud_cfg_dir, HOSTNAME_CFG), remove_new=True)
+    ops.state_unset(ctx, ORIG_HOSTNAME, SET_HOSTNAME)
 
 
 def _purge(ctx: Ctx) -> None:

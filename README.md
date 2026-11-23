@@ -189,7 +189,8 @@ without asking, then each change it would make.
 If the server name (`--name`) differs from the machine's hostname, setup then
 asks `Update hostname <current> to <name>? [Y/n]`. Yes sets it with
 `hostnamectl` (keeping any domain part), updates `/etc/hosts`, and stops
-cloud-init from restoring the old name at boot. It only asks in a terminal
+cloud-init from restoring the old name at boot; `wgt rollback` puts all three
+back (the name only if nobody renamed the host since). It only asks in a terminal
 without `--yes`; names with `_` aren't valid hostnames and are skipped.
 
 **If the terminal goes away.** Once you've answered `Continue?`, losing the terminal
@@ -501,7 +502,7 @@ wgt status            # settings (and any not running yet), interfaces, configs,
 wgt log [N]           # its changes, the watchdogs and the tunnels: last lines, then follows (Ctrl-C stops; --no-follow just prints)
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
-wgt rollback          # stop everything, remove all rules, restore original files (a hostname setup changed stays)
+wgt rollback          # stop everything, remove all rules, restore original files and the hostname
 wgt rollback --purge  # ...and delete keys, configs, WARP accounts and jumps (backup archives stay)
 ```
 
