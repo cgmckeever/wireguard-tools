@@ -25,21 +25,33 @@ real Pi and VPS. Run it first on a VPS nobody else depends on.
 3. When the link is down, that client gets no connection at all. It never
    falls back to the VPS's IP.
 4. Nothing from the tunnel reaches devices on the friend's LAN, unless you
-   turn on LAN mode (2.3).
-5. Clients that aren't chosen are unaffected.
-6. You can reach the Pi from anywhere to check and change it.
+   turn on [LAN mode (2.3)](#23-optional-lan-mode).
+5. The VPS's other clients, the ones not sent to the Pi, still go out through
+   the VPS as before.
+6. You can reach the Pi remotely.
 
 Phase 3 tests each of these.
 
 ## Choose your setup
 
-Three choices, made once in the settings file:
+Two choices, made once in the settings file.
 
-| Choice | Options | Pick |
+**1. Routing: how your VPS sends clients into the Pi.** Pick the row that
+matches your VPS:
+
+| Your VPS | Set | What you get |
 |---|---|---|
-| **Routing** (`TPI_ROUTING`): what sends clients into the Pi | `tpi`: tunnel-pi's own rules on the VPS, for **any** WireGuard VPS. You choose clients by their address (`CLIENT_IPS`) and make their configs yourself. `wgt`: for a VPS running **wgt** (the wireguard-tools in this repository). The Pi becomes an ordinary wgt jump, and wgt makes each device its own config | `wgt` if your VPS runs wgt, else `tpi` |
-| **wgt-ctl** (`WGT_SERVER`), with `wgt` | If you manage the VPS with `wgt-ctl`, name it, and everything on the VPS goes through `wgt-ctl`: device numbers, configs delivered to `~/wg-tunnels` | set it if you use `wgt-ctl` |
-| **Emergency door** (`SSH_CLOUDFLARE`) | Normally you reach the Pi through the VPS, over the link. That fails exactly when the link is down (a blocked port, a changed VPS IP, a bad change). A Cloudflare Tunnel gives SSH to the Pi that doesn't need the link. It costs a domain on Cloudflare (about $10–15 a year; the rest is free) and step 1.3. Without it, a dead link means the friend power-cycles the Pi, or you take it home | recommended; if you skip it, use `PI_PORT="443"` (rarely blocked) |
+| any WireGuard server | `TPI_ROUTING="tpi"` | tunnel-pi's own rules on the VPS. You choose clients by their address (`CLIENT_IPS`) and make their configs yourself |
+| runs **wgt** (the wireguard-tools in this repository) | `TPI_ROUTING="wgt"` | the Pi becomes an ordinary wgt jump, and `tpi-ctl.sh client` makes each device its own config |
+| runs wgt, and you manage it with **wgt-ctl** | `TPI_ROUTING="wgt"` and `WGT_SERVER="<its name>"` | the same, with everything on the VPS going through `wgt-ctl`: each device keeps its fleet-wide number, and its config lands in `~/wg-tunnels` |
+
+**2. The emergency door (`SSH_CLOUDFLARE`): recommended.** Normally you reach
+the Pi through the VPS, over the link. That fails exactly when the link is down
+(a blocked port, a changed VPS IP, a bad change). A Cloudflare Tunnel gives SSH
+to the Pi that doesn't need the link. It costs a domain on Cloudflare (about
+$10–15 a year; the rest is free) and step [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare). Without it, a dead link
+means the friend power-cycles the Pi, or you take it home; if you skip it, use
+`PI_PORT="443"`, which networks rarely block.
 
 ## What you need
 
@@ -121,9 +133,9 @@ Fill it in (each line has a comment), then check it:
 
 | Setting | When | What to put |
 |---|---|---|
-| `SSH_LAN` | always | `user@hostname` for the Pi on your home network. You choose both in 1.2 (`pi@tunnel-pi.local`) |
-| `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip 1.3 |
-| `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in 1.3 (the default is fine) |
+| `SSH_LAN` | always | `user@hostname` for the Pi on your home network. You choose both in [1.2](#12-flash-the-pi-hands) (`pi@tunnel-pi.local`) |
+| `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) |
+| `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) (the default is fine) |
 | `WGT_SERVER` | optional | the VPS's name in `bin/wgt-ctl list`. Then `VPS_SSH` and `VPS_HOST` can stay as the example |
 | `VPS_SSH` | always | how ssh reaches the VPS (`root@vps.example.com`) |
 | `VPS_HOST` | always | the VPS's public name or IP, which the Pi dials |
@@ -135,7 +147,7 @@ Fill it in (each line has a comment), then check it:
 | `WG_IF` | `tpi` | the VPS's WireGuard interface for your clients (`wg show interfaces`; usually `wg0`) |
 | `WG_SUBNET` | `tpi` | leave empty |
 | `JUMP_CODE`, `JUMP_LABEL` | `wgt` | a 2–6 character code (`a-z`, `0-9`, `-`) not already in `wgt jump list`, and a label |
-| `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode (2.3) |
+| `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode ([2.3](#23-optional-lan-mode)) |
 
 **With `TPI_ROUTING=tpi`, make the client configs now, by hand.** tunnel-pi
 makes none. Each device that should exit through the Pi needs a WireGuard
@@ -152,7 +164,7 @@ scripts/tpi-ctl.sh config
 
 With Raspberry Pi Imager, write **Raspberry Pi OS Lite (64-bit)**, Bookworm or
 later. In its settings: the hostname and user from `SSH_LAN`, and **SSH with
-your public key only** (passwords off). Leave Wi-Fi out: step 3.1 handles it.
+your public key only** (passwords off). Leave Wi-Fi out: step [3.1](#31-ethernet-or-wi-fi-at-the-friends-computer) handles it.
 Boot the Pi at home, on ethernet.
 
 **Check [Computer]:** `ssh SSH_LAN true` works with no password prompt.
@@ -171,7 +183,7 @@ menus now and then; follow the nearest match.
    install -m 600 /dev/stdin ~/.config/tunnel-pi/cloudflared.token   # paste the token, then Ctrl-D
    ```
 
-   Don't run the dashboard's install command: 1.4 does that.
+   Don't run the dashboard's install command: [1.4](#14-set-up-the-pis-base-computer) does that.
 2. On the tunnel's **Public Hostname** tab (or **Published application
    routes**): add `SSH_CLOUDFLARE`, type `SSH`, URL `localhost:22`.
 3. **Access → Applications → Add an application → Self-hosted**, for
@@ -220,7 +232,7 @@ output also said `jump 'JUMP_CODE' works: ip=<your home IP>`.
 
 ## 2.2 Device configs
 
-**`TPI_ROUTING=tpi`:** nothing to do here. Your client configs from 1.1 already
+**`TPI_ROUTING=tpi`:** nothing to do here. Your client configs from [1.1](#11-fill-in-the-settings-computer) already
 go through the Pi.
 
 **`TPI_ROUTING=wgt` [Computer]:**
@@ -343,7 +355,7 @@ all.
 
 **Check [Computer], within a few minutes:** `scripts/tpi-ctl.sh check` passes
 and shows the friend's IP, and so does a Pi-exit client's
-`curl https://ifconfig.me`. Tests 2–10 of 3.3 are worth repeating.
+`curl https://ifconfig.me`. Tests 2–10 of [3.3](#33-the-away-from-home-test-hands-then-computer-and-client) are worth repeating.
 
 If it doesn't come up: ask the friend to check the ethernet lights, then to
 unplug the power and plug it back in. Still nothing usually means their
@@ -358,7 +370,7 @@ Without the door, bring the Pi home to change it.
 
 - **Add or remove a `tpi` client:** edit `CLIENT_IPS` (and `CLIENT_IP6S`),
   then `scripts/tpi-ctl.sh link`. A removed client's rules are removed too.
-- **Add a `wgt` device:** `scripts/tpi-ctl.sh client <device>` (2.2).
+- **Add a `wgt` device:** `scripts/tpi-ctl.sh client <device>` ([2.2](#22-device-configs)).
 - **After `wgt restore` or `wgt-ctl move` on the VPS:** wgt's backups include
   `wgpi`, but don't start it: run `scripts/tpi-ctl.sh link`.
 - **Your VPS's IP changes:** the Pi looks up `VPS_HOST` only when the link
