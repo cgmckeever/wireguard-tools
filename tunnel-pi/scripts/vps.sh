@@ -7,10 +7,10 @@
 #
 # Steps (each is safe to run again):
 #   link    the wgpi link to the Pi (PI_PUBKEY needed). Prints PUBKEY=<the VPS's
-#           public key>. With EXIT=hand it also writes the routing for CLIENT_IPS
+#           public key>. With EXIT=tpi it also writes the routing for CLIENT_IPS
 #           and the kill switch
 #   check   PASS/FAIL for the link and, by EXIT, the routing or the wgt jump(s)
-#   undo    remove wgpi (and EXIT=hand's kill switch). wgt jumps are removed
+#   undo    remove wgpi (and EXIT=tpi's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
 # It never changes WG_IF (the clients' interface) or wgt's files. Logs go to stderr; only PUBKEY= goes
@@ -21,10 +21,10 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
-    : "${EXIT:=jump}" "${PI_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
+    : "${EXIT:=tpi}" "${PI_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
     : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}" "${WG_IF:=wg0}"
     case "$WG_IF" in ''|*[!A-Za-z0-9_.-]*) die "WG_IF must be an interface name" ;; esac
-    case "$EXIT" in jump|hand) ;; *) die "EXIT must be jump or hand" ;; esac
+    case "$EXIT" in tpi|wgt) ;; *) die "EXIT must be tpi or wgt" ;; esac
     case "${1:-}" in
         link) do_link ;;
         check) do_check ;;
@@ -70,8 +70,8 @@ preflight() {
         && ss -Hlun "sport = :$PI_PORT" | grep -q .; then
         die "UDP port $PI_PORT is already in use (ss -ulpn)"
     fi
-    if [ "$EXIT" = jump ]; then
-        command -v wgt >/dev/null || die "EXIT=jump needs wgt on this VPS (or use EXIT=hand)"
+    if [ "$EXIT" = wgt ]; then
+        command -v wgt >/dev/null || die "EXIT=wgt needs wgt on this VPS (or use EXIT=tpi)"
     fi
 }
 
@@ -82,7 +82,7 @@ do_link() {
     echo "PUBKEY=$(keypair wgpi)"
 
     CHANGED=0
-    if [ "$EXIT" = jump ]; then
+    if [ "$EXIT" = wgt ]; then
         put 600 "$WG/wgpi.conf" <<EOF
 # tunnel-pi: the link the Pi dials (written by vps.sh link; not wgt's)
 [Interface]
@@ -230,7 +230,7 @@ do_check() {
         fail "wgpi has no recent handshake from the Pi"
     fi
     check "the Pi answers on the link (ping 10.99.0.2)" "ping -c 2 -W 2 10.99.0.2"
-    if [ "$EXIT" = hand ]; then
+    if [ "$EXIT" = tpi ]; then
         check "kill switch is on" "systemctl is-active -q tunnel-pi-killswitch.service"
         check "table 260 sends to the Pi" "ip route show table 260 | grep -q 'default dev wgpi'"
         for ip in $CLIENT_IPS; do

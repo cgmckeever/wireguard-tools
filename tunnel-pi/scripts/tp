@@ -6,8 +6,8 @@
 #   tp ssh-config          print the ~/.ssh/config entry for ADMIN_HOST
 #   tp base                phase 1 on the Pi: packages, updates, watchdog, cloudflared
 #   tp link                phase 2A: the wgpi link (Pi and VPS), keys exchanged for you
-#   tp exit                phase 2B or 2C, by EXIT: the hand routing's DNS, or the wgt jump(s)
-#   tp client <device> [lan]   2C: a config for <device> through the Pi (lan: the LAN jump)
+#   tp exit                phase 2B or 2C, by EXIT: tpi's DNS resolver, or the wgt jump(s)
+#   tp client <device> [lan]   EXIT=wgt: a config for <device> through the Pi (lan: the LAN jump)
 #   tp lan-mode isolated|lan [<interface>]   2D: switch LAN mode (default: wgpi or wgjump)
 #   tp check               PASS/FAIL on the Pi and the VPS
 #   tp all                 link, exit, check (after base)
@@ -29,7 +29,7 @@ case "${1:-}" in ''|-h|--help|help) sed -n '2,19s/^# \{0,1\}//p' "$0"; exit 0 ;;
 # shellcheck disable=SC1090
 . "$CONF"
 : "${PI_SSH:=}" "${VPS_SSH:=}" "${ADMIN_HOST:=}" "${PI_USER:=pi}" "${CF_TOKEN_FILE:=}"
-: "${VPS_HOST:=}" "${PI_PORT:=}" "${EXIT:=jump}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}"
+: "${VPS_HOST:=}" "${PI_PORT:=}" "${EXIT:=tpi}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}"
 : "${WG_IF:=wg0}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
 PI_PUBKEY="" VPS_PUBKEY="" CF_TOKEN=""
 DRY="${TP_DRY_RUN:-}"
@@ -93,10 +93,10 @@ cmd_config() {
     done
     require PI_SSH VPS_SSH VPS_HOST PI_PORT
     case "$EXIT" in
-        jump) require JUMP_CODE JUMP_LABEL
+        wgt)  require JUMP_CODE JUMP_LABEL
               case "$JUMP_CODE" in *[!a-z0-9-]*) die "JUMP_CODE: only a-z, 0-9 and -" ;; esac ;;
-        hand) require CLIENT_IPS ;;
-        *) die "EXIT must be jump or hand" ;;
+        tpi)  require CLIENT_IPS ;;
+        *) die "EXIT must be tpi or wgt" ;;
     esac
     [ -z "$CF_TOKEN_FILE" ] || [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tp base needs it)"
     log "settings look complete"
@@ -138,7 +138,7 @@ cmd_link() {
     log "Pi: WireGuard and its key"
     PI_PUBKEY=$(run "$PI_SSH" pi.sh link | pubkey_from)
     [ -n "$PI_PUBKEY" ] || [ -n "$DRY" ] || die "the Pi didn't report its public key"
-    confirm_vps "a wgpi link$( [ "$EXIT" = hand ] && echo ", routing and a kill switch for $CLIENT_IPS")"
+    confirm_vps "a wgpi link$( [ "$EXIT" = tpi ] && echo ", routing and a kill switch for $CLIENT_IPS")"
     log "VPS: the wgpi link"
     VPS_PUBKEY=$(run "$VPS_SSH" vps.sh link | pubkey_from)
     [ -n "$VPS_PUBKEY" ] || [ -n "$DRY" ] || die "the VPS didn't report its public key"
@@ -172,9 +172,9 @@ add_jump() {
 
 cmd_exit() {
     cmd_config >/dev/null
-    if [ "$EXIT" = hand ]; then
+    if [ "$EXIT" = tpi ]; then
         log "Pi: DNS for Pi-exit clients"
-        run "$PI_SSH" pi.sh hand
+        run "$PI_SSH" pi.sh dns
     else
         install_exit_script
         add_jump isolated "$JUMP_CODE" "$JUMP_LABEL"
@@ -187,7 +187,7 @@ cmd_exit() {
 }
 
 cmd_client() {
-    [ "$EXIT" = jump ] || die "tp client is for EXIT=jump; with EXIT=hand, list the config's address in CLIENT_IPS and run tp link"
+    [ "$EXIT" = wgt ] || die "tp client is for EXIT=wgt; with EXIT=tpi, list the config's address in CLIENT_IPS and run tp link"
     device="${1:-}"; [ -n "$device" ] || die "tp client <device> [lan]"
     code="$JUMP_CODE"
     if [ "${2:-}" = lan ]; then code="$JUMP_LAN_CODE"; [ -n "$code" ] || die "JUMP_LAN_CODE isn't set"; fi
@@ -200,7 +200,7 @@ cmd_lan_mode() {
     mode="${1:-}"
     case "$mode" in isolated|lan) ;; *) die "tp lan-mode isolated|lan [<interface>]" ;; esac
     ifc="${2:-}"
-    [ -n "$ifc" ] || { if [ "$EXIT" = hand ]; then ifc=wgpi; else ifc=wgjump; fi; }
+    [ -n "$ifc" ] || { if [ "$EXIT" = tpi ]; then ifc=wgpi; else ifc=wgjump; fi; }
     run "$PI_SSH" pi.sh lan-mode "$ifc" "$mode"
 }
 
@@ -217,8 +217,8 @@ cmd_check() {
 }
 
 cmd_undo() {
-    confirm_vps "remove wgpi$( [ "$EXIT" = hand ] && echo " and the kill switch")"
-    if [ "$EXIT" = jump ]; then
+    confirm_vps "remove wgpi$( [ "$EXIT" = tpi ] && echo " and the kill switch")"
+    if [ "$EXIT" = wgt ]; then
         log "VPS: removing the wgt jump(s). wgt refuses while configs use them: remove those first (wgt client remove <code>.<device>)"
         for code in $JUMP_CODE $JUMP_LAN_CODE; do
             sshx "$VPS_SSH" "wgt jump list" | grep -qw -- "$code" || continue   # already gone

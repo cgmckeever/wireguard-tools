@@ -9,10 +9,10 @@
 #   base                 packages, automatic updates, watchdog, cloudflared (CF_TOKEN)
 #   link                 WireGuard and the wgpi link to the VPS. Prints PUBKEY=<the Pi's
 #                        public key>; with VPS_PUBKEY set it also writes and starts wgpi
-#   jump isolated|lan    2C: the jump server (wgjump, or wgjumplan for lan). Prints
+#   jump isolated|lan    EXIT=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
 #                        JUMPFILE=<path> when it made a new jump file, else JUMP=exists
 #   jump-done isolated|lan   delete the jump file once the VPS has it
-#   hand                 2B: the DNS resolver for Pi-exit clients
+#   dns                  EXIT=tpi: the DNS resolver for Pi-exit clients
 #   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2D)
 #   check                PASS/FAIL for everything set up so far
 #   undo [all]           remove the WireGuard parts (all: cloudflared too)
@@ -24,7 +24,7 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
-    : "${EXIT:=jump}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}"
+    : "${EXIT:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
@@ -32,7 +32,7 @@ main() {
         link) do_link ;;
         jump) do_jump "${1:-}" ;;
         jump-done) jump_vars "${1:-}"; rm -f "/etc/wireguard/$JFILE"; log "deleted $JFILE" ;;
-        hand) do_hand ;;
+        dns) do_dns ;;
         lan-mode) do_lan_mode "${1:-}" "${2:-}" ;;
         check) do_check ;;
         undo) do_undo "${1:-}" ;;
@@ -149,7 +149,7 @@ EOF
     fi
 
     exit_lines=""
-    if [ "$EXIT" = hand ]; then
+    if [ "$EXIT" = tpi ]; then
         [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tp link installs it)"
         mode=$(current_mode wgpi)
         exit_lines="PostUp = $EXIT_SCRIPT up %i $mode
@@ -230,7 +230,7 @@ EOF
     echo "JUMPFILE=$WG/$JFILE"
 }
 
-do_hand() {
+do_dns() {
     apt-get -y -q install unbound >/dev/null
     CHANGED=0
     put 644 /etc/unbound/unbound.conf.d/tunnel-pi.conf <<'EOF'
@@ -250,7 +250,7 @@ do_lan_mode() {
     ifc="$1" mode="$2"
     case "$mode" in isolated|lan) ;; *) die "lan-mode <interface> isolated|lan" ;; esac
     grep -q "^PostUp = $EXIT_SCRIPT up %i " "$WG/$ifc.conf" 2>/dev/null \
-        || die "$ifc has no exit (it's wgpi with EXIT=hand, or wgjump / wgjumplan)"
+        || die "$ifc has no exit (it's wgpi with EXIT=tpi, or wgjump / wgjumplan)"
     sed -i "s|^PostUp = $EXIT_SCRIPT up %i .*|PostUp = $EXIT_SCRIPT up %i $mode|" "$WG/$ifc.conf"
     systemctl restart "wg-quick@$ifc"
     journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-pi-exit:' | tail -n 1 >&2 || true
@@ -288,7 +288,7 @@ do_check() {
         if [ "$age" -lt 180 ]; then pass "$ifc handshake ${age}s ago"
         else printf 'INFO  %s: no recent handshake (normal while no device uses the jump: wgt brings it up on demand)\n' "$ifc"; fi
     done
-    if [ "$EXIT" = hand ] && [ -f "$WG/wgpi.conf" ]; then
+    if [ "$EXIT" = tpi ] && [ -f "$WG/wgpi.conf" ]; then
         check "wgpi runs the exit rules ($(current_mode wgpi))" "grep -q '^PostUp = $EXIT_SCRIPT up' $WG/wgpi.conf"
         check "unbound answers on 10.99.0.2" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -q 10.99.0.2"
     fi
