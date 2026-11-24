@@ -14,8 +14,11 @@ chosen ones' traffic down a link the Pi keeps open, and the Pi sends it out
 under the friend's IP. You build and test everything at home; at drop-off the
 Pi only needs power.
 
-**Status:** the scripts are tested piece by piece, not yet end to end on a
-real Pi and VPS. Run it first on a VPS nobody else depends on.
+**Status:** phases 1 and 2 have run on a real Pi (a Pi 2 v1.1, 32-bit
+Raspberry Pi OS Bookworm) with `TPI_ROUTING=wgt` against a test VPS, and an
+iPhone on cellular came out with the Pi's home IP. Phase 3, `tpi` routing and
+the Cloudflare door haven't run yet. Run it first on a VPS
+nobody else depends on.
 
 ## Done when
 
@@ -67,8 +70,9 @@ means the friend power-cycles the Pi, or you take it home; if you skip it, use
 
   A **Pi 2** works for testing, not for keeps: it's slow (roughly 50 Mbit/s,
   half that with `wgt` routing), has no Wi-Fi, and boots from an SD card. The
-  original Pi 2 (v1.1) needs the 32-bit Lite image; check that `cloudflared`
-  installs on it before relying on the emergency door.
+  original Pi 2 (v1.1) needs the 32-bit Lite image; phases 1 and 2 have run on
+  one. Check that `cloudflared` installs on it before relying on the emergency
+  door.
 - **A Linux VPS** running the WireGuard server your clients use, with
   `wg-quick`, `iptables` and systemd (Debian and Ubuntu have all three), and
   root ssh (or passwordless `sudo`). With `TPI_ROUTING=wgt`, wgt on it.
@@ -236,8 +240,15 @@ The first `link` also picks the link's subnet (`TPI_LINK`) and, if empty,
 `PI_PORT`, from what's free on the VPS, and saves both in the Pi's settings
 file.
 
-**Check:** it ends with `all checks passed`. With `wgt`, the `wgt jump add`
-output also said `jump 'JUMP_CODE' works: ip=<your home IP>`.
+**Check:** it ends with `all checks passed`, with handshakes on `wgpi` (both
+ends) and, with `wgt`, on `wgjump`.
+
+With `wgt`, `wgt jump add` also tests the new jump and prints
+`jump '<code>' works: ip=... warp=on`. That IP is **Cloudflare's, not your
+home's**: wgt gives every jump its own WARP account (it registers one on the
+VPS) and tests through it, for `warp.` configs. tunnel-pi's configs are made
+without WARP, so they go out with your home IP; 2.2's check is where you see
+that.
 
 ## 2.2 Device configs
 
@@ -272,7 +283,9 @@ scripts/tpi-ctl.sh mom client laptop lan      # with JUMP_LAN_CODE (say momlan):
 The config lands locally in
 `~/wg-tunnels/devices/iphone/config/dengar.mom.iphone.conf`, and the device
 keeps its fleet-wide number. To show it as a QR code:
-`bin/wgt-ctl dengar client show mom.iphone --qr`.
+`bin/wgt-ctl dengar client show mom.iphone --qr`. On Android, the WireGuard
+app takes tunnel names of up to 15 characters, so shorten a longer one
+(`dengar.mom.iphone` is 17) when you import it; wgt warns when that applies.
 
 These configs are made with `--warp off`: a `warp.` config would put
 Cloudflare WARP inside the jump, and sites would see a Cloudflare IP instead of
@@ -285,8 +298,12 @@ internet traffic goes through the Pi: traffic to other devices and the server
 stays on the VPS, under wgt's group rules. Groups are per server, so set them on
 the VPS the Pi's jump is on (`bin/wgt-ctl dengar device group iphone home`).
 
-**Check [client], either routing:** with the device's config on,
-`curl https://ifconfig.me` shows your home IP (the Pi's network, for now).
+**Check [client], either routing:** with the device's config on, and the
+device off your home network (a phone on cellular), `curl https://ifconfig.me`
+or the ifconfig.me page shows your home IP: the Pi's network, for now, which
+`tpi-ctl.sh check` prints as `this network's public IP`. With `wgt`, the
+jump comes up only once a device connects through it, so this is its first
+real test.
 
 ## 2.3 Optional: LAN mode
 
@@ -496,7 +513,7 @@ longer shows the code(s), and clients are back on their usual routes.
 | `10.99.0.x/30 is already used here` or `port ... in use` | something else on the VPS has them: empty `TPI_LINK` (or `PI_PORT`), and `link` picks a free one |
 | FAIL `wgpi has no recent handshake` | **[VPS]** is `PI_PORT/udp` open (`ss -ulpn`, ufw, the provider's firewall)? **[Pi]** does `VPS_HOST` resolve? Then `scripts/tpi-ctl.sh link` again |
 | **[Pi]** `wg-quick@wgpi` keeps restarting | `journalctl -u wg-quick@wgpi -n 20`: `no default route yet` is no network; a failed lookup is `VPS_HOST` |
-| `wgt jump add` fails | **[VPS]** `wg show wgpi-<name>` (the link first: a recent handshake?), `wg show px-JUMP_CODE`; **[Pi]** `sudo wg show wgjump`. Then `TP_RENEW=1 scripts/tpi-ctl.sh exit` (new jump keys) |
+| `wgt jump add` fails | **[VPS]** `wg show wgpi-<name>` (the link first: a recent handshake?), then `wg show px-JUMP_CODE` (it exists only while a device uses the jump); **[Pi]** `sudo wg show wgjump`. Then `TP_RENEW=1 scripts/tpi-ctl.sh exit` (new jump keys) |
 | `the Pi's jump server exists but the VPS has no jump` | `TP_RENEW=1 scripts/tpi-ctl.sh exit` |
 | `tpi`: handshake, but no internet on the client | **[VPS]** `ip rule` (this Pi's rules, Fixed values), `ip route show table <the Pi's table>` (Fixed values); **[Pi]** `sudo iptables -t nat -L -v`, `journalctl -u wg-quick@wgpi` (its `tunnel-pi-exit:` line names the uplink) |
 | `tpi`: sites load, names don't resolve | **[Pi]** `systemctl status unbound`; **[VPS]** `iptables -t nat -L PREROUTING -v` |
