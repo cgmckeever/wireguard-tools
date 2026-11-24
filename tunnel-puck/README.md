@@ -270,15 +270,18 @@ The first `link` also picks the link's subnet (`TPK_LINK`) and, if empty,
 `PUCK_PORT`, from what's free on the VPS, and saves both in the puck's settings
 file.
 
-**Check:** it ends with `all tests passed`, with handshakes on `wgpk` (both
-ends) and, with `wgt`, on `wgrtun`.
+**Check:** `scripts/tpk-ctl.sh test` ends with `all tests passed`, with
+handshakes on `wgpk` (both ends) and, with `wgt`, on `wgrtun`. With `wgt` its
+last row tests a client's way out end to end, with no device needed: wgt brings
+the jump up and traces through it without WARP, and the IP it sees must be the
+puck's own (`PASS  clients exit from the puck's network: <IP>`).
 
 With `wgt`, `wgt jump add` also tests the new jump and prints
 `jump '<code>' works: ip=... warp=on`. That IP is **Cloudflare's, not your
 home's**: wgt gives every jump its own WARP account (it registers one on the
 VPS) and tests through it, for `warp.` configs. tunnel-puck's configs are made
-without WARP, so they go out with your home IP; 2.2's test is where you see
-that.
+without WARP, so they go out with your home IP; `tpk-ctl.sh test`'s end-to-end
+row is where you see that.
 
 ## 2.2 Device configs
 
@@ -333,7 +336,8 @@ device off your home network (a phone on cellular), `curl https://ifconfig.me`
 or the ifconfig.me page shows your home IP: the puck's network, for now, which
 `tpk-ctl.sh test` prints as `this network's public IP`. With `wgt`, the
 jump comes up only once a device connects through it, so this is its first
-real test.
+test from a real device (`tpk-ctl.sh test`'s end-to-end row tests the same path
+from the VPS).
 
 ## 2.3 Optional: LAN mode
 
@@ -430,7 +434,7 @@ is the hotspot's, which `tpk-ctl.sh test` prints.
 
 | # | Test | Pass |
 |---|---|---|
-| 1 | **[Computer]** `scripts/tpk-ctl.sh test` | `all tests passed`; its first line says `via the link` |
+| 1 | **[Computer]** `scripts/tpk-ctl.sh test` | `all tests passed`; its first line says `via the link`. With `wgt`, the end-to-end row shows the puck's IP |
 | 2 | **[client]** (a puck-exit config) `curl https://ifconfig.me` | the puck's IP |
 | 3 | **[client]** a DNS leak test (such as dnsleaktest.com) | `tpk`: only the puck's ISP. `wgt`: Cloudflare's resolvers, reached from the puck's IP |
 | 4 | **[client]** `curl -6 -m 10 https://ifconfig.me` | fails: IPv6 is blocked |
@@ -577,7 +581,7 @@ All from **[Computer]**, as `scripts/tpk-ctl.sh <command>`:
 | `lan-mode isolated\|lan [<interface>]` | switch LAN mode (default `wgpk` or `wgrtun`) |
 | `wifi`, `wifi add <name>`, `wifi remove <name>\|all` | the puck's saved Wi-Fi, one network at a time |
 | `wifi sync` | the puck's saved Wi-Fi becomes `configs/<puck>.wifi.conf`, in its order |
-| `test` | PASS/FAIL on both ends |
+| `test` | PASS/FAIL on both ends; with `wgt`, then a client's way out end to end (`wgt jump test`: the IP must be the puck's) |
 | `ssh [<command>]` | a shell (or one command) on the puck, the first way that answers |
 | `reboot` | restart the puck, and wait until it answers again |
 | `shutdown` | power the puck off cleanly, safe to unplug (asks first: away from home, someone must replug it) |

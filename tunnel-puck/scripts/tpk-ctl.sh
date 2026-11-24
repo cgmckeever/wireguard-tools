@@ -17,7 +17,7 @@
 #   tpk-ctl.sh [<puck>] wifi add <name>     save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
 #   tpk-ctl.sh [<puck>] wifi sync           the puck's Wi-Fi becomes configs/<puck>.wifi.conf, in its order
-#   tpk-ctl.sh [<puck>] test                PASS/FAIL on the puck and the VPS
+#   tpk-ctl.sh [<puck>] test                PASS/FAIL on the puck and the VPS (wgt: and a client's way out)
 #   tpk-ctl.sh [<puck>] ssh [<command>]     a shell (or a command) on the puck, the first way that answers
 #   tpk-ctl.sh [<puck>] reboot              restart the puck, and wait until it answers again
 #   tpk-ctl.sh [<puck>] shutdown            power the puck off, safe to unplug (asks first)
@@ -36,6 +36,8 @@ CONFIGS=$(cd "$HERE/../configs" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
 COMMANDS="new config ssh-config base link exit client lan-mode wifi test ssh reboot shutdown all undo"
+# Cloudflare's trace (ip=... lines), as wgt's jump test uses (wgt/const.py TRACE_URL).
+TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 # The remote prefix that runs a command as root (sudo unless already root).
 AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
 
@@ -671,12 +673,39 @@ auto_wifi() {
     else log "no configs/$PUCK_NAME.wifi.conf: the puck's Wi-Fi is left as it is"; fi
 }
 
+# test_way_out: with wgt, do clients leave from the puck's network? wgt's jump
+# test traces out through the jump without WARP (the path tunnel-puck's configs
+# take), and the IP it sees must be the puck's own public one.
+test_way_out() {
+    what="clients exit from the puck's network"
+    if [ "$TPK_ROUTING" != wgt ]; then printf 'SKIP  %s (tested with TPK_ROUTING=wgt only)\n' "$what"; return 0; fi
+    puck_ip=$(to puck "curl -4 -fsS -m 10 $TRACE_URL" 2>/dev/null | sed -n 's/^ip=//p')
+    out=$(wgt_vps jump test "$JUMP_CODE" 2>&1)
+    jump_ip=$(printf '%s\n' "$out" | grep "jump $JUMP_CODE: plain traffic exits through the jump" \
+        | sed -n 's/.*(ip=\([^ )]*\).*/\1/p')
+    if [ -z "$puck_ip" ]; then
+        printf 'FAIL  %s: the puck got no answer from %s\n' "$what" "$TRACE_URL"; return 1
+    elif [ -z "$jump_ip" ]; then
+        printf 'FAIL  %s: wgt jump test %s gave no plain trace (is wgt on the VPS up to date?):\n' "$what" "$JUMP_CODE"
+        printf '%s\n' "$out" | grep -E 'FAIL|ERROR|error|unexpected' | sed 's/^ */      /'
+        return 1
+    elif [ "$jump_ip" = "$puck_ip" ]; then
+        printf 'PASS  %s: %s (wgt jump test %s, without WARP)\n' "$what" "$jump_ip" "$JUMP_CODE"
+    else
+        printf 'FAIL  clients exit from %s, not the puck'"'"'s network (%s)\n' "$jump_ip" "$puck_ip"; return 1
+    fi
+}
+
 cmd_test() {
     rc=0
     log "puck ($PUCK)"
     run puck puck.sh test || rc=1
     log "VPS ($VPS_SSH)"
     run vps vps.sh test || rc=1
+    if [ -z "$DRY" ]; then
+        log "end to end (a client's way out; up to 30s while wgt brings the jump up)"
+        test_way_out || rc=1
+    fi
     if [ -n "$DRY" ]; then log "(dry run: nothing was tested)"
     elif [ "$rc" = 0 ]; then log "all tests passed"
     else log "some tests failed: see the README's Troubleshooting"; fi
