@@ -100,16 +100,20 @@ DRY="${TP_DRY_RUN:-}"
 
 placeholder() { case "$1" in ''|*example.com*|*'<'*) return 0 ;; esac; return 1; }
 
-# WGT_SERVER: a server in wgt-ctl's list (local/servers of this checkout). Then the
-# VPS is reached through wgt-ctl, and VPS_SSH (and VPS_HOST, unless set) come from
-# that list, read by wgt-ctl's own code.
+# TPI_ROUTING=wgt: the VPS is WGT_SERVER, a server in wgt-ctl's list (local/servers
+# of this checkout), and everything on it goes through wgt-ctl. VPS_SSH (and
+# VPS_HOST, unless set) come from that list, read by wgt-ctl's own code.
+# TPI_ROUTING=tpi: VPS_SSH and VPS_HOST, over plain ssh.
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
-if [ -n "$WGT_SERVER" ]; then
-    [ -x "$WGT_CTL" ] || die "WGT_SERVER needs wgt-ctl at $WGT_CTL (tunnel-pi inside a wireguard-tools checkout)"
+if [ "$TPI_ROUTING" = wgt ]; then
+    [ -n "$WGT_SERVER" ] || die "TPI_ROUTING=wgt goes through wgt-ctl: set WGT_SERVER to the VPS's name in bin/wgt-ctl list (not there yet? bin/wgt-ctl init --address <host> adopts it)"
+    [ -x "$WGT_CTL" ] || die "TPI_ROUTING=wgt needs wgt-ctl at $WGT_CTL (tunnel-pi inside a wireguard-tools checkout)"
     VPS_SSH=$(PYTHONPATH="$REPO" python3 -c 'import sys; from wgt.ctl import remote; print(remote.find(sys.argv[1]).target)' \
-        "$WGT_SERVER" 2>/dev/null) || die "WGT_SERVER '$WGT_SERVER' isn't in wgt-ctl's list (see: $WGT_CTL list)"
+        "$WGT_SERVER" 2>/dev/null) || die "WGT_SERVER '$WGT_SERVER' isn't in wgt-ctl's list (see: bin/wgt-ctl list)"
     ! placeholder "$VPS_HOST" || VPS_HOST="${VPS_SSH#*@}"
+elif [ -n "$WGT_SERVER" ]; then
+    die "WGT_SERVER is for TPI_ROUTING=wgt; with tpi, empty it and set VPS_SSH and VPS_HOST"
 fi
 # The Pi's user: the part of SSH_LAN before the @ (pi if there is none).
 case "$SSH_LAN" in *@*) PI_USER="${SSH_LAN%%@*}" ;; *) PI_USER=pi ;; esac
@@ -168,17 +172,12 @@ run() {
 # The remote prefix that runs a command as root (sudo unless already root).
 AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
 
-# wgt_vps <wgt args...>: a wgt command on the VPS: through wgt-ctl with WGT_SERVER
-# (which also delivers changed client configs to ~/wg-tunnels and keeps each
-# device's fleet-wide number), else wgt over ssh. stdin is passed through.
+# wgt_vps <wgt args...>: a wgt command on the VPS, through wgt-ctl (which also
+# delivers changed client configs to ~/wg-tunnels and keeps each device's
+# fleet-wide number). stdin is passed through.
 wgt_vps() {
-    if [ -n "$DRY" ]; then log "[dry-run] on the VPS: wgt $*"; return 0; fi
-    if [ -n "$WGT_SERVER" ]; then
-        "$WGT_CTL" "$WGT_SERVER" "$@"
-    else
-        words=""; for a in "$@"; do words="$words $(q "$a")"; done
-        ssh "$VPS_SSH" "$AS_ROOT wgt$words"
-    fi
+    if [ -n "$DRY" ]; then log "[dry-run] $WGT_CTL $WGT_SERVER $*"; return 0; fi
+    "$WGT_CTL" "$WGT_SERVER" "$@"
 }
 
 require() {
@@ -201,8 +200,8 @@ pubkey_from() { sed -n 's/^PUBKEY=//p' | tail -n 1; }
 
 cmd_config() {
     printf '%s\n' "settings: $CONF"
-    for v in TPI_LINK SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE WGT_SERVER VPS_SSH VPS_HOST PI_PORT TPI_ROUTING \
-             CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET JUMP_CODE JUMP_LABEL JUMP_LAN_CODE JUMP_LAN_LABEL; do
+    for v in SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE TPI_ROUTING PI_PORT TPI_LINK VPS_SSH VPS_HOST \
+             CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN_CODE JUMP_LAN_LABEL; do
         eval "val=\${$v}"
         printf '  %-15s %s\n' "$v" "${val:-(empty)}"
     done
@@ -362,11 +361,7 @@ cmd_client() {
     if [ "${2:-}" = lan ]; then code="$JUMP_LAN_CODE"; [ -n "$code" ] || die "JUMP_LAN_CODE isn't set"; fi
     confirm_vps "wgt client add $device --exit $code"
     wgt_vps client add "$device" --exit "$code" --warp off --no-qr --yes
-    if [ -n "$WGT_SERVER" ]; then
-        log "made $code.$device; wgt-ctl put it in ~/wg-tunnels/devices/$device/config/ (or: $WGT_CTL $WGT_SERVER client show $code.$device --qr)"
-    else
-        log "made $code.$device. On the VPS: wgt client show $code.$device --qr (or wgt client share $code.$device)"
-    fi
+    log "made $code.$device; wgt-ctl put it in ~/wg-tunnels/devices/$device/config/ (or: $WGT_CTL $WGT_SERVER client show $code.$device --qr)"
 }
 
 cmd_lan_mode() {

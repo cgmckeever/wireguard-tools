@@ -20,28 +20,32 @@ SSH_LAN="pi@tunnel-pi.local"        # user@name of the Pi on your home network, 
 SSH_CLOUDFLARE=""                   # e.g. ssh.pi.example.com, a hostname on your Cloudflare domain
 CF_TOKEN_FILE="$HOME/.config/tunnel-pi/cloudflared.token"   # with SSH_CLOUDFLARE: the tunnel token alone, mode 600
 
-# --- The VPS -----------------------------------------------------------------
-# A VPS you manage with wgt-ctl: name it here (as `bin/wgt-ctl list` shows it),
-# and tpi-ctl.sh drives it through wgt-ctl. VPS_SSH and VPS_HOST then come from that
-# list (VPS_HOST only if you leave it as the example). Empty: tpi-ctl.sh uses ssh itself.
-WGT_SERVER=""
-VPS_SSH="root@vps.example.com"      # how ssh reaches the VPS: root, or a user with passwordless sudo
-VPS_HOST="vps.example.com"          # the VPS's public name or IP, as the Pi dials it
+# --- The VPS and routing -----------------------------------------------------
+# What sends clients into the Pi:
+#   tpi: tunnel-pi's own rules, on any WireGuard VPS. Fill in the tpi block.
+#   wgt: the VPS runs wgt (the wireguard-tools in this repository); the Pi
+#        becomes a wgt jump, and the VPS is driven through wgt-ctl. Fill in the
+#        wgt block.
+TPI_ROUTING="tpi"
+
 PI_PORT=""                          # the link's UDP port on the VPS. Empty: link picks a free one (from 51821) and saves it here. 443, if free, is rarely filtered
 # The link's subnet on the VPS, a /30 in 10.99.0.0/24. Leave it empty: link picks
 # one nothing on the VPS uses and saves it here. Never change it once set.
 TPI_LINK=""
 
-# --- Routing: what sends clients into the Pi ---------------------------------
-TPI_ROUTING="tpi"                   # tpi: tunnel-pi does the routing, on any WireGuard VPS. wgt: a wgt jump
-
 # TPI_ROUTING="tpi" only
+VPS_SSH="root@vps.example.com"      # how ssh reaches the VPS: root, or a user with passwordless sudo
+VPS_HOST="vps.example.com"          # the VPS's public name or IP, as the Pi dials it
 CLIENT_IPS=""                       # the clients that exit via the Pi: space-separated IPv4 addresses, as in each client's config
 CLIENT_IP6S=""                      # their IPv6 addresses, if any (blocked: the link is IPv4 only)
 WG_IF="wg0"                         # the WireGuard interface those clients connect to on the VPS
 WG_SUBNET=""                        # leave empty (it means every subnet WG_IF is on)
 
-# TPI_ROUTING="wgt" only (the VPS runs wgt, the wireguard-tools in this repository)
+# TPI_ROUTING="wgt" only
+# The VPS's name in wgt-ctl's list (`bin/wgt-ctl list`; not there yet:
+# `bin/wgt-ctl init --address <host>` adopts it). Its ssh target and address
+# come from that list.
+WGT_SERVER=""
 JUMP_CODE="home"                    # 2-6 of a-z 0-9 -, not already in `wgt jump list`
 JUMP_LABEL="Friend's house"
 JUMP_LAN_CODE=""                    # optional second jump in LAN mode (2.3), e.g. homelan

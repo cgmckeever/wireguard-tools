@@ -41,9 +41,12 @@ matches your VPS:
 
 | Your VPS | Set | What you get |
 |---|---|---|
-| any WireGuard server | `TPI_ROUTING="tpi"` | tunnel-pi's own rules on the VPS. You choose clients by their address (`CLIENT_IPS`) and make their configs yourself |
-| runs **wgt** (the wireguard-tools in this repository) | `TPI_ROUTING="wgt"` | the Pi becomes an ordinary wgt jump, and `tpi-ctl.sh client` makes each device its own config |
-| runs wgt, and you manage it with **wgt-ctl** | `TPI_ROUTING="wgt"` and `WGT_SERVER="<its name>"` | the same, with everything on the VPS going through `wgt-ctl`: each device keeps its fleet-wide number, and its config lands in `~/wg-tunnels` |
+| any WireGuard server | `TPI_ROUTING="tpi"`, with `VPS_SSH` and `VPS_HOST` | tunnel-pi's own rules on the VPS. You choose clients by their address (`CLIENT_IPS`) and make their configs yourself |
+| runs **wgt** (the wireguard-tools in this repository) | `TPI_ROUTING="wgt"`, with `WGT_SERVER` (its name in `bin/wgt-ctl list`) | the Pi becomes an ordinary wgt jump, and everything on the VPS goes through `wgt-ctl`. `tpi-ctl.sh client` makes each device its own config, with its fleet-wide number, delivered to `~/wg-tunnels` |
+
+A wgt VPS that isn't in `wgt-ctl`'s list yet is added once with
+`bin/wgt-ctl init --address <host>`, which adopts a server already running
+wgt.
 
 **2. The emergency door (`SSH_CLOUDFLARE`): recommended.** Normally you reach
 the Pi through the VPS, over the link. That fails exactly when the link is down
@@ -136,16 +139,16 @@ Fill it in (each line has a comment), then check it:
 | `SSH_LAN` | always | `user@hostname` for the Pi on your home network. You choose both in [1.2](#12-flash-the-pi-hands) (`pi@tunnel-pi.local`) |
 | `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) |
 | `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) (the default is fine) |
-| `WGT_SERVER` | optional | the VPS's name in `bin/wgt-ctl list`. Then `VPS_SSH` and `VPS_HOST` can stay as the example |
-| `VPS_SSH` | always | how ssh reaches the VPS (`root@vps.example.com`) |
-| `VPS_HOST` | always | the VPS's public name or IP, which the Pi dials |
+| `TPI_ROUTING` | always | `tpi` or `wgt` |
 | `PI_PORT` | optional | the link's UDP port on the VPS. Empty: `link` picks a free one and saves it. `443`, if free, is rarely filtered |
 | `TPI_LINK` | leave empty | the link's subnet on the VPS: `link` picks one nothing there uses and saves it. Never change it once set |
-| `TPI_ROUTING` | always | `tpi` or `wgt` |
+| `VPS_SSH` | `tpi` | how ssh reaches the VPS (`root@vps.example.com`) |
+| `VPS_HOST` | `tpi` | the VPS's public name or IP, which the Pi dials |
 | `CLIENT_IPS` | `tpi` | the IPv4 `Address` of each client config that should exit through the Pi (see below) |
 | `CLIENT_IP6S` | `tpi`, if any | those clients' IPv6 addresses: they get blocked, since the link is IPv4 only |
 | `WG_IF` | `tpi` | the VPS's WireGuard interface for your clients (`wg show interfaces`; usually `wg0`) |
 | `WG_SUBNET` | `tpi` | leave empty |
+| `WGT_SERVER` | `wgt` | the VPS's name in `bin/wgt-ctl list`. Its ssh target and address come from there |
 | `JUMP_CODE`, `JUMP_LABEL` | `wgt` | a 2–6 character code (`a-z`, `0-9`, `-`) not already in `wgt jump list`, and a label |
 | `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode ([2.3](#23-optional-lan-mode)) |
 
@@ -242,10 +245,9 @@ scripts/tpi-ctl.sh client phone          # makes the config JUMP_CODE.phone
 scripts/tpi-ctl.sh client laptop lan     # with JUMP_LAN_CODE: JUMP_LAN_CODE.laptop (LAN mode, 2.3)
 ```
 
-With `WGT_SERVER`, the config lands in `~/wg-tunnels/devices/<device>/config/`
-and the device keeps its fleet-wide number; show it as a QR code with
-`bin/wgt-ctl WGT_SERVER client show <code>.<device> --qr`. Without it, run
-`wgt client show <code>.<device> --qr` on the VPS.
+The config lands in `~/wg-tunnels/devices/<device>/config/`, and the device
+keeps its fleet-wide number. To show it as a QR code:
+`bin/wgt-ctl WGT_SERVER client show <code>.<device> --qr`.
 
 These configs are made with `--warp off`: a `warp.` config would put
 Cloudflare WARP inside the jump, and sites would see a Cloudflare IP instead of
@@ -407,7 +409,7 @@ same subnet or port, or (below) the same jump code or client. How clients pick a
   scripts/tpi-ctl.sh mom client phone       # mom.phone: out through your mom's
   ```
 
-  This is plain wgt: it handles any number of jumps, and with `WGT_SERVER`
+  This is plain wgt: it handles any number of jumps, and
   `bin/wgt-ctl WGT_SERVER client list` shows every config and its exit.
 - **`TPI_ROUTING=tpi`: each client address belongs to one Pi.** List it in
   that Pi's `CLIENT_IPS` only. A device that should switch between Pis needs a
@@ -416,8 +418,8 @@ same subnet or port, or (below) the same jump code or client. How clients pick a
 ## Undo **[Computer]**
 
 With `TPI_ROUTING=wgt`, first remove each device's config (wgt won't remove a
-jump that configs use): `bin/wgt-ctl WGT_SERVER client remove <code>.<device>`,
-or without `WGT_SERVER`, `wgt client remove <code>.<device>` on the VPS. Then:
+jump that configs use): `bin/wgt-ctl WGT_SERVER client remove <code>.<device>`.
+Then:
 
 ```sh
 scripts/tpi-ctl.sh undo          # the VPS's tunnel-pi parts, then the Pi's WireGuard parts
@@ -493,8 +495,8 @@ Environment variables:
 2. Through the VPS over the link: `ssh -J VPS_SSH <user>@<the Pi's link address>`.
 3. `SSH_CLOUDFLARE`, the emergency door.
 
-**The VPS:** `VPS_SSH`. With `WGT_SERVER`, through `wgt-ctl` instead: its
-server list and host-key checks, and every wgt command as
+**The VPS:** with `tpi`, `VPS_SSH` over plain ssh. With `wgt`, through
+`wgt-ctl`: its server list and host-key checks, and every wgt command as
 `wgt-ctl WGT_SERVER ...`, so configs reach `~/wg-tunnels`. That needs
 `tunnel-pi/` inside the wireguard-tools checkout, next to `bin/wgt-ctl`.
 
