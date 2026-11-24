@@ -194,7 +194,6 @@ prune() {
 
 # The TPI_ROUTING=tpi link config: route CLIENT_IPS through the Pi, NAT onto the link, DNS to the Pi.
 hand_conf() {
-    need CLIENT_IPS
     if [ -z "$WG_SUBNET" ]; then
         # Every IPv4 subnet WG_IF is on (its kernel routes), so traffic between
         # clients stays on WG_IF

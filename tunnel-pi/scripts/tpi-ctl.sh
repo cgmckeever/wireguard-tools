@@ -256,7 +256,7 @@ cmd_config() {
     case "$TPI_ROUTING" in
         wgt)  require JUMP_CODE JUMP_LABEL
               case "$JUMP_CODE" in *[!a-z0-9-]*) die "JUMP_CODE: only a-z, 0-9 and -" ;; esac ;;
-        tpi)  require CLIENT_IPS ;;
+        tpi)  [ -n "$CLIENT_IPS" ] || log "note: CLIENT_IPS is empty, so no client goes through the Pi yet (README 2.2)" ;;
         *) die "TPI_ROUTING must be tpi or wgt" ;;
     esac
     if [ -n "$SSH_CLOUDFLARE" ]; then
@@ -336,7 +336,7 @@ cmd_link() {
     log "Pi: WireGuard and its key"
     PI_PUBKEY=$(run pi pi.sh link | pubkey_from)
     [ -n "$PI_PUBKEY" ] || [ -n "$DRY" ] || die "the Pi didn't report its public key"
-    confirm_vps "the link $LINK_IF$( [ "$TPI_ROUTING" = tpi ] && echo ", routing and a kill switch for $CLIENT_IPS")"
+    confirm_vps "the link $LINK_IF$( [ "$TPI_ROUTING" = tpi ] && [ -n "$CLIENT_IPS" ] && echo ", routing and a kill switch for $CLIENT_IPS")"
     log "VPS: the link $LINK_IF"
     out=$(run vps vps.sh link)
     VPS_PUBKEY=$(printf '%s\n' "$out" | pubkey_from)
