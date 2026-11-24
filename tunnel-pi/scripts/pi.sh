@@ -163,6 +163,9 @@ EOF
         put 755 "$DISPATCHER" <<'EOF'
 #!/bin/sh
 # tunnel-pi: when a network comes or goes, move the exit rules to the current uplink.
+# tunnel-pi's own WireGuard interfaces coming up aren't a network change: wg-quick
+# runs their exit itself.
+case "$1" in wg*) exit 0 ;; esac
 case "$2" in up|down|dhcp4-change) /usr/local/sbin/tunnel-pi-exit refresh 2>&1 | logger -t tunnel-pi-exit ;; esac
 EOF
     else

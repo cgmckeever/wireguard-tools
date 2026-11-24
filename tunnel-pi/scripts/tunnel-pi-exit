@@ -12,6 +12,21 @@ set -e
 USAGE="usage: $0 up <interface> [isolated|lan] | down <interface> | refresh | uplink"
 PRIVATE=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10
 
+# One change at a time: wg-quick and the NetworkManager hook can start this at
+# the same moment, and two runs would each add every rule. refresh holds the lock
+# for the up and down it runs.
+case "$1" in
+  up|down|refresh)
+    if [ -z "${TPI_EXIT_LOCKED:-}" ] && command -v flock >/dev/null; then
+      export TPI_EXIT_LOCKED=1
+      exec 9> /run/tunnel-pi-exit.lock
+      flock 9
+    fi ;;
+esac
+
+# ensure <table> <-I|-A> <rule...>: add the rule unless it's there already.
+ensure() { t="$1" op="$2"; shift 2; iptables -t "$t" -C "$@" 2>/dev/null || iptables -t "$t" "$op" "$@"; }
+
 uplink() { ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i+1); exit}}'; }
 subnet() { ip -4 -o addr show dev "$1" | awk '{print $4; exit}'; }   # e.g. 192.168.1.50/24
 
@@ -23,19 +38,18 @@ case "$1" in
     UP=$(uplink)
     [ -n "$UP" ] || { echo "tunnel-pi-exit: no default route yet" >&2; exit 1; }
     LAN=-
-    iptables -I FORWARD -i "$IF" -d "$PRIVATE" -j DROP
+    ensure filter -I FORWARD -i "$IF" -d "$PRIVATE" -j DROP
     if [ "$MODE" = lan ]; then
       LAN=$(subnet "$UP")
       if [ -n "$LAN" ]; then
-        iptables -I FORWARD -i "$IF" -o "$UP" -d "$LAN" -j ACCEPT    # above the DROP
+        ensure filter -I FORWARD -i "$IF" -o "$UP" -d "$LAN" -j ACCEPT    # above the DROP
       else
         LAN=-; echo "tunnel-pi-exit: $UP has no IPv4 address; $IF stays isolated" >&2
       fi
     fi
-    iptables -A FORWARD -i "$IF" -o "$UP" -j ACCEPT
-    iptables -A FORWARD -i "$UP" -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-    iptables -t nat -C POSTROUTING -o "$UP" -j MASQUERADE 2>/dev/null \
-      || iptables -t nat -A POSTROUTING -o "$UP" -j MASQUERADE
+    ensure filter -A FORWARD -i "$IF" -o "$UP" -j ACCEPT
+    ensure filter -A FORWARD -i "$UP" -o "$IF" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+    ensure nat -A POSTROUTING -o "$UP" -j MASQUERADE
     # "<uplink> <lan or ->", so down removes the same rules and refresh sees a change
     echo "$UP $LAN" > "$SAVED"
     if [ "$LAN" = - ]; then echo "tunnel-pi-exit: $IF -> $UP, isolated" >&2
