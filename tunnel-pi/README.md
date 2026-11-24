@@ -268,6 +268,13 @@ These configs are made with `--warp off`: a `warp.` config would put
 Cloudflare WARP inside the jump, and sites would see a Cloudflare IP instead of
 the friend's.
 
+**Groups still apply.** A device keeps its static address and its wgt
+[groups](../README.md#groups-who-can-reach-what) whichever config it uses, so
+`mom.iphone` reaches the same devices as `iphone`'s other configs. Only its
+internet traffic goes through the Pi: traffic to other devices and the server
+stays on the VPS, under wgt's group rules. Groups are per server, so set them on
+the VPS the Pi's jump is on (`bin/wgt-ctl dengar device group iphone home`).
+
 **Check [client], either routing:** with the device's config on,
 `curl https://ifconfig.me` shows your home IP (the Pi's network, for now).
 
