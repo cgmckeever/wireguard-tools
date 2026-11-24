@@ -59,8 +59,16 @@ means the friend power-cycles the Pi, or you take it home; if you skip it, use
 
 ## What you need
 
-- **A Raspberry Pi 4 or 5**, an SSD (or an SD card), a power supply, and
-  ethernet at home.
+- **A Raspberry Pi 3 or later** with ethernet (a 3B, 3B+, 4 or 5), an SSD or
+  an SD card, and a power supply. The OS is **Raspberry Pi OS Lite (64-bit),
+  Bookworm or later**: tunnel-pi relies on its NetworkManager. A Pi 4 or 5 is
+  fastest; on a 3, its 100–300 Mbit/s ethernet is the ceiling, though the
+  friend's upload speed usually is anyway.
+
+  A **Pi 2** works for testing, not for keeps: it's slow (roughly 50 Mbit/s,
+  half that with `wgt` routing), has no Wi-Fi, and boots from an SD card. The
+  original Pi 2 (v1.1) needs the 32-bit Lite image; check that `cloudflared`
+  installs on it before relying on the emergency door.
 - **A Linux VPS** running the WireGuard server your clients use, with
   `wg-quick`, `iptables` and systemd (Debian and Ubuntu have all three), and
   root ssh (or passwordless `sudo`). With `TPI_ROUTING=wgt`, wgt on it.
@@ -162,10 +170,11 @@ scripts/tpi-ctl.sh config
 
 ## 1.2 Flash the Pi **[Hands]**
 
-With Raspberry Pi Imager, write **Raspberry Pi OS Lite (64-bit)**, Bookworm or
-later. In its settings: the hostname and user from `SSH_LAN`, and **SSH with
-your public key only** (passwords off). Leave Wi-Fi out: step [3.1](#31-ethernet-or-wi-fi-at-the-friends-computer) handles it.
-Boot the Pi at home, on ethernet.
+With Raspberry Pi Imager, write the OS from [What you need](#what-you-need). In
+its settings: the hostname and user from `SSH_LAN`, and **SSH with your public
+key only** (passwords off). Leave Wi-Fi out: step
+[3.1](#31-ethernet-or-wi-fi-at-the-friends-computer) handles it. Boot the Pi at
+home, on ethernet.
 
 **Check [Computer]:** `ssh SSH_LAN true` works with no password prompt.
 
