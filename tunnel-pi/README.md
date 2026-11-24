@@ -68,11 +68,13 @@ means the friend power-cycles the Pi, or you take it home; if you skip it, use
   fastest; on a 3, its 100–300 Mbit/s ethernet is the ceiling, though the
   friend's upload speed usually is anyway.
 
-  A **Pi 2** works for testing, not for keeps: it's slow (roughly 50 Mbit/s,
-  half that with `wgt` routing), has no Wi-Fi, and boots from an SD card. The
-  original Pi 2 (v1.1) needs the 32-bit Lite image; phases 1 and 2 have run on
-  one. Check that `cloudflared` installs on it before relying on the emergency
-  door.
+  A **Pi 2** works for testing, and may be enough for light use: phases 1 and 2
+  have run on an original one (v1.1). Its link carried about 87 Mbit/s each way
+  straight on a home router and 60–65 Mbit/s behind a travel router (the
+  `wgt` jump's second layer of encryption, not measured yet, costs more). It
+  has no Wi-Fi and boots from an SD card. The v1.1 needs the 32-bit Lite
+  image; check that `cloudflared` installs on it before relying on the
+  emergency door.
 - **A Linux VPS** running the WireGuard server your clients use, with
   `wg-quick`, `iptables` and systemd (Debian and Ubuntu have all three), and
   root ssh (or passwordless `sudo`). With `TPI_ROUTING=wgt`, wgt on it.
@@ -209,13 +211,14 @@ menus now and then; follow the nearest match.
 
 ```sh
 scripts/tpi-ctl.sh base          # updates, automatic security updates, watchdog, cloudflared
-ssh SSH_LAN sudo reboot          # once, so the hardware watchdog starts
+scripts/tpi-ctl.sh reboot        # once, so the hardware watchdog starts
 scripts/tpi-ctl.sh ssh-config    # emergency door only: add what it prints to ~/.ssh/config
 ```
 
-**Check:** `base` ends with `base done`, and after the reboot `ssh SSH_LAN true`
-works. With the emergency door: the dashboard shows the tunnel **Healthy**, and
-`ssh SSH_CLOUDFLARE` opens a browser login once **[Browser]**, then a shell.
+**Check:** `base` ends with `base done`, and `reboot` ends with `tpi1 is back`
+(your Pi's name). With the emergency door: the dashboard shows the tunnel
+**Healthy**, and `ssh SSH_CLOUDFLARE` opens a browser login once **[Browser]**,
+then a shell.
 
 ---
 
@@ -545,6 +548,8 @@ All from **[Computer]**, as `scripts/tpi-ctl.sh <command>`:
 | `wifi sync` | the Pi's saved Wi-Fi becomes `configs/<pi>.wifi.conf`, in its order |
 | `check` | PASS/FAIL on both ends |
 | `ssh [<command>]` | a shell (or one command) on the Pi, the first way that answers |
+| `reboot` | restart the Pi, and wait until it answers again |
+| `shutdown` | power the Pi off cleanly, safe to unplug (asks first: away from home, someone must replug it) |
 | `undo [all]` | remove it all (`all`: cloudflared too) |
 
 Environment variables:
