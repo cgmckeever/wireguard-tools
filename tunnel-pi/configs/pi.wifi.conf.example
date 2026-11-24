@@ -1,0 +1,12 @@
+# A Pi's Wi-Fi list. Copy to configs/<pi>.wifi.conf (git ignores it, and
+# tpi-ctl.sh keeps it mode 600: it holds passwords), then:
+#   scripts/tpi-ctl.sh <pi> wifi sync
+# One network per line, name::password, most preferred first. Only the first ::
+# splits, so a password may hold anything; spaces count, at the ends too. Among networks in
+# range, the Pi joins the highest on the list; ethernet still wins when plugged
+# in. An empty password is an open network. Networks tunnel-pi saved before that
+# aren't here are removed on sync. scripts/tpi-ctl.sh <pi> all syncs it too.
+#
+# MomsHouse::hunter2hunter2
+# MomsHouse-5G::hunter2hunter2
+# CafeGuest::

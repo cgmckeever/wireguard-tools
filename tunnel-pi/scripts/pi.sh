@@ -18,6 +18,8 @@
 #   wifi-list            the saved Wi-Fi networks, and which one is in use
 #   wifi-add             save the Wi-Fi network WIFI_SSID (password WIFI_PSK; empty: open)
 #   wifi-remove          remove the saved Wi-Fi network WIFI_SSID (all: every one)
+#   wifi-sync            make tunnel-pi's saved Wi-Fi match WIFI_LIST ("ssid::password"
+#                        lines, most preferred first): the first gets the highest priority
 #   check                PASS/FAIL for everything set up so far
 #   undo [all]           remove the WireGuard parts (all: cloudflared too)
 #
@@ -30,7 +32,7 @@ main() {
     if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
     : "${PI_NAME:=$(basename "${TP_CONF:-pi}" .conf)}"
     link_ids
-    : "${TPI_ROUTING:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}"
+    : "${TPI_ROUTING:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}" "${WIFI_LIST:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
@@ -42,6 +44,7 @@ main() {
         lan-mode) do_lan_mode "${1:-}" "${2:-}" ;;
         wifi-list) do_wifi_list ;;
         wifi-add) do_wifi_add ;;
+        wifi-sync) do_wifi_sync ;;
         wifi-remove) do_wifi_remove ;;
         check) do_check ;;
         undo) do_undo "${1:-}" ;;
@@ -301,21 +304,59 @@ do_wifi_list() {
     done
 }
 
+# wifi_keyfile <ssid> <password or empty> <priority>: write tunnel-pi's keyfile for a
+# network (root-only, mode 600: the password never goes on a command line) and
+# print its path. route-metric 600 keeps ethernet (100) first when both work; among
+# networks in range, NetworkManager joins the highest autoconnect-priority.
+wifi_keyfile() {
+    case "$1" in *"
+"*|'') die "a network name can't be empty or hold a line break" ;; esac
+    file="$NM_CONNS/tunnel-pi-$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' _).nmconnection"
+    {
+        printf '[connection]\nid=%s\ntype=wifi\nautoconnect=true\nautoconnect-priority=%s\n\n' "$1" "$3"
+        printf '[wifi]\nmode=infrastructure\nssid=%s\n\n' "$1"
+        [ -z "$2" ] || printf '[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n' "$2"
+        printf '[ipv4]\nmethod=auto\nroute-metric=600\n\n[ipv6]\nmethod=auto\n'
+    } | put 600 "$file"
+    echo "$file"
+}
+
 do_wifi_add() {
     need_nm; need WIFI_SSID
-    case "$WIFI_SSID" in *"
-"*) die "a network name can't hold a line break" ;; esac
-    name=$(printf '%s' "$WIFI_SSID" | tr -c 'A-Za-z0-9_-' _)
-    # A keyfile NetworkManager reads (root-only, mode 600): the password never goes on
-    # a command line. route-metric 600 keeps ethernet (100) first when both work.
-    {
-        printf '[connection]\nid=%s\ntype=wifi\nautoconnect=true\n\n[wifi]\nmode=infrastructure\nssid=%s\n\n' "$WIFI_SSID" "$WIFI_SSID"
-        [ -z "$WIFI_PSK" ] || printf '[wifi-security]\nkey-mgmt=wpa-psk\npsk=%s\n\n' "$WIFI_PSK"
-        printf '[ipv4]\nmethod=auto\nroute-metric=600\n\n[ipv6]\nmethod=auto\n'
-    } | put 600 "$NM_CONNS/tunnel-pi-$name.nmconnection"
+    wifi_keyfile "$WIFI_SSID" "$WIFI_PSK" 0 >/dev/null
     WIFI_PSK=""
     nmcli connection reload
     log "saved Wi-Fi '$WIFI_SSID': the Pi joins it when it's in range (ethernet still wins when both work)"
+}
+
+# do_wifi_sync: tunnel-pi's saved networks become WIFI_LIST, in its order. Networks
+# saved some other way (Raspberry Pi Imager's) are left alone; one this would remove
+# is kept while it's the Pi's uplink.
+do_wifi_sync() {
+    need_nm
+    up=$(uplink) keep="" prio=100
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        keep="$keep
+$(wifi_keyfile "${line%%::*}" "${line#*::}" "$prio")"
+        log "Wi-Fi '${line%%::*}': priority $prio"
+        prio=$((prio - 1))
+    done <<EOF
+$WIFI_LIST
+EOF
+    WIFI_LIST=""
+    for f in "$NM_CONNS"/tunnel-pi-*.nmconnection; do
+        [ -e "$f" ] || continue
+        printf '%s\n' "$keep" | grep -qxF -- "$f" && continue
+        id=$(sed -n 's/^id=//p' "$f" | head -n 1)
+        dev=$(nmcli -t -f NAME,DEVICE connection show --active | awk -F: -v n="$id" '$1 == n {print $2}')
+        if [ -n "$dev" ] && [ "$dev" = "$up" ]; then
+            log "kept Wi-Fi '$id', not in the list, because it's the Pi's uplink right now: plug in ethernet and sync again"
+            continue
+        fi
+        rm -f "$f"; log "removed Wi-Fi '$id' (not in the list)"
+    done
+    nmcli connection reload
 }
 
 do_wifi_remove() {

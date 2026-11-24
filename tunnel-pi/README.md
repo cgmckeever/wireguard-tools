@@ -327,6 +327,23 @@ Ethernet only is the most reliable, and the friend sets up nothing. Their
 Wi-Fi needs their password, and helps where a cable can't reach. `remove`
 won't remove the network the Pi is using right now: plug in ethernet first.
 
+**Or keep a list,** like travelmate: several networks, most preferred first,
+in `configs/<pi>.wifi.conf` next to the Pi's settings (git ignores it, and
+`tpi-ctl.sh` keeps it mode 600). One `name::password` per line, an empty
+password for an open network:
+
+```sh
+cp configs/pi.wifi.conf.example configs/mom.wifi.conf    # fill it in
+scripts/tpi-ctl.sh mom wifi sync                         # the Pi's Wi-Fi becomes this list
+```
+
+Among networks in range, the Pi joins the highest on the list, and moves on
+to the next if one fails to connect; ethernet still wins when plugged in.
+`sync` removes the networks tunnel-pi saved earlier that aren't on the list
+(not the one in use right now) and leaves others, like Raspberry Pi Imager's,
+alone. Edit the file and sync again to change it; `tpi-ctl.sh all` syncs it
+too. With no `<pi>.wifi.conf`, the Pi's Wi-Fi is left as it is.
+
 **Check:** `scripts/tpi-ctl.sh check` shows `INFO  uplink: eth0. Saved Wi-Fi: ...`
 as you expect.
 
@@ -493,10 +510,11 @@ All from **[Computer]**, as `scripts/tpi-ctl.sh <command>`:
 | `base` | the Pi: package updates, automatic security updates, the hardware watchdog, and with the door, cloudflared |
 | `link` | the Pi: WireGuard, IP forwarding, a retry at boot, its key, and a hook that moves the exit rules when the network changes. The VPS: its key, its end of the link (`wgpi-<name>`, picking a free subnet and port the first time), `PI_PORT/udp` in ufw if active, and with `tpi` the routing and kill switch for `CLIENT_IPS`. Then the Pi's end |
 | `exit` | `tpi`: the DNS resolver (unbound) on the Pi. `wgt`: the jump server(s) on the Pi, piped into `wgt jump add` on the VPS |
-| `all` | `link`, `exit`, `check` |
+| `all` | `link`, `exit`, `wifi sync` (only with a `<pi>.wifi.conf`), `check` |
 | `client <device> [lan]` | `wgt`: a config for the device (`lan`: through the LAN-mode jump) |
 | `lan-mode isolated\|lan [<interface>]` | switch LAN mode (default `wgpi` or `wgjump`) |
-| `wifi`, `wifi add <name>`, `wifi remove <name>\|all` | the Pi's saved Wi-Fi |
+| `wifi`, `wifi add <name>`, `wifi remove <name>\|all` | the Pi's saved Wi-Fi, one network at a time |
+| `wifi sync` | the Pi's saved Wi-Fi becomes `configs/<pi>.wifi.conf`, in its order |
 | `check` | PASS/FAIL on both ends |
 | `ssh [<command>]` | a shell (or one command) on the Pi, the first way that answers |
 | `undo [all]` | remove it all (`all`: cloudflared too) |
@@ -555,7 +573,7 @@ the VPS through a pipe.
 | `unattended-upgrades` | `tpi` or `wgt` | `base` | automatic security updates |
 | Cloudflare's apt repository, `/etc/systemd/system/tunnel-pi-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpi` or `wgt` | `base` | cloudflared and its service |
 | `/etc/cloudflared/tunnel-pi.env` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpi` or `wgt` | `base` | the tunnel token (mode 600) |
-| `/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection` | `tpi` or `wgt` | `wifi add` | a saved Wi-Fi network, with its password (mode 600) |
+| `/etc/NetworkManager/system-connections/tunnel-pi-*.nmconnection` | `tpi` or `wgt` | `wifi add`, `wifi sync` | a saved Wi-Fi network, with its password (mode 600) |
 
 **On the VPS:**
 

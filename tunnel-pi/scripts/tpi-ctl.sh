@@ -14,9 +14,10 @@
 #   tpi-ctl.sh [<pi>] wifi [list]         the Pi's saved Wi-Fi networks, and its uplink now
 #   tpi-ctl.sh [<pi>] wifi add <name>     save a Wi-Fi network on the Pi (asks for the password)
 #   tpi-ctl.sh [<pi>] wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
+#   tpi-ctl.sh [<pi>] wifi sync           the Pi's Wi-Fi becomes configs/<pi>.wifi.conf, in its order
 #   tpi-ctl.sh [<pi>] check               PASS/FAIL on the Pi and the VPS
 #   tpi-ctl.sh [<pi>] ssh [<command>]     a shell (or a command) on the Pi, the first way that answers
-#   tpi-ctl.sh [<pi>] all                 link, exit, check (after base)
+#   tpi-ctl.sh [<pi>] all                 link, exit, wifi sync (with a <pi>.wifi.conf), check (after base)
 #   tpi-ctl.sh [<pi>] undo [all]          remove it from the VPS and the Pi (all: cloudflared too)
 #
 # tpi-ctl.sh reaches the Pi the first way that answers: SSH_LAN (at home), then through
@@ -31,12 +32,20 @@ CONFIGS=$(cd "$HERE/../configs" && pwd)
 
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'tpi-ctl.sh: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,27s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (cp configs/pi.conf.example configs/<name>.conf)')"; }
+usage() { sed -n '2,28s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (cp configs/pi.conf.example configs/<name>.conf)')"; }
 
 COMMANDS="config ssh-config base link exit client lan-mode wifi check ssh all undo"
 is_command() { case " $COMMANDS " in *" $1 "*) return 0 ;; esac; return 1; }
 # pis: the configured Pis, one name per line (configs/<name>.conf).
-pis() { for f in "$CONFIGS"/*.conf; do [ -e "$f" ] && basename "$f" .conf; done; return 0; }
+pis() {
+    for f in "$CONFIGS"/*.conf; do
+        [ -e "$f" ] || continue
+        n=$(basename "$f" .conf)
+        case "$n" in *.*) continue ;; esac    # <pi>.wifi.conf: a Pi's Wi-Fi list, not a Pi
+        echo "$n"
+    done
+    return 0
+}
 
 case "${1:-}" in ''|-h|--help|help) usage; exit 0 ;; esac
 # ask_pi <command>: which Pi, when the command line doesn't say. One: that one.
@@ -99,7 +108,7 @@ jump_default() { if [ -n "$1" ]; then echo "$1"; else echo "$2"; fi; }
 JUMP_CODE=$(jump_default "$JUMP_CODE" "$PI_NAME")
 : "${JUMP_LABEL:=$PI_NAME}"
 : "${WG_IF:=wg0}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
-PI_PUBKEY="" VPS_PUBKEY="" CF_TOKEN="" WIFI_SSID="" WIFI_PSK=""
+PI_PUBKEY="" VPS_PUBKEY="" CF_TOKEN="" WIFI_SSID="" WIFI_PSK="" WIFI_LIST=""
 DRY="${TP_DRY_RUN:-}"
 
 placeholder() { case "$1" in ''|*example.com*|*'<'*) return 0 ;; esac; return 1; }
@@ -174,7 +183,7 @@ q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
 # The settings pi.sh and vps.sh read, as sh assignments (sent ahead of the script).
 vars() {
     for v in PI_NAME TPI_LINK VPS_HOST PI_PORT TPI_ROUTING WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS CLIENT_IP6S WG_SUBNET \
-             SSH_CLOUDFLARE PI_PUBKEY VPS_PUBKEY CF_TOKEN WIFI_SSID WIFI_PSK; do
+             SSH_CLOUDFLARE PI_PUBKEY VPS_PUBKEY CF_TOKEN WIFI_SSID WIFI_PSK WIFI_LIST; do
         eval "val=\${$v}"
         printf '%s=%s\n' "$v" "$(q "$val")"
     done
@@ -278,9 +287,9 @@ cmd_config() {
 # others: refuse what another Pi on the same VPS already uses (TPI_LINK, PI_PORT,
 # a jump code, a client). The VPS checks again when link runs.
 others() {
-    for f in "$CONFIGS"/*.conf; do
-        [ -e "$f" ] && [ "$f" != "$CONF" ] || continue
-        o=$(basename "$f" .conf)
+    for o in $(pis); do
+        f="$CONFIGS/$o.conf"
+        [ "$f" != "$CONF" ] || continue
         # shellcheck disable=SC1090,SC2030
         set -- $( (TPI_LINK="" PI_PORT="" WGT_SERVER="" VPS_SSH=""
                   . "$f"; printf '%s %s %s %s' "${TPI_LINK:--}" "${PI_PORT:--}" "${WGT_SERVER:--}" "${VPS_SSH:--}") )
@@ -426,6 +435,31 @@ read_password() {
     fi
 }
 
+# wifi_list: this Pi's Wi-Fi list, configs/<pi>.wifi.conf, checked: "ssid::password"
+# lines (password empty: an open network), most preferred first; # starts a comment.
+# Kept mode 600: it holds passwords.
+wifi_list() {
+    file="$CONFIGS/$PI_NAME.wifi.conf"
+    [ -r "$file" ] || die "no Wi-Fi list for $PI_NAME: cp configs/pi.wifi.conf.example configs/$PI_NAME.wifi.conf, and fill it in"
+    chmod 600 "$file"
+    n=0
+    while IFS= read -r line || [ -n "$line" ]; do
+        n=$((n + 1))
+        case "$line" in ''|'#'*) continue ;; *::*) ;; *) die "$PI_NAME.wifi.conf line $n: want name::password (password empty for an open network)" ;; esac
+        [ -n "${line%%::*}" ] || die "$PI_NAME.wifi.conf line $n: the network name is empty"
+        psk="${line#*::}"
+        case "${#psk}" in 0|[89]|[1-5][0-9]|6[0-3]) ;; *) die "$PI_NAME.wifi.conf line $n: a Wi-Fi password is 8 to 63 characters" ;; esac
+        printf '%s\n' "$line"
+    done < "$file"
+}
+
+# auto_wifi: in all, sync the Pi's Wi-Fi to its list when there is one; with none,
+# the Pi's Wi-Fi stays as it is.
+auto_wifi() {
+    if [ -e "$CONFIGS/$PI_NAME.wifi.conf" ]; then log "Pi: Wi-Fi from configs/$PI_NAME.wifi.conf"; cmd_wifi sync
+    else log "no configs/$PI_NAME.wifi.conf: the Pi's Wi-Fi is left as it is"; fi
+}
+
 cmd_wifi() {
     case "${1:-list}" in
         list) install_exit_script; run pi pi.sh wifi-list ;;
@@ -443,7 +477,12 @@ cmd_wifi() {
             WIFI_SSID="${2:-}"; [ -n "$WIFI_SSID" ] || die "tpi-ctl.sh wifi remove <network name>|all"
             install_exit_script
             run pi pi.sh wifi-remove ;;
-        *) die "tpi-ctl.sh wifi [list] | add <name> | remove <name>|all" ;;
+        sync)
+            WIFI_LIST=$(wifi_list)
+            install_exit_script
+            run pi pi.sh wifi-sync
+            WIFI_LIST="" ;;
+        *) die "tpi-ctl.sh wifi [list] | add <name> | remove <name>|all | sync" ;;
     esac
 }
 
@@ -493,7 +532,7 @@ case "${1:-}" in
     wifi) require SSH_LAN; pick_pi; shift; cmd_wifi "$@" ;;
     check) require SSH_LAN; pick_pi; cmd_check ;;
     ssh) require SSH_LAN; pick_pi; shift; cmd_ssh "$@" ;;
-    all) require SSH_LAN; pick_pi; cmd_link; cmd_exit; cmd_check ;;
+    all) require SSH_LAN; pick_pi; cmd_link; cmd_exit; auto_wifi; cmd_check ;;
     undo) require SSH_LAN; pick_pi; shift; cmd_undo "$@" ;;
     *) usage; exit 2 ;;
 esac
