@@ -18,6 +18,8 @@
 #   tpi-ctl.sh [<pi>] wifi sync           the Pi's Wi-Fi becomes configs/<pi>.wifi.conf, in its order
 #   tpi-ctl.sh [<pi>] check               PASS/FAIL on the Pi and the VPS
 #   tpi-ctl.sh [<pi>] ssh [<command>]     a shell (or a command) on the Pi, the first way that answers
+#   tpi-ctl.sh [<pi>] reboot              restart the Pi, and wait until it answers again
+#   tpi-ctl.sh [<pi>] shutdown            power the Pi off, safe to unplug (asks first)
 #   tpi-ctl.sh [<pi>] all                 link, exit, wifi sync (with a <pi>.wifi.conf), check (after base)
 #   tpi-ctl.sh [<pi>] undo [all]          remove it from the VPS and the Pi (all: cloudflared too)
 #
@@ -33,9 +35,9 @@ CONFIGS=$(cd "$HERE/../configs" && pwd)
 
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'tpi-ctl.sh: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,29s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (scripts/tpi-ctl.sh new)')"; }
+usage() { sed -n '2,31s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (scripts/tpi-ctl.sh new)')"; }
 
-COMMANDS="new config ssh-config base link exit client lan-mode wifi check ssh all undo"
+COMMANDS="new config ssh-config base link exit client lan-mode wifi check ssh reboot shutdown all undo"
 is_command() { case " $COMMANDS " in *" $1 "*) return 0 ;; esac; return 1; }
 # pis: the configured Pis, one name per line (configs/<name>.conf).
 pis() {
@@ -518,9 +520,36 @@ cmd_wifi() {
 }
 
 # cmd_ssh [<command>]: a shell on the Pi (or one command), the way pick_pi found.
+# cmd_power reboot|shutdown: restart the Pi or power it off. The ssh session ends
+# with it, so its exit status says nothing; a reboot then waits for the Pi.
+cmd_power() {
+    if [ "$1" = shutdown ] && [ -z "$DRY" ] && [ "${TP_YES:-}" != 1 ]; then
+        printf 'Power off %s? Away from home, someone must unplug and replug it to bring it back. [y/N] ' "$PI_NAME" >&2
+        read -r yes < /dev/tty || yes=""
+        case "$yes" in y|Y|yes) ;; *) die "stopped; the Pi is still on" ;; esac
+    fi
+    if [ "$1" = reboot ]; then what=reboot; else what=poweroff; fi
+    if [ -n "$DRY" ]; then log "[dry-run] on $PI: systemctl $what"; return 0; fi
+    to pi "$AS_ROOT systemctl $what" 2>/dev/null || true
+    if [ "$1" = shutdown ]; then
+        log "$PI_NAME is shutting down: unplug it once its green light stops flashing (about 10 seconds)"
+        return 0
+    fi
+    log "$PI_NAME is rebooting; waiting for it to answer (up to 3 minutes)"
+    sleep 15
+    i=0
+    while [ "$i" -lt 33 ]; do
+        if [ -n "$PI_HOP" ]; then probe -o StrictHostKeyChecking=accept-new -J "$PI_HOP" "$PI"; else probe "$PI"; fi \
+            && { log "$PI_NAME is back"; return 0; }
+        sleep 5; i=$((i + 1))
+    done
+    die "$PI_NAME didn't answer within 3 minutes: try scripts/tpi-ctl.sh $PI_NAME check in a while"
+}
+
 cmd_ssh() {
-    if [ -n "$PI_HOP" ]; then exec ssh -t -o StrictHostKeyChecking=accept-new -J "$PI_HOP" "$PI" "$@"
-    else exec ssh -t "$PI" "$@"; fi
+    tty=""; [ ! -t 0 ] || tty=-t    # a terminal only when there's one to give it
+    if [ -n "$PI_HOP" ]; then exec ssh $tty -o StrictHostKeyChecking=accept-new -J "$PI_HOP" "$PI" "$@"
+    else exec ssh $tty "$PI" "$@"; fi
 }
 
 cmd_check() {
@@ -563,6 +592,7 @@ case "${1:-}" in
     wifi) require SSH_LAN; pick_pi; shift; cmd_wifi "$@" ;;
     check) require SSH_LAN; pick_pi; cmd_check ;;
     ssh) require SSH_LAN; pick_pi; shift; cmd_ssh "$@" ;;
+    reboot|shutdown) require SSH_LAN; pick_pi; cmd_power "$1" ;;
     all) require SSH_LAN; pick_pi; cmd_link; cmd_exit; auto_wifi; cmd_check ;;
     undo) require SSH_LAN; pick_pi; shift; cmd_undo "$@" ;;
     *) usage; exit 2 ;;
