@@ -271,7 +271,7 @@ The first `link` also picks the link's subnet (`TPK_LINK`) and, if empty,
 file.
 
 **Check:** it ends with `all checks passed`, with handshakes on `wgpk` (both
-ends) and, with `wgt`, on `wgjump`.
+ends) and, with `wgt`, on `wgrtun`.
 
 With `wgt`, `wgt jump add` also tests the new jump and prints
 `jump '<code>' works: ip=... warp=on`. That IP is **Cloudflare's, not your
@@ -350,10 +350,10 @@ scripts/tpk-ctl.sh lan-mode lan          # on
 scripts/tpk-ctl.sh lan-mode isolated     # off
 ```
 
-That switches `wgpk` (with `tpk`) or `wgjump` (with `wgt`); a third word picks
-another, such as `wgjumplan`. Every client of that interface gets the same
-mode. To choose per device with `wgt`, keep `wgjump` isolated and set
-`JUMP_LAN="yes"`: `tpk-ctl.sh exit` adds a second jump, `wgjumplan`, in LAN
+That switches `wgpk` (with `tpk`) or `wgrtun` (with `wgt`); a third word picks
+another, such as `wgrtunlan`. Every client of that interface gets the same
+mode. To choose per device with `wgt`, keep `wgrtun` isolated and set
+`JUMP_LAN="yes"`: `tpk-ctl.sh exit` adds a second jump, `wgrtunlan`, in LAN
 mode, and each device picks by config (`mom.phone` isolated, `mom-l.laptop`
 LAN). The LAN jump's code is the jump's with `-l`, shortened to fit wgt's six
 characters; set `JUMP_LAN_CODE` to name it yourself. (It can't be a part of the
@@ -364,7 +364,7 @@ LAN mode is the puck's, not wgt's.)
 when it moves. It must not overlap the client's own network (see
 Troubleshooting).
 
-**Check [puck]:** `journalctl -u wg-quick@wgpk -n 20` (or `@wgjump`) shows
+**Check [puck]:** `journalctl -u wg-quick@wgpk -n 20` (or `@wgrtun`) shows
 `tunnel-puck-exit: ... LAN 192.168.1.50/24 reachable` (the puck's address on that
 LAN).
 
@@ -546,7 +546,7 @@ longer shows the code(s), and clients are back on their usual routes.
 | `10.99.0.x/30 is already used here` or `port ... in use` | something else on the VPS has them: empty `TPK_LINK` (or `PUCK_PORT`), and `link` picks a free one |
 | FAIL `wgpk has no recent handshake` | **[VPS]** is `PUCK_PORT/udp` open (`ss -ulpn`, ufw, the provider's firewall)? **[Puck]** does `VPS_HOST` resolve? Then `scripts/tpk-ctl.sh link` again |
 | **[Puck]** `wg-quick@wgpk` keeps restarting | `journalctl -u wg-quick@wgpk -n 20`: `no default route yet` is no network; a failed lookup is `VPS_HOST` |
-| `wgt jump add` fails | **[VPS]** `wg show wgpk-<name>` (the link first: a recent handshake?), then `wg show px-JUMP_CODE` (it exists only while a device uses the jump); **[Puck]** `sudo wg show wgjump`. Then `TPK_RENEW=1 scripts/tpk-ctl.sh exit` (new jump keys) |
+| `wgt jump add` fails | **[VPS]** `wg show wgpk-<name>` (the link first: a recent handshake?), then `wg show px-JUMP_CODE` (it exists only while a device uses the jump); **[Puck]** `sudo wg show wgrtun`. Then `TPK_RENEW=1 scripts/tpk-ctl.sh exit` (new jump keys) |
 | `the puck's jump server exists but the VPS has no jump` | `TPK_RENEW=1 scripts/tpk-ctl.sh exit` |
 | `tpk`: handshake, but no internet on the client | **[VPS]** `ip rule` (this puck's rules, Fixed values), `ip route show table <the puck's table>` (Fixed values); **[Puck]** `sudo iptables -t nat -L -v`, `journalctl -u wg-quick@wgpk` (its `tunnel-puck-exit:` line names the uplink) |
 | `tpk`: sites load, names don't resolve | **[Puck]** `systemctl status unbound`; **[VPS]** `iptables -t nat -L PREROUTING -v` |
@@ -574,7 +574,7 @@ All from **[Computer]**, as `scripts/tpk-ctl.sh <command>`:
 | `exit` | `tpk`: the DNS resolver (unbound) on the puck. `wgt`: the jump server(s) on the puck, piped into `wgt jump add` on the VPS |
 | `all` | `link`, `exit`, `wifi sync` (only with a `<puck>.wifi.conf`), `check` |
 | `client <device> [lan]` | `wgt`: a config for the device (`lan`: through the LAN-mode jump) |
-| `lan-mode isolated\|lan [<interface>]` | switch LAN mode (default `wgpk` or `wgjump`) |
+| `lan-mode isolated\|lan [<interface>]` | switch LAN mode (default `wgpk` or `wgrtun`) |
 | `wifi`, `wifi add <name>`, `wifi remove <name>\|all` | the puck's saved Wi-Fi, one network at a time |
 | `wifi sync` | the puck's saved Wi-Fi becomes `configs/<puck>.wifi.conf`, in its order |
 | `check` | PASS/FAIL on both ends |
@@ -641,7 +641,7 @@ the VPS through a pipe.
 | `/etc/systemd/system/wg-quick@.service.d/tunnel-puck-retry.conf` | `tpk` or `wgt` | `link` | `wg-quick` keeps retrying at boot |
 | `/etc/NetworkManager/dispatcher.d/90-tunnel-puck` | `tpk` or `wgt` | `link` | moves the exit rules when the network changes |
 | `/etc/unbound/unbound.conf.d/tunnel-puck.conf` | `tpk` | `exit` | the DNS resolver for puck-exit clients |
-| `/etc/wireguard/wgjump*`, `wgjumplan*` | `wgt` | `exit` | the jump server(s): config, keys and exit rules |
+| `/etc/wireguard/wgrtun*`, `wgrtunlan*` | `wgt` | `exit` | the reverse tunnel(s), which the VPS reaches in through (wgt's jump): config, keys and exit rules |
 | `/etc/wireguard/jump-for-vps*.conf` | `wgt` | `exit`, briefly | the jump file for the VPS, deleted once wgt has it |
 | `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpk` or `wgt` | `base` | the hardware watchdog |
 | `unattended-upgrades` | `tpk` or `wgt` | `base` | automatic security updates |

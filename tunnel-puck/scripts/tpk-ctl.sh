@@ -12,7 +12,7 @@
 #   tpk-ctl.sh [<puck>] link                2.1: the link (puck and VPS), keys exchanged for you
 #   tpk-ctl.sh [<puck>] exit                2.1, by TPK_ROUTING: tpk's DNS resolver, or the wgt jump(s)
 #   tpk-ctl.sh [<puck>] client <device> [lan]   2.2, TPK_ROUTING=wgt: a config for <device> through the puck (lan: the LAN jump)
-#   tpk-ctl.sh [<puck>] lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpk or wgjump)
+#   tpk-ctl.sh [<puck>] lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpk or wgrtun)
 #   tpk-ctl.sh [<puck>] wifi [list]         the puck's saved Wi-Fi networks, and its uplink now
 #   tpk-ctl.sh [<puck>] wifi add <name>     save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
@@ -602,7 +602,7 @@ cmd_lan_mode() {
     mode="${1:-}"
     case "$mode" in isolated|lan) ;; *) die "tpk-ctl.sh lan-mode isolated|lan [<interface>]" ;; esac
     ifc="${2:-}"
-    [ -n "$ifc" ] || { if [ "$TPK_ROUTING" = tpk ]; then ifc=wgpk; else ifc=wgjump; fi; }
+    [ -n "$ifc" ] || { if [ "$TPK_ROUTING" = tpk ]; then ifc=wgpk; else ifc=wgrtun; fi; }
     run puck puck.sh lan-mode "$ifc" "$mode"
 }
 

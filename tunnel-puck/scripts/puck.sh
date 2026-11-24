@@ -10,7 +10,7 @@
 #                        CF_TOKEN is set (tpk-ctl.sh sends it when SSH_CLOUDFLARE is set)
 #   link                 WireGuard and the wgpk link to the VPS. Prints PUBKEY=<the puck's
 #                        public key>; with VPS_PUBKEY set it also writes and starts wgpk
-#   jump isolated|lan    TPK_ROUTING=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
+#   jump isolated|lan    TPK_ROUTING=wgt: the reverse tunnel (wgrtun, or wgrtunlan for lan). Prints
 #                        JUMPFILE=<path> when it made a new jump file, else JUMP=exists
 #   jump-done isolated|lan   delete the jump file once the VPS has it
 #   dns                  TPK_ROUTING=tpk: the DNS resolver for puck-exit clients
@@ -206,11 +206,13 @@ EOF
     log "wgpk up; the first handshake can take a few seconds"
 }
 
-# jump_vars isolated|lan: the names and addresses of that jump server.
+# jump_vars isolated|lan: the names and addresses of that reverse tunnel: a
+# WireGuard server on the puck that the VPS reaches in through, over wgpk (wgt
+# calls it a jump).
 jump_vars() {
     case "$1" in
-        isolated) JIF=wgjump    JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=51822 JFILE=jump-for-vps.conf ;;
-        lan)      JIF=wgjumplan JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=51823 JFILE=jump-for-vps-lan.conf ;;
+        isolated) JIF=wgrtun    JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=51822 JFILE=jump-for-vps.conf ;;
+        lan)      JIF=wgrtunlan JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=51823 JFILE=jump-for-vps-lan.conf ;;
         *) die "jump needs isolated or lan" ;;
     esac
 }
@@ -233,7 +235,7 @@ do_jump() {
     vps_pub=$(printf '%s\n' "$vps_key" | wg pubkey)
     CHANGED=0
     put 600 "$WG/$JIF.conf" <<EOF
-# tunnel-puck: the jump server the VPS connects to over wgpk (written by puck.sh jump $1)
+# tunnel-puck: the reverse tunnel, the VPS's way in over wgpk; a wgt jump (written by puck.sh jump $1)
 [Interface]
 Address = $JADDR
 ListenPort = $JPORT
@@ -283,7 +285,7 @@ do_lan_mode() {
     ifc="$1" mode="$2"
     case "$mode" in isolated|lan) ;; *) die "lan-mode <interface> isolated|lan" ;; esac
     grep -q "^PostUp = $EXIT_SCRIPT up %i " "$WG/$ifc.conf" 2>/dev/null \
-        || die "$ifc has no exit (it's wgpk with TPK_ROUTING=tpk, or wgjump / wgjumplan)"
+        || die "$ifc has no exit (it's wgpk with TPK_ROUTING=tpk, or wgrtun / wgrtunlan)"
     sed -i "s|^PostUp = $EXIT_SCRIPT up %i .*|PostUp = $EXIT_SCRIPT up %i $mode|" "$WG/$ifc.conf"
     systemctl restart "wg-quick@$ifc"
     journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-puck-exit:' | tail -n 1 >&2 || true
@@ -414,7 +416,7 @@ do_check() {
     else
         fail "wgpk isn't set up (tpk-ctl.sh link)"
     fi
-    for ifc in wgjump wgjumplan; do
+    for ifc in wgrtun wgrtunlan; do
         [ -f "$WG/$ifc.conf" ] || continue
         check "$ifc is up ($(current_mode "$ifc"))" "ip link show $ifc"
         age=$(handshake_age "$ifc")
@@ -435,10 +437,10 @@ do_check() {
 }
 
 do_undo() {
-    for ifc in wgjumplan wgjump wgpk; do
+    for ifc in wgrtunlan wgrtun wgpk; do
         systemctl disable -q --now "wg-quick@$ifc" 2>/dev/null || true
     done
-    rm -f "$WG"/wgpk.* "$WG"/wgjump* "$WG"/jump-for-vps*.conf "$EXIT_SCRIPT" \
+    rm -f "$WG"/wgpk.* "$WG"/wgrtun* "$WG"/jump-for-vps*.conf "$EXIT_SCRIPT" \
           /etc/unbound/unbound.conf.d/tunnel-puck.conf /etc/sysctl.d/99-tunnel-puck.conf \
           /etc/systemd/system/wg-quick@.service.d/tunnel-puck-retry.conf "$DISPATCHER"
     systemctl restart unbound 2>/dev/null || true
