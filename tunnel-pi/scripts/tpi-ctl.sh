@@ -4,6 +4,7 @@
 # vps.sh on the VPS over ssh. Without <pi>: the only one there is, else it asks
 # (TPI_PI=<pi> is the default, and the answer when there's no terminal).
 #
+#   tpi-ctl.sh new [<pi>] [--wifi]        a new Pi's settings file (asks the name; --wifi: its Wi-Fi list too)
 #   tpi-ctl.sh [<pi>] config              show the settings and check they're filled in
 #   tpi-ctl.sh [<pi>] ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
 #   tpi-ctl.sh [<pi>] base                1.4, on the Pi: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
@@ -32,9 +33,9 @@ CONFIGS=$(cd "$HERE/../configs" && pwd)
 
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'tpi-ctl.sh: %s\n' "$*" >&2; exit 1; }
-usage() { sed -n '2,28s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (cp configs/pi.conf.example configs/<name>.conf)')"; }
+usage() { sed -n '2,29s/^# \{0,1\}//p' "$0"; printf '\nconfigured Pis: %s\n' "$(pis | tr '\n' ' ' | grep . || echo 'none yet (scripts/tpi-ctl.sh new)')"; }
 
-COMMANDS="config ssh-config base link exit client lan-mode wifi check ssh all undo"
+COMMANDS="new config ssh-config base link exit client lan-mode wifi check ssh all undo"
 is_command() { case " $COMMANDS " in *" $1 "*) return 0 ;; esac; return 1; }
 # pis: the configured Pis, one name per line (configs/<name>.conf).
 pis() {
@@ -48,6 +49,36 @@ pis() {
 }
 
 case "${1:-}" in ''|-h|--help|help) usage; exit 0 ;; esac
+
+# cmd_new [<name>] [--wifi]: a new Pi's settings file from the template (and, with
+# --wifi or a yes, its Wi-Fi list), asking for the name when it isn't given.
+cmd_new() {
+    name="" wifi=""
+    for a in "$@"; do case "$a" in --wifi) wifi=1 ;; *) name="$a" ;; esac; done
+    tty=""; if (: < /dev/tty) 2>/dev/null; then tty=1; fi
+    if [ -z "$name" ]; then
+        [ -n "$tty" ] || die "tpi-ctl.sh new <name> [--wifi]"
+        printf 'Name for the new Pi (up to 10 of a-z, 0-9 and -, starting with a letter): ' >&2
+        read -r name < /dev/tty || name=""
+    fi
+    # shellcheck source=ids.sh
+    ( . "$HERE/ids.sh"; PI_NAME="$name"; TPI_LINK=""; link_ids ) || exit 1
+    ! is_command "$name" || die "'$name' is a command word: pick another name"
+    [ ! -e "$CONFIGS/$name.conf" ] || die "configs/$name.conf already exists"
+    cp "$CONFIGS/pi.conf.example" "$CONFIGS/$name.conf"
+    log "made configs/$name.conf: fill it in, then scripts/tpi-ctl.sh $name config"
+    if [ -z "$wifi" ] && [ -n "$tty" ] && [ ! -e "$CONFIGS/$name.wifi.conf" ]; then
+        printf 'A Wi-Fi list for it too (configs/%s.wifi.conf)? [y/N] ' "$name" >&2
+        read -r yes < /dev/tty || yes=""
+        case "$yes" in y|Y|yes) wifi=1 ;; esac
+    fi
+    if [ -n "$wifi" ]; then
+        [ ! -e "$CONFIGS/$name.wifi.conf" ] || die "configs/$name.wifi.conf already exists"
+        (umask 077; cp "$CONFIGS/pi.wifi.conf.example" "$CONFIGS/$name.wifi.conf")
+        log "made configs/$name.wifi.conf: one name::password per line, most preferred first"
+    fi
+}
+if [ "$1" = new ]; then shift; cmd_new "$@"; exit 0; fi
 # ask_pi <command>: which Pi, when the command line doesn't say. One: that one.
 # Several: a numbered list to choose from, TPI_PI (a name) the default for Enter;
 # without a terminal, TPI_PI itself, else stop.
@@ -58,7 +89,7 @@ ask_pi() {
         die "TPI_PI=$default, but there's no configs/$default.conf (configured: $(echo $names))"
     fi
     case "$count" in
-        0) die "no settings yet: cp configs/pi.conf.example configs/<name>.conf, and fill it in" ;;
+        0) die "no settings yet: scripts/tpi-ctl.sh new, then fill it in" ;;
         1) PICK="$names"; return 0 ;;
     esac
     if ! (: < /dev/tty) 2>/dev/null; then    # no terminal to ask on
@@ -440,7 +471,7 @@ read_password() {
 # Kept mode 600: it holds passwords.
 wifi_list() {
     file="$CONFIGS/$PI_NAME.wifi.conf"
-    [ -r "$file" ] || die "no Wi-Fi list for $PI_NAME: cp configs/pi.wifi.conf.example configs/$PI_NAME.wifi.conf, and fill it in"
+    [ -r "$file" ] || die "no Wi-Fi list for $PI_NAME: cp configs/pi.wifi.conf.example configs/$PI_NAME.wifi.conf (or tpi-ctl.sh new makes it), and fill it in"
     chmod 600 "$file"
     n=0
     while IFS= read -r line || [ -n "$line" ]; do

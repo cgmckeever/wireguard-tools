@@ -41,7 +41,7 @@ matches your VPS:
 
 | Your VPS | Set | What you get |
 |---|---|---|
-| any WireGuard server | `TPI_ROUTING="tpi"`, with `VPS_SSH` and `VPS_HOST` | tunnel-pi's own rules on the VPS. You choose clients by their address (`CLIENT_IPS`) and make their configs yourself |
+| any WireGuard server | `TPI_ROUTING="tpi"`, with `VPS_SSH` and `VPS_HOST` | tunnel-pi's own rules on the VPS. You make the clients' configs yourself on the VPS and list their addresses in `CLIENT_IPS` ([2.2](#22-device-configs)) |
 | runs **wgt** (the wireguard-tools in this repository) | `TPI_ROUTING="wgt"`, with `WGT_SERVER` (its name in `bin/wgt-ctl list`) | the Pi becomes an ordinary wgt jump, and everything on the VPS goes through `wgt-ctl`. `tpi-ctl.sh client` makes each device its own config, with its fleet-wide number, delivered to `~/wg-tunnels` |
 
 Leave `WGT_SERVER` empty and `tpi-ctl.sh` asks: it lists the servers in
@@ -127,10 +127,11 @@ means the friend power-cycles the Pi, or you take it home; if you skip it, use
 
 Each Pi gets a settings file named for it, in `configs/` (git ignores them).
 The name is up to 10 characters of `a-z`, `0-9` and `-`, starting with a
-letter:
+letter. `new` asks for it and makes the file from the template, and offers a
+Wi-Fi list too ([3.1](#31-ethernet-or-wi-fi-at-the-friends-computer)):
 
 ```sh
-cp configs/pi.conf.example configs/home.conf
+scripts/tpi-ctl.sh new           # or: scripts/tpi-ctl.sh new home [--wifi]
 ```
 
 Fill it in (each line has a comment), then check it:
@@ -333,7 +334,7 @@ in `configs/<pi>.wifi.conf` next to the Pi's settings (git ignores it, and
 password for an open network:
 
 ```sh
-cp configs/pi.wifi.conf.example configs/mom.wifi.conf    # fill it in
+cp configs/pi.wifi.conf.example configs/mom.wifi.conf    # or tpi-ctl.sh new made it; fill it in
 scripts/tpi-ctl.sh mom wifi sync                         # the Pi's Wi-Fi becomes this list
 ```
 
@@ -431,7 +432,7 @@ the new one: `link` picks a subnet and port nothing on the VPS uses, and saves
 them in that file.
 
 ```sh
-cp configs/pi.conf.example configs/mom.conf    # fill it in: SSH_LAN, the VPS, routing ...
+scripts/tpi-ctl.sh new mom                     # then fill in configs/mom.conf: SSH_LAN, the VPS, routing ...
 scripts/tpi-ctl.sh mom config
 scripts/tpi-ctl.sh mom base                    # and so on through the steps, naming the Pi each time
 ```
@@ -505,6 +506,7 @@ All from **[Computer]**, as `scripts/tpi-ctl.sh <command>`:
 
 | Command | Does |
 |---|---|
+| `new [<name>] [--wifi]` | a new Pi's settings file from the template (asks the name), and with `--wifi` or a yes its Wi-Fi list |
 | `config` | prints the settings and checks them |
 | `ssh-config` | the `~/.ssh/config` entry for `SSH_CLOUDFLARE` |
 | `base` | the Pi: package updates, automatic security updates, the hardware watchdog, and with the door, cloudflared |
@@ -531,10 +533,12 @@ Environment variables:
 
 ## How tpi-ctl.sh reaches the machines
 
-**The Pi:** the first way that answers, and each run says which:
+**The Pi:** every command, and `scripts/tpi-ctl.sh <pi> ssh` for a shell
+(or `ssh <command>` for one command), takes the first way that answers, and
+says which:
 
 1. `SSH_LAN`, on your home network.
-2. Through the VPS over the link: `ssh -J VPS_SSH <user>@<the Pi's link address>`.
+2. Through the VPS over the link (`ssh -J VPS_SSH <user>@<the Pi's link address>`).
 3. `SSH_CLOUDFLARE`, the emergency door.
 
 **The VPS:** with `tpi`, `VPS_SSH` over plain ssh. With `wgt`, through
@@ -546,7 +550,7 @@ Environment variables:
 
 | Script | Runs |
 |---|---|
-| `scripts/tpi-ctl.sh` | on your computer: the one you run |
+| `scripts/tpi-ctl.sh` | on your computer: the management script, the one you run |
 | `scripts/pi.sh` | on the Pi, as root, sent by `tpi-ctl.sh` (the top says how to run it by hand) |
 | `scripts/vps.sh` | on the VPS, as root, sent by `tpi-ctl.sh` (likewise) |
 | `scripts/tunnel-pi-exit` | installed on the Pi: the exit's firewall rules |
