@@ -483,6 +483,7 @@ its jump file, and a new `--label` goes into its configs' `# exit:` line too. It
 ```bash
 wgt jump list              # jumps: state (up; up, no WARP; partly up; idle), configs, endpoint
 wgt jump test              # bring each one up and check it (up to 25s each for its WARP)
+wgt jump test par-fr       # that one alone
 wgt jump remove par-fr     # refused while configs use it (no code: pick from a list)
 ```
 

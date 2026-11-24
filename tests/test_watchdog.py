@@ -231,6 +231,24 @@ def test_jump_plain_trace(make_ctx, monkeypatch, trace, kind):
     assert got[0].split()[0] == kind
 
 
+def test_jump_test_one_code(make_ctx, monkeypatch):
+    """`jump test <code>` checks that jump alone; an unknown code is refused."""
+    from wgt import exits, results
+    from wgt.errors import WgtError
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+    ctx = make_ctx()
+    codes = [e.code for e in ctx.snap.exits]
+    assert "par-fr" in codes and len(codes) > 1
+    got = []
+    exits.run_tests(ctx, results.Results(out=got.append), only="par-fr")
+    named = [c for c in codes if any(f"jump {c}:" in g for g in got)]
+    assert named == ["par-fr"]
+    with pytest.raises(WgtError, match="no jump 'nope'"):
+        exits.cmd_test(ctx, ["nope"])
+    with pytest.raises(WgtError, match="unexpected"):
+        exits.cmd_test(ctx, ["par-fr", "extra"])
+
+
 def test_tunnel_test_without_jumps(make_ctx, monkeypatch, tmp_path):
     """Every way out is traced; with no jumps, just the host's two."""
     from wgt import exits

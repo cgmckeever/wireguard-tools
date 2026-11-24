@@ -437,12 +437,15 @@ def _remove_jump_files(ctx: Ctx, code: str) -> None:
 
 
 def cmd_test(ctx: Ctx, words: List[str]) -> int:
-    """wgt jump test: bring each jump up and check it end to end."""
-    ops.no_more_words(words, "wgt jump test")
+    """wgt jump test [<code>]: bring each jump (or that one) up and check it end to end."""
+    code = words[0] if words else ""
+    ops.no_more_words(words[1:], "wgt jump test [<code>]")
+    if code and not ctx.snap.exit(code):
+        raise WgtError(f"no jump '{code}' (wgt jump list)")
     ops.take_lock(ctx)
-    ctx.out.log("Jump tests")
+    ctx.out.log(f"Jump test: {code}" if code else "Jump tests")
     res = results.Results(out=ctx.out.line)
-    run_tests(ctx, res, bring_up=True)
+    run_tests(ctx, res, bring_up=True, only=code)
     return results.report(ctx, res)
 
 
@@ -525,14 +528,16 @@ def tunnel_checks(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
         res.result("FAIL", f"jump {e.code}: no WARP trace through {e.wx} ({tr or 'no answer'})")
 
 
-def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False) -> None:
-    """The jump checks; with <bring_up> (jump test) an idle exit is brought
-    up for its tunnel checks and taken down again."""
+def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False, only: str = "") -> None:
+    """The jump checks (<only>: that jump's alone); with <bring_up> (jump test)
+    an idle exit is brought up for its tunnel checks and taken down again."""
     r = ctx.runner
     if not ctx.snap.exits:
         res.result("SKIP", "jumps (none)")
         return
     for e in ctx.snap.exits:
+        if only and e.code != only:
+            continue
         res.check(f"jump {e.code}: tables with blackhole fallbacks, fwmark rule to the jump", tables_ok(ctx, e))
         users = ctx.snap.exit_clients(e.code)
         off = sum(1 for c in users if not store.name_warp(c.name))
