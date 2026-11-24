@@ -232,8 +232,15 @@ menus now and then; follow the nearest match.
 ```sh
 scripts/tpk-ctl.sh base          # updates, automatic security updates, watchdog, cloudflared
 scripts/tpk-ctl.sh reboot        # once, so the hardware watchdog starts
-scripts/tpk-ctl.sh ssh-config    # emergency door only: add what it prints to ~/.ssh/config
+scripts/tpk-ctl.sh ssh-config install   # emergency door only: so your own ssh reaches it
 ```
+
+`tpk-ctl.sh` itself needs no ssh setup for the door: through Cloudflare it
+passes `cloudflared` to ssh itself. `ssh-config install` is for your own
+`ssh SSH_CLOUDFLARE`: it writes every puck's door to
+`~/.config/tunnel-puck/ssh_config` (rewritten each time) and adds one
+`Include` line for it at the top of `~/.ssh/config`, after a backup; the rest
+of that file is left alone. (`ssh-config` alone prints the entry instead.)
 
 **Check:** `base` ends with `base done`, and `reboot` ends with `<name> is back`
 (your puck's name). With the emergency door: the dashboard shows the tunnel
@@ -534,7 +541,7 @@ longer shows the code(s), and clients are back on their usual routes.
 |---|---|
 | `check` says `via the link` at home | `SSH_LAN` didn't answer: is the puck on, and does `ssh SSH_LAN true` work without a prompt? |
 | `check` says `via SSH_CLOUDFLARE` | the link is down; you're in through the emergency door. The rows below say why |
-| the puck can't be reached at all | with the door: is the tunnel Healthy in the dashboard, your email in the Access policy, the `ssh-config` entry in `~/.ssh/config`? Without it: the friend power-cycles the puck |
+| the puck can't be reached at all | with the door: is the tunnel Healthy in the dashboard, your email in the Access policy, is `cloudflared` installed on this computer? Without it: the friend power-cycles the puck |
 | `tpk-ctl.sh` waits at "This changes the VPS ... Continue?" | run it in a terminal, or `TPK_YES=1` once the person has agreed |
 | `10.99.0.x/30 is already used here` or `port ... in use` | something else on the VPS has them: empty `TPK_LINK` (or `PUCK_PORT`), and `link` picks a free one |
 | FAIL `wgpk has no recent handshake` | **[VPS]** is `PUCK_PORT/udp` open (`ss -ulpn`, ufw, the provider's firewall)? **[Puck]** does `VPS_HOST` resolve? Then `scripts/tpk-ctl.sh link` again |
@@ -560,7 +567,8 @@ All from **[Computer]**, as `scripts/tpk-ctl.sh <command>`:
 |---|---|
 | `new [<name>] [--wifi]` | a new puck's settings file from the template (asks the name), and with `--wifi` or a yes its Wi-Fi list |
 | `config` | prints the settings and checks them |
-| `ssh-config` | the `~/.ssh/config` entry for `SSH_CLOUDFLARE` |
+| `ssh-config` | print the `~/.ssh/config` entry for `SSH_CLOUDFLARE` |
+| `ssh-config install` | every puck's entry into your ssh config (its own file, plus one `Include` line); not needed by `tpk-ctl.sh` itself |
 | `base` | the puck: package updates, automatic security updates, the hardware watchdog, and with the door, cloudflared |
 | `link` | the puck: WireGuard, IP forwarding, a retry at boot, its key, and a hook that moves the exit rules when the network changes. The VPS: its key, its end of the link (`wgpk-<name>`, picking a free subnet and port the first time), `PUCK_PORT/udp` in ufw if active, and with `tpk` the routing and kill switch for `CLIENT_IPS`. Then the puck's end |
 | `exit` | `tpk`: the DNS resolver (unbound) on the puck. `wgt`: the jump server(s) on the puck, piped into `wgt jump add` on the VPS |

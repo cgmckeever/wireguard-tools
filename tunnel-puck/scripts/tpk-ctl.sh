@@ -7,6 +7,7 @@
 #   tpk-ctl.sh new [<puck>] [--wifi]        a new puck's settings file (asks the name; --wifi: its Wi-Fi list too)
 #   tpk-ctl.sh [<puck>] config              show the settings and check they're filled in
 #   tpk-ctl.sh [<puck>] ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
+#   tpk-ctl.sh ssh-config install           add every puck's entry to your ssh config (its own file, one Include)
 #   tpk-ctl.sh [<puck>] base                1.4, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
 #   tpk-ctl.sh [<puck>] link                2.1: the link (puck and VPS), keys exchanged for you
 #   tpk-ctl.sh [<puck>] exit                2.1, by TPK_ROUTING: tpk's DNS resolver, or the wgt jump(s)
@@ -44,7 +45,7 @@ AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'tpk-ctl.sh: %s\n' "$*" >&2; exit 1; }
 usage() {
-    sed -n '2,32s/^# \{0,1\}//p' "$0"
+    sed -n '2,33s/^# \{0,1\}//p' "$0"
     printf '\nconfigured pucks: %s\n' "$(pucks | tr '\n' ' ' | grep . || echo 'none yet (scripts/tpk-ctl.sh new)')"
 }
 
@@ -259,9 +260,10 @@ vars() {
 
 # --- Reaching the puck and the VPS -----------------------------------------------
 
-# PUCK (an ssh target), PUCK_HOP (an ssh -J hop: the VPS, for the link) and
-# PUCK_VIA (said in the log): set once per run by pick_puck.
-PUCK="" PUCK_HOP="" PUCK_VIA=""
+# PUCK (an ssh target), PUCK_ROUTE (lan, link or cloudflare), PUCK_HOP (the
+# VPS, an ssh -J hop, for the link) and PUCK_VIA (said in the log): set once per
+# run by pick_puck.
+PUCK="" PUCK_ROUTE="" PUCK_HOP="" PUCK_VIA=""
 
 probe() { ssh -o BatchMode=yes -o ConnectTimeout=8 "$@" true 2>/dev/null; }
 link_target() { if [ -n "$PUCK_USER" ]; then echo "$PUCK_USER@$PUCK_LINK"; else echo "$PUCK_LINK"; fi; }
@@ -276,27 +278,56 @@ link_opts() {
         -o StrictHostKeyChecking=accept-new -J "$1"
 }
 forget_link_key() { ssh-keygen -R "tunnel-puck-$PUCK_NAME" -f "$KNOWN_HOSTS" >/dev/null 2>&1 || true; }
-# ssh options for the puck, as pick_puck found it.
-hop_opts() { [ -z "$PUCK_HOP" ] || link_opts "$PUCK_HOP"; }
-probe_puck() {
-    # shellcheck disable=SC2046
-    probe $(hop_opts) "$PUCK"
+
+# Through Cloudflare (the emergency door), cloudflared is the ssh proxy, given on
+# the command line: no ~/.ssh/config entry is needed (ssh-config install adds one
+# for your own ssh).
+cloudflared_bin() {
+    command -v cloudflared \
+        || die "the emergency door needs cloudflared on this computer (macOS: brew install cloudflared; Linux: Cloudflare's package)"
 }
+cf_opts() {
+    printf '%s\n' -o "ProxyCommand=$(cloudflared_bin) access ssh --hostname %h"
+    [ -z "$PUCK_USER" ] || printf '%s\n' -o "User=$PUCK_USER"
+}
+
+# route_opts: ssh options for the puck, one per line, as pick_puck found it.
+route_opts() {
+    case "$PUCK_ROUTE" in
+        link) link_opts "$PUCK_HOP" ;;
+        cloudflare) cf_opts ;;
+    esac
+}
+
+# puck_ssh <command> <args...>: <command> (ssh, probe ...) with the route's
+# options and the puck's target, then <args>. The options split on lines only:
+# cloudflared's ProxyCommand holds spaces.
+puck_ssh() {
+    c="$1"; shift
+    opts=$(route_opts) || exit 1
+    old_ifs="$IFS"; IFS='
+'
+    # shellcheck disable=SC2086
+    set -- $opts "$PUCK" "$@"
+    IFS="$old_ifs"
+    "$c" "$@"
+}
+probe_puck() { puck_ssh probe; }
 
 # pick_puck: how to reach the puck, the first way that answers.
 pick_puck() {
     [ -z "$PUCK" ] || return 0
     require SSH_LAN
-    if [ -n "$DRY" ]; then PUCK="$SSH_LAN" PUCK_VIA="SSH_LAN (dry run: not tried)"
+    if [ -n "$DRY" ]; then PUCK="$SSH_LAN" PUCK_ROUTE=lan PUCK_VIA="SSH_LAN (dry run: not tried)"
     elif probe "$SSH_LAN"; then
-        PUCK="$SSH_LAN" PUCK_VIA="SSH_LAN"
+        PUCK="$SSH_LAN" PUCK_ROUTE=lan PUCK_VIA="SSH_LAN"
     elif [ -z "$PUCK_LINK" ] && [ -z "$SSH_CLOUDFLARE" ]; then
         die "can't reach the puck: SSH_LAN ($SSH_LAN) didn't answer, and there's no link yet"
     elif [ -n "$PUCK_LINK" ] && { [ -z "$SSH_CLOUDFLARE" ] \
             || probe $(link_opts "$VPS_SSH") "$(link_target)"; }; then
-        PUCK="$(link_target)" PUCK_HOP="$VPS_SSH" PUCK_VIA="the link, through $VPS_SSH"
+        PUCK="$(link_target)" PUCK_ROUTE=link PUCK_HOP="$VPS_SSH" PUCK_VIA="the link, through $VPS_SSH"
     else
-        PUCK="$SSH_CLOUDFLARE" PUCK_VIA="SSH_CLOUDFLARE: Cloudflare, the emergency door (SSH_LAN and the link didn't answer)"
+        PUCK="$SSH_CLOUDFLARE" PUCK_ROUTE=cloudflare PUCK_VIA="SSH_CLOUDFLARE: Cloudflare, the emergency door (SSH_LAN and the link didn't answer)"
     fi
     log "puck: $PUCK, via $PUCK_VIA"
 }
@@ -304,9 +335,7 @@ pick_puck() {
 # to puck|vps <ssh args...>: ssh to that machine (the VPS through wgt-ctl, with wgt).
 to() {
     who="$1"; shift
-    if [ "$who" = puck ]; then
-        # shellcheck disable=SC2046
-        ssh $(hop_opts) "$PUCK" "$@"
+    if [ "$who" = puck ]; then puck_ssh ssh "$@"
     elif [ -n "$WGT_SERVER" ]; then "$WGT_CTL" "$WGT_SERVER" ssh "$@"
     else ssh "$VPS_SSH" "$@"; fi
 }
@@ -405,16 +434,58 @@ check_others() {
     done
 }
 
+# ssh_entry <hostname> <user or empty>: the ~/.ssh/config entry for a puck's
+# emergency door, so your own ssh reaches it through cloudflared.
+ssh_entry() {
+    printf 'Host %s\n' "$1"
+    [ -z "$2" ] || printf '    User %s\n' "$2"
+    printf '    ProxyCommand %s access ssh --hostname %%h\n' "$(cloudflared_bin)"
+}
+
 cmd_ssh_config() {
     require SSH_CLOUDFLARE
-    cat <<EOF
-# Add to ~/.ssh/config. cloudflared must be installed on this computer first
-# (macOS: brew install cloudflared; Linux: Cloudflare's package for your system).
+    printf '# Add to ~/.ssh/config, or let scripts/tpk-ctl.sh ssh-config install do it.\n\n'
+    ssh_entry "$SSH_CLOUDFLARE" "$PUCK_USER"
+}
 
-Host $SSH_CLOUDFLARE
-${PUCK_USER:+    User $PUCK_USER
-}    ProxyCommand $(command -v cloudflared || echo cloudflared) access ssh --hostname %h
-EOF
+# cmd_ssh_install: every puck's emergency door in ~/.config/tunnel-puck/ssh_config
+# (rewritten each time), and one Include line for it at the top of ~/.ssh/config
+# (added once, after a backup). Nothing else in ~/.ssh/config changes.
+cmd_ssh_install() {
+    file="$HOME/.config/tunnel-puck/ssh_config" user_conf="$HOME/.ssh/config"
+    include="Include $file"
+    mkdir -p "${file%/*}"
+    tmp=$(mktemp)
+    printf '# tunnel-puck: the pucks'"'"' emergency doors (SSH_CLOUDFLARE), for your own ssh.\n' > "$tmp"
+    printf '# Made by scripts/tpk-ctl.sh ssh-config install, rewritten each time.\n' >> "$tmp"
+    n=0
+    for o in $(pucks); do
+        # Each read on its own, in a subshell, so one puck's settings don't leak into the next.
+        # shellcheck disable=SC1090
+        door=$( (SSH_CLOUDFLARE=""; . "$CONFIGS/$o.conf"; printf '%s' "$SSH_CLOUDFLARE") )
+        [ -n "$door" ] || continue    # no emergency door for this puck
+        # shellcheck disable=SC1090
+        user=$( (SSH_LAN=""; . "$CONFIGS/$o.conf"; [ "${SSH_LAN#*@}" = "$SSH_LAN" ] || printf '%s' "${SSH_LAN%%@*}") )
+        printf '\n# %s\n' "$o" >> "$tmp"
+        ssh_entry "$door" "$user" >> "$tmp"
+        n=$((n + 1))
+    done
+    install -m 600 "$tmp" "$file"; rm -f "$tmp"
+    log "wrote $file: $n puck(s) with an emergency door"
+    mkdir -p "$HOME/.ssh"; chmod 700 "$HOME/.ssh"
+    if [ -f "$user_conf" ] && grep -qxF "$include" "$user_conf"; then
+        log "$user_conf already includes it"
+        return 0
+    fi
+    if [ -f "$user_conf" ]; then
+        backup="$user_conf.$(date +%Y%m%d-%H%M%S).bak"
+        cp -p "$user_conf" "$backup"; log "backed up $user_conf to $backup"
+    fi
+    # At the top: an Include further down could fall inside a Host block, and apply only there.
+    tmp=$(mktemp)
+    { printf '%s\n\n' "$include"; [ ! -f "$user_conf" ] || cat "$user_conf"; } > "$tmp"
+    install -m 600 "$tmp" "$user_conf"; rm -f "$tmp"
+    log "added '$include' at the top of $user_conf"
 }
 
 cmd_base() {
@@ -613,10 +684,10 @@ cmd_check() {
 }
 
 # cmd_ssh [<command>]: a shell on the puck (or one command), the way pick_puck found.
+ssh_tty() { ssh -t "$@"; }
 cmd_ssh() {
-    tty=""; [ ! -t 0 ] || tty=-t    # a terminal only when there's one to give it
-    # shellcheck disable=SC2046
-    exec ssh $tty $(hop_opts) "$PUCK" "$@"
+    if [ -t 0 ]; then puck_ssh ssh_tty "$@"    # a terminal only when there's one to give it
+    else puck_ssh ssh "$@"; fi
 }
 
 # cmd_power reboot|shutdown: restart the puck or power it off. The ssh session ends
@@ -645,9 +716,9 @@ cmd_power() {
 
 cmd_undo() {
     what="${1:-}"    # all: cloudflared too (the loop below reuses $1, $2)
-    if [ -n "$PUCK_HOP" ]; then    # undo removes the link, so it can't run through it
+    if [ "$PUCK_ROUTE" = link ]; then    # undo removes the link, so it can't run through it
         [ -n "$SSH_CLOUDFLARE" ] || die "tpk-ctl.sh undo can't run through the link it removes: run it at home (SSH_LAN)"
-        PUCK="$SSH_CLOUDFLARE" PUCK_HOP=""; log "puck: $PUCK instead (undo removes the link)"
+        PUCK="$SSH_CLOUDFLARE" PUCK_ROUTE=cloudflare PUCK_HOP=""; log "puck: $PUCK instead (undo removes the link)"
     fi
     killswitch=""; [ "$TPK_ROUTING" != tpk ] || killswitch=" and its kill switch"
     confirm_vps "remove the link $LINK_IF$killswitch"
@@ -673,6 +744,7 @@ cmd_undo() {
 main() {
     case "${1:-}" in ''|-h|--help|help) usage; exit 0 ;; esac
     if [ "$1" = new ]; then shift; cmd_new "$@"; exit 0; fi
+    if [ "$1" = ssh-config ] && [ "${2:-}" = install ]; then cmd_ssh_install; exit 0; fi
 
     # Which puck: TPK_CONF (a file), else a first word that isn't a command, else ask.
     if [ -n "${TPK_CONF:-}" ]; then
