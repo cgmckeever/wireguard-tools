@@ -15,11 +15,13 @@ chosen ones' traffic down a link the puck keeps open, and the puck sends it out
 under the friend's IP. You build and test everything at home; at drop-off the
 puck only needs power.
 
-**Status:** tested only on a Raspberry Pi so far. Phases 1 and 2 have run on a
-Pi 2 v1.1 (32-bit Raspberry Pi OS Bookworm) with `TPK_ROUTING=wgt` against a
-test VPS, and an iPhone on cellular came out with the puck's home IP. Phase 3,
-`tpk` routing and the Cloudflare door haven't run yet. Run it first on a VPS
-nobody else depends on.
+**Status:** tested only on a Raspberry Pi so far: a Pi 2 v1.1 (32-bit
+Raspberry Pi OS Bookworm), with `TPK_ROUTING=wgt` against a test VPS. Phases 1
+and 2 ran from a fresh image, and an iPhone on cellular came out with the
+puck's home IP. Unplugged and moved behind a travel router, the puck came back
+on its own and was reached through the link. Still untested: the rest of
+phase 3 (fail closed, a DNS leak test), `tpk` routing and the Cloudflare door.
+Run it first on a VPS nobody else depends on.
 
 ## Done when
 
@@ -83,11 +85,14 @@ means the friend power-cycles the puck, or you take it home; if you skip it, use
   5 is fastest; on a 3, its 100–300 Mbit/s ethernet is the ceiling, though the
   friend's upload speed usually is anyway. A **Pi 2** works for testing, and
   may be enough for light use: phases 1 and 2 have run on an original one
-  (v1.1). Its link carried about 87 Mbit/s each way straight on a home router
-  and 60–65 Mbit/s behind a travel router (the `wgt` jump's second layer of
-  encryption, not measured yet, costs more). It has no Wi-Fi and boots from an
-  SD card. The v1.1 needs the 32-bit Lite image; check that `cloudflared`
-  installs on it before relying on the emergency door.
+  (v1.1). It has no Wi-Fi and boots from an SD card. The v1.1 needs the 32-bit
+  Lite image; check that `cloudflared` installs on it before relying on the
+  emergency door. Measured on it (Mbit/s, each way):
+
+  | Path | On the home router | Behind a travel router |
+  |---|---|---|
+  | the link alone (one layer of WireGuard) | about 87 | 57–68 |
+  | a `wgt` client's path (the jump inside the link: two layers) | 65–68 | 42–66 |
 - **A Linux VPS** running the WireGuard server your clients use, with
   `wg-quick`, `iptables` and systemd (Debian and Ubuntu have all three), and
   root ssh (or passwordless `sudo`). With `TPK_ROUTING=wgt`, wgt on it.
@@ -178,8 +183,9 @@ Fill it in (each line has a comment), then check it:
 | `WG_IF` | `tpk` | the VPS's WireGuard interface for your clients (`wg show interfaces`; usually `wg0`) |
 | `WG_SUBNET` | `tpk` | leave empty |
 | `WGT_SERVER` | `wgt` | the VPS's name in `bin/wgt-ctl list`; its ssh target and address come from there. Empty: `tpk-ctl.sh` asks (or adds a new server) and saves it |
-| `JUMP_CODE`, `JUMP_LABEL` | `wgt`, optional | the puck's jump on the VPS (2–6 of `a-z`, `0-9`, `-`, not already in `wgt jump list`) and a label for it. Empty: both are the puck's name |
-| `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode ([2.3](#23-optional-lan-mode)) |
+| `JUMP_CODE`, `JUMP_LABEL` | `wgt`, optional | the puck's jump on the VPS (wgt's codes are 2–6 of `a-z`, `0-9`, `-`) and a label for it. Empty: the puck's name, the code shortened to 6 (`grandma`: `grandm`); `config` shows it. A code the VPS already uses for something else is refused. Empty: both are the puck's name |
+| `JUMP_LAN` | `wgt`, optional | `yes`: a second jump in LAN mode ([2.3](#23-optional-lan-mode)), coded as the jump's with `-l` (`mom-l`, `gran-l`) |
+| `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | name the LAN jump yourself (this also turns it on); the label defaults to the jump's with " (LAN)" |
 
 ```sh
 scripts/tpk-ctl.sh config
@@ -294,7 +300,7 @@ called `mom` on the server `dengar`:
 
 ```sh
 scripts/tpk-ctl.sh mom client iphone          # mom.iphone on dengar
-scripts/tpk-ctl.sh mom client laptop lan      # with JUMP_LAN_CODE (say momlan): momlan.laptop, LAN mode (2.3)
+scripts/tpk-ctl.sh mom client laptop lan      # with JUMP_LAN=yes: mom-l.laptop, LAN mode (2.3)
 ```
 
 The config lands locally in
@@ -340,9 +346,12 @@ scripts/tpk-ctl.sh lan-mode isolated     # off
 That switches `wgpk` (with `tpk`) or `wgjump` (with `wgt`); a third word picks
 another, such as `wgjumplan`. Every client of that interface gets the same
 mode. To choose per device with `wgt`, keep `wgjump` isolated and set
-`JUMP_LAN_CODE`: `tpk-ctl.sh exit` adds a second jump, `wgjumplan`, in LAN
-mode, and each device picks by config (`home.phone` isolated,
-`homelan.laptop` LAN).
+`JUMP_LAN="yes"`: `tpk-ctl.sh exit` adds a second jump, `wgjumplan`, in LAN
+mode, and each device picks by config (`mom.phone` isolated, `mom-l.laptop`
+LAN). The LAN jump's code is the jump's with `-l`, shortened to fit wgt's six
+characters; set `JUMP_LAN_CODE` to name it yourself. (It can't be a part of the
+config name like `warp.`: wgt names configs `[warp.][<jump>.]<device>`, and
+LAN mode is the puck's, not wgt's.)
 
 "The LAN" is the subnet the puck is on, so at home it's yours; the puck follows
 when it moves. It must not overlap the client's own network (see
@@ -534,7 +543,7 @@ longer shows the code(s), and clients are back on their usual routes.
 | `the puck's jump server exists but the VPS has no jump` | `TPK_RENEW=1 scripts/tpk-ctl.sh exit` |
 | `tpk`: handshake, but no internet on the client | **[VPS]** `ip rule` (this puck's rules, Fixed values), `ip route show table <the puck's table>` (Fixed values); **[Puck]** `sudo iptables -t nat -L -v`, `journalctl -u wg-quick@wgpk` (its `tunnel-puck-exit:` line names the uplink) |
 | `tpk`: sites load, names don't resolve | **[Puck]** `systemctl status unbound`; **[VPS]** `iptables -t nat -L PREROUTING -v` |
-| large pages hang | MTU: a client config's `MTU` above 1280 needs lowering |
+| large pages hang | MTU: a client config's `MTU` above 1280 needs lowering. The jump runs inside the link, so a packet much bigger than a client's 1280 gets split in two on the way, and behind a busy NAT that can cut the speed to a few Mbit/s |
 | a client shows the VPS's IP | `tpk`: is it in `CLIENT_IPS`? `systemctl status tunnel-puck-killswitch-<name>`. `wgt`: is the config named `<code>.<device>`? |
 | traffic stops after the puck changes networks | **[Puck]** `journalctl -t tunnel-puck-exit -n 20` shows each move; if none, reboot the puck |
 | LAN mode: some LAN addresses don't answer | the friend's LAN overlaps the client's own network (a café on `192.168.1.0/24` too), a subnet of `WG_IF`, or the link's addresses (Fixed values). Try the client from another network |
@@ -573,6 +582,7 @@ Environment variables:
 | `TPK_DRY_RUN=1` | shows what would run, and changes nothing |
 | `TPK_YES=1` | answers yes to "This changes the VPS ... Continue?" |
 | `TPK_RENEW=1` | with `exit`: makes new jump keys |
+| `TPK_TAKEOVER=1` | with `exit`: lets this puck take over a jump code the VPS already uses for something else (normally refused, since `wgt jump add` would repoint it and `undo` would delete it) |
 | `TPK_PUCK=<name>` | the puck to offer as the default when it asks; with no terminal to ask on, the puck it uses |
 | `TPK_CONF=<file>` | reads that settings file, without asking |
 
@@ -599,6 +609,13 @@ says which:
 | `scripts/puck.sh` | on the puck, as root, sent by `tpk-ctl.sh` (the top says how to run it by hand) |
 | `scripts/vps.sh` | on the VPS, as root, sent by `tpk-ctl.sh` (likewise) |
 | `scripts/tunnel-puck-exit` | installed on the puck: the exit's firewall rules |
+
+**The puck's host key**, when reached through the link, is kept under its name
+(`tunnel-puck-<name>`) in `~/.config/tunnel-puck/known_hosts`, not under its
+link address: link addresses are reused, by a reflashed puck or a new puck on
+an old one's subnet. `link` forgets it each time it builds the link, and the
+next connection learns it again; the link itself is authenticated by
+WireGuard's keys.
 
 **Secrets** never go on a command line. The token and the Wi-Fi password
 travel inside ssh into root-only files, and the jump file goes from the puck to

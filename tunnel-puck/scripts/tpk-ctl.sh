@@ -165,9 +165,11 @@ load_settings() {
     . "$CONF"
     : "${SSH_LAN:=}" "${SSH_CLOUDFLARE:=}" "${CF_TOKEN_FILE:=}" "${TPK_ROUTING:=tpk}" "${PUCK_PORT:=}" "${TPK_LINK:=}"
     : "${VPS_SSH:=}" "${VPS_HOST:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_IF:=wg0}" "${WG_SUBNET:=}"
-    : "${WGT_SERVER:=}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}"
+    : "${WGT_SERVER:=}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}" "${JUMP_LAN:=}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}"
     JUMP_CODE=$(jump_code "$JUMP_CODE" "$PUCK_NAME")
     : "${JUMP_LABEL:=$PUCK_NAME}"
+    JUMP_LAN_CODE=$(lan_code "$JUMP_LAN_CODE" "$JUMP_LAN" "$JUMP_CODE")
+    [ -z "$JUMP_LAN_CODE" ] || : "${JUMP_LAN_LABEL:=$JUMP_LABEL (LAN)}"
     # shellcheck source=ids.sh
     . "$HERE/ids.sh"
     link_ids
@@ -182,8 +184,22 @@ load_settings() {
     PUCK_PUBKEY="" VPS_PUBKEY="" CF_TOKEN="" WIFI_SSID="" WIFI_PSK="" WIFI_LIST=""
 }
 
-# jump_code <JUMP_CODE> <puck name>: the jump code, the puck's name when it's empty.
-jump_code() { if [ -n "$1" ]; then echo "$1"; else echo "$2"; fi; }
+# Jump codes are wgt's: 2-6 of a-z, 0-9 and -. A puck's name can be longer (up to
+# 10), so the defaults are shortened to fit; config shows them, and checks them.
+# shorten <text> <n>: its first n characters, without a trailing -.
+shorten() {
+    t=$(printf '%s' "$1" | cut -c "1-$2")
+    while case "$t" in *-) true ;; *) false ;; esac; do t="${t%-}"; done
+    printf '%s\n' "$t"
+}
+# jump_code <JUMP_CODE> <puck name>: the jump code; empty, the puck's name (shortened to 6).
+jump_code() { if [ -n "$1" ]; then echo "$1"; else shorten "$2" 6; fi; }
+# lan_code <JUMP_LAN_CODE> <JUMP_LAN> <jump code>: the LAN jump's code, if there's
+# one: JUMP_LAN_CODE, else with JUMP_LAN=yes the jump code with -l (mom: mom-l).
+lan_code() {
+    if [ -n "$1" ]; then echo "$1"
+    elif [ "$2" = yes ]; then echo "$(shorten "$3" 4)-l"; fi
+}
 
 # wgt_vps_settings: TPK_ROUTING=wgt drives the VPS through wgt-ctl: the VPS is
 # WGT_SERVER (asked for, if empty), and VPS_SSH (and VPS_HOST, unless set) come
@@ -249,9 +265,19 @@ PUCK="" PUCK_HOP="" PUCK_VIA=""
 
 probe() { ssh -o BatchMode=yes -o ConnectTimeout=8 "$@" true 2>/dev/null; }
 link_target() { if [ -n "$PUCK_USER" ]; then echo "$PUCK_USER@$PUCK_LINK"; else echo "$PUCK_LINK"; fi; }
-# ssh options for the puck: through the link, its host key is taken on first use
-# (the link itself is authenticated by WireGuard keys).
-hop_opts() { [ -z "$PUCK_HOP" ] || printf '%s\n' -o StrictHostKeyChecking=accept-new -J "$PUCK_HOP"; }
+# Through the link, the puck's host key is kept under its name, in tunnel-puck's
+# own known_hosts, not under its link address: link addresses get reused (a
+# reflashed puck, a new puck on an old one's subnet). It's taken on first use,
+# and link forgets it (the link itself is authenticated by WireGuard keys).
+KNOWN_HOSTS="$HOME/.config/tunnel-puck/known_hosts"
+link_opts() {
+    mkdir -p "${KNOWN_HOSTS%/*}"
+    printf '%s\n' -o "HostKeyAlias=tunnel-puck-$PUCK_NAME" -o "UserKnownHostsFile=$KNOWN_HOSTS" \
+        -o StrictHostKeyChecking=accept-new -J "$1"
+}
+forget_link_key() { ssh-keygen -R "tunnel-puck-$PUCK_NAME" -f "$KNOWN_HOSTS" >/dev/null 2>&1 || true; }
+# ssh options for the puck, as pick_puck found it.
+hop_opts() { [ -z "$PUCK_HOP" ] || link_opts "$PUCK_HOP"; }
 probe_puck() {
     # shellcheck disable=SC2046
     probe $(hop_opts) "$PUCK"
@@ -267,7 +293,7 @@ pick_puck() {
     elif [ -z "$PUCK_LINK" ] && [ -z "$SSH_CLOUDFLARE" ]; then
         die "can't reach the puck: SSH_LAN ($SSH_LAN) didn't answer, and there's no link yet"
     elif [ -n "$PUCK_LINK" ] && { [ -z "$SSH_CLOUDFLARE" ] \
-            || probe -o StrictHostKeyChecking=accept-new -J "$VPS_SSH" "$(link_target)"; }; then
+            || probe $(link_opts "$VPS_SSH") "$(link_target)"; }; then
         PUCK="$(link_target)" PUCK_HOP="$VPS_SSH" PUCK_VIA="the link, through $VPS_SSH"
     else
         PUCK="$SSH_CLOUDFLARE" PUCK_VIA="SSH_CLOUDFLARE: Cloudflare, the emergency door (SSH_LAN and the link didn't answer)"
@@ -325,7 +351,7 @@ install_exit_script() {
 cmd_config() {
     printf '%s\n' "settings: $CONF"
     for v in SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE TPK_ROUTING PUCK_PORT TPK_LINK VPS_SSH VPS_HOST \
-             CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN_CODE JUMP_LAN_LABEL; do
+             CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL; do
         eval "val=\${$v}"
         printf '  %-15s %s\n' "$v" "${val:-(empty)}"
     done
@@ -334,7 +360,7 @@ cmd_config() {
     if [ "$TPK_ROUTING" = wgt ]; then
         for code in $JUMP_CODE $JUMP_LAN_CODE; do    # wgt's own rule for a new jump's code
             PYTHONPATH="$REPO" python3 -c 'import sys; from wgt import store; sys.exit(not store.new_exit_code(sys.argv[1]))' "$code" \
-                || die "jump code '$code' won't do: $(PYTHONPATH="$REPO" python3 -c 'from wgt import store; print(store.EXIT_CODE_RULE)'). Set JUMP_CODE (empty, it's the puck's name)"
+                || die "jump code '$code' won't do: $(PYTHONPATH="$REPO" python3 -c 'from wgt import store; print(store.EXIT_CODE_RULE)'). Set JUMP_CODE (or JUMP_LAN_CODE) yourself"
         done
     elif [ -z "$CLIENT_IPS" ]; then
         log "note: CLIENT_IPS is empty, so no client goes through the puck yet (README 2.2)"
@@ -358,7 +384,7 @@ check_others() {
         [ "$f" != "$CONF" ] || continue
         # Each value read in a subshell, so the other puck's settings don't leak into these.
         # shellcheck disable=SC1090
-        theirs() { ( TPK_ROUTING=tpk TPK_LINK="" PUCK_PORT="" WGT_SERVER="" VPS_SSH="" JUMP_CODE="" JUMP_LAN_CODE="" CLIENT_IPS=""
+        theirs() { ( TPK_ROUTING=tpk TPK_LINK="" PUCK_PORT="" WGT_SERVER="" VPS_SSH="" JUMP_CODE="" JUMP_LAN="" JUMP_LAN_CODE="" CLIENT_IPS=""
                      . "$f"; eval "echo \"$1\"" ); }
         if [ -n "$WGT_SERVER" ]; then [ "$(theirs '$WGT_SERVER')" = "$WGT_SERVER" ] || continue
         else [ "$(theirs '$VPS_SSH')" = "$VPS_SSH" ] || continue; fi
@@ -368,11 +394,12 @@ check_others() {
             || die "puck '$o' on the same VPS also uses PUCK_PORT $PUCK_PORT: empty it, and link picks a free one"
         [ "$(theirs '$TPK_ROUTING')" = "$TPK_ROUTING" ] || continue
         if [ "$TPK_ROUTING" = wgt ]; then mine="$JUMP_CODE $JUMP_LAN_CODE"
-            other="$(jump_code "$(theirs '$JUMP_CODE')" "$o") $(theirs '$JUMP_LAN_CODE')"
+            ocode=$(jump_code "$(theirs '$JUMP_CODE')" "$o")
+            other="$ocode $(lan_code "$(theirs '$JUMP_LAN_CODE')" "$(theirs '$JUMP_LAN')" "$ocode")"
         else mine="$CLIENT_IPS" other="$(theirs '$CLIENT_IPS')"; fi
         for x in $mine; do
             for y in $other; do
-                [ "$x" != "$y" ] || die "puck '$o' on the same VPS also uses $x: a jump code or client goes to one puck"
+                [ "$x" != "$y" ] || die "puck '$o' on the same VPS also uses $x: a jump code or client goes to one puck (set JUMP_CODE or JUMP_LAN_CODE)"
             done
         done
     done
@@ -424,13 +451,39 @@ cmd_link() {
     fi
     log "puck: the link"
     run puck puck.sh link >/dev/null
+    forget_link_key    # a rebuilt link may lead to a reflashed puck: learn its key afresh
     log "waiting for the first handshake"
     [ -n "$DRY" ] || sleep 8
     run puck puck.sh check || log "the link isn't fully up yet: run tpk-ctl.sh check in a minute"
 }
 
+# jump_owner <code> <port>: is the VPS's jump <code> this puck's? Prints "none"
+# (no such jump), "ours" (it points at this puck's link, port <port>), or the
+# endpoint it points at instead.
+jump_owner() {
+    ep=$(wgt_vps jump list 2>/dev/null | awk -v c="$1" '$1 == c {print $NF; exit}')
+    if [ -z "$ep" ]; then echo none
+    elif [ "$ep" = "$PUCK_LINK:$2" ]; then echo ours
+    else echo "$ep"; fi
+}
+
+# guard_jump <code> <port>: stop before touching a jump that belongs to something
+# else (another puck, or a jump that isn't a puck at all): wgt jump add on an
+# existing code replaces it, and remove deletes it. TPK_TAKEOVER=1 allows it.
+guard_jump() {
+    [ -z "$DRY" ] || return 0
+    owner=$(jump_owner "$1" "$2")
+    case "$owner" in none|ours) return 0 ;; esac
+    [ "${TPK_TAKEOVER:-}" = 1 ] \
+        || die "the VPS already has a jump '$1', pointing at $owner, not this puck: set JUMP_CODE (or JUMP_LAN_CODE) to another code, or TPK_TAKEOVER=1 to take it over"
+    log "jump '$1' points at $owner; taking it over (TPK_TAKEOVER=1)"
+}
+
+jump_port() { if [ "$1" = lan ]; then echo 51823; else echo 51822; fi; }    # the jump server's port on the puck (puck.sh)
+
 # add_jump <isolated|lan> <code> <label>: the puck's jump server, added to wgt.
 add_jump() {
+    guard_jump "$2" "$(jump_port "$1")"
     out=$(run puck puck.sh jump "$1")
     file=$(printf '%s\n' "$out" | sed -n 's/^JUMPFILE=//p')
     if [ -n "$file" ]; then
@@ -591,6 +644,7 @@ cmd_power() {
 }
 
 cmd_undo() {
+    what="${1:-}"    # all: cloudflared too (the loop below reuses $1, $2)
     if [ -n "$PUCK_HOP" ]; then    # undo removes the link, so it can't run through it
         [ -n "$SSH_CLOUDFLARE" ] || die "tpk-ctl.sh undo can't run through the link it removes: run it at home (SSH_LAN)"
         PUCK="$SSH_CLOUDFLARE" PUCK_HOP=""; log "puck: $PUCK instead (undo removes the link)"
@@ -599,13 +653,18 @@ cmd_undo() {
     confirm_vps "remove the link $LINK_IF$killswitch"
     if [ "$TPK_ROUTING" = wgt ]; then
         log "VPS: removing the wgt jump(s). wgt refuses while configs use them: remove those first (bin/wgt-ctl $WGT_SERVER client remove <code>.<device>)"
-        for code in $JUMP_CODE $JUMP_LAN_CODE; do
-            wgt_vps jump list | grep -qw -- "$code" || continue    # already gone
-            wgt_vps jump remove "$code" --yes || die "wgt jump remove $code failed; nothing else was removed"
+        set -- "$JUMP_CODE isolated" "$JUMP_LAN_CODE lan"
+        for pair in "$@"; do
+            set -- $pair; [ $# -eq 2 ] || continue    # no LAN jump
+            case "$(jump_owner "$1" "$(jump_port "$2")")" in
+                none) continue ;;    # already gone
+                ours) wgt_vps jump remove "$1" --yes || die "wgt jump remove $1 failed; nothing else was removed" ;;
+                *) log "leaving jump '$1': it isn't this puck's" ;;
+            esac
         done
     fi
     run vps vps.sh undo
-    run puck puck.sh undo "${1:-}"
+    run puck puck.sh undo "$what"
 }
 
 

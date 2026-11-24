@@ -47,7 +47,11 @@ WG_SUBNET=""                        # leave empty (it means every subnet WG_IF i
 # address come from that list. Empty: tpk-ctl.sh asks, offering the listed
 # servers or a new one (bin/wgt-ctl init), and saves the answer here.
 WGT_SERVER=""
-JUMP_CODE=""                        # the puck's jump on the VPS; empty: the puck's name. 2-6 of a-z 0-9 -, not already in `wgt jump list`
+# Jump codes are wgt's: 2-6 of a-z 0-9 -. Empty, they're made from the puck's
+# name, shortened to fit (grandma: grandm, LAN gran-l); tpk-ctl.sh config shows
+# them. A code the VPS already uses for something else is refused.
+JUMP_CODE=""                        # the puck's jump on the VPS; empty: the puck's name (6 at most)
 JUMP_LABEL=""                       # a label for it, e.g. "Friend's house"; empty: the puck's name
-JUMP_LAN_CODE=""                    # optional second jump in LAN mode (2.3), e.g. homelan
-JUMP_LAN_LABEL=""                   # e.g. "Friend's house (LAN)"
+JUMP_LAN=""                         # yes: a second jump in LAN mode (2.3), its code the jump's with -l (mom: mom-l)
+JUMP_LAN_CODE=""                    # or name the LAN jump yourself (this also turns it on)
+JUMP_LAN_LABEL=""                   # empty: the jump's label with " (LAN)"
