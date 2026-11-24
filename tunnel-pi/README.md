@@ -150,7 +150,7 @@ Fill it in (each line has a comment), then check it:
 | `WG_IF` | `tpi` | the VPS's WireGuard interface for your clients (`wg show interfaces`; usually `wg0`) |
 | `WG_SUBNET` | `tpi` | leave empty |
 | `WGT_SERVER` | `wgt` | the VPS's name in `bin/wgt-ctl list`; its ssh target and address come from there. Empty: `tpi-ctl.sh` asks (or adds a new server) and saves it |
-| `JUMP_CODE`, `JUMP_LABEL` | `wgt` | a 2–6 character code (`a-z`, `0-9`, `-`) not already in `wgt jump list`, and a label |
+| `JUMP_CODE`, `JUMP_LABEL` | `wgt`, optional | the Pi's jump on the VPS (2–6 of `a-z`, `0-9`, `-`, not already in `wgt jump list`) and a label for it. Empty: both are the Pi's name |
 | `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode ([2.3](#23-optional-lan-mode)) |
 
 ```sh
@@ -249,14 +249,19 @@ To add or remove a device later, edit `CLIENT_IPS` and run `link` again.
 
 ### With `TPI_ROUTING=wgt`: tpi-ctl.sh makes them **[Computer]**
 
+The Pi is a wgt jump on the VPS, named by `JUMP_CODE`, which is the Pi's name
+unless you set it. Each device gets a config named `<jump>.<device>` on the
+VPS, delivered to your computer as `<server>.<jump>.<device>.conf`. For a Pi
+called `mom` on the server `dengar`:
+
 ```sh
-scripts/tpi-ctl.sh client phone          # makes the config JUMP_CODE.phone
-scripts/tpi-ctl.sh client laptop lan     # with JUMP_LAN_CODE: JUMP_LAN_CODE.laptop (LAN mode, 2.3)
+scripts/tpi-ctl.sh mom client iphone          # mom.iphone on dengar
+scripts/tpi-ctl.sh mom client laptop lan      # with JUMP_LAN_CODE (say momlan): momlan.laptop, LAN mode (2.3)
 ```
 
-The config lands in `~/wg-tunnels/devices/<device>/config/`, and the device
-keeps its fleet-wide number. To show it as a QR code:
-`bin/wgt-ctl WGT_SERVER client show <code>.<device> --qr`.
+`mom.iphone` lands in `~/wg-tunnels/devices/iphone/config/dengar.mom.iphone.conf`,
+and the device keeps its fleet-wide number. To show it as a QR code:
+`bin/wgt-ctl dengar client show mom.iphone --qr`.
 
 These configs are made with `--warp off`: a `warp.` config would put
 Cloudflare WARP inside the jump, and sites would see a Cloudflare IP instead of
@@ -412,8 +417,8 @@ subnet, routing table and rules, so they don't touch each other.
 same subnet or port, or (below) the same jump code or client. How clients pick a Pi depends on routing:
 
 - **`TPI_ROUTING=wgt`: each Pi is another wgt jump, and a device picks its
-  exit by config.** Give each Pi its own `JUMP_CODE` (`home`, `mom`). One
-  phone can have both configs and switch between them:
+  exit by config.** Each Pi's jump is its name (`home`, `mom`), unless you
+  set `JUMP_CODE`. One phone can have both configs and switch between them:
 
   ```sh
   scripts/tpi-ctl.sh home client phone      # home.phone: out through the friend's

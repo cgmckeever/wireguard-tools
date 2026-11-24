@@ -94,6 +94,10 @@ if [ "$CONF" = "$CONFIGS/$PI_NAME.conf" ]; then log "Pi: $PI_NAME (configs/$PI_N
 link_ids
 : "${SSH_LAN:=}" "${SSH_CLOUDFLARE:=}" "${CF_TOKEN_FILE:=}" "${WGT_SERVER:=}" "${VPS_SSH:=}"
 : "${VPS_HOST:=}" "${PI_PORT:=}" "${TPI_ROUTING:=tpi}" "${JUMP_CODE:=}" "${JUMP_LABEL:=}"
+# jump_default <file's JUMP_CODE> <Pi name>: the jump code, the Pi's name when it's empty.
+jump_default() { if [ -n "$1" ]; then echo "$1"; else echo "$2"; fi; }
+JUMP_CODE=$(jump_default "$JUMP_CODE" "$PI_NAME")
+: "${JUMP_LABEL:=$PI_NAME}"
 : "${WG_IF:=wg0}" "${JUMP_LAN_CODE:=}" "${JUMP_LAN_LABEL:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
 PI_PUBKEY="" VPS_PUBKEY="" CF_TOKEN="" WIFI_SSID="" WIFI_PSK=""
 DRY="${TP_DRY_RUN:-}"
@@ -254,8 +258,10 @@ cmd_config() {
     require SSH_LAN VPS_SSH VPS_HOST
     case "$PI_PORT" in *[!0-9]*) die "PI_PORT must be a number, or empty (link picks one)" ;; esac
     case "$TPI_ROUTING" in
-        wgt)  require JUMP_CODE JUMP_LABEL
-              case "$JUMP_CODE" in *[!a-z0-9-]*) die "JUMP_CODE: only a-z, 0-9 and -" ;; esac ;;
+        wgt)  for code in $JUMP_CODE $JUMP_LAN_CODE; do    # wgt's own rule for a new jump's code
+                  PYTHONPATH="$REPO" python3 -c 'import sys; from wgt import store; sys.exit(not store.new_exit_code(sys.argv[1]))' "$code" \
+                      || die "jump code '$code' won't do: $(PYTHONPATH="$REPO" python3 -c 'from wgt import store; print(store.EXIT_CODE_RULE)'). Set JUMP_CODE (empty, it's the Pi's name)"
+              done ;;
         tpi)  [ -n "$CLIENT_IPS" ] || log "note: CLIENT_IPS is empty, so no client goes through the Pi yet (README 2.2)" ;;
         *) die "TPI_ROUTING must be tpi or wgt" ;;
     esac
@@ -286,7 +292,7 @@ others() {
         [ -z "$PI_PORT" ] || [ "$2" != "$PI_PORT" ] || die "Pi '$o' on the same VPS also uses PI_PORT $PI_PORT: empty it, and link picks a free one"
         # By routing: wgt's jump codes, or tpi's client addresses, each belong to one Pi.
         if [ "$TPI_ROUTING" = wgt ]; then mine="$JUMP_CODE $JUMP_LAN_CODE"
-            theirs=$( (TPI_ROUTING=tpi JUMP_CODE="" JUMP_LAN_CODE=""; . "$f"; [ "$TPI_ROUTING" != wgt ] || echo "$JUMP_CODE $JUMP_LAN_CODE") )
+            theirs=$( (TPI_ROUTING=tpi JUMP_CODE="" JUMP_LAN_CODE=""; . "$f"; [ "$TPI_ROUTING" != wgt ] || echo "$(jump_default "$JUMP_CODE" "$o") $JUMP_LAN_CODE") )
         else mine="$CLIENT_IPS"
             theirs=$( (TPI_ROUTING=tpi CLIENT_IPS=""; . "$f"; [ "$TPI_ROUTING" != tpi ] || echo "$CLIENT_IPS") )
         fi
