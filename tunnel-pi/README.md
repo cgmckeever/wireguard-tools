@@ -145,18 +145,13 @@ Fill it in (each line has a comment), then check it:
 | `TPI_LINK` | leave empty | the link's subnet on the VPS: `link` picks one nothing there uses and saves it. Never change it once set |
 | `VPS_SSH` | `tpi` | how ssh reaches the VPS (`root@vps.example.com`) |
 | `VPS_HOST` | `tpi` | the VPS's public name or IP, which the Pi dials |
-| `CLIENT_IPS` | `tpi` | the IPv4 `Address` of each client config that should exit through the Pi (see below) |
+| `CLIENT_IPS` | `tpi` | the IPv4 `Address` of each client config that should exit through the Pi. Can wait until [2.2](#22-device-configs) |
 | `CLIENT_IP6S` | `tpi`, if any | those clients' IPv6 addresses: they get blocked, since the link is IPv4 only |
 | `WG_IF` | `tpi` | the VPS's WireGuard interface for your clients (`wg show interfaces`; usually `wg0`) |
 | `WG_SUBNET` | `tpi` | leave empty |
 | `WGT_SERVER` | `wgt` | the VPS's name in `bin/wgt-ctl list`; its ssh target and address come from there. Empty: `tpi-ctl.sh` asks (or adds a new server) and saves it |
 | `JUMP_CODE`, `JUMP_LABEL` | `wgt` | a 2–6 character code (`a-z`, `0-9`, `-`) not already in `wgt jump list`, and a label |
 | `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode ([2.3](#23-optional-lan-mode)) |
-
-**With `TPI_ROUTING=tpi`, make the client configs now, by hand.** tunnel-pi
-makes none. Each device that should exit through the Pi needs a WireGuard
-client config on your VPS, made however you normally make them; its
-`Address` goes in `CLIENT_IPS`. The link step needs at least one.
 
 ```sh
 scripts/tpi-ctl.sh config
@@ -236,10 +231,23 @@ output also said `jump 'JUMP_CODE' works: ip=<your home IP>`.
 
 ## 2.2 Device configs
 
-**`TPI_ROUTING=tpi`:** nothing to do here. Your client configs from [1.1](#11-fill-in-the-settings-computer) already
-go through the Pi.
+Each device that should exit through the Pi needs a WireGuard config. How you
+make it depends on your routing.
 
-**`TPI_ROUTING=wgt` [Computer]:**
+### With `TPI_ROUTING=tpi`: by hand **[VPS]**, then **[Computer]**
+
+tunnel-pi makes no client configs: you do, on your VPS, however you normally
+make them. Then send them through the Pi:
+
+1. Make a client config for each device on the VPS (or pick existing ones).
+2. Put each config's IPv4 `Address` in `CLIENT_IPS` (and any IPv6 address in
+   `CLIENT_IP6S`) in the Pi's settings file.
+3. Run `scripts/tpi-ctl.sh link` again: it adds the routing and the kill
+   switch for them.
+
+To add or remove a device later, edit `CLIENT_IPS` and run `link` again.
+
+### With `TPI_ROUTING=wgt`: tpi-ctl.sh makes them **[Computer]**
 
 ```sh
 scripts/tpi-ctl.sh client phone          # makes the config JUMP_CODE.phone
@@ -254,8 +262,8 @@ These configs are made with `--warp off`: a `warp.` config would put
 Cloudflare WARP inside the jump, and sites would see a Cloudflare IP instead of
 the friend's.
 
-**Check [client]:** with the new config on, `curl https://ifconfig.me` shows
-your home IP (the Pi's network, for now).
+**Check [client], either routing:** with the device's config on,
+`curl https://ifconfig.me` shows your home IP (the Pi's network, for now).
 
 ## 2.3 Optional: LAN mode
 
@@ -289,7 +297,7 @@ LAN).
 
 ---
 
-# Phase 3: finish, prove, drop off
+# Phase 3: finish and prove it
 
 ## 3.1 Ethernet or Wi-Fi at the friend's **[Computer]**
 
@@ -351,7 +359,9 @@ Unplug the Pi and plug it back in.
 passes and test 2 passes again. Drop-off is the same power-up on another
 network.
 
-## 3.5 Drop-off **[Hands]**
+---
+
+# Phase 4: drop-off **[Hands]**
 
 The friend plugs in ethernet (unless you saved their Wi-Fi) and power. That's
 all.
