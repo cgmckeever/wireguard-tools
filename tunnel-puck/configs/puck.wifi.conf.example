@@ -1,0 +1,13 @@
+# A puck's Wi-Fi list. Copy to configs/<puck>.wifi.conf (or tpk-ctl.sh new makes
+# it; git ignores it, and tpk-ctl.sh keeps it mode 600: it holds passwords), then:
+#   scripts/tpk-ctl.sh <puck> wifi sync          (tpk-ctl.sh <puck> all syncs it too)
+#
+# One network per line, name::password, most preferred first. Only the first ::
+# splits, so a password may hold anything; spaces count, at the ends too. An
+# empty password is an open network. Among networks in range, the puck joins the
+# highest on the list; ethernet still wins when plugged in. Networks tunnel-puck
+# saved before that aren't here are removed on sync.
+#
+# MomsHouse::hunter2hunter2
+# MomsHouse-5G::hunter2hunter2
+# CafeGuest::

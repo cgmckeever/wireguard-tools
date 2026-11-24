@@ -1,38 +1,38 @@
 #!/bin/sh
-# pi.sh <step> [args]: the Raspberry Pi's side of tunnel-pi. Runs as root.
+# puck.sh <step> [args]: the puck's side of tunnel-puck. Runs as root.
 #
-# scripts/tpi-ctl.sh on your computer streams this file to the Pi over ssh, after the
-# settings it needs and ids.sh. To run it on the Pi yourself instead:
-#   cat ids.sh pi.sh | sudo TP_CONF=/path/to/configs/<name>.conf sh -s -- <step>
+# scripts/tpk-ctl.sh on your computer streams this file to the puck over ssh, after the
+# settings it needs and ids.sh. To run it on the puck yourself instead:
+#   cat ids.sh puck.sh | sudo TPK_CONF=/path/to/configs/<name>.conf sh -s -- <step>
 #
 # Steps (each is safe to run again):
 #   base                 packages, automatic updates, watchdog; cloudflared too when
-#                        CF_TOKEN is set (tpi-ctl.sh sends it when SSH_CLOUDFLARE is set)
-#   link                 WireGuard and the wgpi link to the VPS. Prints PUBKEY=<the Pi's
-#                        public key>; with VPS_PUBKEY set it also writes and starts wgpi
-#   jump isolated|lan    TPI_ROUTING=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
+#                        CF_TOKEN is set (tpk-ctl.sh sends it when SSH_CLOUDFLARE is set)
+#   link                 WireGuard and the wgpk link to the VPS. Prints PUBKEY=<the puck's
+#                        public key>; with VPS_PUBKEY set it also writes and starts wgpk
+#   jump isolated|lan    TPK_ROUTING=wgt: the jump server (wgjump, or wgjumplan for lan). Prints
 #                        JUMPFILE=<path> when it made a new jump file, else JUMP=exists
 #   jump-done isolated|lan   delete the jump file once the VPS has it
-#   dns                  TPI_ROUTING=tpi: the DNS resolver for Pi-exit clients
+#   dns                  TPK_ROUTING=tpk: the DNS resolver for puck-exit clients
 #   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2.3)
 #   wifi-list            the saved Wi-Fi networks, and which one is in use
 #   wifi-add             save the Wi-Fi network WIFI_SSID (password WIFI_PSK; empty: open)
 #   wifi-remove          remove the saved Wi-Fi network WIFI_SSID (all: every one)
-#   wifi-sync            make tunnel-pi's saved Wi-Fi match WIFI_LIST ("ssid::password"
+#   wifi-sync            make tunnel-puck's saved Wi-Fi match WIFI_LIST ("ssid::password"
 #                        lines, most preferred first): the first gets the highest priority
 #   check                PASS/FAIL for everything set up so far
 #   undo [all]           remove the WireGuard parts (all: cloudflared too)
 #
-# Logs go to stderr; only results meant for tpi-ctl.sh (PUBKEY=, JUMPFILE=) go to stdout.
+# Logs go to stderr; only results meant for tpk-ctl.sh (PUBKEY=, JUMPFILE=) go to stdout.
 
 main() {
     set -eu
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
-    if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
-    : "${PI_NAME:=$(basename "${TP_CONF:-pi}" .conf)}"
+    if [ -n "${TPK_CONF:-}" ]; then . "$TPK_CONF"; fi
+    : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf)}"
     link_ids
-    : "${TPI_ROUTING:=tpi}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}" "${WIFI_LIST:=}"
+    : "${TPK_ROUTING:=tpk}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}" "${WIFI_LIST:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
@@ -48,17 +48,17 @@ main() {
         wifi-remove) do_wifi_remove ;;
         check) do_check ;;
         undo) do_undo "${1:-}" ;;
-        *) die "unknown step '$step' (see the top of pi.sh)" ;;
+        *) die "unknown step '$step' (see the top of puck.sh)" ;;
     esac
 }
 
 WG=/etc/wireguard
-EXIT_SCRIPT=/usr/local/sbin/tunnel-pi-exit
-DISPATCHER=/etc/NetworkManager/dispatcher.d/90-tunnel-pi
+EXIT_SCRIPT=/usr/local/sbin/tunnel-puck-exit
+DISPATCHER=/etc/NetworkManager/dispatcher.d/90-tunnel-puck
 NM_CONNS=/etc/NetworkManager/system-connections
 
 log() { printf '==> %s\n' "$*" >&2; }
-die() { printf 'pi.sh: %s\n' "$*" >&2; exit 1; }
+die() { printf 'puck.sh: %s\n' "$*" >&2; exit 1; }
 need() { for v in "$@"; do eval "x=\${$v:-}"; [ -n "$x" ] || die "$v is not set"; done; }
 
 # put <mode> <path>: write stdin to <path> if it differs; CHANGED=1 when it did.
@@ -105,7 +105,7 @@ do_base() {
 
     if [ -n "$CF_TOKEN" ]; then do_cloudflared
     else log "no CF_TOKEN (SSH_CLOUDFLARE is empty): no cloudflared, so no emergency door"; fi
-    log "base done. Reboot once so the watchdog starts: sudo reboot"
+    log "base done. Reboot once so the watchdog starts: tpk-ctl.sh reboot"
 }
 
 # cloudflared, the emergency door: SSH through Cloudflare that doesn't depend on the link.
@@ -123,15 +123,15 @@ do_cloudflared() {
     fi
 
     # The token lives in a root-only file the unit reads, never on a command line.
-    printf 'TUNNEL_TOKEN=%s\n' "$CF_TOKEN" | put 600 /etc/cloudflared/tunnel-pi.env
-    put 644 /etc/systemd/system/tunnel-pi-cloudflared.service <<EOF
+    printf 'TUNNEL_TOKEN=%s\n' "$CF_TOKEN" | put 600 /etc/cloudflared/tunnel-puck.env
+    put 644 /etc/systemd/system/tunnel-puck-cloudflared.service <<EOF
 [Unit]
-Description=tunnel-pi: Cloudflare Tunnel for admin SSH
+Description=tunnel-puck: Cloudflare Tunnel for admin SSH
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-EnvironmentFile=/etc/cloudflared/tunnel-pi.env
+EnvironmentFile=/etc/cloudflared/tunnel-puck.env
 ExecStart=$(command -v cloudflared) --no-autoupdate tunnel run
 Restart=always
 RestartSec=5
@@ -140,15 +140,15 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
-    start_or_restart tunnel-pi-cloudflared.service
+    start_or_restart tunnel-puck-cloudflared.service
 }
 
 do_link() {
     apt-get -y -q install wireguard-tools iptables >/dev/null
-    printf 'net.ipv4.ip_forward=1\n' | put 644 /etc/sysctl.d/99-tunnel-pi.conf
+    printf 'net.ipv4.ip_forward=1\n' | put 644 /etc/sysctl.d/99-tunnel-puck.conf
     sysctl -q --system
     # At power-on DHCP or DNS may not be ready: keep retrying instead of staying down.
-    put 644 /etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf <<'EOF'
+    put 644 /etc/systemd/system/wg-quick@.service.d/tunnel-puck-retry.conf <<'EOF'
 [Unit]
 StartLimitIntervalSec=0
 
@@ -162,48 +162,48 @@ EOF
     if [ -d "${DISPATCHER%/*}" ]; then
         put 755 "$DISPATCHER" <<'EOF'
 #!/bin/sh
-# tunnel-pi: when a network comes or goes, move the exit rules to the current uplink.
-# tunnel-pi's own WireGuard interfaces coming up aren't a network change: wg-quick
+# tunnel-puck: when a network comes or goes, move the exit rules to the current uplink.
+# tunnel-puck's own WireGuard interfaces coming up aren't a network change: wg-quick
 # runs their exit itself.
 case "$1" in wg*) exit 0 ;; esac
-case "$2" in up|down|dhcp4-change) /usr/local/sbin/tunnel-pi-exit refresh 2>&1 | logger -t tunnel-pi-exit ;; esac
+case "$2" in up|down|dhcp4-change) /usr/local/sbin/tunnel-puck-exit refresh 2>&1 | logger -t tunnel-puck-exit ;; esac
 EOF
     else
-        log "no NetworkManager: after the Pi changes networks, reboot it so the exit follows"
+        log "no NetworkManager: after the puck changes networks, reboot it so the exit follows"
     fi
-    echo "PUBKEY=$(keypair wgpi)"
+    echo "PUBKEY=$(keypair wgpk)"
     if [ -z "$VPS_PUBKEY" ]; then
-        log "keys ready; wgpi is written once VPS_PUBKEY is known (tpi-ctl.sh link does this)"
+        log "keys ready; wgpk is written once VPS_PUBKEY is known (tpk-ctl.sh link does this)"
         return 0
     fi
-    need VPS_HOST PI_PORT
+    need VPS_HOST PUCK_PORT
     need_link
 
     exit_lines=""
-    if [ "$TPI_ROUTING" = tpi ]; then
-        [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpi-ctl.sh link installs it)"
-        mode=$(current_mode wgpi)
+    if [ "$TPK_ROUTING" = tpk ]; then
+        [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpk-ctl.sh link installs it)"
+        mode=$(current_mode wgpk)
         exit_lines="PostUp = $EXIT_SCRIPT up %i $mode
 PostDown = $EXIT_SCRIPT down %i"
     fi
     CHANGED=0
-    put 600 "$WG/wgpi.conf" <<EOF
-# tunnel-pi: the link to the VPS (written by pi.sh link)
+    put 600 "$WG/wgpk.conf" <<EOF
+# tunnel-puck: the link to the VPS (written by puck.sh link)
 [Interface]
-Address = $PI_LINK/30
+Address = $PUCK_LINK/30
 MTU = 1420
-PostUp = wg set %i private-key $WG/wgpi.key
+PostUp = wg set %i private-key $WG/wgpk.key
 $exit_lines
 
 [Peer]
 # the VPS
 PublicKey = $VPS_PUBKEY
-Endpoint = $VPS_HOST:$PI_PORT
+Endpoint = $VPS_HOST:$PUCK_PORT
 AllowedIPs = $VPS_LINK/32
 PersistentKeepalive = 25
 EOF
-    start_or_restart wg-quick@wgpi
-    log "wgpi up; the first handshake can take a few seconds"
+    start_or_restart wg-quick@wgpk
+    log "wgpk up; the first handshake can take a few seconds"
 }
 
 # jump_vars isolated|lan: the names and addresses of that jump server.
@@ -218,22 +218,22 @@ jump_vars() {
 do_jump() {
     need_link
     jump_vars "$1"
-    [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpi-ctl.sh link installs it)"
-    if [ -f "$WG/$JIF.conf" ] && [ "${TP_RENEW:-}" != 1 ]; then
+    [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpk-ctl.sh link installs it)"
+    if [ -f "$WG/$JIF.conf" ] && [ "${TPK_RENEW:-}" != 1 ]; then
         systemctl enable -q --now "wg-quick@$JIF"
-        log "$JIF already exists; its jump file was handed over when it was made (TP_RENEW=1 makes new keys)"
+        log "$JIF already exists; its jump file was handed over when it was made (TPK_RENEW=1 makes new keys)"
         echo "JUMP=exists"
         return 0
     fi
     # The VPS's private key for this jump is made here and leaves only in the jump
-    # file, which tpi-ctl.sh pipes straight to `wgt jump add` and then deletes.
+    # file, which tpk-ctl.sh pipes straight to `wgt jump add` and then deletes.
     rm -f "$WG/$JIF.key"
     server_pub=$(keypair "$JIF")
     vps_key=$(wg genkey)
     vps_pub=$(printf '%s\n' "$vps_key" | wg pubkey)
     CHANGED=0
     put 600 "$WG/$JIF.conf" <<EOF
-# tunnel-pi: the jump server the VPS connects to over wgpi (written by pi.sh jump $1)
+# tunnel-puck: the jump server the VPS connects to over wgpk (written by puck.sh jump $1)
 [Interface]
 Address = $JADDR
 ListenPort = $JPORT
@@ -253,9 +253,9 @@ PrivateKey = $vps_key
 Address = $JPEER/32
 
 [Peer]
-# tunnel-pi ($JIF), reached over wgpi
+# tunnel-puck ($JIF), reached over wgpk
 PublicKey = $server_pub
-Endpoint = $PI_LINK:$JPORT
+Endpoint = $PUCK_LINK:$JPORT
 EOF
     vps_key=""
     start_or_restart "wg-quick@$JIF"
@@ -266,11 +266,11 @@ do_dns() {
     need_link
     apt-get -y -q install unbound >/dev/null
     CHANGED=0
-    put 644 /etc/unbound/unbound.conf.d/tunnel-pi.conf <<EOF
-# tunnel-pi: answers DNS for Pi-exit clients (the VPS redirects their port 53 here)
+    put 644 /etc/unbound/unbound.conf.d/tunnel-puck.conf <<EOF
+# tunnel-puck: answers DNS for puck-exit clients (the VPS redirects their port 53 here)
 server:
     interface: 127.0.0.1
-    interface: $PI_LINK
+    interface: $PUCK_LINK
     ip-freebind: yes
     access-control: 127.0.0.0/8 allow
     access-control: $LINK_NET allow
@@ -283,13 +283,13 @@ do_lan_mode() {
     ifc="$1" mode="$2"
     case "$mode" in isolated|lan) ;; *) die "lan-mode <interface> isolated|lan" ;; esac
     grep -q "^PostUp = $EXIT_SCRIPT up %i " "$WG/$ifc.conf" 2>/dev/null \
-        || die "$ifc has no exit (it's wgpi with TPI_ROUTING=tpi, or wgjump / wgjumplan)"
+        || die "$ifc has no exit (it's wgpk with TPK_ROUTING=tpk, or wgjump / wgjumplan)"
     sed -i "s|^PostUp = $EXIT_SCRIPT up %i .*|PostUp = $EXIT_SCRIPT up %i $mode|" "$WG/$ifc.conf"
     systemctl restart "wg-quick@$ifc"
-    journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-pi-exit:' | tail -n 1 >&2 || true
+    journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-puck-exit:' | tail -n 1 >&2 || true
 }
 
-need_nm() { command -v nmcli >/dev/null || die "Wi-Fi needs NetworkManager (Raspberry Pi OS Bookworm or later)"; }
+need_nm() { command -v nmcli >/dev/null || die "Wi-Fi needs NetworkManager (Debian Bookworm or later, e.g. Raspberry Pi OS)"; }
 uplink() { "$EXIT_SCRIPT" uplink 2>/dev/null || echo none; }
 
 # Saved Wi-Fi connections, one per line: <name>:<device it's on, or empty>
@@ -300,21 +300,21 @@ do_wifi_list() {
     up=$(uplink)
     printf 'uplink now: %s\n' "$up"
     list=$(wifi_conns)
-    if [ -z "$list" ]; then echo "saved Wi-Fi: none (the Pi uses ethernet only)"; return 0; fi
-    echo "saved Wi-Fi (the Pi joins any of these in range; ethernet wins when both work):"
+    if [ -z "$list" ]; then echo "saved Wi-Fi: none (the puck uses ethernet only)"; return 0; fi
+    echo "saved Wi-Fi (the puck joins any of these in range; ethernet wins when both work):"
     printf '%s\n' "$list" | while IFS=: read -r n d; do
         if [ -z "$d" ]; then echo "  $n"; elif [ "$d" = "$up" ]; then echo "  $n  (connected: the uplink)"; else echo "  $n  (connected)"; fi
     done
 }
 
-# wifi_keyfile <ssid> <password or empty> <priority>: write tunnel-pi's keyfile for a
+# wifi_keyfile <ssid> <password or empty> <priority>: write tunnel-puck's keyfile for a
 # network (root-only, mode 600: the password never goes on a command line) and
 # print its path. route-metric 600 keeps ethernet (100) first when both work; among
 # networks in range, NetworkManager joins the highest autoconnect-priority.
 wifi_keyfile() {
     case "$1" in *"
 "*|'') die "a network name can't be empty or hold a line break" ;; esac
-    file="$NM_CONNS/tunnel-pi-$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' _).nmconnection"
+    file="$NM_CONNS/tunnel-puck-$(printf '%s' "$1" | tr -c 'A-Za-z0-9_-' _).nmconnection"
     {
         printf '[connection]\nid=%s\ntype=wifi\nautoconnect=true\nautoconnect-priority=%s\n\n' "$1" "$3"
         printf '[wifi]\nmode=infrastructure\nssid=%s\n\n' "$1"
@@ -329,12 +329,12 @@ do_wifi_add() {
     wifi_keyfile "$WIFI_SSID" "$WIFI_PSK" 0 >/dev/null
     WIFI_PSK=""
     nmcli connection reload
-    log "saved Wi-Fi '$WIFI_SSID': the Pi joins it when it's in range (ethernet still wins when both work)"
+    log "saved Wi-Fi '$WIFI_SSID': the puck joins it when it's in range (ethernet still wins when both work)"
 }
 
-# do_wifi_sync: tunnel-pi's saved networks become WIFI_LIST, in its order. Networks
-# saved some other way (Raspberry Pi Imager's) are left alone; one this would remove
-# is kept while it's the Pi's uplink.
+# do_wifi_sync: tunnel-puck's saved networks become WIFI_LIST, in its order. Networks
+# saved some other way (by the OS image's installer) are left alone; one this would remove
+# is kept while it's the puck's uplink.
 do_wifi_sync() {
     need_nm
     up=$(uplink) keep="" prio=100
@@ -348,13 +348,13 @@ $(wifi_keyfile "${line%%::*}" "${line#*::}" "$prio")"
 $WIFI_LIST
 EOF
     WIFI_LIST=""
-    for f in "$NM_CONNS"/tunnel-pi-*.nmconnection; do
+    for f in "$NM_CONNS"/tunnel-puck-*.nmconnection; do
         [ -e "$f" ] || continue
         printf '%s\n' "$keep" | grep -qxF -- "$f" && continue
         id=$(sed -n 's/^id=//p' "$f" | head -n 1)
         dev=$(nmcli -t -f NAME,DEVICE connection show --active | awk -F: -v n="$id" '$1 == n {print $2}')
         if [ -n "$dev" ] && [ "$dev" = "$up" ]; then
-            log "kept Wi-Fi '$id', not in the list, because it's the Pi's uplink right now: plug in ethernet and sync again"
+            log "kept Wi-Fi '$id', not in the list, because it's the puck's uplink right now: plug in ethernet and sync again"
             continue
         fi
         rm -f "$f"; log "removed Wi-Fi '$id' (not in the list)"
@@ -365,16 +365,16 @@ EOF
 do_wifi_remove() {
     need_nm; need WIFI_SSID
     up=$(uplink) list=$(wifi_conns) found=""
-    # First make sure none of them is the connection the Pi is using right now.
+    # First make sure none of them is the connection the puck is using right now.
     while IFS=: read -r n d; do
         [ -n "$n" ] || continue
         [ "$WIFI_SSID" = all ] || [ "$n" = "$WIFI_SSID" ] || continue
         found=1
-        [ -z "$d" ] || [ "$d" != "$up" ] || die "'$n' is the Pi's uplink right now: plug in ethernet first, then run this again"
+        [ -z "$d" ] || [ "$d" != "$up" ] || die "'$n' is the puck's uplink right now: plug in ethernet first, then run this again"
     done <<EOF
 $list
 EOF
-    [ -n "$found" ] || { log "no saved Wi-Fi named '$WIFI_SSID' (tpi-ctl.sh wifi lists them)"; return 0; }
+    [ -n "$found" ] || { log "no saved Wi-Fi named '$WIFI_SSID' (tpk-ctl.sh wifi lists them)"; return 0; }
     while IFS=: read -r n d; do
         [ -n "$n" ] || continue
         [ "$WIFI_SSID" = all ] || [ "$n" = "$WIFI_SSID" ] || continue
@@ -396,23 +396,23 @@ handshake_age() {   # seconds since <interface>'s newest handshake (99999: none)
 }
 
 do_check() {
-    if systemctl cat tunnel-pi-cloudflared.service >/dev/null 2>&1; then
-        check "cloudflared (the emergency door) is running" "systemctl is-active -q tunnel-pi-cloudflared.service"
+    if systemctl cat tunnel-puck-cloudflared.service >/dev/null 2>&1; then
+        check "cloudflared (the emergency door) is running" "systemctl is-active -q tunnel-puck-cloudflared.service"
     elif [ -n "$SSH_CLOUDFLARE" ]; then
-        fail "cloudflared isn't set up, but SSH_CLOUDFLARE is (tpi-ctl.sh base)"
+        fail "cloudflared isn't set up, but SSH_CLOUDFLARE is (tpk-ctl.sh base)"
     else
         printf 'INFO  no cloudflared (SSH_CLOUDFLARE is empty): no emergency door if the link goes down\n'
     fi
-    if [ -f "$WG/wgpi.conf" ] && [ -z "$LINK_NET" ]; then
-        fail "wgpi exists but TPI_LINK is empty in this Pi's settings (tpi-ctl.sh link fills it in)"
-    elif [ -f "$WG/wgpi.conf" ]; then
+    if [ -f "$WG/wgpk.conf" ] && [ -z "$LINK_NET" ]; then
+        fail "wgpk exists but TPK_LINK is empty in this puck's settings (tpk-ctl.sh link fills it in)"
+    elif [ -f "$WG/wgpk.conf" ]; then
         check "IP forwarding is on" "[ \"\$(sysctl -n net.ipv4.ip_forward)\" = 1 ]"
-        check "wgpi is up" "ip link show wgpi"
-        age=$(handshake_age wgpi)
-        if [ "$age" -lt 180 ]; then pass "wgpi handshake ${age}s ago"; else fail "wgpi has no recent handshake (is PI_PORT/udp open on the VPS?)"; fi
+        check "wgpk is up" "ip link show wgpk"
+        age=$(handshake_age wgpk)
+        if [ "$age" -lt 180 ]; then pass "wgpk handshake ${age}s ago"; else fail "wgpk has no recent handshake (is PUCK_PORT/udp open on the VPS?)"; fi
         check "the VPS answers on the link (ping $VPS_LINK)" "ping -c 2 -W 2 $VPS_LINK"
     else
-        fail "wgpi isn't set up (tpi-ctl.sh link)"
+        fail "wgpk isn't set up (tpk-ctl.sh link)"
     fi
     for ifc in wgjump wgjumplan; do
         [ -f "$WG/$ifc.conf" ] || continue
@@ -421,9 +421,9 @@ do_check() {
         if [ "$age" -lt 180 ]; then pass "$ifc handshake ${age}s ago"
         else printf 'INFO  %s: no recent handshake (normal while no device uses the jump: wgt brings it up on demand)\n' "$ifc"; fi
     done
-    if [ "$TPI_ROUTING" = tpi ] && [ -f "$WG/wgpi.conf" ]; then
-        check "wgpi runs the exit rules ($(current_mode wgpi))" "grep -q '^PostUp = $EXIT_SCRIPT up' $WG/wgpi.conf"
-        check "unbound answers on $PI_LINK" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -qF $PI_LINK"
+    if [ "$TPK_ROUTING" = tpk ] && [ -f "$WG/wgpk.conf" ]; then
+        check "wgpk runs the exit rules ($(current_mode wgpk))" "grep -q '^PostUp = $EXIT_SCRIPT up' $WG/wgpk.conf"
+        check "unbound answers on $PUCK_LINK" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -qF $PUCK_LINK"
     fi
     if command -v nmcli >/dev/null; then
         wifi=$(wifi_conns | cut -d: -f1 | paste -sd, - | sed 's/,/, /g')
@@ -435,16 +435,16 @@ do_check() {
 }
 
 do_undo() {
-    for ifc in wgjumplan wgjump wgpi; do
+    for ifc in wgjumplan wgjump wgpk; do
         systemctl disable -q --now "wg-quick@$ifc" 2>/dev/null || true
     done
-    rm -f "$WG"/wgpi.* "$WG"/wgjump* "$WG"/jump-for-vps*.conf "$EXIT_SCRIPT" \
-          /etc/unbound/unbound.conf.d/tunnel-pi.conf /etc/sysctl.d/99-tunnel-pi.conf \
-          /etc/systemd/system/wg-quick@.service.d/tunnel-pi-retry.conf "$DISPATCHER"
+    rm -f "$WG"/wgpk.* "$WG"/wgjump* "$WG"/jump-for-vps*.conf "$EXIT_SCRIPT" \
+          /etc/unbound/unbound.conf.d/tunnel-puck.conf /etc/sysctl.d/99-tunnel-puck.conf \
+          /etc/systemd/system/wg-quick@.service.d/tunnel-puck-retry.conf "$DISPATCHER"
     systemctl restart unbound 2>/dev/null || true
     if [ "${1:-}" = all ]; then
-        systemctl disable -q --now tunnel-pi-cloudflared.service 2>/dev/null || true
-        rm -f /etc/systemd/system/tunnel-pi-cloudflared.service /etc/cloudflared/tunnel-pi.env
+        systemctl disable -q --now tunnel-puck-cloudflared.service 2>/dev/null || true
+        rm -f /etc/systemd/system/tunnel-puck-cloudflared.service /etc/cloudflared/tunnel-puck.env
         log "cloudflared stopped: delete the tunnel and the Access application in the dashboard too"
     fi
     systemctl daemon-reload

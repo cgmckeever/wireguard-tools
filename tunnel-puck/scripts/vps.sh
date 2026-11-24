@@ -1,21 +1,21 @@
 #!/bin/sh
-# vps.sh <step>: the VPS's side of tunnel-pi. Runs as root.
+# vps.sh <step>: the VPS's side of tunnel-puck. Runs as root.
 #
-# scripts/tpi-ctl.sh on your computer streams this file to the VPS over ssh, after the
+# scripts/tpk-ctl.sh on your computer streams this file to the VPS over ssh, after the
 # settings it needs and ids.sh. To run it on the VPS yourself instead:
-#   cat ids.sh vps.sh | TP_CONF=/path/to/configs/<name>.conf PI_PUBKEY=<the Pi's key> sh -s -- <step>
+#   cat ids.sh vps.sh | TPK_CONF=/path/to/configs/<name>.conf PUCK_PUBKEY=<the puck's key> sh -s -- <step>
 #
-# Each Pi on this VPS has its own link, wgpi-<name>, with its own subnet,
-# routing table and rules (ids.sh); a step touches only its own Pi's. link picks
-# a free subnet (TPI_LINK) and UDP port (PI_PORT) when they're empty, and prints
-# them (LINK=, PORT=) for tpi-ctl.sh to save.
+# Each puck on this VPS has its own link, wgpk-<name>, with its own subnet,
+# routing table and rules (ids.sh); a step touches only its own puck's. link picks
+# a free subnet (TPK_LINK) and UDP port (PUCK_PORT) when they're empty, and prints
+# them (LINK=, PORT=) for tpk-ctl.sh to save.
 #
 # Steps (each is safe to run again):
-#   link    the link to the Pi (PI_PUBKEY needed). Prints PUBKEY=<the VPS's
-#           public key>. With TPI_ROUTING=tpi it also writes the routing for CLIENT_IPS
+#   link    the link to the puck (PUCK_PUBKEY needed). Prints PUBKEY=<the VPS's
+#           public key>. With TPK_ROUTING=tpk it also writes the routing for CLIENT_IPS
 #           and the kill switch
-#   check   PASS/FAIL for the link and, by TPI_ROUTING, the routing or the wgt jump(s)
-#   undo    remove the link (and TPI_ROUTING=tpi's kill switch). wgt jumps are removed
+#   check   PASS/FAIL for the link and, by TPK_ROUTING, the routing or the wgt jump(s)
+#   undo    remove the link (and TPK_ROUTING=tpk's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
 # It never changes WG_IF (the clients' interface) or wgt's files. Logs go to stderr; only PUBKEY= goes
@@ -25,14 +25,14 @@ main() {
     set -eu
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
-    if [ -n "${TP_CONF:-}" ]; then . "$TP_CONF"; fi
-    : "${PI_NAME:=$(basename "${TP_CONF:-pi}" .conf)}" "${TPI_LINK:=}" "${PI_PORT:=}"
+    if [ -n "${TPK_CONF:-}" ]; then . "$TPK_CONF"; fi
+    : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf)}" "${TPK_LINK:=}" "${PUCK_PORT:=}"
     link_ids
     KILL="/usr/local/sbin/$KILL_NAME" KILL_UNIT="/etc/systemd/system/$KILL_NAME.service"
-    : "${TPI_ROUTING:=tpi}" "${PI_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
+    : "${TPK_ROUTING:=tpk}" "${PUCK_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
     : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}" "${WG_IF:=wg0}"
     case "$WG_IF" in ''|*[!A-Za-z0-9_.-]*) die "WG_IF must be an interface name" ;; esac
-    case "$TPI_ROUTING" in tpi|wgt) ;; *) die "TPI_ROUTING must be tpi or wgt" ;; esac
+    case "$TPK_ROUTING" in tpk|wgt) ;; *) die "TPK_ROUTING must be tpk or wgt" ;; esac
     case "${1:-}" in
         link) do_link ;;
         check) do_check ;;
@@ -67,22 +67,22 @@ v6() { case "$1" in ''|*[!0-9a-fA-F:./]*) die "not an IPv6 address: '$1'" ;; esa
 
 preflight() {
     command -v wg >/dev/null || die "wg isn't installed (apt install wireguard-tools)"
-    [ "$TPI_ROUTING" != tpi ] || ip link show "$WG_IF" >/dev/null 2>&1 || die "no interface $WG_IF here: set WG_IF to the WireGuard interface your clients connect to"
+    [ "$TPK_ROUTING" != tpk ] || ip link show "$WG_IF" >/dev/null 2>&1 || die "no interface $WG_IF here: set WG_IF to the WireGuard interface your clients connect to"
     # The link's addresses must be free (or already this link's)
-    other=$(link_users "$VPS_LINK" "$PI_LINK")
-    [ -z "$other" ] || die "$LINK_NET is already used here, by $other: empty TPI_LINK and link picks a free one"
-    # PI_PORT must be free (or already this link's)
-    if [ "$(wg show "$LINK_IF" listen-port 2>/dev/null || true)" != "$PI_PORT" ] \
-        && ss -Hlun "sport = :$PI_PORT" | grep -q .; then
-        die "UDP port $PI_PORT is already in use (ss -ulpn)"
+    other=$(link_users "$VPS_LINK" "$PUCK_LINK")
+    [ -z "$other" ] || die "$LINK_NET is already used here, by $other: empty TPK_LINK and link picks a free one"
+    # PUCK_PORT must be free (or already this link's)
+    if [ "$(wg show "$LINK_IF" listen-port 2>/dev/null || true)" != "$PUCK_PORT" ] \
+        && ss -Hlun "sport = :$PUCK_PORT" | grep -q .; then
+        die "UDP port $PUCK_PORT is already in use (ss -ulpn)"
     fi
-    if [ "$TPI_ROUTING" = wgt ]; then
-        command -v wgt >/dev/null || die "TPI_ROUTING=wgt needs wgt on this VPS (or use TPI_ROUTING=tpi)"
+    if [ "$TPK_ROUTING" = wgt ]; then
+        command -v wgt >/dev/null || die "TPK_ROUTING=wgt needs wgt on this VPS (or use TPK_ROUTING=tpk)"
     fi
 }
 
 # link_users <address>...: what else on this VPS has these addresses: an interface,
-# or a WireGuard config (up or not). Never this Pi's own link.
+# or a WireGuard config (up or not). Never this puck's own link.
 link_users() {
     for a in "$@"; do
         ip -o -4 addr show | awk -v a="$a/" -v me="$LINK_IF" 'index($4, a) == 1 && $2 != me {print $2}'
@@ -93,12 +93,12 @@ link_users() {
     done | sort -u | tr '\n' ' ' | sed 's/ $//'
 }
 
-# pick_link: TPI_LINK, if empty: this link's own (if it exists), else the first
+# pick_link: TPK_LINK, if empty: this link's own (if it exists), else the first
 # /30 in 10.99.0.0/24 that nothing here uses.
 pick_link() {
-    [ -z "$TPI_LINK" ] || return 0
+    [ -z "$TPK_LINK" ] || return 0
     own=$(sed -n 's|^Address *= *10\.99\.0\.\([0-9]*\)/30$|\1|p' "$WG/$LINK_IF.conf" 2>/dev/null | head -n 1)
-    if [ -n "$own" ]; then TPI_LINK="10.99.0.$((own - 1))/30"
+    if [ -n "$own" ]; then TPK_LINK="10.99.0.$((own - 1))/30"
     else
         host=0
         while [ "$host" -le 252 ]; do
@@ -106,51 +106,51 @@ pick_link() {
             host=$((host + 4))
         done
         [ "$host" -le 252 ] || die "every /30 in 10.99.0.0/24 is in use here"
-        TPI_LINK="10.99.0.$host/30"
-        log "picked TPI_LINK=$TPI_LINK"
+        TPK_LINK="10.99.0.$host/30"
+        log "picked TPK_LINK=$TPK_LINK"
     fi
     link_ids
-    echo "LINK=$TPI_LINK"
+    echo "LINK=$TPK_LINK"
 }
 
-# pick_port: PI_PORT, if empty: this link's own, else the first UDP port from
+# pick_port: PUCK_PORT, if empty: this link's own, else the first UDP port from
 # 51821 up that nothing listens on and no WireGuard config here names.
 pick_port() {
-    [ -z "$PI_PORT" ] || return 0
-    PI_PORT=$(sed -n 's/^ListenPort *= *//p' "$WG/$LINK_IF.conf" 2>/dev/null | head -n 1)
-    if [ -z "$PI_PORT" ]; then
-        PI_PORT=51821
-        while ss -Hlun "sport = :$PI_PORT" | grep -q . \
-            || grep -qs "^ListenPort *= *$PI_PORT\$" "$WG"/*.conf; do
-            PI_PORT=$((PI_PORT + 1))
+    [ -z "$PUCK_PORT" ] || return 0
+    PUCK_PORT=$(sed -n 's/^ListenPort *= *//p' "$WG/$LINK_IF.conf" 2>/dev/null | head -n 1)
+    if [ -z "$PUCK_PORT" ]; then
+        PUCK_PORT=51821
+        while ss -Hlun "sport = :$PUCK_PORT" | grep -q . \
+            || grep -qs "^ListenPort *= *$PUCK_PORT\$" "$WG"/*.conf; do
+            PUCK_PORT=$((PUCK_PORT + 1))
         done
-        log "picked PI_PORT=$PI_PORT"
+        log "picked PUCK_PORT=$PUCK_PORT"
     fi
-    echo "PORT=$PI_PORT"
+    echo "PORT=$PUCK_PORT"
 }
 
 do_link() {
-    need PI_PUBKEY
+    need PUCK_PUBKEY
     pick_link
     pick_port
-    case "$PI_PORT" in *[!0-9]*) die "PI_PORT must be a number" ;; esac
+    case "$PUCK_PORT" in *[!0-9]*) die "PUCK_PORT must be a number" ;; esac
     preflight
     echo "PUBKEY=$(keypair "$LINK_IF")"
 
     CHANGED=0
-    if [ "$TPI_ROUTING" = wgt ]; then
+    if [ "$TPK_ROUTING" = wgt ]; then
         put 600 "$WG/$LINK_IF.conf" <<EOF
-# tunnel-pi: the link the Pi dials (written by vps.sh link; not wgt's)
+# tunnel-puck: the link the puck dials (written by vps.sh link; not wgt's)
 [Interface]
 Address = $VPS_LINK/30
-ListenPort = $PI_PORT
+ListenPort = $PUCK_PORT
 MTU = 1420
 PostUp = wg set %i private-key $WG/$LINK_IF.key
 
 [Peer]
-# the Pi
-PublicKey = $PI_PUBKEY
-AllowedIPs = $PI_LINK/32
+# the puck
+PublicKey = $PUCK_PUBKEY
+AllowedIPs = $PUCK_LINK/32
 EOF
     else
         conf=$(hand_conf)    # not piped: a die inside must stop the script, not write half a file
@@ -160,8 +160,8 @@ EOF
     open_port
     systemctl enable -q "wg-quick@$LINK_IF"
     if [ "$CHANGED" = 1 ]; then systemctl restart "wg-quick@$LINK_IF"; else systemctl start "wg-quick@$LINK_IF"; fi
-    [ "$TPI_ROUTING" != tpi ] || prune
-    log "$LINK_IF up; it waits for the Pi to dial in"
+    [ "$TPK_ROUTING" != tpk ] || prune
+    log "$LINK_IF up; it waits for the puck to dial in"
 }
 
 # listed <address> <list>: is it in the list (a /32 or /128 written there or not)?
@@ -176,7 +176,7 @@ prune() {
         listed "$ip" "$CLIENT_IPS" && continue
         ip rule del priority "$prio" from "$ip" iif "$WG_IF" && log "removed rule $prio for $ip (no longer in CLIENT_IPS)"
     done
-    iptables -t nat -S PREROUTING | grep -- "-i $WG_IF .*--to-destination $PI_LINK\$" |
+    iptables -t nat -S PREROUTING | grep -- "-i $WG_IF .*--to-destination $PUCK_LINK\$" |
     while read -r rule; do
         ip=$(printf '%s\n' "$rule" | sed -n 's|.* -s \([0-9.]*\)/32 .*|\1|p')
         [ -n "$ip" ] && ! listed "$ip" "$CLIENT_IPS" || continue
@@ -192,7 +192,7 @@ prune() {
     done
 }
 
-# The TPI_ROUTING=tpi link config: route CLIENT_IPS through the Pi, NAT onto the link, DNS to the Pi.
+# The TPK_ROUTING=tpk link config: route CLIENT_IPS through the puck, NAT onto the link, DNS to the puck.
 hand_conf() {
     if [ -z "$WG_SUBNET" ]; then
         # Every IPv4 subnet WG_IF is on (its kernel routes), so traffic between
@@ -202,19 +202,19 @@ hand_conf() {
     fi
     for net in $WG_SUBNET; do v4 "$net"; done
     cat <<EOF
-# tunnel-pi: the link the Pi dials, and the clients routed through it (written by vps.sh link)
+# tunnel-puck: the link the puck dials, and the clients routed through it (written by vps.sh link)
 [Interface]
 Address = $VPS_LINK/30
-ListenPort = $PI_PORT
+ListenPort = $PUCK_PORT
 MTU = 1420
 # Table = off: no routes from AllowedIPs; the rules below choose who uses the link
 Table = off
 PostUp = wg set %i private-key $WG/$LINK_IF.key
-# Table $TABLE: the Pi for everything, except the VPS's own clients, which stay on $WG_IF
+# Table $TABLE: the puck for everything, except the VPS's own clients, which stay on $WG_IF
 $(for net in $WG_SUBNET; do echo "PostUp = ip route replace $net dev $WG_IF table $TABLE"; done)
 PostUp = ip route replace default dev %i table $TABLE
 PostDown = ip route flush table $TABLE
-# Forward into the link and NAT onto it (the Pi sees only $VPS_LINK)
+# Forward into the link and NAT onto it (the puck sees only $VPS_LINK)
 PostUp = iptables -I FORWARD -i $WG_IF -o %i -j ACCEPT
 PostUp = iptables -I FORWARD -i %i -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -o %i -j MASQUERADE
@@ -224,19 +224,19 @@ PostDown = iptables -t nat -D POSTROUTING -o %i -j MASQUERADE
 EOF
     for ip in $CLIENT_IPS; do
         v4 "$ip"
-        echo "# $ip: through the Pi, its DNS answered by the Pi"
+        echo "# $ip: through the puck, its DNS answered by the puck"
         echo "PostUp = ip rule del iif $WG_IF from $ip lookup $TABLE priority $PRIO_ROUTE 2>/dev/null; ip rule add iif $WG_IF from $ip lookup $TABLE priority $PRIO_ROUTE"
         echo "PostDown = ip rule del iif $WG_IF from $ip lookup $TABLE priority $PRIO_ROUTE"
         for proto in udp tcp; do
-            echo "PostUp = iptables -t nat -I PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination $PI_LINK"
-            echo "PostDown = iptables -t nat -D PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination $PI_LINK"
+            echo "PostUp = iptables -t nat -I PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination $PUCK_LINK"
+            echo "PostDown = iptables -t nat -D PREROUTING -i $WG_IF -s $ip -p $proto --dport 53 -j DNAT --to-destination $PUCK_LINK"
         done
     done
     cat <<EOF
 
 [Peer]
-# the Pi
-PublicKey = $PI_PUBKEY
+# the puck
+PublicKey = $PUCK_PUBKEY
 AllowedIPs = 0.0.0.0/0
 EOF
 }
@@ -262,7 +262,7 @@ ip rule add iif $WG_IF from $ip unreachable priority $PRIO_KILL
     done
     put 755 "$KILL" <<EOF
 #!/bin/sh
-# $KILL_NAME up|down (written by vps.sh link, for the Pi $PI_NAME): Pi-exit clients never
+# $KILL_NAME up|down (written by vps.sh link, for the puck $PUCK_NAME): puck-exit clients never
 # fall back to the VPS's own IP, and their IPv6 is blocked (the link is IPv4 only).
 case "\$1" in
 up)
@@ -273,7 +273,7 @@ esac
 EOF
     put 644 "$KILL_UNIT" <<EOF
 [Unit]
-Description=tunnel-pi: Pi-exit clients never fall back to the VPS's IP
+Description=tunnel-puck: puck-exit clients never fall back to the VPS's IP
 After=network-online.target
 
 [Service]
@@ -292,10 +292,10 @@ EOF
 
 open_port() {
     if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
-        ufw allow "$PI_PORT/udp" >/dev/null
-        log "ufw: allowed $PI_PORT/udp"
+        ufw allow "$PUCK_PORT/udp" >/dev/null
+        log "ufw: allowed $PUCK_PORT/udp"
     else
-        log "ufw isn't active here: make sure $PI_PORT/udp is open in this VPS's firewall (and the provider's)"
+        log "ufw isn't active here: make sure $PUCK_PORT/udp is open in this VPS's firewall (and the provider's)"
     fi
 }
 
@@ -305,21 +305,21 @@ fail() { printf 'FAIL  %s\n' "$*"; FAILED=1; }
 check() { if eval "$2" >/dev/null 2>&1; then pass "$1"; else fail "$1"; fi; }
 
 do_check() {
-    if [ ! -f "$WG/$LINK_IF.conf" ]; then fail "$LINK_IF isn't set up (tpi-ctl.sh link)"; return 1; fi
-    if [ -z "$LINK_NET" ]; then fail "TPI_LINK is empty in this Pi's settings (tpi-ctl.sh link fills it in)"; return 1; fi
+    if [ ! -f "$WG/$LINK_IF.conf" ]; then fail "$LINK_IF isn't set up (tpk-ctl.sh link)"; return 1; fi
+    if [ -z "$LINK_NET" ]; then fail "TPK_LINK is empty in this puck's settings (tpk-ctl.sh link fills it in)"; return 1; fi
     check "$LINK_IF is up" "ip link show $LINK_IF"
     t=$(wg show "$LINK_IF" latest-handshakes 2>/dev/null | awk '{print $2 + 0; exit}')
     if [ "${t:-0}" -gt 0 ] && [ $(( $(date +%s) - t )) -lt 180 ]; then
         pass "$LINK_IF handshake $(( $(date +%s) - t ))s ago"
     else
-        fail "$LINK_IF has no recent handshake from the Pi"
+        fail "$LINK_IF has no recent handshake from the puck"
     fi
-    check "the Pi answers on the link (ping $PI_LINK)" "ping -c 2 -W 2 $PI_LINK"
-    if [ "$TPI_ROUTING" = tpi ]; then
+    check "the puck answers on the link (ping $PUCK_LINK)" "ping -c 2 -W 2 $PUCK_LINK"
+    if [ "$TPK_ROUTING" = tpk ]; then
         check "kill switch is on" "systemctl is-active -q $KILL_NAME.service"
-        check "table $TABLE sends to the Pi" "ip route show table $TABLE | grep -q 'default dev $LINK_IF'"
+        check "table $TABLE sends to the puck" "ip route show table $TABLE | grep -q 'default dev $LINK_IF'"
         for ip in $CLIENT_IPS; do
-            check "$ip: routed through the Pi (rule $PRIO_ROUTE)" "ip rule show | grep -q '^$PRIO_ROUTE:.*from $ip .*lookup $TABLE'"
+            check "$ip: routed through the puck (rule $PRIO_ROUTE)" "ip rule show | grep -q '^$PRIO_ROUTE:.*from $ip .*lookup $TABLE'"
             check "$ip: kill switch (rule $PRIO_KILL)" "ip rule show | grep -q '^$PRIO_KILL:.*from $ip .*unreachable'"
         done
     else
