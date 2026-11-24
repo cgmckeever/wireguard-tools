@@ -100,6 +100,52 @@ DRY="${TP_DRY_RUN:-}"
 
 placeholder() { case "$1" in ''|*example.com*|*'<'*) return 0 ;; esac; return 1; }
 
+# save <NAME> <value>: set NAME="value" in this Pi's settings file (replacing its
+# line, or adding one), and say so.
+save() {
+    tmp=$(mktemp)
+    awk -v k="$1" -v line="$1=\"$2\"" 'index($0, k "=") == 1 && !done {print line; done = 1; next} {print}
+        END {if (!done) print line}' "$CONF" > "$tmp"
+    cat "$tmp" > "$CONF"; rm -f "$tmp"
+    log "saved $1=\"$2\" in $CONF"
+}
+
+# wgt_servers: the servers in wgt-ctl's list, one name per line (read by its own code).
+wgt_servers() {
+    PYTHONPATH="$REPO" python3 -c 'from wgt.ctl import remote
+for s in remote.servers(): print(s.name)'
+}
+
+# choose_wgt_server: WGT_SERVER, when it's empty: a server from wgt-ctl's list, or a
+# new one added with wgt-ctl init. Saved in the Pi's settings. Needs a terminal.
+choose_wgt_server() {
+    (: < /dev/tty) 2>/dev/null \
+        || die "TPI_ROUTING=wgt goes through wgt-ctl: set WGT_SERVER to the VPS's name in bin/wgt-ctl list (not there yet? bin/wgt-ctl init adds it)"
+    before=$(wgt_servers) || die "can't read wgt-ctl's server list (bin/wgt-ctl list says why)"
+    printf 'TPI_ROUTING=wgt: which wgt server is the VPS for %s?\n' "$PI_NAME" >&2
+    i=0
+    for n in $before; do i=$((i + 1)); printf '  %d) %s\n' "$i" "$n" >&2; done
+    printf '  a) add a new one: bin/wgt-ctl init sets up wgt on it (or adopts one already running it)\n' >&2
+    if [ -z "$before" ]; then printf '[a]: ' >&2; else printf '[number or a]: ' >&2; fi
+    read -r answer < /dev/tty || answer=""
+    [ -n "$answer" ] || [ -n "$before" ] || answer=a
+    case "$answer" in
+        a|A)
+            [ -z "$DRY" ] || die "a dry run doesn't add a server: run it without TP_DRY_RUN, or set WGT_SERVER"
+            printf 'wgt-ctl init connects to that server and sets it up (or adopts it). Continue? [y/N] ' >&2
+            read -r yes < /dev/tty || yes=""
+            case "$yes" in y|Y|yes) ;; *) die "stopped; nothing was changed" ;; esac
+            "$WGT_CTL" init < /dev/tty || die "wgt-ctl init didn't finish: nothing was saved"
+            WGT_SERVER=$(wgt_servers | grep -vxF -e "$before" -e '' | head -n 1 || true)
+            [ -n "$WGT_SERVER" ] || die "wgt-ctl init added no server: set WGT_SERVER by hand"
+            ;;
+        ''|*[!0-9]*) die "no server chosen" ;;
+        *)  WGT_SERVER=$(printf '%s\n' "$before" | sed -n "${answer}p")
+            [ -n "$WGT_SERVER" ] || die "no server $answer" ;;
+    esac
+    if [ -n "$DRY" ]; then log "[dry-run] would save WGT_SERVER=\"$WGT_SERVER\""; else save WGT_SERVER "$WGT_SERVER"; fi
+}
+
 # TPI_ROUTING=wgt: the VPS is WGT_SERVER, a server in wgt-ctl's list (local/servers
 # of this checkout), and everything on it goes through wgt-ctl. VPS_SSH (and
 # VPS_HOST, unless set) come from that list, read by wgt-ctl's own code.
@@ -107,8 +153,8 @@ placeholder() { case "$1" in ''|*example.com*|*'<'*) return 0 ;; esac; return 1;
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
 if [ "$TPI_ROUTING" = wgt ]; then
-    [ -n "$WGT_SERVER" ] || die "TPI_ROUTING=wgt goes through wgt-ctl: set WGT_SERVER to the VPS's name in bin/wgt-ctl list (not there yet? bin/wgt-ctl init --address <host> adopts it)"
     [ -x "$WGT_CTL" ] || die "TPI_ROUTING=wgt needs wgt-ctl at $WGT_CTL (tunnel-pi inside a wireguard-tools checkout)"
+    [ -n "$WGT_SERVER" ] || choose_wgt_server
     VPS_SSH=$(PYTHONPATH="$REPO" python3 -c 'import sys; from wgt.ctl import remote; print(remote.find(sys.argv[1]).target)' \
         "$WGT_SERVER" 2>/dev/null) || die "WGT_SERVER '$WGT_SERVER' isn't in wgt-ctl's list (see: bin/wgt-ctl list)"
     ! placeholder "$VPS_HOST" || VPS_HOST="${VPS_SSH#*@}"
@@ -283,15 +329,6 @@ install_exit_script() {
     to pi "$AS_ROOT install -m 755 /dev/stdin /usr/local/sbin/tunnel-pi-exit" < "$HERE/tunnel-pi-exit"
 }
 
-# save <NAME> <value>: set NAME="value" in this Pi's settings file (replacing its
-# line, or adding one), and say so.
-save() {
-    tmp=$(mktemp)
-    awk -v k="$1" -v line="$1=\"$2\"" 'index($0, k "=") == 1 && !done {print line; done = 1; next} {print}
-        END {if (!done) print line}' "$CONF" > "$tmp"
-    cat "$tmp" > "$CONF"; rm -f "$tmp"
-    log "saved $1=\"$2\" in $CONF"
-}
 
 cmd_link() {
     cmd_config >/dev/null

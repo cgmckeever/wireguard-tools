@@ -44,9 +44,10 @@ matches your VPS:
 | any WireGuard server | `TPI_ROUTING="tpi"`, with `VPS_SSH` and `VPS_HOST` | tunnel-pi's own rules on the VPS. You choose clients by their address (`CLIENT_IPS`) and make their configs yourself |
 | runs **wgt** (the wireguard-tools in this repository) | `TPI_ROUTING="wgt"`, with `WGT_SERVER` (its name in `bin/wgt-ctl list`) | the Pi becomes an ordinary wgt jump, and everything on the VPS goes through `wgt-ctl`. `tpi-ctl.sh client` makes each device its own config, with its fleet-wide number, delivered to `~/wg-tunnels` |
 
-A wgt VPS that isn't in `wgt-ctl`'s list yet is added once with
-`bin/wgt-ctl init --address <host>`, which adopts a server already running
-wgt.
+Leave `WGT_SERVER` empty and `tpi-ctl.sh` asks: it lists the servers in
+`wgt-ctl`'s list, plus **add a new one**, which runs `bin/wgt-ctl init` to set
+up wgt on a server (or adopt one already running it). With no servers listed,
+adding one is the default. Your choice is saved in the Pi's settings file.
 
 **2. The emergency door (`SSH_CLOUDFLARE`): recommended.** Normally you reach
 the Pi through the VPS, over the link. That fails exactly when the link is down
@@ -148,7 +149,7 @@ Fill it in (each line has a comment), then check it:
 | `CLIENT_IP6S` | `tpi`, if any | those clients' IPv6 addresses: they get blocked, since the link is IPv4 only |
 | `WG_IF` | `tpi` | the VPS's WireGuard interface for your clients (`wg show interfaces`; usually `wg0`) |
 | `WG_SUBNET` | `tpi` | leave empty |
-| `WGT_SERVER` | `wgt` | the VPS's name in `bin/wgt-ctl list`. Its ssh target and address come from there |
+| `WGT_SERVER` | `wgt` | the VPS's name in `bin/wgt-ctl list`; its ssh target and address come from there. Empty: `tpi-ctl.sh` asks (or adds a new server) and saves it |
 | `JUMP_CODE`, `JUMP_LABEL` | `wgt` | a 2–6 character code (`a-z`, `0-9`, `-`) not already in `wgt jump list`, and a label |
 | `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | a second jump in LAN mode ([2.3](#23-optional-lan-mode)) |
 
