@@ -17,11 +17,11 @@
 #   tpk-ctl.sh [<puck>] wifi add <name>     save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
 #   tpk-ctl.sh [<puck>] wifi sync           the puck's Wi-Fi becomes configs/<puck>.wifi.conf, in its order
-#   tpk-ctl.sh [<puck>] check               PASS/FAIL on the puck and the VPS
+#   tpk-ctl.sh [<puck>] test                PASS/FAIL on the puck and the VPS
 #   tpk-ctl.sh [<puck>] ssh [<command>]     a shell (or a command) on the puck, the first way that answers
 #   tpk-ctl.sh [<puck>] reboot              restart the puck, and wait until it answers again
 #   tpk-ctl.sh [<puck>] shutdown            power the puck off, safe to unplug (asks first)
-#   tpk-ctl.sh [<puck>] all                 link, exit, wifi sync (with a <puck>.wifi.conf), check (after base)
+#   tpk-ctl.sh [<puck>] all                 link, exit, wifi sync (with a <puck>.wifi.conf), test (after base)
 #   tpk-ctl.sh [<puck>] undo [all]          remove it from the VPS and the puck (all: cloudflared too)
 #
 # The puck is reached the first way that answers: SSH_LAN (at home), then through
@@ -35,7 +35,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 CONFIGS=$(cd "$HERE/../configs" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
-COMMANDS="new config ssh-config base link exit client lan-mode wifi check ssh reboot shutdown all undo"
+COMMANDS="new config ssh-config base link exit client lan-mode wifi test ssh reboot shutdown all undo"
 # The remote prefix that runs a command as root (sudo unless already root).
 AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
 
@@ -525,7 +525,7 @@ cmd_link() {
     forget_link_key    # a rebuilt link may lead to a reflashed puck: learn its key afresh
     log "waiting for the first handshake"
     [ -n "$DRY" ] || sleep 8
-    run puck puck.sh check || log "the link isn't fully up yet: run tpk-ctl.sh check in a minute"
+    run puck puck.sh test || log "the link isn't fully up yet: run tpk-ctl.sh test in a minute"
 }
 
 # jump_owner <code> <port>: is the VPS's jump <code> this puck's? Prints "none"
@@ -671,15 +671,15 @@ auto_wifi() {
     else log "no configs/$PUCK_NAME.wifi.conf: the puck's Wi-Fi is left as it is"; fi
 }
 
-cmd_check() {
+cmd_test() {
     rc=0
     log "puck ($PUCK)"
-    run puck puck.sh check || rc=1
+    run puck puck.sh test || rc=1
     log "VPS ($VPS_SSH)"
-    run vps vps.sh check || rc=1
-    if [ -n "$DRY" ]; then log "(dry run: nothing was checked)"
-    elif [ "$rc" = 0 ]; then log "all checks passed"
-    else log "some checks failed: see the README's Troubleshooting"; fi
+    run vps vps.sh test || rc=1
+    if [ -n "$DRY" ]; then log "(dry run: nothing was tested)"
+    elif [ "$rc" = 0 ]; then log "all tests passed"
+    else log "some tests failed: see the README's Troubleshooting"; fi
     return "$rc"
 }
 
@@ -711,7 +711,7 @@ cmd_power() {
         if probe_puck; then log "$PUCK_NAME is back"; return 0; fi
         sleep 5; i=$((i + 1))
     done
-    die "$PUCK_NAME didn't answer within 3 minutes: try scripts/tpk-ctl.sh $PUCK_NAME check in a while"
+    die "$PUCK_NAME didn't answer within 3 minutes: try scripts/tpk-ctl.sh $PUCK_NAME test in a while"
 }
 
 cmd_undo() {
@@ -770,10 +770,10 @@ main() {
         exit) pick_puck; cmd_exit ;;
         lan-mode) pick_puck; cmd_lan_mode "$@" ;;
         wifi) pick_puck; cmd_wifi "$@" ;;
-        check) pick_puck; cmd_check ;;
+        test) pick_puck; cmd_test ;;
         ssh) pick_puck; cmd_ssh "$@" ;;
         reboot|shutdown) pick_puck; cmd_power "$cmd" ;;
-        all) pick_puck; cmd_link; cmd_exit; auto_wifi; cmd_check ;;
+        all) pick_puck; cmd_link; cmd_exit; auto_wifi; cmd_test ;;
         undo) pick_puck; cmd_undo "$@" ;;
         *) usage; exit 2 ;;
     esac

@@ -14,7 +14,7 @@
 #   link    the link to the puck (PUCK_PUBKEY needed). Prints PUBKEY=<the VPS's
 #           public key>. With TPK_ROUTING=tpk it also writes the routing for CLIENT_IPS
 #           and the kill switch
-#   check   PASS/FAIL for the link and, by TPK_ROUTING, the routing or the wgt jump(s)
+#   test    PASS/FAIL for the link and, by TPK_ROUTING, the routing or the wgt jump(s)
 #   undo    remove the link (and TPK_ROUTING=tpk's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
@@ -35,7 +35,7 @@ main() {
     case "$TPK_ROUTING" in tpk|wgt) ;; *) die "TPK_ROUTING must be tpk or wgt" ;; esac
     case "${1:-}" in
         link) do_link ;;
-        check) do_check ;;
+        test) do_test ;;
         undo) do_undo ;;
         *) die "unknown step '${1:-}' (see the top of vps.sh)" ;;
     esac
@@ -304,7 +304,7 @@ pass() { printf 'PASS  %s\n' "$*"; }
 fail() { printf 'FAIL  %s\n' "$*"; FAILED=1; }
 check() { if eval "$2" >/dev/null 2>&1; then pass "$1"; else fail "$1"; fi; }
 
-do_check() {
+do_test() {
     if [ ! -f "$WG/$LINK_IF.conf" ]; then fail "$LINK_IF isn't set up (tpk-ctl.sh link)"; return 1; fi
     if [ -z "$LINK_NET" ]; then fail "TPK_LINK is empty in this puck's settings (tpk-ctl.sh link fills it in)"; return 1; fi
     check "$LINK_IF is up" "ip link show $LINK_IF"

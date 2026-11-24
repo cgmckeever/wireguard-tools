@@ -20,7 +20,7 @@
 #   wifi-remove          remove the saved Wi-Fi network WIFI_SSID (all: every one)
 #   wifi-sync            make tunnel-puck's saved Wi-Fi match WIFI_LIST ("ssid::password"
 #                        lines, most preferred first): the first gets the highest priority
-#   check                PASS/FAIL for everything set up so far
+#   test                 PASS/FAIL for everything set up so far
 #   undo [all]           remove the WireGuard parts (all: cloudflared too)
 #
 # Logs go to stderr; only results meant for tpk-ctl.sh (PUBKEY=, JUMPFILE=) go to stdout.
@@ -46,7 +46,7 @@ main() {
         wifi-add) do_wifi_add ;;
         wifi-sync) do_wifi_sync ;;
         wifi-remove) do_wifi_remove ;;
-        check) do_check ;;
+        test) do_test ;;
         undo) do_undo "${1:-}" ;;
         *) die "unknown step '$step' (see the top of puck.sh)" ;;
     esac
@@ -397,7 +397,7 @@ handshake_age() {   # seconds since <interface>'s newest handshake (99999: none)
     if [ "${t:-0}" -gt 0 ]; then echo $(( $(date +%s) - t )); else echo 99999; fi
 }
 
-do_check() {
+do_test() {
     if systemctl cat tunnel-puck-cloudflared.service >/dev/null 2>&1; then
         check "cloudflared (the emergency door) is running" "systemctl is-active -q tunnel-puck-cloudflared.service"
     elif [ -n "$SSH_CLOUDFLARE" ]; then
