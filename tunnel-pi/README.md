@@ -259,8 +259,9 @@ scripts/tpi-ctl.sh mom client iphone          # mom.iphone on dengar
 scripts/tpi-ctl.sh mom client laptop lan      # with JUMP_LAN_CODE (say momlan): momlan.laptop, LAN mode (2.3)
 ```
 
-`mom.iphone` lands in `~/wg-tunnels/devices/iphone/config/dengar.mom.iphone.conf`,
-and the device keeps its fleet-wide number. To show it as a QR code:
+The config lands locally in
+`~/wg-tunnels/devices/iphone/config/dengar.mom.iphone.conf`, and the device
+keeps its fleet-wide number. To show it as a QR code:
 `bin/wgt-ctl dengar client show mom.iphone --qr`.
 
 These configs are made with `--warp off`: a `warp.` config would put
