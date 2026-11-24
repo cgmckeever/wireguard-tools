@@ -10,9 +10,11 @@
 # TPI_LINK still empty, only the names are set; need_link stops a step that
 # needs the rest.
 link_ids() {
+    # Spelled out, not [a-z]: in some locales that range matches capitals too.
+    lower=abcdefghijklmnopqrstuvwxyz
     case "${PI_NAME:-}" in
-        [a-z]*) case "$PI_NAME" in *[!a-z0-9-]*) ids_die "a Pi's name is a-z, 0-9 and - (got: $PI_NAME)" ;; esac ;;
-        *) ids_die "a Pi's name starts with a letter (got: ${PI_NAME:-nothing})" ;;
+        ["$lower"]*) case "$PI_NAME" in *[!"$lower"0123456789-]*) ids_die "a Pi's name is a-z, 0-9 and - (got: $PI_NAME)" ;; esac ;;
+        *) ids_die "a Pi's name starts with a lowercase letter (got: ${PI_NAME:-nothing})" ;;
     esac
     [ "${#PI_NAME}" -le 10 ] || ids_die "a Pi's name is at most 10 characters (got: $PI_NAME): wgpi-<name> must fit an interface name"
     LINK_IF="wgpi-$PI_NAME"                     # the link's interface on the VPS (on the Pi: wgpi)
