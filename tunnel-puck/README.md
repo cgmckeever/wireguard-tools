@@ -69,31 +69,13 @@ Run it first on a gateway nobody else depends on.
 
 Phase 3 tests each of these.
 
-## Choose your routing
+## Two choices along the way
 
-Two choices: the routing for each gateway the puck serves (in that gateway's settings
-file), and the emergency door for the puck (in its own).
-
-**1. Routing: how your gateway sends clients into the puck.** Pick the row that
-matches your gateway:
-
-| Your gateway | Set | What you get |
-|---|---|---|
-| any WireGuard server | `TPK_ROUTING="tpk"`, with `GATEWAY_SSH` and `GATEWAY_HOST` | tunnel-puck's own rules on the gateway. You make the clients' configs yourself on the gateway and list their addresses in `CLIENT_IPS` ([2.2](#22-device-configs)) |
-| runs **wgt** (the wireguard-tools in this repository) | `TPK_ROUTING="wgt"`, with `WGT_SERVER` (its name in `bin/wgt-ctl list`) | the puck becomes a wgt **jump**: an extra way out on a wgt server, which a client config named `<code>.<device>` uses instead of the gateway's own. Everything on the gateway goes through `wgt-ctl`, and `tpk-ctl.sh client` makes each device its config, delivered to `~/wg-tunnels` |
-
-With `wgt`, [2.1](#21-serve-a-gateway-computer) fills these in for you.
-
-**2. The emergency door (`SSH_CLOUDFLARE`): recommended.** Normally you reach
-the puck through a gateway, over its link (with several gateways, any of them). That
-fails exactly when the links are down (a blocked port, a changed gateway IP, a bad
-change). A Cloudflare Tunnel gives SSH
-to the puck that doesn't need the link. It costs a domain on Cloudflare (about
-$10–15 a year; the rest is free) and one extra step,
-[1.2b](#12b-optional-the-emergency-door-cloudflare-browser).
-Without it, a dead link means the friend power-cycles the puck, or you take it
-home. If you skip it, set `PUCK_PORT="443"` in each gateway's settings file when
-you reach 2.1: networks rarely block it.
+- **Routing, for each gateway:** how the gateway sends clients into the puck,
+  tunnel-puck's own rules (`tpk`) or a wgt jump (`wgt`). Chosen when you add
+  the gateway ([2.1](#21-serve-a-gateway-computer)).
+- **An emergency door (optional, recommended):** SSH to the puck through
+  Cloudflare when its links are down ([1.2b](#12b-optional-the-emergency-door-cloudflare-browser)).
 
 ## What you need
 
@@ -239,6 +221,15 @@ Fill it in (each line has a comment):
 
 ### 1.2b [Optional] The emergency door: Cloudflare **[Browser]**
 
+**Recommended.** Normally you reach the puck through a gateway, over its link
+(with several gateways, any of them). That fails exactly when the links are down
+(a blocked port, a changed gateway IP, a bad change). A Cloudflare Tunnel gives
+SSH to the puck that doesn't need the link. It costs a domain on Cloudflare
+(about $10–15 a year; the rest is free), and this step. Without it, a dead link
+means the friend power-cycles the puck, or you take it home. If you skip it, set
+`PUCK_PORT="443"` in each gateway's settings file when you reach 2.1: networks
+rarely block it.
+
 In Cloudflare Zero Trust (`one.dash.cloudflare.com`). Cloudflare renames these
 menus now and then; follow the nearest match.
 
@@ -284,6 +275,16 @@ then a shell.
 The puck stays at home for this phase.
 
 ## 2.1 Serve a gateway **[Computer]**
+
+**Choose the routing:** how this gateway sends clients into the puck. Pick the
+row that matches it:
+
+| Your gateway | Set | What you get |
+|---|---|---|
+| any WireGuard server | `TPK_ROUTING="tpk"`, with `GATEWAY_SSH` and `GATEWAY_HOST` | tunnel-puck's own rules on the gateway. You make the clients' configs yourself on the gateway and list their addresses in `CLIENT_IPS` ([2.2](#22-device-configs)) |
+| runs **wgt** (the wireguard-tools in this repository) | `TPK_ROUTING="wgt"`, with `WGT_SERVER` (its name in `bin/wgt-ctl list`) | the puck becomes a wgt **jump**: an extra way out on a wgt server, which a client config named `<code>.<device>` uses instead of the gateway's own. Everything on the gateway goes through `wgt-ctl`, and `tpk-ctl.sh client` makes each device its config, delivered to `~/wg-tunnels` |
+
+With `wgt`, `gateway add` below fills these in for you.
 
 ```sh
 scripts/tpk-ctl.sh gateway add dengar      # asks before it changes the gateway
