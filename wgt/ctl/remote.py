@@ -62,7 +62,7 @@ SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.joi
 # wgt-ctl's own per-server commands.
 CTL_COMMANDS = ("pull", "backup", "jump-add", "ssh", "branch", "forget", "remove", "move", "sync")
 # The wgt commands (anything else after a server word is a mistake, not a command).
-WGT_COMMANDS = ("setup", "summary", "status", "test", "log", "backup", "restore", "rollback", "client",
+WGT_COMMANDS = ("setup", "summary", "status", "test", "log", "history", "backup", "restore", "rollback", "client",
                 "device", "jump", "exit", "tunnel", "warp")
 
 

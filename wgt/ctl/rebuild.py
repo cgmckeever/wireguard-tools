@@ -73,11 +73,13 @@ def teardown(target: str, checkout: str) -> int:
     and the backup archives. set -e: if rollback fails, nothing is deleted."""
     _refuse_shallow(checkout)
     d = shlex.quote(checkout)
+    hist = remote.REMOTE.history_file
     return remote.ssh(target, f"""set -e
         if [ -x {d}/bin/wgt ]; then {d}/bin/wgt rollback --purge --yes; fi
         rm -rf {d} {remote.REMOTE.backup_dir}
-        rm -f {remote.REMOTE.wgcf_bin} {remote.REMOTE.wgt_link}
-        echo "    removed {checkout}, {remote.REMOTE.wgt_link}, {remote.REMOTE.wgcf_bin} and {remote.REMOTE.backup_dir}"
+        rm -f {remote.REMOTE.wgcf_bin} {remote.REMOTE.wgt_link} {hist} {hist}.*
+        echo "    removed {checkout}, {remote.REMOTE.wgt_link}, {remote.REMOTE.wgcf_bin},"
+        echo "    {remote.REMOTE.backup_dir} and the history ({hist})"
         echo "    (packages left installed)"
         """, tty=True)[0]
 

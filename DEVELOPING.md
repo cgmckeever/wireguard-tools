@@ -21,8 +21,8 @@ wgt/                      the package (Python 3.8+, standard library only)
   net.py, host.py         address maths; host facts and preflight
   rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP, jumps, static addresses)
   render.py               wg0.conf, warp.conf, px/wx, client configs, templates
-  system.py               Runner (commands, dry-run, journal), FakeRunner, Files (writes with backups),
-                          marker files
+  system.py               Runner (commands, dry-run, journal and the history file), FakeRunner,
+                          Files (writes with backups), marker files
   live.py                 read-only queries: handshakes, rules, tables, units, Cloudflare's trace
   ops.py                  shared operations: lock, confirm, setup checks, state, endpoint, wg0.conf,
                           peers, the client/exit databases, subcommand dispatch

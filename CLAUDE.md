@@ -66,6 +66,11 @@ server, bossk too.
   `move` fetch the newest by that name (`rebuild.fetch_backup`).
 - `wg0.conf`, hooks and rules, pinned byte for byte by `tests/golden/` (a
   change restarts wg0 at each server's next setup).
+- The history, `/var/log/wireguard-tools.log` (and logrotate's `.N`, `.N.gz`):
+  one line per change, `<UTC time> <tag>: <what>  [<command>; <from>]`, oldest
+  first. `wgt history` reads it back, `restore` joins an archive's ahead of the
+  server's own, and people read it: add to a line, don't reshape it. A server
+  set up before `HISTORY_MONTHS` has no such key saved: 12 applies.
 - `wgt-ctl` assumes every server runs a recent `wgt`: pull everywhere first.
 
 ## Rules

@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 HOSTNAME_CFG = "99-wg-tools-hostname.cfg"
 PACKAGES = ("wireguard", "wireguard-tools", "iptables", "curl", "ca-certificates", "iputils-ping",
-            "qrencode", "magic-wormhole")
+            "qrencode", "magic-wormhole", "logrotate")
 
 
 # --- small pieces ---
@@ -425,6 +425,16 @@ def sysctl_wanted(ctx: Ctx) -> Tuple[List[str], Optional[str]]:
     return render.sysctl_lines(ctx.cfg, ctx.pub_if, ctx.facts.has_ipv6, accept_ra), accept_ra
 
 
+def write_history_rotation(ctx: Ctx) -> None:
+    """logrotate's rule for the history file, keeping HISTORY_MONTHS of it."""
+    path = ctx.paths.logrotate_file
+    text = render.render_logrotate(ctx.paths.history_file, ctx.cfg.HISTORY_MONTHS)
+    if store.read_text(path) != text:
+        ctx.runner.step(f"Keep the history ({ctx.paths.history_file}) {ctx.cfg.HISTORY_MONTHS} months: {path}",
+                        "wgt rollback")
+    ctx.files.write(path, 0o644, text)
+
+
 def write_sysctl(ctx: Ctx) -> None:
     """Persist and apply the forwarding sysctls."""
     lines, accept_ra = sysctl_wanted(ctx)
@@ -604,6 +614,7 @@ def _apply_setup(ctx: Ctx, old_name: str) -> None:
     ops.resolve_endpoint(ctx)   # saved by save_config, with the rest
     save_location(ctx)
     write_sysctl(ctx)
+    write_history_rotation(ctx)
     write_dropin(ctx)
     write_networkd_conf(ctx)
     # Late: until here a failure (WARP, a checksum) leaves the running wg0 and the
@@ -735,6 +746,7 @@ def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
     """The sysctl file and the forwarding values recorded before setup."""
     r = ctx.runner
     ctx.files.restore_original(ctx.paths.sysctl_file, remove_new=True)
+    ctx.files.restore_original(ctx.paths.logrotate_file, remove_new=True)
     ctx.files.restore_original(ctx.paths.networkd_file, remove_new=True)
     ctx.files.remove_empty_dir(os.path.dirname(ctx.paths.networkd_file))
     fwd, fwd6, ra = (store.state_get(state, k) for k in ("ORIG_IP_FORWARD", "ORIG_IP6_FORWARD", "ORIG_ACCEPT_RA"))

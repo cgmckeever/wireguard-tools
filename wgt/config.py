@@ -123,6 +123,8 @@ class Config:
             raise WgtError("WG_IF and WARP_IF must differ")
         if not _in_range(v["WG_PORT"], 1, 65535):
             raise WgtError(f"bad port: {v['WG_PORT']}")
+        if not _in_range(v["HISTORY_MONTHS"], 1, 120):
+            raise WgtError(f"bad history months (1-120): {v['HISTORY_MONTHS']}")
         if not _in_range(v["WG_MTU"], 1280, 9000):
             raise WgtError(f"bad MTU (1280-9000): {v['WG_MTU']}")
         if not _in_range(v["WARP_MTU"], 1280, 9000):

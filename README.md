@@ -136,6 +136,7 @@ and other commands refuse them, except `--allowed-ips` on `wgt client`.
 | `--subnet <cidr>` | `WG_SUBNET` | random `10.<200-255>.<200-255>.0/24` | devices' IPv4 network, /16 to /30 (server is `.1`) |
 | `--subnet6 <cidr>` | `WG_SUBNET6` | random `fd…::/64` | devices' IPv6 network; `off` disables IPv6 for devices |
 | `--mtu <bytes>` | `WG_MTU` | `1280` | tunnel MTU for server and devices (1280 minimum, at most `--warp-mtu`) |
+| `--history-months <n>` | `HISTORY_MONTHS` | `12` | how many months of [history](#history-what-changed-when-and-who-did-it) to keep, 1 to 120 |
 | *Rarely needed:* | | | |
 | `--warp-mtu <bytes>` | `WARP_MTU` | `1280` | MTU of the WARP tunnel |
 | `--wg-if` / `--warp-if` | `WG_IF` / `WARP_IF` | `wg0` / `warp` | interface names |
@@ -503,6 +504,7 @@ wgt tunnel test       # every way out (each exit, with and without WARP), traced
 wgt summary           # at a glance: one line per fact, says what is wrong
 wgt status            # settings (and any not running yet), interfaces, configs, routes, rules
 wgt log [N]           # its changes, the watchdogs and the tunnels: last lines, then follows (Ctrl-C stops; --no-follow just prints)
+wgt history [N]       # every change made here, when and by whom (--all: the whole year)
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
 wgt rollback          # stop everything, remove all rules, restore original files and the hostname
@@ -519,6 +521,45 @@ Backups go in `/var/backups/wireguard-tools/` (mode 700, outside the checkout,
 so re-cloning the tools keeps them); `backup <dir>` writes elsewhere. Each
 `backup` also prunes old archives and file copies. A backup holds private keys
 (it's created mode 600); keep it somewhere safe.
+
+### History: what changed, when, and who did it
+
+Every change wgt makes, by hand, through `wgt-ctl` or by a watchdog, is one
+line in `/var/log/wireguard-tools.log`: the time (UTC), what changed, and in
+brackets the command and where it came from (the ssh client's address, as
+`wgt-ctl`'s commands arrive; the sudo user).
+
+```
+2026-11-23T13:20:37Z wg-tools: wgt: Add config 'tablet' at 10.77.1.4 (host:Buffalo, no WARP)  [wgt client add tablet --no-qr --yes; ssh from 203.0.113.5]
+2026-11-24T02:11:09Z wg-tools-exit-watchdog: jump par-fr: a client is active; brought up  [wgt watchdog exits]
+```
+
+```bash
+wgt history                 # the last 40 lines
+wgt history 200             # the last 200
+wgt history --all           # everything kept
+wgt-ctl dengar history      # from your machine (or wgt-ctl all history)
+```
+
+**Kept for a year by default.** logrotate starts a new file each month and keeps
+`HISTORY_MONTHS` old ones (compressed; `setup --history-months <n>`, 1 to 120,
+saved like the other settings), so `--all` reaches back that many months plus
+the current one. The journal (`wgt log`) has the same lines and more, but
+journald keeps only as much as fits its share of the disk, and on a public
+server ssh login attempts fill that within weeks or months; the history file
+isn't shared with anything.
+
+- **Rotation** is set by `wgt setup` (`/etc/logrotate.d/wireguard-tools`). Until
+  a server's next setup it isn't rotated, and `wgt history` says so.
+- **Backups carry it,** rotated months included, and `restore` (so `wgt-ctl
+  move`) puts the old server's lines first, then the new one's: one history
+  across the move.
+- **Mode 600,** root only: it names addresses. Nothing secret goes in it (no
+  keys; commands never carry them).
+- **`rollback` keeps it** (even `--purge`: it's a record, not configuration);
+  `wgt-ctl <server> remove` deletes it with the rest.
+- A dry run writes nothing to it, and a full disk or missing `/var/log` never
+  stops a change: the line is just lost.
 
 `rollback --purge` also removes the `wgt` link (afterwards use
 `/opt/wireguard-tools/bin/wgt`), and leaves the packages, `/usr/local/bin/wgcf`, the
@@ -1066,6 +1107,8 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | jump watchdog (runs `wgt watchdog exits` every 10s: jumps up on demand) |
 | `/etc/systemd/system/wg-tools-device-watchdog.{service,timer}` | device watchdog (runs `wgt watchdog devices` every 10s: static addresses follow the config in use; restarts wg0 if its routing rules have gone, at most every 5 minutes) |
 | `/usr/local/sbin/wgt` | link to the checkout's `bin/wgt` |
+| `/var/log/wireguard-tools.log`, `.1`, `.2.gz` ... | the [history](#history-what-changed-when-and-who-did-it): one line per change (time, what, who), mode 600 |
+| `/etc/logrotate.d/wireguard-tools` | rotates the history monthly, keeping `HISTORY_MONTHS` |
 
 Secrets are mode 600 in 700 directories. Before a file is changed (not
 `wg-tools.state`), a timestamped copy goes to `/var/backups/wireguard-tools/files/<its path>` (e.g.

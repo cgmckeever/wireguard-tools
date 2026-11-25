@@ -336,5 +336,13 @@ def render_sysctl(lines: List[str]) -> str:
     return "\n".join([MARKER] + lines) + "\n"
 
 
+def render_logrotate(history_file: str, months: str) -> str:
+    """logrotate's rule for the history: a new file each month, <months> old
+    ones kept (compressed, all but the last), mode 600 (it names addresses)."""
+    return (f"{MARKER}: the history of changes (wgt history), kept {months} months\n"
+            f"{history_file} {{\n    monthly\n    rotate {months}\n    compress\n    delaycompress\n"
+            "    missingok\n    notifempty\n    create 0600 root root\n}\n")
+
+
 def render_dropin(cfg: Config) -> str:
     return render_template("wg-quick-after-warp.conf.tmpl", WG_IF=cfg.WG_IF, WARP_IF=cfg.WARP_IF)

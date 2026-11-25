@@ -10,7 +10,7 @@ from dataclasses import dataclass
 # Settings saved in the state file by setup, in this order (ENDPOINT last: SETTING_KEYS).
 CONFIG_KEYS = (
     "SERVER_NAME", "WG_SUBNET", "WG_SUBNET6", "WG_PORT", "WG_MTU", "WARP_MTU",
-    "WG_DNS", "WG_IF", "WARP_IF", "RT_TABLE", "CLIENT_ALLOWED_IPS",
+    "WG_DNS", "WG_IF", "WARP_IF", "RT_TABLE", "CLIENT_ALLOWED_IPS", "HISTORY_MONTHS",
 )
 
 # All of them (setup saves them together): ENDPOINT has no default (setup detects it,
@@ -30,6 +30,7 @@ DEFAULTS = {
     "WG_PORT": "51820", "WARP_MTU": "1280", "WG_MTU": "1280",
     "WG_DNS": "1.1.1.1", "WG_IF": "wg0", "WARP_IF": "warp", "RT_TABLE": "100",
     "CLIENT_ALLOWED_IPS": "0.0.0.0/0, ::/0",
+    "HISTORY_MONTHS": "12",
 }
 
 WARP_RULE_PRIO = 10000
@@ -165,6 +166,10 @@ class Paths:
     run_dir: str = "/run"
     hosts_file: str = "/etc/hosts"
     cloud_cfg_dir: str = "/etc/cloud/cloud.cfg.d"
+    # The history: every change wgt and its watchdogs make, one line each, kept by
+    # logrotate for HISTORY_MONTHS (the journal's own copy goes when the journal fills).
+    history_file: str = "/var/log/wireguard-tools.log"
+    logrotate_file: str = "/etc/logrotate.d/wireguard-tools"
 
     def wg(self, *parts: str) -> str:
         return os.path.join(self.wg_dir, *parts)

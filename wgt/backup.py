@@ -16,7 +16,7 @@ from . import clients, host, ops, store, units
 from .const import HOST_STATE_KEYS, KEEP_ARCHIVES, LEGACY_SETUP_DONE, SET_UP_KEYS, SETUP_DONE, Paths, archive_name
 from .ctx import SETTING_FLAGS
 from .errors import WgtError
-from .system import write_private
+from .system import history_files, write_private
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -25,6 +25,46 @@ if TYPE_CHECKING:
 def _member_path(m: tarfile.TarInfo) -> str:
     """Where an archive member goes: archives hold absolute paths (tar -P), with or without the leading /."""
     return m.name if m.name.startswith("/") else "/" + m.name
+
+
+def restore_history(ctx: Ctx, archive: str, members: List[str]) -> None:
+    """The archive's history (an old server's, in a move): its rotated months are
+    written where this server has none, and its current file goes before this
+    server's own lines (this restore's among them), so one file runs in order."""
+    p = ctx.paths.history_file
+    d, name = os.path.split(p)
+    rotated = re.compile(re.escape(name) + r"\.\d+(\.gz)?")
+    old = [m for m in members if os.path.dirname(m) == d and rotated.fullmatch(os.path.basename(m))]
+    with tarfile.open(archive, "r:gz") as t:
+        for m in t.getmembers():
+            path = _member_path(m)
+            if not m.isfile() or (path != p and path not in old):
+                continue
+            data = t.extractfile(m)
+            body = data.read() if data else b""
+            if path == p:
+                try:
+                    with open(p, "rb") as f:
+                        here = f.read()
+                except OSError:
+                    here = b""
+                body = body + here
+            elif os.path.exists(path):
+                continue
+            write_private_bytes(path, body)
+    if p in members:
+        ctx.out.info(f"history: the archive's kept, ahead of this server's ({p})")
+
+
+def write_private_bytes(path: str, data: bytes) -> None:
+    """<path> written whole, mode 600."""
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
 
 
 def check_archive(archive: str, paths: Paths) -> List[str]:
@@ -112,6 +152,8 @@ def cmd_backup(ctx: Ctx, words: List[str]) -> None:
     # Absolute: the scp hint below is read from another machine, where a relative one means ~.
     dest_dir = os.path.abspath(words[0]) if words else ctx.paths.backup_dir
     sources = [p for p in (ctx.paths.wg_dir, ctx.paths.sysctl_file, ctx.cfg.dropin_dir) if os.path.exists(p)]
+    # The history goes too (its rotated months as well), so a move keeps it.
+    history = history_files(ctx.paths.history_file)
     # No restore takes an archive without the state (check_archive). Made after a purge, or a
     # restore stopped before writing it (a move stopped part-way, run again), it would be the
     # newest and stand in for the real one: wgt-ctl backup and move fetch the newest.
@@ -125,7 +167,7 @@ def cmd_backup(ctx: Ctx, words: List[str]) -> None:
         os.makedirs(dest_dir, mode=0o700, exist_ok=True)
         old_umask = os.umask(0o077)
         try:
-            ctx.runner.run(["tar", "-czf", archive, "-P", *sources])
+            ctx.runner.run(["tar", "-czf", archive, "-P", *sources, *history])
         finally:
             os.umask(old_umask)
         os.chmod(archive, 0o600)
@@ -190,6 +232,7 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     write_private(p.state, state)
     ctx.reload()
     rebuild_backup_map(ctx, keep_map, members)
+    restore_history(ctx, archive, members)
     ctx.out.info("restored; configs: " + " ".join(c.name for c in store.load(ctx.paths).clients))
     if has_warp:
         ctx.out.warn("the WARP account is now on this server too; don't keep running it on the old one")

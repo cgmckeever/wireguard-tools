@@ -8,8 +8,8 @@ import os
 import sys
 from typing import Callable, List, Optional
 
-from . import host, ops, render, rules, store
-from .const import ALL_WATCHDOGS, DEVICE_ADDRESS_FORM, EXIT_WATCHDOG, LOG_TAG, WATCHDOGS, error_tag
+from . import host, ops, render, rules, store, system
+from .const import ALL_WATCHDOGS, DEVICE_ADDRESS_FORM, EXIT_WATCHDOG, LOG_TAG, WATCHDOGS, Paths, error_tag
 from .ctx import Args, Ctx, load, parse, settings_env
 from .errors import WgtError
 from .system import Out, Runner
@@ -25,6 +25,8 @@ Cloudflare WARP. The device picks one at a time.
   summary | status | test    at a glance / everything running / all checks
   log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops;
                              --no-follow, or piped: print and stop)
+  history [N] [--all]        every change made here, with who made it: the last N lines (default
+                             40; --all: everything kept, HISTORY_MONTHS of it)
   backup [dir] | restore <archive> [--old-names] | rollback [--purge]
 
   client list [--tsv] | add <device> [--exit host|<jump>[,..]] [--warp on|off|on,off] [--allowed-ips ..] [--group ..]
@@ -113,6 +115,23 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"cannot run journalctl: {e.strerror}") from None
 
 
+def cmd_history(ctx: Ctx, words: List[str]) -> None:
+    """wgt history [N] [--all]: the changes made on this server (by wgt, wgt-ctl and
+    the watchdogs), with when and who: the last N lines, or with --all every one kept."""
+    ops.no_more_words(words[1:], "wgt history [lines] [--all]")
+    count = words[0] if words else "40"
+    if not store.is_uint(count):
+        raise WgtError("usage: wgt history [lines] [--all]")
+    lines = system.read_history(ctx.paths.history_file)
+    if not lines:
+        ctx.out.info(f"no history yet ({ctx.paths.history_file}): it starts with the next change")
+        return
+    for line in lines if ctx.args.all else lines[-int(count):]:
+        print(line)
+    if not os.path.isfile(ctx.paths.logrotate_file):
+        ctx.out.warn(f"no {ctx.paths.logrotate_file}: the history isn't rotated yet (wgt setup writes it)")
+
+
 # command -> (module, function); a module is only imported when its command runs.
 # The watchdogs run every 10s and still reach most modules (exits, warp, units), so
 # anything slow to import is imported where it's used: see warp._fetch.
@@ -121,6 +140,7 @@ COMMANDS = {
     "restore": ("backup", "cmd_restore"), "rollback": ("server", "cmd_rollback"),
     "summary": ("checks", "cmd_summary"),
     "status": ("checks", "cmd_status"), "test": ("checks", "cmd_test"), "log": ("cli", "cmd_log"),
+    "history": ("cli", "cmd_history"),
     "client": ("clients", "cmd_client"), "device": ("clients", "cmd_device"),
     "jump": ("exits", "cmd_exit"), "exit": ("exits", "cmd_exit"),
     "tunnel": ("exits", "cmd_tunnel"), "warp": ("warp_rotate", "cmd_warp"),
@@ -179,7 +199,9 @@ def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
         return command("watchdog")(ctx, rest) or 0
     except Exception as e:   # a timer job must log, not crash (a bad database line too: `wgt log` shows it)
         from .system import journal
-        journal(Runner(), error_tag(tag), f"error: {type(e).__name__}: {e}")
+        r = Runner()
+        r.history_file = Paths().history_file
+        journal(r, error_tag(tag), f"error: {type(e).__name__}: {e}")
         out.error(f"{type(e).__name__}: {e}")
         return 1
 

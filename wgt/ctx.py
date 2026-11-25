@@ -20,6 +20,7 @@ SETTING_FLAGS = {
     "--name": "SERVER_NAME", "--subnet": "WG_SUBNET", "--subnet6": "WG_SUBNET6", "--port": "WG_PORT",
     "--mtu": "WG_MTU", "--warp-mtu": "WARP_MTU", "--dns": "WG_DNS", "--endpoint": "ENDPOINT",
     "--wg-if": "WG_IF", "--warp-if": "WARP_IF", "--table": "RT_TABLE", "--allowed-ips": "CLIENT_ALLOWED_IPS",
+    "--history-months": "HISTORY_MONTHS",
 }
 
 
@@ -166,6 +167,7 @@ def load(args: Args, paths: Optional[Paths] = None, runner: Optional[Runner] = N
     paths = paths or Paths()
     runner = runner or Runner(dry_run=args.dry_run)
     runner.dry_run = runner.dry_run or args.dry_run
+    runner.history_file = runner.history_file or paths.history_file
     facts = facts or host.gather(runner)
     snap = store.load(paths)
     saved = store.saved_settings(snap.state, SETTING_KEYS)

@@ -7,6 +7,7 @@ from __future__ import annotations
 import contextlib
 import difflib
 import fnmatch
+import gzip
 import os
 import re
 import shutil
@@ -14,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Callable, Dict, List, Optional, Sequence, TextIO, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, TextIO, Tuple
 
 from . import store
 from .const import KEEP_CHANGES, LOG_TAG, Paths
@@ -143,8 +144,61 @@ class Out:
 
 
 def journal(runner: Runner, tag: str, msg: str) -> None:
-    """One line in the journal under <tag> (what `wgt log` shows)."""
+    """One line in the journal under <tag> (what `wgt log` shows), and the same line
+    in the history file (what `wgt history` shows, kept for HISTORY_MONTHS)."""
     runner.attempt(["logger", "-t", tag, msg])
+    runner.record(tag, msg)
+
+
+def history_context(argv: Sequence[str], env: Mapping[str, str]) -> str:
+    """Who made a change: the command, and where it came from (the ssh client's
+    address, as wgt-ctl's runs arrive; the sudo user), for the history's lines."""
+    cmd = " ".join(["wgt", *argv[1:]]) if argv else "wgt"
+    where = []
+    if env.get("SSH_CLIENT"):
+        where.append("ssh from " + env["SSH_CLIENT"].split()[0])
+    if env.get("SUDO_USER"):
+        where.append("sudo " + env["SUDO_USER"])
+    return "; ".join([cmd, *where])
+
+
+def history_line(tag: str, msg: str, context: str, when: Optional[float] = None) -> str:
+    """One line of the history: UTC time, tag, what happened, [who]."""
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when))
+    return f"{stamp} {tag}: {' '.join(msg.split())}  [{context}]\n"
+
+
+def history_files(path: str) -> List[str]:
+    """The history's files, oldest first: logrotate's path.N[.gz] (N higher is older),
+    then the current one."""
+    d, name = os.path.split(path)
+    try:
+        names = os.listdir(d or ".")
+    except OSError:
+        return []
+    old = []
+    for n in names:
+        m = re.fullmatch(re.escape(name) + r"\.(\d+)(\.gz)?", n)
+        if m:
+            old.append((int(m.group(1)), os.path.join(d, n)))
+    files = [p for _, p in sorted(old, reverse=True)]
+    return files + ([path] if os.path.isfile(path) else [])
+
+
+def read_history(path: str) -> List[str]:
+    """Every line of the history, oldest first, rotated files included."""
+    lines: List[str] = []
+    for f in history_files(path):
+        try:
+            if f.endswith(".gz"):
+                with gzip.open(f, "rt", encoding="utf-8", errors="replace") as fh:
+                    lines += fh.read().splitlines()
+            else:
+                with open(f, encoding="utf-8", errors="replace") as fh:
+                    lines += fh.read().splitlines()
+        except OSError:
+            continue
+    return lines
 
 
 class Runner:
@@ -228,6 +282,25 @@ class Runner:
                                 + (f": {why[0]}" if why else ""))
         return p.returncode, p.stdout or ""
 
+    # --- the history ---
+
+    history_file: Optional[str] = None   # set by ctx.load; None: don't write one
+
+    def record(self, tag: str, msg: str) -> None:
+        """Append one line to the history file (mode 600: it names addresses). Never
+        raises: a full disk or a missing /var/log mustn't stop the change itself."""
+        if self.dry_run or not self.history_file:
+            return
+        line = history_line(tag, msg, history_context(sys.argv, os.environ))
+        try:
+            fd = os.open(self.history_file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.write(fd, line.encode("utf-8", errors="replace"))
+            finally:
+                os.close(fd)
+        except OSError:
+            pass
+
     # --- steps ---
 
     def step(self, what: str, undo: str = "") -> None:
@@ -249,6 +322,11 @@ class FakeRunner(Runner):
         super().__init__(dry_run=dry_run, out=out)
         self.answers = answers or {}
         self.calls: List[str] = []
+        self.history: List[str] = []   # what record() would have written
+
+    def record(self, tag: str, msg: str) -> None:
+        if not self.dry_run:
+            self.history.append(f"{tag}: {msg}")
 
     def _exec(self, args: Sequence[str], check: bool, input: Optional[str] = None,
               capture: bool = False) -> Tuple[int, str]:

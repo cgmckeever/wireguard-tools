@@ -9,6 +9,10 @@ so keep them compatible):
   devices.db         "device number [groups]" (its static address; who it can reach)
   wg-tools.backups   "path<TAB>original-copy|NEW"
 
+Elsewhere: the history, /var/log/wireguard-tools.log, one line per change
+(system.history_line), appended by system.Runner.record and read by
+system.read_history.
+
 Reading is pure; writes return the new text, and system.Files writes it."""
 
 from __future__ import annotations
