@@ -17,7 +17,8 @@ wgt/                      the package (Python 3.8+, standard library only)
                           delivery (tunnels.py; plan() is its pure part)
   const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError
   config.py               settings: flag > env > saved > default, validation
-  store.py                the server files: state, clients.db, exits.db (jumps), devices.db, disabled, backup record; config names
+  store.py                the server files: state, clients.db, exits.db (jumps), exits.routes, devices.db, disabled,
+                          backup record; config names
   net.py, host.py         address maths; host facts and preflight
   rules.py                routing, NAT and firewall lines (wg0 PostUp/PostDown, WARP, jumps, static addresses)
   render.py               wg0.conf, warp.conf, px/wx, client configs, templates

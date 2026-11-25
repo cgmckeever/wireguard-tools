@@ -43,7 +43,9 @@ Cloudflare WARP. The device picks one at a time.
          group [<device> <group,group>] | ungroup <device> [group,group]
                              who it can reach: devices sharing a group; "server" reaches the server
                              and not the others in it; no groups: isolated
-  jump   list | add <code> <wg.conf|-> [--label NAME] | remove [code] | test [code]   (old name: exit)
+  jump   list | add <code> <wg.conf|-> [--label NAME] [--routes CIDR[,..]] | remove [code] | test [code]
+         routes <code> [CIDR[,..]|none]   routes-only: its configs send just those subnets through it,
+                             the rest out of here (no CIDRs: show them; none: a normal jump)   (old name: exit)
   tunnel test                every way out (each exit, with and without WARP), traced
   warp rotate [host|<jump>|all]   new WARP account (keys, identity): this server's (default),
                              a jump's, or all; device configs don't change

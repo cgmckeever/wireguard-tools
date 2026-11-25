@@ -499,6 +499,28 @@ wgt jump test par-fr       # that one alone
 wgt jump remove par-fr     # refused while configs use it (no code: pick from a list)
 ```
 
+**Routes-only jumps.** A jump can instead carry only chosen IPv4 subnets, a
+friend's home LAN say, reached through a server or puck there: its configs keep
+their internet from the WireGuard Server, and only traffic to those subnets
+takes the jump.
+
+```bash
+wgt jump add pat pat.conf --label "Pat's house" --routes 10.20.30.0/24   # a new routes-only jump
+wgt jump routes pat                                    # its routes: 10.20.30.0/24 (or none)
+wgt jump routes pat 10.20.30.0/24,192.168.7.0/24       # change them, live
+wgt jump routes pat none                               # a normal jump again
+```
+
+Its configs are `pat.<device>`, WARP off only (`client add --exit pat` makes
+just that one; `warp.pat.<device>` is refused, and a jump with `warp.` configs
+can't become routes-only). Their IPv4 to the subnets goes through the jump; the rest,
+IPv6 included, leaves from the server's IP like a plain host config. While the jump
+is down, those subnets are blocked (fail closed) and the internet still works.
+The routes are IPv4 networks (`10.20.30.0/24`, not `10.20.30.1/24`), not
+`0.0.0.0/0`, and clear of the server's subnet and `10.9.8.0/24`. Its WARP is never
+started, and `jump test` checks the jump's handshake without tracing the internet
+through it. `jump list` shows them after its name: `Pat's house (routes 10.20.30.0/24)`.
+
 **On demand.** A jump is only up while one of its configs is connected, so an
 idle jump holds no connection. A device switching to an idle jump's config waits
 for it to come up the first time: the watchdog checks every 10 seconds, and a
@@ -1041,6 +1063,7 @@ its way out by that address:
 |---|---|---|
 | **host** | table 100 (the subnet's WARP rule) | `main`, then blackhole |
 | **jump** `<code>` | table `200+n` (`wx-<code>`) | table `230+n` (`px-<code>`) |
+| **routes-only jump** | (none) | its subnets: table `230+n`; the rest: `main`, then blackhole |
 
 The WARP rule is one per address family for the whole subnet
 (`from <VPN subnet> lookup 100`, priority 10000); every other config has its
@@ -1061,7 +1084,9 @@ sends that config's traffic there. The jump's WARP tunnel marks its own packets
 default route through the jump tunnel `px-<code>`, again with a blackhole
 fallback, so the jump's WARP can never connect from the server's own IP. A
 plain jump config's rule points at table `230+n` directly (NATed out
-`px-<code>`; IPv4 only, its IPv6 is blackholed). The tunnels use `Table = off`
+`px-<code>`; IPv4 only, its IPv6 is blackholed). A routes-only jump's config instead
+gets a plain host config's two rules, with one per subnet ahead of them
+(`from 10.4.5.8 to 10.20.30.0/24 lookup 231`, priority 9450). The tunnels use `Table = off`
 and aren't enabled at boot; the jump watchdog (`wg-tools-exit-watchdog.timer`,
 every 10s) brings a jump up when one of its configs handshakes and down after
 5 minutes with none, and starts the jump's WARP only when a `warp.` config
@@ -1135,6 +1160,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/systemd/system/wg-quick@wg0.service.d/` | start `wg0` after `warp` |
 | `/etc/systemd/system/wg-tools-warp-watchdog.{service,timer}` | WARP watchdog (runs `wgt watchdog warp` every 30s) |
 | `/etc/wireguard/exits.db` | jumps: `code index label` (in file names such as this, "exit" means a jump, for historical reasons) |
+| `/etc/wireguard/exits.routes` | [routes-only jumps](#jumps): `code cidr[,cidr]` (a jump not listed carries all its configs' traffic) |
 | `/etc/wireguard/exits/<code>.proton.conf`, `exits/<code>/` | a jump file as given (from anywhere; the file name is historical) and its own WARP account |
 | `/etc/wireguard/px-<code>.conf`, `wx-<code>.conf` | a jump's tunnel and the WARP tunnel inside it |
 | `/etc/systemd/system/wg-tools-exit-watchdog.{service,timer}` | jump watchdog (runs `wgt watchdog exits` every 10s: jumps up on demand) |
