@@ -89,6 +89,17 @@ server, bossk too.
    any server, by wgt, wgt-ctl, tunnel-puck or `tools/trial.sh`. Every config
    is delivered to `~/wg-tunnels/devices/<device>/config/`, where an unmarked
    test device looks like a real one and nobody knows whether to keep it.
-   Remove them when the test is done (`wgt-ctl <server> client remove`). Real
-   devices are named for what they are (`iphone`, `steve`), and only when the
-   person asks for one.
+   Real devices are named for what they are (`iphone`, `steve`), and only when
+   the person asks for one.
+
+   **Remove test configs properly when the test is done**, unless there's a
+   reason to keep them: then say which ones and why, and remove them as soon
+   as that reason is gone. Properly means everywhere they went:
+   - on the server: `wgt-ctl <server> client remove <config>` (that also drops
+     the device's number once it has no configs left);
+   - on this machine: wgt-ctl renames the copy in `~/wg-tunnels` to `.bak`;
+     delete those, and the device's folder once nothing else is in it;
+   - what the test added for them: a jump, a tunnel-puck VPS (`tpk-ctl.sh
+     <puck> vps remove <vps>`), QR images.
+
+   A test that stops part-way still cleans up what it made before it stops.
