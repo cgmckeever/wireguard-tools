@@ -1,5 +1,6 @@
-"""Reading a log as it grows and stepping back through it: `wgt history
---follow`, and `--step` for `wgt history` and `wgt log`.
+"""Live views on the terminal: a log as it grows and stepping back through it
+(`wgt history --follow`, `--step` for `wgt history` and `wgt log`), and a
+table kept up to date (`wgt client list --watch`).
 
 follow() tails a file the way tail -F does (a rotated file is reopened from its
 start). step() is a full-screen view that opens at the newest entry and walks
@@ -151,6 +152,34 @@ def step(lines: List[str], title: str) -> None:
                     cur = found
                 continue
             cur = move(action, cur, len(lines), max(1, rows // 2))
+    except KeyboardInterrupt:
+        pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, saved)
+        w("\x1b[?25h\x1b[?1049l")
+        sys.stdout.flush()
+
+
+def watch(draw: Callable[[], str], title: str, every: float = 2.0) -> None:
+    """<draw>'s text, redrawn every <every> seconds (any key: now) until q or Ctrl-C."""
+    import select
+    import termios
+    import tty
+
+    fd = sys.stdin.fileno()
+    saved = termios.tcgetattr(fd)
+    w = sys.stdout.write
+    w("\x1b[?1049h\x1b[?25l")
+    try:
+        tty.setcbreak(fd)
+        while True:
+            body = draw()
+            stamp = time.strftime("%H:%M:%S")
+            w("\x1b[H\x1b[2J" + body.replace("\n", "\r\n")
+              + f"\r\n\r\n\x1b[2m{title}, {stamp}: every {every:g}s (any key: now)  q quit\x1b[0m")
+            sys.stdout.flush()
+            if select.select([fd], [], [], every)[0] and KEYS.get(os.read(fd, 16)) == "quit":
+                return
     except KeyboardInterrupt:
         pass
     finally:

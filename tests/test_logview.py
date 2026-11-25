@@ -132,3 +132,19 @@ def test_wgt_ctl_all_refuses_step_and_follow(monkeypatch):
             ctl._on_all("history", args)
     with pytest.raises(WgtError, match="one server"):
         ctl._on_all("log", ["--step"])
+
+
+def test_client_list_watch_redraws_the_table(make_ctx, monkeypatch):
+    from wgt import clients
+    ctx = make_ctx()
+    ctx.args.watch = True
+    drawn = []
+    monkeypatch.setattr(logview, "can_step", lambda: True)
+    monkeypatch.setattr(logview, "watch", lambda draw, title: drawn.extend([draw(), draw(), title]))
+    clients.cmd_list(ctx, [])
+    first, second, title = drawn
+    assert first == second and first.startswith("DEVICE") and "LAST HANDSHAKE" in first
+    assert all(c.name in first for c in ctx.snap.clients) and "client list on" in title
+    monkeypatch.setattr(logview, "can_step", lambda: False)
+    with pytest.raises(WgtError, match="terminal"):
+        clients.cmd_list(ctx, [])

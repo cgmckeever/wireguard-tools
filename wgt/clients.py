@@ -14,9 +14,9 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Tuple
 
-from . import devices, live, net, ops, render, rules, store, system, ui, units
+from . import devices, live, logview, net, ops, render, rules, store, system, ui, units
 from .const import MIB, client_conf_name
 from .errors import WgtError
 
@@ -267,16 +267,24 @@ def way_out(ctx: Ctx, name: str) -> str:
     return f"{exit_label(ctx, name)}, {'through WARP' if store.name_warp(name) else 'no WARP'}"
 
 
-def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str]:
-    """Print the clients table, device first (the exit is its own column);
-    returns the full client names in the order shown."""
+def clients_table(ctx: Ctx, prefix: str = "", numbered: bool = True) -> Tuple[List[str], List[str]]:
+    """The clients table's lines, device first (the exit is its own column), and
+    the full client names in the order shown."""
     number = f"{'#':>3} " if numbered else ""
-    ctx.out.line(prefix + number + ui.CLIENT_FMT.format(*ui.CLIENT_HEAD))
+    lines = [prefix + number + ui.CLIENT_FMT.format(*ui.CLIENT_HEAD)]
     rows = sorted(client_rows(ctx), key=lambda row: store.device_key(row.name))
     for i, row in enumerate(rows, 1):
         number = f"{i:>3} " if numbered else ""
-        ctx.out.line(prefix + number + ui.CLIENT_FMT.format(*row.cells()))
-    return [row.name for row in rows]
+        lines.append(prefix + number + ui.CLIENT_FMT.format(*row.cells()))
+    return lines, [row.name for row in rows]
+
+
+def print_clients(ctx: Ctx, prefix: str = "", numbered: bool = True) -> List[str]:
+    """Print the clients table; returns the full client names in the order shown."""
+    lines, names = clients_table(ctx, prefix, numbered)
+    for line in lines:
+        ctx.out.line(line)
+    return names
 
 
 # --- commands ---
@@ -701,8 +709,18 @@ def cmd_share(ctx: Ctx, words: List[str]) -> None:
 
 
 def cmd_list(ctx: Ctx, words: List[str]) -> None:
-    """The clients table (or --tsv rows), then in a terminal the action menu."""
-    ops.no_more_words(words, "wgt client list [--tsv]")
+    """The clients table (or --tsv rows), then in a terminal the action menu.
+    --watch: the table redrawn every 2s, the newest handshakes and traffic, until q."""
+    ops.no_more_words(words, "wgt client list [--tsv|--watch]")
+    if ctx.args.watch:
+        if not logview.can_step():
+            raise WgtError("--watch needs a terminal (from wgt-ctl: one server, not all)")
+
+        def table() -> str:
+            ctx.reload()   # a config added or removed meanwhile shows up
+            return "\n".join(clients_table(ctx, numbered=False)[0])
+        logview.watch(table, f"wgt client list on {ctx.cfg.SERVER_NAME}")
+        return
     if ctx.args.tsv:
         for row in client_rows(ctx):
             ctx.out.line(row.tsv())
