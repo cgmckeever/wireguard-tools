@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import time
 from typing import TYPE_CHECKING, List, Optional
 
 from . import exits, live, ops, results, store, units, warp
@@ -51,10 +50,7 @@ def rotate_host_warp(ctx: Ctx, res: results.Results) -> None:
     # "Rotate WARP now?" agreed to the restart (its step says warp. configs pause): asked
     # again here, a no would leave the new account written and warp running the old one.
     units.start_unit(ctx, ctx.cfg.WARP_IF, changed, agreed=True)
-    for _ in range(15):   # a fresh account's first handshake
-        if live.newest_hs(ctx.runner, ctx.cfg.WARP_IF) > 0:
-            break
-        time.sleep(1)
+    exits.wait_hs(ctx, ctx.cfg.WARP_IF, 15)   # a fresh account's first handshake
     exits.path_result(res, "host", True, live.trace_summary(live.trace(ctx.runner, "--interface", ctx.cfg.WARP_IF)))
 
 
@@ -69,11 +65,7 @@ def rotate_jump_warp(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
     exits.write_confs(ctx, e)
     if exits.any_up(ctx, e):
         exits.down(ctx, e)
-    try:
-        with exits.probing(ctx, e):
-            exits.path_result(res, ctx.snap.jump_label(e.code), True, exits.trace(ctx, e))
-    except WgtError as err:
-        res.result("FAIL", f"jump {e.code}: could not bring it up ({err})")
+    exits.probed(ctx, res, e, lambda: exits.path_result(res, ctx.snap.jump_label(e.code), True, exits.trace(ctx, e)))
 
 
 def cmd_warp_rotate(ctx: Ctx, words: List[str]) -> int:

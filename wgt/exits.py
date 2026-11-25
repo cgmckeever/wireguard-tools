@@ -11,7 +11,7 @@ import os
 import re
 import sys
 import time
-from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Optional, Tuple
 
 from . import live, ops, render, results, rules, store, ui, units, warp
 from .const import EXIT_IDLE, EXIT_MAX, EXIT_WARP_WAIT, EXIT_WATCHDOG, WATCHDOG_STALE, watchdog
@@ -134,10 +134,11 @@ def down(ctx: Ctx, e: store.Exit, check: bool = True) -> bool:
     return not any_up(ctx, e)
 
 
-def wait_hs(ctx: Ctx, e: store.Exit, seconds: int = EXIT_WARP_WAIT) -> None:
-    """Give a just-started exit up to <seconds> for its WARP handshake (EXIT_WARP_WAIT)."""
+def wait_hs(ctx: Ctx, ifc: str, seconds: int = EXIT_WARP_WAIT) -> None:
+    """Give a just-started WARP tunnel up to <seconds> for its first handshake (a jump's:
+    EXIT_WARP_WAIT)."""
     for _ in range(seconds):
-        if live.newest_hs(ctx.runner, e.wx) > 0:
+        if live.newest_hs(ctx.runner, ifc) > 0:
             return
         time.sleep(1)
 
@@ -173,7 +174,7 @@ def probing(ctx: Ctx, e: store.Exit) -> Iterator[None]:
     try:
         if not (px_was and wx_was):
             up(ctx, e)
-        wait_hs(ctx, e)
+        wait_hs(ctx, e.wx)
         yield
     finally:
         if px_was and wx_was:
@@ -185,6 +186,16 @@ def probing(ctx: Ctx, e: store.Exit) -> Iterator[None]:
             unhold(ctx, e.code)
         else:
             down(ctx, e)
+
+
+def probed(ctx: Ctx, res: results.Results, e: store.Exit, check: Callable[[], None], label: str = "") -> None:
+    """Run <check> with the jump up (probing); one it can't bring up is a FAIL, under
+    <label> (default "jump <code>:")."""
+    try:
+        with probing(ctx, e):
+            check()
+    except WgtError as err:
+        res.result("FAIL", f"{label or f'jump {e.code}:'} could not bring it up ({err})")
 
 
 def probe(ctx: Ctx, e: store.Exit) -> Tuple[bool, str]:
@@ -469,12 +480,11 @@ def cmd_tunnel_test(ctx: Ctx, words: List[str]) -> int:
     path_result(res, host, True, live.trace_summary(live.trace(ctx.runner, "--interface", ctx.cfg.WARP_IF)))
     for e in ctx.snap.exits:
         label = ctx.snap.jump_label(e.code)
-        try:
-            with probing(ctx, e):
-                path_result(res, label, False, trace(ctx, e, e.px))
-                path_result(res, label, True, trace(ctx, e))
-        except WgtError as err:
-            res.result("FAIL", f"{label:<22} could not bring it up ({err})")
+
+        def both(e: store.Exit = e, label: str = label) -> None:
+            path_result(res, label, False, trace(ctx, e, e.px))
+            path_result(res, label, True, trace(ctx, e))
+        probed(ctx, res, e, both, f"{label:<22}")
     return results.report(ctx, res)
 
 
@@ -550,11 +560,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False, only: str 
                       live.hs_recent(r, e.px, WATCHDOG_STALE, ctx.clock()))
             plain_check(ctx, res, e)
         elif bring_up or is_up(ctx, e):
-            try:
-                with probing(ctx, e):
-                    tunnel_checks(ctx, res, e)
-            except WgtError as err:
-                res.result("FAIL", f"jump {e.code}: could not bring it up ({err})")
+            probed(ctx, res, e, lambda: tunnel_checks(ctx, res, e))   # noqa: B023 (run at once)
         elif act > 0:
             res.result("FAIL", f"jump {e.code}: not (fully) up while {act} client(s) are active "
                                "(the watchdog brings it up within 10s)")

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from conftest import FIXTURES, KEYS, temp_paths
 
-from wgt import backup, cli, host, ops, render, store, ui, warp_rotate
+from wgt import backup, cli, exits, host, ops, render, store, ui, warp_rotate
 from wgt import server as srv
 from wgt.errors import CommandFailed, WgtError
 from wgt.host import Facts
@@ -309,7 +309,7 @@ def rotating(make_ctx, monkeypatch):
         return True
     monkeypatch.setattr(warp, "register", fake_register)
     monkeypatch.setattr(warp, "install_wgcf", lambda ctx, **kw: True)
-    monkeypatch.setattr(warp_rotate.time, "sleep", lambda s: None)
+    monkeypatch.setattr(exits.time, "sleep", lambda s: None)
     return state
 
 
