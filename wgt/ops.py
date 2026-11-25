@@ -234,6 +234,22 @@ def write_wg_conf(ctx: Ctx) -> bool:
     return ctx.files.write_config(ctx.cfg.wg_conf, 0o600, render_wg_conf(ctx))
 
 
+def add_live_peer(ctx: Ctx, name: str, pub: str, ip: str) -> None:
+    ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "preshared-key",
+                    ctx.paths.psk(name), "allowed-ips", ctx.cfg.client_addrs(ip)])
+    ctx.out.info(f"peer live on {ctx.cfg.WG_IF} (other clients unaffected)")
+
+
+def remove_live_peer(ctx: Ctx, pub: str) -> None:
+    ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "remove"])
+
+
+def wg_up(ctx: Ctx) -> bool:
+    return live.if_exists(ctx.runner, ctx.cfg.WG_IF)
+
+
+# --- the databases ---
+
 # The database writes below read through ctx.files, so a dry run's second
 # change to the same file builds on its first (rename = add new + drop old),
 # and each reloads ctx.snap: snapshot values read before them are stale after.
@@ -321,17 +337,3 @@ def no_more_words(extra: List[str], usage: str) -> None:
     """Refuse leftover words (`wgt client remove a b` must not remove only a)."""
     if extra:
         raise WgtError(f"unexpected: {' '.join(extra)} (usage: {usage})")
-
-
-def add_live_peer(ctx: Ctx, name: str, pub: str, ip: str) -> None:
-    ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "preshared-key",
-                    ctx.paths.psk(name), "allowed-ips", ctx.cfg.client_addrs(ip)])
-    ctx.out.info(f"peer live on {ctx.cfg.WG_IF} (other clients unaffected)")
-
-
-def remove_live_peer(ctx: Ctx, pub: str) -> None:
-    ctx.runner.run(["wg", "set", ctx.cfg.WG_IF, "peer", pub, "remove"])
-
-
-def wg_up(ctx: Ctx) -> bool:
-    return live.if_exists(ctx.runner, ctx.cfg.WG_IF)
