@@ -53,6 +53,9 @@ AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
 # The settings in a configs/<puck>.<vps>.conf.
 VPS_VARS="TPK_ROUTING PUCK_PORT TPK_LINK VPS_SSH VPS_HOST CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET
           WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL TPK_DISABLED TPK_DISABLED_CONFIGS"
+# link_ids, name_ok, vps_name_ok: the link's names and numbers, as puck.sh and vps.sh have them.
+# shellcheck source=ids.sh
+. "$HERE/ids.sh"
 
 
 # --- Small helpers -------------------------------------------------------------
@@ -68,6 +71,7 @@ q() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }    # the valu
 placeholder() { case "$1" in ''|*example.com*|*'<'*) return 0 ;; esac; return 1; }
 is_command() { case " $COMMANDS " in *" $1 "*) return 0 ;; esac; return 1; }
 have_tty() { (: < /dev/tty) 2>/dev/null; }
+puck_name_ok() { ( PUCK_NAME="$1" TPK_LINK=""; link_ids ) || exit 1; }    # in a subshell: sets nothing here
 words() { printf '%s\n' "$1" | tr '\n' ' ' | sed 's/ *$//'; }    # one per line -> one line
 
 # ask_yes <question>: true on y/yes, asked on the terminal.
@@ -183,8 +187,7 @@ cmd_new() {
         printf 'Name for the new puck (up to 10 of a-z, 0-9 and -, starting with a letter): ' >&2
         read -r name < /dev/tty || name=""
     fi
-    # shellcheck source=ids.sh
-    ( . "$HERE/ids.sh"; PUCK_NAME="$name"; TPK_LINK=""; link_ids ) || exit 1
+    puck_name_ok "$name"
     ! is_command "$name" || die "'$name' is a command word: pick another name"
     [ ! -e "$CONFIGS/$name.conf" ] || die "configs/$name.conf already exists"
     cp "$CONFIGS/puck.conf.example" "$CONFIGS/$name.conf"
@@ -205,8 +208,7 @@ cmd_new() {
 
 # load_puck: read configs/<PUCK_NAME>.conf, the puck's own settings.
 load_puck() {
-    # shellcheck source=ids.sh
-    ( . "$HERE/ids.sh"; TPK_LINK=""; link_ids ) || exit 1    # checks the name
+    puck_name_ok "$PUCK_NAME"
     PUCK_CONF="$CONFIGS/$PUCK_NAME.conf"
     [ -r "$PUCK_CONF" ] || die "no puck '$PUCK_NAME': configs/$PUCK_NAME.conf doesn't exist (configured: $(words "$(pucks)"))"
     if grep -qE '^(TPK_ROUTING|WGT_SERVER|VPS_SSH|TPK_LINK|PUCK_PORT)="[^"]' "$PUCK_CONF"; then
@@ -218,8 +220,6 @@ load_puck() {
     . "$PUCK_CONF"
     # The puck's user: the part of SSH_LAN before an @ (none: ssh's default).
     case "$SSH_LAN" in *@*) PUCK_USER="${SSH_LAN%%@*}" ;; *) PUCK_USER="" ;; esac
-    # shellcheck source=ids.sh
-    . "$HERE/ids.sh"
     reset_vps
     # Sent to the scripts when a step sets them; empty otherwise.
     CF_TOKEN="" WIFI_SSID="" WIFI_PSK="" WIFI_LIST=""
