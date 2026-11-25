@@ -489,8 +489,8 @@ ig88         wgt      serving  ig88                     10.99.0.4/30    wgpk1 wg
 
 - **Commands for one VPS** (`link`, `exit`, `client`, `lan-mode`) take it as
   `<puck>.<vps>`, or ask which when there are several (with no terminal: name
-  it, or set `TPK_VPS`). `test`, `config` and `all` do every VPS, or one if
-  named. The puck's own commands (`init`, `wifi`, `ssh`, `reboot`, `shutdown`,
+  it, or set `TPK_VPS`). `config`, `status`, `test`, `all`, `disable` and
+  `enable` do every VPS, or one if named. The puck's own commands (`init`, `wifi`, `ssh`, `reboot`, `shutdown`,
   `undo`) don't depend on a VPS.
 - **A device gets a config on each VPS it should use** (`dengar.mom.iphone`,
   `ig88.mom.iphone`): both come out at the puck, each through its own VPS. Its

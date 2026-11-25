@@ -5,7 +5,8 @@
 # puck and vps.sh on the VPSes over ssh. <puck> can be left out while there's only
 # one (else it asks; TPK_PUCK=<puck> is the default). <puck>.<vps> names one VPS:
 # commands about one VPS take the puck's only one without it, or ask (TPK_VPS=<vps>
-# is the default); test, config and all then do just that one.
+# is the default); the commands about every VPS (config, status, test, all,
+# disable, enable) then do just that one.
 #
 #   tpk-ctl.sh new [<puck>] [--wifi]        a new puck's settings file (asks the name; --wifi: its Wi-Fi list too)
 #   tpk-ctl.sh [<puck>] config              show the settings, the puck's and each VPS's, and check them
@@ -174,7 +175,7 @@ one_vps() {
     load_vps "$PICK"
 }
 
-# the_vpses: the VPSes test, config and all go through: the one named, else all.
+# the_vpses: the VPSes the commands about every VPS go through: the one named, else all.
 the_vpses() { if [ -n "$VPS_PICK" ]; then echo "$VPS_PICK"; else vpses; fi; }
 
 # cmd_new [<name>] [--wifi]: a new puck's settings file from the template (and, with
