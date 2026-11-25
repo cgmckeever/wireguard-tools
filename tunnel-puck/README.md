@@ -739,6 +739,7 @@ in at all, bring the puck home to change it.
     CONFIG                       LAST HANDSHAKE RX      TX
     mom.iphone                   3h ago         2.2M    12M
     mom.laptop                   disabled       0       0
+
   ig88       serving   wgpk1 78s ago        wgrtun1 5m ago        mom up, no WARP (1 active)
     CONFIG                       LAST HANDSHAKE RX      TX
     mom.iphone                   1m ago         330K    75K

@@ -20,7 +20,9 @@ def cmd_clients() -> None:
     fmt = "  {:<10} " + ui.CLIENT_FMT
     print("")
     print(fmt.format("SERVER", *ui.CLIENT_HEAD))
-    for s in remote.servers():
+    for i, s in enumerate(remote.servers()):
+        if i:
+            print("")   # a blank line between servers
         rc, o = remote.ssh(s.target, f"{s.wgt} client list --tsv", batch=True, capture=True)
         if rc != 0:
             note = "unreachable" if rc == 255 else f"client list failed: exit {rc}"

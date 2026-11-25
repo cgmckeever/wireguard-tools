@@ -1180,7 +1180,10 @@ cmd_status() {
     names=$(the_gateways)
     [ -n "$names" ] || { echo "  serves no gateway yet (tpk-ctl.sh $PUCK_NAME gateway add <gateway>)"; return 0; }
     printf '%-10s %-9s %-20s %-21s %s\n' GATEWAY STATE LINK RTUN JUMP
+    gap=""
     for v in $names; do
+        printf '%s' "$gap"; gap="
+"    # a blank line between gateways
         QUIET=1 load_gateway "$v"
         if [ -z "$LINK_NET" ]; then printf '%-10s %s\n' "$v" "no link yet (tpk-ctl.sh $PUCK_NAME.$v link)"; continue; fi
         state=$(gateway_state)
