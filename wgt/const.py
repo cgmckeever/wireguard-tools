@@ -50,7 +50,8 @@ EXIT_IDLE = 300              # seconds without a client handshake before an exit
 
 # Static device addresses: one number per device, the same on every server.
 DEVICE_NET = "10.9.8.0/24"
-DEVICE_ADDRESS_FORM = DEVICE_NET.rsplit(".", 1)[0] + ".<number>"   # for people: 10.9.8.<number>
+_DEVICE_PREFIX = DEVICE_NET.rsplit(".", 1)[0]
+DEVICE_ADDRESS_FORM = _DEVICE_PREFIX + ".<number>"   # for people: 10.9.8.<number>
 DEVICE_SERVER = 1            # the server itself
 DEVICE_CTL_FIRST, DEVICE_CTL_LAST = 2, 127          # handed out by wgt-ctl, counting up
 DEVICE_DIRECT_FIRST, DEVICE_DIRECT_LAST = 128, 254  # handed out by `wgt client add`, counting down
@@ -61,6 +62,12 @@ DEVICE_PEER_CHAIN = "WGT-PEERS"    # filter: which devices may reach each other 
 DEVICE_SERVER_CHAIN = "WGT-SERVER" # filter: which devices may reach the server's tunnel addresses
 SERVER_GROUP = "server"      # the group that reaches the server, and not the others in it
 DEVICE_RULE_PRIO = 9300      # before every client rule: no config in use means unreachable, not a way out
+
+
+def device_ip(number: int) -> str:
+    """A device's static address."""
+    return f"{_DEVICE_PREFIX}.{number}"
+
 
 LOG_TAG = "wg-tools"            # journal tag for the changes wgt makes
 WARP_WATCHDOG = "wg-tools-warp-watchdog"
@@ -126,6 +133,7 @@ def error_tag(tag: str) -> str:
     """The journal tag a watchdog's failed runs log under: its own tag is what it did
     (the last WARP port change is the WARP watchdog's last entry)."""
     return f"{tag}-error"
+
 
 MIB = 1024 * 1024
 KEEP_CHANGES = 5             # newest copies kept per file (plus its original)
@@ -303,11 +311,6 @@ class Paths:
 
     def unit_file(self, name: str) -> str:
         return os.path.join(self.systemd_dir, name)
-
-
-def device_ip(number: int) -> str:
-    """A device's static address."""
-    return DEVICE_NET.rsplit(".", 1)[0] + f".{number}"
 
 
 # The settings table (setup's review, status): key, label, default. A row with
