@@ -920,15 +920,13 @@ test_vps() {
     return "$rc_v"
 }
 
-# jump_configs <code>...: the VPS's client configs whose exit is one of these jumps
-# (wgt client list --tsv: the config's name, then its exit).
+# jump_configs all|on <code>...: the VPS's client configs whose exit is one of these
+# jumps (wgt client list --tsv: the config's name, then its exit); on: without the
+# ones disabled already (the 4th column, last seen, says "disabled").
 jump_configs() {
-    wgt_vps client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $* " 'index(codes, " " $2 " ") {print $1}'
-}
-# jump_configs_on <code>...: the same, without the ones disabled already (the 4th
-# column, last seen, says "disabled").
-jump_configs_on() {
-    wgt_vps client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $* " 'index(codes, " " $2 " ") && $4 != "disabled" {print $1}'
+    which="$1"; shift
+    wgt_vps client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $* " -v which="$which" \
+        'index(codes, " " $2 " ") && (which == "all" || $4 != "disabled") {print $1}'
 }
 
 # The puck's configs on the loaded VPS that disable turned off are kept in
@@ -966,7 +964,7 @@ cmd_disable() {
     fi
     if [ -z "$device" ] && [ "$TPK_DISABLED" = yes ]; then log "$VPS_NAME is disabled already${TPK_DISABLED_CONFIGS:+ ($TPK_DISABLED_CONFIGS)}"; return 0; fi
     # shellcheck disable=SC2086
-    names=$(jump_configs_on $JUMP_CODE $JUMP_LAN_CODE)
+    names=$(jump_configs on $JUMP_CODE $JUMP_LAN_CODE)
     # shellcheck disable=SC2086
     [ -z "$device" ] || names=$(of_device "$device" $names)
     names=$(words "$names")
@@ -1087,7 +1085,7 @@ undo_vps() {
             esac
         done
         # shellcheck disable=SC2086
-        [ -z "$jumps" ] || [ -n "$DRY" ] || configs=$(words "$(jump_configs $jumps)")
+        [ -z "$jumps" ] || [ -n "$DRY" ] || configs=$(words "$(jump_configs all $jumps)")
     fi
     what="remove"
     if [ -n "$DRY" ] && [ -n "$jumps" ]; then what="$what the configs on jump(s)$jumps (none listed in a dry run), then"
