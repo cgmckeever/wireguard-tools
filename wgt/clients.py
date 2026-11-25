@@ -585,16 +585,25 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     ops.lock_as_seen(ctx)
     if not already:
         ops.set_disabled(ctx, name, disable)
+    if _apply_disabled(ctx, [c], disable):
+        if disable:
+            ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other configs unaffected)")
+        devices.apply_now(ctx)
+
+
+def _apply_disabled(ctx: Ctx, entries: List[store.Client], disable: bool) -> bool:
+    """wg0.conf, and the live wg0's peers, for <entries> just disabled (or enabled).
+    False if wg0 is down: it applies when it starts."""
     ops.write_wg_conf(ctx)
     if not ops.wg_up(ctx):
         ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
-    else:
+        return False
+    for c in entries:
         if disable:
             ops.remove_live_peer(ctx, c.pub)
-            ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other configs unaffected)")
         else:
-            ops.add_live_peer(ctx, name, c.pub, c.ip)
-        devices.apply_now(ctx)
+            ops.add_live_peer(ctx, c.name, c.pub, c.ip)
+    return True
 
 
 def _set_all_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
@@ -626,18 +635,7 @@ def _set_all_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
                         f"{' '.join(names) or '(none left)'}", "wgt client disable --all")
         ops.lock_as_seen(ctx)
     ops.set_disabled_many(ctx, names, disable)
-    ops.write_wg_conf(ctx)
-    if not ops.wg_up(ctx):
-        ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
-    else:
-        for n in names:
-            c = ctx.snap.client(n)
-            if c is None:
-                continue
-            if disable:
-                ops.remove_live_peer(ctx, c.pub)
-            else:
-                ops.add_live_peer(ctx, n, c.pub, c.ip)
+    if _apply_disabled(ctx, [c for c in map(ctx.snap.client, names) if c is not None], disable):
         devices.apply_now(ctx)
         ctx.out.info(f"{len(names)} peer(s) {'removed from' if disable else 'back on'} {ctx.cfg.WG_IF}")
     if not disable:
