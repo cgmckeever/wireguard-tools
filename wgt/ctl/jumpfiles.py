@@ -90,19 +90,19 @@ def add_one_exit(s: Server, path: str) -> None:
     out.log(f"{s.name}: {file} -> jump {code} ({label})")
     if remote.ssh(s.target, f"install -d -m 700 {remote.REMOTE.exit_dir} {remote.INBOX}")[0] != 0:
         raise WgtError(f"cannot reach {s.target}")
+    uploaded = f"{remote.INBOX}/{code}.conf"
     fd, tmp = tempfile.mkstemp()
     try:
         # As store.read_text read it: any non-UTF-8 byte goes up as it was, not a traceback.
         with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as f:
             f.write(with_local_file_comment(store.read_text(path) or "", file))
         os.chmod(tmp, 0o600)
-        if not remote.scp(tmp, f"{s.target}:{remote.INBOX}/{code}.conf"):
+        if not remote.scp(tmp, f"{s.target}:{uploaded}"):
             raise WgtError("upload failed")
     finally:
         os.remove(tmp)
-    uploaded = f"{remote.INBOX}/{code}.conf"
     rc, _ = remote.ssh(s.target, f"{s.wgt} jump add {q(code, uploaded, '--label', label, '--yes')}; "
-                                 f"rc=$?; rm -f {uploaded}; exit $rc")
+                                 f"rc=$?; rm -f {q(uploaded)}; exit $rc")
     if rc != 0:
         raise WgtError(f"jump add failed for {code}")
     tunnels.after(s, "jump", ["add"])   # a replaced jump's label is in its configs' "# exit:" line
@@ -143,7 +143,7 @@ def remote_exit_codes(s: Server) -> List[str]:
     return [e.code for e in store.parse_exits(o)]
 
 
-def print_exit_files(s: Server, files: List[str], on_server: List[str]) -> None:
+def print_exit_files(files: List[str], on_server: List[str]) -> None:
     """The staged configs, numbered: file, code and name (once named), on the server or not."""
     w = max(4, *(len(os.path.basename(f)) for f in files))
     print("")
@@ -172,7 +172,7 @@ def offer_staged_exits(s: Server, args: List[str]) -> None:
     if not staged:
         return
     out.log(f"Jump configs staged here but not on {s.name}")
-    print_exit_files(s, staged, on_server)
+    print_exit_files(staged, on_server)
     sel = ui.ask("    Push one first, so the new client can use it? [number, Enter skips]: ")
     if not sel:
         return
@@ -193,7 +193,7 @@ def do_exit_add(s: Server, args: List[str]) -> int:
     if not sel:
         if not ui.have_tty():
             raise WgtError(f"no config given (and no terminal to pick one): wgt-ctl {s.name} jump-add <n|all>")
-        print_exit_files(s, files, remote_exit_codes(s))
+        print_exit_files(files, remote_exit_codes(s))
         sel = ui.ask("  Add which? [number or all]: ")
     if not sel:
         raise WgtError("nothing chosen")
