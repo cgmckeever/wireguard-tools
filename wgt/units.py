@@ -7,7 +7,7 @@ import shutil
 from typing import TYPE_CHECKING, Iterable, List, Tuple
 
 from . import live, ops, render, store
-from .const import WATCHDOGS, Watchdog
+from .const import REPO_DIR, WATCHDOGS, Watchdog
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 def checkout_wgt() -> str:
     """This checkout's bin/wgt."""
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "bin", "wgt")
+    return os.path.join(REPO_DIR, "bin", "wgt")
 
 
 def wgt_command(ctx: Ctx) -> str:

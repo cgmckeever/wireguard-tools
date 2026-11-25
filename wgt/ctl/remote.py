@@ -12,12 +12,12 @@ from dataclasses import dataclass
 from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 
 from .. import store, ui
-from ..const import Paths
+from ..const import REPO_DIR, Paths
 from ..ctx import BOOL_FLAGS, VALUE_FLAGS
 from ..errors import WgtError
 from ..system import Out, atomic_write
 
-ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+ROOT = REPO_DIR
 
 
 LOCAL = os.path.join(ROOT, "local")

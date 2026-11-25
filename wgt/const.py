@@ -132,7 +132,8 @@ HOST_STATE_KEYS = ("DEFAULT_ROUTE", "PUB_IF", "ORIG_IP_FORWARD", "ORIG_IP6_FORWA
                    "UFW_PORTS", ORIG_HOSTNAME, SET_HOSTNAME, "LOCATION")
 KEEP_ARCHIVES = 10           # newest `backup` archives kept
 
-TEMPLATE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # this checkout
+TEMPLATE_DIR = os.path.join(REPO_DIR, "templates")
 
 
 def archive_name(host: str, stamp: str) -> str:
