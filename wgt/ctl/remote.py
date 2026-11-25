@@ -132,14 +132,16 @@ def private_dir(path: str) -> str:
 
 
 def ssh(target: str, command: str, tty: bool = False, batch: bool = False, capture: bool = False,
-        input: Optional[str] = None, errors: str = "replace") -> Tuple[int, str]:
+        input: Optional[str] = None, errors: str = "replace", notices: bool = False) -> Tuple[int, str]:
     """Run <command> on <target>, under bash whatever root's login shell is
     (a zsh login shell trips over unmatched globs). tty: with a terminal when
     we have one (prompts, QR codes); batch: never prompt, never read stdin (probes).
     Captured output is read as UTF-8 whatever the locale, line endings as sent, and
     starts where <command>'s does: anything a login script prints first is dropped.
     errors: how a byte that isn't UTF-8 is read ("replace": shown as U+FFFD, never
-    a traceback; "surrogateescape": kept as it was, for writing back out byte for byte)."""
+    a traceback; "surrogateescape": kept as it was, for writing back out byte for byte).
+    notices: the output is passed through as it comes, its desktop notices (OSC 9:
+    an --alert view's) shown on this machine instead (notify.pump)."""
     if capture:
         command = f"printf '%s\\n' {shlex.quote(OUTPUT_MARK)}; {command}"
     command = "bash -c " + shlex.quote(command)
@@ -149,6 +151,12 @@ def ssh(target: str, command: str, tty: bool = False, batch: bool = False, captu
     elif tty and sys.stdin.isatty() and sys.stdout.isatty():
         args += ["-t", "-q"]
     args += [target, command]
+    if notices and not capture:
+        from . import notify
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE)
+        assert proc.stdout is not None
+        notify.pump(proc.stdout.fileno())
+        return proc.wait(), ""
     p = subprocess.run(args, input=None if input is None else input.encode("utf-8", errors),
                        stdout=subprocess.PIPE if capture else None,
                        stderr=subprocess.DEVNULL if batch else None,
@@ -214,7 +222,8 @@ def repo_url() -> str:
 
 def do_wgt(s: Server, args: List[str]) -> int:
     """Any wgt command, run there. Printed scp hints use this machine's login."""
-    return ssh(s.target, f"WGT_SSH_TARGET={shlex.quote(s.target)} {s.wgt} {q(*args)}", tty=True)[0]
+    return ssh(s.target, f"WGT_SSH_TARGET={shlex.quote(s.target)} {s.wgt} {q(*args)}", tty=True,
+               notices="--alert" in args)[0]
 
 
 def check_branch(branch: str) -> None:

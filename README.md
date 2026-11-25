@@ -290,7 +290,7 @@ them only to that device's owner.
 ```bash
 wgt client list                        # each config: device, exit, WARP, address, static address, last handshake, traffic, allowed IPs
 wgt client list --watch                # the same, live: redrawn every 2s, q quits (wgt-ctl <server> client list --watch from your machine)
-wgt client list --alert                # --watch, and the terminal's bell when a config comes on (a handshake after 3 minutes without)
+wgt client list --alert                # --watch, and an alert when a config comes on (a handshake after 3 minutes without)
 wgt client show laptop                 # config with keys redacted
 wgt client show laptop --qr            # QR code again (phones: WireGuard app → scan)
 wgt client share laptop                # send the config via magic-wormhole
@@ -302,6 +302,12 @@ wgt client enable --all                # just the ones --all turned off back in;
 wgt client rename warp.tablet tablet   # one config, a new name; same keys and address
 wgt client remove laptop
 ```
+
+`--alert` rings the terminal's bell and asks for a desktop notification. Through
+`wgt-ctl <server> client list --alert`, wgt-ctl shows that notification on your
+own machine, whatever the terminal: macOS's Notification Center with a sound, or
+`notify-send` on Linux. Run on the server itself, terminals that know the request
+(iTerm2, kitty, WezTerm) show it; the rest just ring.
 
 Each command takes a config name. Leave it out on `rotate`, `remove`,
 `disable`, `enable`, `show` or `share` to pick from a numbered list (`wgt

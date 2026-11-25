@@ -761,8 +761,9 @@ def watch_clients(ctx: Ctx, bell: bool) -> None:
         text = "\n".join(clients_table(ctx, numbered=False)[0])
         if not bell:
             return text
-        ring = alerts.update(active_configs(ctx, ctx.clock()), time.strftime("%H:%M:%S"))
-        return text + "".join("\n  " + line for line in [""] + alerts.lines) + ("\a" if ring else "")
+        new = alerts.update(active_configs(ctx, ctx.clock()), time.strftime("%H:%M:%S"))
+        ring = "".join(logview.notice(f"{n} came on ({ctx.cfg.SERVER_NAME})") for n in new) + ("\a" if new else "")
+        return text + "".join("\n  " + line for line in [""] + alerts.lines) + ring
     logview.watch(table, f"wgt client list on {ctx.cfg.SERVER_NAME}" + (", bell on" if bell else ""))
 
 

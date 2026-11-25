@@ -152,10 +152,10 @@ def test_client_list_watch_redraws_the_table(make_ctx, monkeypatch):
 
 def test_alerts_ring_when_a_config_comes_on():
     a = logview.Alerts()
-    assert a.update({"iphone"}, "10:00") is False          # the first look only learns
-    assert a.update({"iphone"}, "10:01") is False
-    assert a.update({"iphone", "laptop"}, "10:02") is True
-    assert a.update({"laptop"}, "10:03") is False         # going idle shows, without the bell
+    assert a.update({"iphone"}, "10:00") == []             # the first look only learns
+    assert a.update({"iphone"}, "10:01") == []
+    assert a.update({"iphone", "laptop"}, "10:02") == ["laptop"]
+    assert a.update({"laptop"}, "10:03") == []            # going idle shows, without the bell
     assert a.lines == ["10:03 iphone went idle", "10:02 laptop came on"]
 
 
@@ -175,3 +175,39 @@ def test_client_list_alert_marks_and_rings(make_ctx, monkeypatch):
     monkeypatch.setattr(clients.live, "last_handshakes", lambda r, ifc, path: dict(hs))
     clients.cmd_list(ctx, [])
     assert not drawn[0].endswith("\a") and drawn[1].endswith("\a") and f"{c.name} came on" in drawn[1]
+    assert "\x1b]9;" not in drawn[0] and f"\x1b]9;{c.name} came on (" in drawn[1]
+
+
+def test_notices_are_taken_out_of_a_stream_even_split():
+    n = logview.notice("puck1.iphone came on (bossk)").encode()
+    assert logview.split_notices(b"table" + n + b"\a") == (b"table\a", ["puck1.iphone came on (bossk)"], b"")
+    head, tail = n[:6], n[6:]
+    out, texts, rest = logview.split_notices(b"abc" + head)
+    assert (out, texts, rest) == (b"abc", [], head)
+    assert logview.split_notices(rest + tail + b"x") == (b"x", ["puck1.iphone came on (bossk)"], b"")
+    assert logview.split_notices(b"\x1b[2Jplain") == (b"\x1b[2Jplain", [], b"")   # other escapes pass
+
+
+def test_notify_command_by_platform(monkeypatch):
+    from wgt.ctl import notify
+    monkeypatch.setattr(notify.sys, "platform", "darwin")
+    monkeypatch.setattr(notify.shutil, "which", lambda c: "/usr/bin/" + c)
+    cmd = notify.command("wgt", "x came on")
+    assert cmd[0] == "osascript" and cmd[-2:] == ["wgt", "x came on"] and "Glass" in cmd[2]
+    monkeypatch.setattr(notify.sys, "platform", "linux")
+    assert notify.command("wgt", "x") == ["notify-send", "wgt", "x"]
+    monkeypatch.setattr(notify.shutil, "which", lambda c: None)
+    assert notify.command("wgt", "x") is None
+
+
+def test_pump_shows_notices_and_passes_the_rest(tmp_path, monkeypatch):
+    from wgt.ctl import notify
+    r, w = os.pipe()
+    os.write(w, b"row 1\n" + logview.notice("a came on").encode() + b"row 2\n")
+    os.close(w)
+    out_r, out_w = os.pipe()
+    shown = []
+    with open(out_w, "w") as fake_stdout:
+        monkeypatch.setattr(notify.sys, "stdout", fake_stdout)
+        notify.pump(r, shown.append)
+    assert os.read(out_r, 4096) == b"row 1\nrow 2\n" and shown == ["a came on"]

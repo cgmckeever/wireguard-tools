@@ -11,11 +11,12 @@ text) are kept apart from the terminal so tests can drive them."""
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 import textwrap
 import time
-from typing import Callable, List, Optional, Set, TextIO
+from typing import Callable, List, Optional, Set, TextIO, Tuple
 
 HELP = "k/Enter older  j newer  u/d page  g/G oldest/newest  /text search back  n/N again  q quit"
 SHORT_HELP = "k older  j newer  / search  q quit"
@@ -170,14 +171,35 @@ class Alerts:
         self.active: Optional[Set[str]] = None
         self.lines: List[str] = []
 
-    def update(self, active: Set[str], stamp: str) -> bool:
-        """Note <active> now; True (ring) if a name in it wasn't active before."""
+    def update(self, active: Set[str], stamp: str) -> List[str]:
+        """Note <active> now; the names that came on (ring for them), oldest look excluded."""
         new = sorted(active - self.active) if self.active is not None else []
         gone = sorted(self.active - active) if self.active is not None else []
         self.active = set(active)
         self.lines = ([f"{stamp} {n} came on" for n in new] + [f"{stamp} {n} went idle" for n in gone]
                       + self.lines)[:self.KEEP]
-        return bool(new)
+        return new
+
+
+def notice(text: str) -> str:
+    """<text> as a desktop notification request (OSC 9): wgt-ctl turns it into one
+    on your machine, and terminals that know it (iTerm2, kitty, WezTerm) show it
+    themselves; the rest ignore it."""
+    return "\x1b]9;" + text.replace("\x07", "").replace("\x1b", "") + "\x07"
+
+
+_NOTICE = re.compile(rb"\x1b\]9;([^\x07\x1b]*)(?:\x07|\x1b\\)")
+
+
+def split_notices(data: bytes) -> Tuple[bytes, List[str], bytes]:
+    """<data> (a stream's next bytes) without its notices: (what to show, the
+    notices' texts, a notice's unfinished start to prepend to the next bytes)."""
+    rest = b""
+    start = data.rfind(b"\x1b]9;")
+    if start != -1 and not _NOTICE.match(data, start) and len(data) - start < 1024:
+        data, rest = data[:start], data[start:]
+    texts = [m.group(1).decode("utf-8", "replace") for m in _NOTICE.finditer(data)]
+    return _NOTICE.sub(b"", data), texts, rest
 
 
 def watch(draw: Callable[[], str], title: str, every: float = 2.0) -> None:
