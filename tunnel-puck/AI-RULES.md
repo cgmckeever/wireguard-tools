@@ -25,4 +25,4 @@ before running anything.
 - **Secrets stay put.** Never print a `*.key` file, a `PrivateKey` line, a jump
   file, the Cloudflare token or a Wi-Fi password. The scripts never do.
 - **A FAIL means stop.** Report the command, its output and the matching
-  [Troubleshooting](README.md#troubleshooting) row. Don't improvise a fix on the gateway.
+  [Troubleshooting](TROUBLESHOOTING.md) row. Don't improvise a fix on the gateway.
