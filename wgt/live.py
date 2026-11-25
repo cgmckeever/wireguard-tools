@@ -192,5 +192,3 @@ def mtu(ifc: str) -> str:
             return f.read().strip()
     except OSError:
         return ""
-
-

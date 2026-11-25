@@ -532,4 +532,3 @@ class Files:
                 self.out.info(f"restored {path} from {orig}")
         else:
             self.out.warn(f"original backup {orig} is missing; left {path} as is")
-

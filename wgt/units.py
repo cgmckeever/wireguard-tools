@@ -211,4 +211,3 @@ def close_firewall(ctx: Ctx, outs: List[str], port: bool = False) -> List[str]:
     for o in outs:
         ctx.runner.run(["ufw", "route", "delete", "allow", "in", "on", ctx.cfg.WG_IF, "out", "on", o], check=False)
     return left
-

@@ -26,8 +26,6 @@ FLEET_SUBNET_SOURCE = "next free in the fleet"   # WG_SUBNET's source when picke
 _IFNAME = re.compile(r"[A-Za-z0-9_-]{1,15}")
 _SERVER_NAME = re.compile(r"[A-Za-z0-9_-]{1,32}")
 _SUBNET4 = re.compile(r"([0-9]{1,3}\.){3}[0-9]{1,3}/([0-9]{1,2})")
-
-
 _DNS = re.compile(r"[A-Za-z0-9.:-]+( *, *[A-Za-z0-9.:-]+)*")
 _ENDPOINT = re.compile(r"\[[0-9a-fA-F:.]+\]|[0-9a-fA-F:]+|[A-Za-z0-9.-]+")
 
