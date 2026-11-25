@@ -6,7 +6,7 @@ import ipaddress
 import os
 import random
 import re
-from typing import List, Optional
+from typing import Iterator, List, Optional, Tuple, Union
 
 from . import host
 from .errors import WgtError
@@ -51,20 +51,27 @@ def random_subnet6() -> str:
     return str(canon_subnet6(f"fd{h[0:2]}:{h[2:6]}:{h[6:10]}::/64"))
 
 
+def _route_nets(routes: str) -> Iterator[Tuple[str, Union[ipaddress.IPv4Network, ipaddress.IPv6Network]]]:
+    """Each route line in <routes> that starts with a network, and that network (the
+    default route and a "blackhole x" line don't)."""
+    for line in routes.splitlines():
+        fields = line.split()
+        if not fields:
+            continue
+        try:
+            yield line, ipaddress.ip_network(fields[0], strict=False)
+        except ValueError:
+            continue
+
+
 def routed_overlap(subnet: str, routes: str, own_if: str) -> str:
     """The first network in <routes> (`ip -4 route`) overlapping <subnet>, not
     counting <own_if>'s; "" if none. The default route isn't one."""
     want = ipaddress.ip_network(subnet)
-    for line in routes.splitlines():
-        fields = line.split()
+    for line, routed in _route_nets(routes):
         # The route's own interface, not a substring: wg0's would also skip a wg0b's routes.
-        if not fields or host.route_dev(line) == own_if:
-            continue
-        try:
-            if want.overlaps(ipaddress.ip_network(fields[0], strict=False)):
-                return fields[0]
-        except ValueError:
-            continue   # default, or a "blackhole x" line
+        if host.route_dev(line) != own_if and want.overlaps(routed):
+            return line.split()[0]
     return ""
 
 
@@ -74,14 +81,7 @@ def _routed(net: str, routes: str) -> bool:
     if re.search(r"(^|[^0-9.])" + re.escape(net) + r"\.", routes, re.M):
         return True
     want = ipaddress.ip_network(f"{net}.0/24")
-    for line in routes.splitlines():
-        fields = line.split()
-        try:
-            if fields and want.overlaps(ipaddress.ip_network(fields[0], strict=False)):
-                return True
-        except ValueError:
-            continue   # default, or a "blackhole x" line
-    return False
+    return any(want.overlaps(routed) for _, routed in _route_nets(routes))
 
 
 def next_free_subnet(routes: str, used: List[str]) -> str:
