@@ -122,8 +122,8 @@ would change.
 
 All optional. They're saved in `/etc/wireguard/wg-tools.state`, so re-runs and
 `wgt client` commands reuse them. Each can also be set as an environment variable
-(flag > env > saved > default). They only apply to `wgt setup` and `wgt restore`,
-and other commands refuse them, except `--allowed-ips` on `wgt client`.
+(flag > env > saved > default). Only `wgt setup` and `wgt restore` take them
+(and `wgt client` takes `--allowed-ips`); other commands refuse them.
 
 | Flag | Env | Default | What it sets |
 |------|-----|---------|--------------|
@@ -480,7 +480,8 @@ rm paris.conf                                     # it holds the jump's key
 into `wg0` live (devices stay connected), and checks the result:
 `jump 'par-fr' works: ip=104.28.x.x colo=CDG loc=FR warp=on` (`colo` is
 Cloudflare's data centre: CDG is Paris). Adding the same code again replaces
-its jump file, and a new `--label` goes into its configs' `# exit:` line too. It makes no device configs: add those with
+its jump file, and a new `--label` goes into its configs' `# exit:` line too.
+`jump add` makes no device configs: add those with
 `wgt client add <device> --exit par-fr`.
 
 ```bash
@@ -548,11 +549,11 @@ rm wireguard-tools.<host>.<date>.tar.gz   # it holds private keys
 ```
 
 `restore` needs a clean server: a new one, or one after `wgt rollback --purge`. It
-refuses a server that's set up, and what a plain rollback keeps would mix with the
-archive. An archive from before config names said WARP (before about 2026-11-06) is
-refused too, because a config named plainly used WARP then and would leave straight
-out now. Run `restore --old-names`, then rename them (`wgt client rename phone
-warp.phone`).
+refuses a server that's set up, and one after a plain rollback, whose kept configs
+would mix with the archive's. An archive from before config names said WARP (before
+about 2026-11-06) is refused too, because a config named plainly used WARP then and
+would leave straight out now: run `restore --old-names`, then give those configs
+their `warp.` names (`wgt client rename phone warp.phone`).
 
 `restore` brings over the server keys, every config (same keys, addresses and
 allowed IPs), the settings, the static numbers, the WARP account (so it doesn't
@@ -572,8 +573,8 @@ front. The location is looked up again for the new machine (or pass `--location`
 
 Every change wgt makes, by hand, through `wgt-ctl` or by a watchdog, is one
 line in `/var/log/wireguard-tools.log`: the time (UTC), what changed, and in
-brackets the command and where it came from (the ssh client's address, as
-`wgt-ctl`'s commands arrive; the sudo user).
+brackets the command and where it came from: the SSH client's address (which is
+how `wgt-ctl`'s commands show up) and the sudo user, if any.
 
 ```
 2026-11-23T13:20:37Z wg-tools: wgt: Add config 'tablet' at 10.77.1.4 (host:Buffalo, no WARP)  [wgt client add tablet --no-qr --yes; ssh from 203.0.113.5]
@@ -663,13 +664,13 @@ private keys.
 
 ### Adding a server
 
-`wgt-ctl init` does the [Quick start](#quick-start) install over SSH. It logs in as root and, on first contact, shows the
-server's host key for you to check against your provider's console. If only a
-password works it offers `ssh-copy-id`. It then installs git and Python 3 if
-they're missing, clones the same
-repository your local checkout came from (its `origin`) and
-runs `wgt setup --name <name>` with its usual prompts; anything after `--` is
-passed to setup. The server is added to the list only once setup finishes; if it
+`wgt-ctl init` does the [Quick start](#quick-start) install over SSH. It logs in
+as root and, on first contact, shows the server's host key for you to check
+against your provider's console. If only a password works it offers
+`ssh-copy-id`. It then installs git and Python 3 if they're missing, clones the
+same repository your local checkout came from (its `origin`) and runs
+`wgt setup --name <name>` with its usual prompts; anything after `--` is passed
+to setup. The server is added to the list only once setup finishes; if it
 stops part-way, fix the cause and run the same `init` again. A server where setup
 already finished is adopted under its saved name instead.
 
@@ -830,12 +831,12 @@ wgt-ctl boba jump-add                  # pick it by number (or: all)
 `jump-add` uploads the file and runs [`wgt jump add`](#jumps) there. The first
 time it sees a file it asks what it is ("Paris, France") and suggests a code
 from that name and the file's country tag if it has one (Proton's `FR#252` gives
-`par-fr`); the answer is written into the file as a `# jump: par-fr Paris, France` line
-(edit it to rename the jump before pushing). Pushing a file again updates its jump; pushing
-one whose code the server already has from another file (or that was added on the server)
-asks first, since that jump's clients move to the new tunnel. `wgt-ctl boba client add` also offers to push
-staged jump files that aren't on the server yet, so they show up in its exit
-menu.
+`par-fr`); the answer is written into the file as a `# jump: par-fr Paris, France`
+line (edit it to rename the jump before pushing). Pushing a file again updates its
+jump. Pushing one whose code the server already has from another file (or from a
+`wgt jump add` on the server) asks first, since that jump's clients move to the new
+tunnel. `wgt-ctl boba client add` also offers to push staged jump files that
+aren't on the server yet, so they show up in its exit menu.
 
 From an older version: move your files from `local/exits/<server>/` into
 `~/wg-tunnels/servers/<server>/carriers/` (they're named again on their next push;
@@ -909,9 +910,10 @@ Servers run their checkout directly (the watchdog timers too, every 10-30s), so 
 code runs as soon as it's pulled; but files already generated don't change until
 `wgt setup` runs.
 
-On a single server without `wgt-ctl`: `git -C /opt/wireguard-tools pull --ff-only
-&& wgt test`, then `wgt setup --yes` if `tools/render-diff.sh root@<server>`, run
-from your own machine, shows differences.
+On a single server without `wgt-ctl`: first, from your own machine with its
+clone pulled, `tools/render-diff.sh root@<server>` shows which generated files
+would change (step 1 below). Then on the server: `git -C /opt/wireguard-tools pull
+--ff-only && wgt test`, and `wgt setup --yes` if render-diff showed differences.
 
 With `wgt-ctl`:
 
