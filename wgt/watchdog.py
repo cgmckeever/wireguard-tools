@@ -7,7 +7,7 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional
 
-from . import devices, exits, live, ops, store
+from . import devices, exits, live, ops, store, ui
 from .const import (
     DEVICE_WATCHDOG,
     EXIT_HOLD,
@@ -203,9 +203,8 @@ def restore_wg0_rules(ctx: Ctx) -> None:
     if now - read_marker(ctx.paths.rules_marker) < RULES_RESTART_GAP:
         return
     ctx.files.write_marker(ctx.paths.rules_marker, str(now))
-    shown = "; ".join(missing[:3]) + (f" (+{len(missing) - 3} more)" if len(missing) > 3 else "")
     ok = ctx.runner.attempt(["systemctl", "restart", unit])
-    log_event(ctx, DEVICE_WATCHDOG, f"{ctx.cfg.WG_IF} was running without its rules ({shown}); "
+    log_event(ctx, DEVICE_WATCHDOG, f"{ctx.cfg.WG_IF} was running without its rules ({ui.first_few(missing, '; ')}); "
               + ("restarted it to put them back" if ok else "restarting it failed"))
 
 

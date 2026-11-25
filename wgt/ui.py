@@ -22,6 +22,11 @@ def ago(ts: int, now: Optional[float] = None) -> str:
     return f"{d // 3600}h ago"
 
 
+def first_few(items: Sequence[str], sep: str, n: int = 3) -> str:
+    """The first <n> of <items>, and how many more there are."""
+    return sep.join(items[:n]) + (f" (+{len(items) - n} more)" if len(items) > n else "")
+
+
 def have_tty() -> bool:
     """True if we can prompt on the terminal (even with stdin redirected)."""
     try:

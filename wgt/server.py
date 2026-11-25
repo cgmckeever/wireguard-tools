@@ -514,8 +514,8 @@ def restart_if_drifted(ctx: Ctx) -> None:
     if not drift:
         return
     unit = f"wg-quick@{ctx.cfg.WG_IF}"
-    shown = ", ".join(drift[:3]) + (f" (+{len(drift) - 3} more)" if len(drift) > 3 else "")
-    ctx.runner.step(f"Restart {ctx.cfg.WG_IF}: its running rules don't match {ctx.cfg.wg_conf} ({shown})",
+    ctx.runner.step(f"Restart {ctx.cfg.WG_IF}: its running rules don't match {ctx.cfg.wg_conf} "
+                    f"({ui.first_few(drift, ', ')})",
                     f"systemctl restart {unit}")
     ops.confirm(ctx, f"Restart {ctx.cfg.WG_IF} now?")
     ctx.runner.run(["systemctl", "restart", unit])
