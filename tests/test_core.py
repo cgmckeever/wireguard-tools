@@ -160,6 +160,39 @@ def test_exits_db():
     assert store.parse_exits(store.put_exit(text, "par-fr")) == []
 
 
+def test_exits_routes():
+    text = store.put_routes(None, "lan", ("10.20.30.0/24",))
+    text = store.put_routes(text, "par-fr", ("192.168.7.0/24", "10.1.0.0/16"))
+    assert text == store.ROUTES_HEADER + "\nlan 10.20.30.0/24\npar-fr 192.168.7.0/24,10.1.0.0/16\n"
+    assert store.parse_routes(text) == {"lan": ("10.20.30.0/24",), "par-fr": ("192.168.7.0/24", "10.1.0.0/16")}
+    assert store.parse_routes(store.put_routes(text, "lan", ())) == {"par-fr": ("192.168.7.0/24", "10.1.0.0/16")}
+
+
+def test_cidrs_are_ipv4_networks_once_each():
+    assert store.parse_cidrs("10.20.30.0/24, 10.20.30.0/24,192.168.1.5") == ("10.20.30.0/24", "192.168.1.5/32")
+    for bad, why in (("10.20.30.1/24", "IPv4 network"), ("fd00::/64", "IPv4 network"), ("0.0.0.0/0", "every"),
+                     ("", "no networks"), ("lan", "IPv4 network")):
+        with pytest.raises(WgtError, match=why):
+            store.parse_cidrs(bad)
+
+
+@pytest.mark.parametrize("line", ["lan", "lan 10.1.2.3/8", "X 10.0.0.0/8", "lan 10.0.0.0/8 x",
+                                  "lan 10.0.0.0/8\nlan 10.1.0.0/16"])
+def test_bad_exits_routes_lines_refused(line):
+    with pytest.raises(WgtError, match="exits.routes"):
+        store.parse_routes(line + "\n")
+
+
+def test_routes_only_configs():
+    names = ("lan.tv", "warp.lan.tv", "tv", "par-fr.tv")
+    configs = [store.Client(n, f"10.0.0.{i}", f"K{i}") for i, n in enumerate(names)]
+    snap = store.Snapshot(None, configs, [], [store.Exit("lan", 1, "LAN"), store.Exit("par-fr", 2, "Paris")],
+                          routes={"lan": ("10.20.30.0/24",), "gone": ("10.9.0.0/16",)})
+    assert [snap.client_routes(c) for c in snap.clients] == [("10.20.30.0/24",), (), (), ()]
+    assert snap.exit_routes("gone") == () and snap.exit_routes("par-fr") == ()
+    assert [c.name for c in snap.main_clients()] == ["lan.tv", "tv"]
+
+
 def test_disabled():
     assert store.set_disabled("a\nb\n", "a", False) == "b\n"
     assert store.set_disabled("b\n", "a", True) == "b\na\n"

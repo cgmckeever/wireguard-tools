@@ -483,6 +483,20 @@ def test_restore_refuses_to_mix_with_what_rollback_kept(make_ctx, tmp_path):
         backup.cmd_restore(ctx, [archive])
 
 
+def test_restore_refuses_to_mix_with_a_kept_routes_file(make_ctx, tmp_path):
+    """exits.routes is a database like exits.db: one left by a rollback would mix in."""
+    ctx = make_ctx(argv=["restore"])
+    _unset_up(ctx)
+    for db in (ctx.paths.client_db, ctx.paths.exit_db, ctx.paths.device_db, ctx.paths.disabled_db):
+        if os.path.exists(db):
+            os.remove(db)
+    Path(ctx.paths.exit_routes_db).write_text("nyc-us 10.20.30.0/24\n")
+    ctx.reload()
+    archive = _archive(tmp_path, "SETUP_DONE=1\n", ctx.paths.state.lstrip("/"))
+    with pytest.raises(WgtError, match="exits.routes would mix"):
+        backup.cmd_restore(ctx, [archive])
+
+
 def test_a_routed_subnet_is_refused_and_the_saved_one_isnt(make_ctx):
     ctx = make_ctx(argv=["--subnet", "192.0.2.0/25"])
     ctx.facts.routes4 = "default via 192.0.2.1 dev eth0\n192.0.2.0/24 dev eth0 scope link\n10.8.0.0/24 dev wg0\n"

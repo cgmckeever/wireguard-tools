@@ -307,6 +307,11 @@ def remove_exit(ctx: Ctx, code: str) -> None:
     _rewrite(ctx, ctx.paths.exit_db, lambda text: store.put_exit(text, code, None))
 
 
+def set_routes(ctx: Ctx, code: str, routes: Tuple[str, ...]) -> None:
+    """Jump <code>'s subnets in exits.routes (none: its line goes); reloads ctx.snap."""
+    _rewrite(ctx, ctx.paths.exit_routes_db, lambda text: store.put_routes(text, code, routes))
+
+
 def set_device(ctx: Ctx, name: str, number: Optional[int], groups: Optional[Tuple[str, ...]] = None) -> None:
     """Give device <name> a static <number>, or none, and <groups> (None: the
     ones it has); reloads ctx.snap."""

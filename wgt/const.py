@@ -44,6 +44,7 @@ EXIT_MARK_BASE = 22272       # fwmark of exit idx: 0x5700+idx
 EXIT_MAX = 20
 EXIT_RULE_PRIO = 9500        # per-client rules: before the WARP rule (WARP_RULE_PRIO)
 EXIT_MARK_PRIO = 9400
+EXIT_ROUTE_PRIO = 9450       # routes-only jump configs: their subnets to the jump, before their main-table rule
 DIRECT_STOP_PRIO = 9501      # WARP-off host clients: blackhole after their main-table rule
 JUMP_MTU = 1420
 EXIT_IDLE = 300              # seconds without a client handshake before an exit goes down
@@ -245,6 +246,11 @@ class Paths:
     @property
     def exit_db(self) -> str:
         return self.wg("exits.db")
+
+    @property
+    def exit_routes_db(self) -> str:
+        """The subnets of routes-only jumps (none listed: a jump carries all its configs' traffic)."""
+        return self.wg("exits.routes")
 
     def psk(self, name: str) -> str:
         """Client <name>'s preshared key."""

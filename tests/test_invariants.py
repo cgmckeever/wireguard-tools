@@ -198,6 +198,7 @@ def test_a_second_setup_changes_nothing(world):
 
 def test_setup_then_purge_with_clients_and_a_jump_leaves_nothing(world):
     """The fixture has jumps and clients: everything setup made goes."""
+    world.run(["status"], fn=lambda ctx: (ops.take_lock(ctx), ops.set_routes(ctx, "nyc-us", ("10.20.30.0/24",))))
     world.run(["setup"])
     world.run(["rollback", "--purge"])
     assert world.kernel.rules == [] and world.kernel.routes == set()

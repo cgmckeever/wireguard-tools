@@ -8,6 +8,7 @@ so keep them compatible):
   clients.handshakes "public-key unix-time": each config's newest handshake, kept by
                      the device watchdog (WireGuard forgets it when wg0 reloads a peer)
   exits.db           "code idx label..."
+  exits.routes       "code cidr[,cidr]": a routes-only jump's subnets (wgt jump routes)
   devices.db         "device number [groups]" (its static address; who it can reach)
   wg-tools.backups   "path<TAB>original-copy|NEW"
 
@@ -35,6 +36,7 @@ Reader = Callable[[str], Optional[str]]
 
 CLIENTS_HEADER = "# wireguard-tools clients: name ip public-key allowed-ips (no private keys)"
 EXITS_HEADER = "# wireguard-tools jumps: code idx label (wgt jump add)"
+ROUTES_HEADER = "# wireguard-tools jump routes: code cidr[,cidr] (wgt jump routes; none listed: all its traffic)"
 DEVICES_HEADER = "# wireguard-tools devices: device number [group,group] (its static address, who it can reach)"
 
 _EXIT_CODE = re.compile(r"[a-z][a-z0-9-]{0,4}[a-z0-9]")
@@ -328,6 +330,51 @@ def put_exit(text: Optional[str], code: str, entry: Optional[Exit] = None) -> st
     return _with_header(EXITS_HEADER, lines)
 
 
+# --- routes-only jumps ---
+
+def parse_cidrs(word: str) -> Tuple[str, ...]:
+    """A comma list of IPv4 networks (address/prefix), each once, in the order given,
+    as ipaddress writes them. Not 0.0.0.0/0: that's every address, a normal jump."""
+    nets: List[str] = []
+    for part in (p.strip() for p in word.split(",")):
+        if not part:
+            continue
+        try:
+            net = ipaddress.IPv4Network(part)
+        except ValueError:
+            raise WgtError(f"not an IPv4 network (its first address/prefix, e.g. 10.20.30.0/24): '{part}'") from None
+        if net.prefixlen == 0:
+            raise WgtError(f"{part} is every address: leave out the routes for a normal jump")
+        if net.with_prefixlen not in nets:
+            nets.append(net.with_prefixlen)
+    if not nets:
+        raise WgtError(f"no networks in '{word}' (e.g. 10.20.30.0/24)")
+    return tuple(nets)
+
+
+def parse_routes(text: Optional[str]) -> Dict[str, Tuple[str, ...]]:
+    """exits.routes: jump code -> the subnets its configs send through it."""
+    out: Dict[str, Tuple[str, ...]] = {}
+    for line in entries(text):
+        f = line.split()
+        if len(f) != 2 or not valid_exit_code(f[0]) or f[0] in out:
+            raise WgtError(f"exits.routes: bad line (want 'code cidr[,cidr]', a code once): {line}")
+        try:
+            out[f[0]] = parse_cidrs(f[1])
+        except WgtError as e:
+            raise WgtError(f"exits.routes: bad line ({e}): {line}") from e
+    return out
+
+
+def put_routes(text: Optional[str], code: str, routes: Iterable[str]) -> str:
+    """exits.routes with <code>'s line replaced by <routes> (none: dropped)."""
+    found = {c: r for c, r in parse_routes(text).items() if c != code}
+    nets = tuple(routes)
+    if nets:
+        found[code] = nets
+    return _with_header(ROUTES_HEADER, (f"{c} {','.join(r)}" for c, r in found.items()))
+
+
 # --- devices ---
 
 @dataclass
@@ -441,6 +488,7 @@ class Snapshot:
     disabled: List[str]
     exits: List[Exit]
     devices: List[Device] = field(default_factory=list)
+    routes: Dict[str, Tuple[str, ...]] = field(default_factory=dict)   # exits.routes
 
     def host_label(self) -> str:
         """This server as a way out, for people: host:<its location>."""
@@ -460,6 +508,16 @@ class Snapshot:
 
     def exit_clients(self, code: str) -> List[Client]:
         return [c for c in self.clients if c.exit == code]
+
+    def exit_routes(self, code: str) -> Tuple[str, ...]:
+        """Jump <code>'s subnets if it's routes-only (its configs send only those through
+        it), else none."""
+        return self.routes.get(code, ()) if self.exit(code) else ()
+
+    def client_routes(self, client: Client) -> Tuple[str, ...]:
+        """The subnets a config sends through its jump, if that's all it does: a WARP-off
+        config of a routes-only jump. None for every other config."""
+        return () if not client.exit or name_warp(client.name) else self.exit_routes(client.exit)
 
     def device_number(self, name: str) -> Optional[int]:
         """Device <name>'s static number (None if it has none)."""
@@ -484,6 +542,11 @@ class Snapshot:
         """Host configs without warp (out this server's IP)."""
         return [c for c in self.clients if not c.exit and not name_warp(c.name)]
 
+    def main_clients(self) -> List[Client]:
+        """Every config whose internet leaves from this server's IP (the main table):
+        the plain host ones, and those of routes-only jumps."""
+        return [c for c in self.clients if not name_warp(c.name) and (not c.exit or self.client_routes(c))]
+
 
 def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
     """Read the server's files (through <read>, default read_text)."""
@@ -494,6 +557,7 @@ def load(paths: Paths, read: Optional[Reader] = None) -> Snapshot:
         disabled=parse_disabled(read(paths.disabled_db)),
         exits=parse_exits(read(paths.exit_db)),
         devices=parse_devices(read(paths.device_db)),
+        routes=parse_routes(read(paths.exit_routes_db)),
     )
 
 
