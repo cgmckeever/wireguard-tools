@@ -1057,6 +1057,47 @@ cmd_status() {
 }
 
 
+# undo_vps: take the loaded VPS's part away, all of it: with wgt the configs made
+# through the puck's jumps (tpk-ctl.sh client made them; without the jump they're
+# cruft), then the jumps; then the link on both ends. Gone for good: a config
+# made again gets new keys (wgt-ctl keeps your old copy as a .bak).
+undo_vps() {
+    route_around "$VPS_NAME"
+    jumps="" configs=""
+    if [ "$TPK_ROUTING" = wgt ] && [ -n "$LINK_NET" ]; then
+        for pair in "$JUMP_CODE isolated" "$JUMP_LAN_CODE lan"; do
+            # shellcheck disable=SC2086
+            set -- $pair; [ $# -eq 2 ] || continue    # no LAN jump
+            if [ -n "$DRY" ]; then jumps="$jumps $1"; continue; fi
+            case "$(jump_owner "$1" "$(jump_port "$2")")" in
+                none) ;;    # already gone
+                ours) jumps="$jumps $1" ;;
+                *) log "leaving jump '$1': it isn't this puck's" ;;
+            esac
+        done
+        # shellcheck disable=SC2086
+        [ -z "$jumps" ] || [ -n "$DRY" ] || configs=$(words "$(jump_configs $jumps)")
+    fi
+    what="remove"
+    if [ -n "$DRY" ] && [ -n "$jumps" ]; then what="$what the configs on jump(s)$jumps (none listed in a dry run), then"
+    elif [ -n "$configs" ]; then what="$what the configs $configs, then"; fi
+    [ -z "$jumps" ] || what="$what jump(s)$jumps,"
+    killswitch=""; [ "$TPK_ROUTING" != tpk ] || killswitch=" and its kill switch"
+    confirm_vps "$what the link $LINK_IF$killswitch"
+    [ -z "$DRY" ] || log "[dry-run] would $what the link $LINK_IF$killswitch"
+    for c in $configs; do
+        log "$VPS_NAME: wgt client remove $c"
+        wgt_vps client remove "$c" --yes || die "wgt client remove $c failed; the jump and link are still there"
+    done
+    for j in $jumps; do
+        log "$VPS_NAME: wgt jump remove $j"
+        wgt_vps jump remove "$j" --yes || die "wgt jump remove $j failed; the link is still there"
+    done
+    run vps vps.sh undo
+    if [ -n "$LINK_NET" ]; then run puck puck.sh undo-link; fi
+}
+
+
 # --- Several VPSes ---------------------------------------------------------------
 
 cmd_vps() {
