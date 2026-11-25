@@ -17,8 +17,7 @@ from ..ctx import BOOL_FLAGS, VALUE_FLAGS
 from ..errors import WgtError
 from ..system import Out, atomic_write
 
-ROOT = REPO_DIR
-LOCAL = os.path.join(ROOT, "local")
+LOCAL = os.path.join(REPO_DIR, "local")
 LIST = os.path.join(LOCAL, "servers")
 DEVICES = os.path.join(LOCAL, "devices")               # each device's static number (fleet.py)
 
@@ -205,10 +204,10 @@ def cmd_list(quick: bool = False) -> None:
 
 def repo_url() -> str:
     """This checkout's origin, as an https URL (servers clone anonymously)."""
-    p = subprocess.run(["git", "-C", ROOT, "remote", "get-url", "origin"], stdout=subprocess.PIPE, text=True)
+    p = subprocess.run(["git", "-C", REPO_DIR, "remote", "get-url", "origin"], stdout=subprocess.PIPE, text=True)
     url = p.stdout.strip()
     if p.returncode != 0 or not url:
-        raise WgtError(f"no git remote 'origin' in {ROOT}")
+        raise WgtError(f"no git remote 'origin' in {REPO_DIR}")
     m = re.match(r"^git@([^:]+):(.+)$", url)   # servers clone anonymously
     return f"https://{m.group(1)}/{m.group(2)}" if m else url
 
