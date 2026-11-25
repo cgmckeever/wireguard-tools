@@ -888,8 +888,8 @@ links. They're chosen to avoid wgt's numbers (tables `100`, `200`–`250`, rules
 | link interface on the gateway | `wgpk-<puck>` | `wgpk-home` | the link, at the gateway's end |
 | link interface on the puck | `wgpk<n>` | `wgpk2` | the link, at the puck's end |
 | link addresses | `TPK_LINK`: gateway `+1`, puck `+2` | gateway `10.99.0.9`, puck `10.99.0.10` | the two ends of the link |
-| reverse tunnels on the puck | `wgrtun<n>`, `wgrtunlan<n>`, UDP `51822 + 2n`, `51823 + 2n` | `wgrtun2` on `51826`, `wgrtunlan2` on `51827` | `wgt`: what the gateway reaches in through (its jumps) |
-| jump addresses | `10.98.n.0/29`: puck `.1`, gateway `.2`; LAN-mode jump `.5`, `.6` | `10.98.2.1`, `10.98.2.2` | `wgt`: the ends of the reverse tunnels |
+| reverse tunnels on the puck | `wgrtun<n>`, `wgrtunlan<n>`, `wgrtunlo<n>`, UDP `51822 + 3n`, `51823 + 3n`, `51824 + 3n` | `wgrtun2` on `51828`, `wgrtunlan2` on `51829`, `wgrtunlo2` on `51830` | `wgt`: what the gateway reaches in through (its jumps) |
+| jump addresses | `10.98.n.0/28`: puck `.1`, gateway `.2`; the LAN jumps `.5`, `.6` (egress + LAN) and `.9`, `.10` (LAN only) | `10.98.2.1`, `10.98.2.2` | `wgt`: the ends of the reverse tunnels |
 | routing table | `260 + n` | `262` | `tpk`: the table that goes to the puck |
 | rule priorities | `900 + 2n`, `901 + 2n` | `904`, `905` | `tpk`: the rule sending a listed client to the table, and the kill switch that drops its traffic when the first can't apply |
 | kill switch | `tunnel-puck-killswitch-<puck>` | `tunnel-puck-killswitch-home` | `tpk`: its script and service on the gateway |

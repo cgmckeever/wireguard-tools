@@ -5,9 +5,9 @@
 # Everything else comes from the link's subnet (TPK_LINK, in the puck's
 # configs/<name>.<gateway>.conf), a /30 in 10.99.0.0/24 that gateway.sh pick chooses
 # while it's empty, free on that gateway and among the puck's other links. The n-th
-# /30 gives the puck's interfaces wgpk<n>, wgrtun<n> and wgrtunlan<n> (the rtuns
-# on ports 51822+2n and 51823+2n), wgt jump addresses 10.98.n.x, and on the gateway
-# table 260+n and rules 900+2n and 901+2n.
+# /30 gives the puck's interfaces wgpk<n>, wgrtun<n>, wgrtunlan<n> and wgrtunlo<n>
+# (the rtuns, on ports 51822+3n, 51823+3n and 51824+3n), wgt jump addresses
+# 10.98.n.x, and on the gateway table 260+n and rules 900+2n and 901+2n.
 
 # link_ids: set the values below (exit 1 on a bad PUCK_NAME or TPK_LINK). With
 # TPK_LINK still empty only the names are set; need_link stops a step that needs
@@ -19,7 +19,7 @@ link_ids() {
     LINK_IF="wgpk-$PUCK_NAME"                        # the link's interface on the gateway (on the puck: wgpk<n>)
     KILL_NAME="tunnel-puck-killswitch-$PUCK_NAME"    # tpk routing: the kill switch's script and service on the gateway
     LINK_NET="" GATEWAY_LINK="" PUCK_LINK="" JUMP_NET="" TABLE="" PRIO_ROUTE="" PRIO_KILL=""
-    LINK_N="" PK_IF="" RTUN_IF="" RTUN_LAN_IF="" RTUN_PORT="" RTUN_LAN_PORT=""
+    LINK_N="" PK_IF="" RTUN_IF="" RTUN_LAN_IF="" RTUN_LO_IF="" RTUN_PORT="" RTUN_LAN_PORT="" RTUN_LO_PORT=""
     [ -n "${TPK_LINK:-}" ] || return 0
     host="${TPK_LINK#10.99.0.}"; host="${host%/30}"
     case "$TPK_LINK" in 10.99.0.*/30) ;; *) host=x ;; esac
@@ -32,13 +32,15 @@ link_ids() {
     LINK_N=$n
     PK_IF="wgpk$n"                       # the link's interface on the puck
     RTUN_IF="wgrtun$n"                   # wgt routing: the reverse tunnel the gateway reaches in through (wgt's jump)
-    RTUN_LAN_IF="wgrtunlan$n"            # ... and its LAN-mode twin
-    RTUN_PORT=$((51822 + 2 * n))         # their ports on the puck, inside the link
+    RTUN_LAN_IF="wgrtunlan$n"            # ... its egress+lan twin (the LAN jump)
+    RTUN_LO_IF="wgrtunlo$n"              # ... and its lan one (the LAN-only jump)
+    RTUN_PORT=$((51822 + 3 * n))         # their ports on the puck, inside the link
     RTUN_LAN_PORT=$((RTUN_PORT + 1))
+    RTUN_LO_PORT=$((RTUN_PORT + 2))
     LINK_NET="$TPK_LINK"
     GATEWAY_LINK="10.99.0.$((host + 1))"     # the gateway's end of the link
     PUCK_LINK="10.99.0.$((host + 2))"    # the puck's end
-    JUMP_NET="10.98.$n"                  # wgt routing: jump servers $JUMP_NET.1/.2 and, the LAN jump, .5/.6
+    JUMP_NET="10.98.$n"                  # wgt routing: jump servers $JUMP_NET.1/.2, the LAN jump .5/.6, the LAN-only .9/.10
     TABLE=$((260 + n))                   # tpk routing: the table that goes to the puck
     PRIO_ROUTE=$((900 + 2 * n))          # tpk routing: the rule sending CLIENT_IPS to TABLE
     PRIO_KILL=$((PRIO_ROUTE + 1))        # tpk routing: the kill switch's rule
