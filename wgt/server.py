@@ -380,7 +380,7 @@ def sync_client_configs(ctx: Ctx, old_name: str) -> None:
     endpoint = f"{ctx.cfg.values['ENDPOINT']}:{ctx.cfg.WG_PORT}"
     stale: List[str] = []
     for c in ctx.snap.clients:
-        conf = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
+        conf = clients.client_conf(ctx, c.name)
         # Before the move: once moved (not in a dry run) src is conf, and a renamed one must still be listed.
         moved = not os.path.isfile(conf)
         src = conf if not moved else _move_to_current_name(ctx, c.name, conf, old_name)
