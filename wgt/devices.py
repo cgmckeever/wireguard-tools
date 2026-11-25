@@ -35,10 +35,10 @@ from .const import (
 )
 from .errors import WgtError
 
-FAILED = "could not"   # starts sync's lines about a rule it couldn't change
-
 if TYPE_CHECKING:
     from .ctx import Ctx
+
+FAILED = "could not"   # starts sync's lines about a rule it couldn't change
 
 
 def static_of(ctx: Ctx, config: str) -> str:
@@ -273,7 +273,7 @@ def _sync_allowed(ctx: Ctx) -> List[str]:
 # --- commands ---
 
 def cmd_list(ctx: Ctx, words: List[str]) -> None:
-    """Each device and its static address (--tsv: device, number; wgt-ctl reads it)."""
+    """Each device, its static address and groups (--tsv: device, number[, groups]; wgt-ctl reads it)."""
     ops.no_more_words(words, "wgt device list [--tsv]")
     for device in ctx.snap.device_names():
         number = ctx.snap.device_number(device)
@@ -293,10 +293,7 @@ def cmd_set(ctx: Ctx, words: List[str]) -> None:
         raise WgtError(f"usage: {usage}")
     device = words[0]
     number = _number_word(words[1]) if len(words) == 2 else None
-    ops.take_lock(ctx)
-    ops.require_setup(ctx)
-    if not ctx.snap.device_clients(device):
-        raise WgtError(f"no device '{device}' (see: wgt client list)")
+    _lock_for(ctx, device)
     have = ctx.snap.device_number(device)
     if number is None:
         if have is not None:
@@ -348,12 +345,17 @@ def cmd_ungroup(ctx: Ctx, words: List[str]) -> None:
     apply_now(ctx)
 
 
-def _for_groups(ctx: Ctx, device: str) -> int:
-    """The number of a device about to change groups, under the lock."""
+def _lock_for(ctx: Ctx, device: str) -> None:
+    """Take the lock for a change to <device>, which must have configs here."""
     ops.take_lock(ctx)
     ops.require_setup(ctx)
     if not ctx.snap.device_clients(device):
         raise WgtError(f"no device '{device}' (see: wgt client list)")
+
+
+def _for_groups(ctx: Ctx, device: str) -> int:
+    """The number of a device about to change groups, under the lock."""
+    _lock_for(ctx, device)
     number = ctx.snap.device_number(device)
     if number is None:
         raise WgtError(f"'{device}' has no static address yet (wgt device set {device})")
