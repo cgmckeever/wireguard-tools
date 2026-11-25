@@ -17,6 +17,31 @@ under the friend's IP. You build and test everything at home; at drop-off the
 puck only needs power. One puck can serve several VPSes, each over its own link
 ([One puck, several VPSes](#one-puck-several-vpses)).
 
+**Where each tunnel starts and ends, and who sees the traffic.** With `wgt`:
+
+```
+client ══[1]══▶ VPS wg0 ─ plain ─▶ VPS ══[2 inside 3]══▶ puck wgpk0 → wgrtun0 ─ plain ─▶ friend's ISP ──▶ sites
+  [1] the client's config: client ↔ VPS
+  [2] the jump (rtun): VPS px-<code> ↔ puck wgrtun<n>
+  [3] the link: VPS wgpk-<puck> ↔ puck wgpk<n>, dialled by the puck
+```
+
+| Where | Sees the traffic in the clear? |
+|---|---|
+| the client's own network, its ISP | no: only [1], encrypted, to the VPS |
+| **the VPS** | **yes**: it unwraps [1] and wraps the traffic again for the puck, as any VPN server would |
+| between the VPS and the puck, the friend's router | no: [2] inside [3], encrypted twice |
+| **the puck** | **yes**: it unwraps [3] then [2], and sends the traffic out |
+| **the friend's ISP, and the sites** | **yes**, as for any traffic from that home (HTTPS still hides the content) |
+
+With `tpk` there's no [2]: the VPS routes the listed clients straight into the
+link, so it's [1], then [3] alone. Who sees what is the same.
+
+To keep the traffic from the VPS too, the client would have to wrap it
+itself, a puck tunnel inside its VPS tunnel, as wireguard-tunnels' warped
+tunnels do with WARP. tunnel-puck doesn't do that. Phones would need sing-box
+for it, and a Mac wireguard-tunnels, sing-box or two `wg-quick` configs.
+
 **Status:** tested only on a Raspberry Pi so far: a Pi 2 v1.1 (32-bit
 Raspberry Pi OS Bookworm), with `TPK_ROUTING=wgt` against a test VPS. Phases 1
 and 2 ran from a fresh image, and an iPhone on cellular came out with the
