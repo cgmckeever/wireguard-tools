@@ -504,7 +504,7 @@ wgt tunnel test       # every way out (each exit, with and without WARP), traced
 wgt summary           # at a glance: one line per fact, says what is wrong
 wgt status            # settings (and any not running yet), interfaces, configs, routes, rules
 wgt log [N]           # its changes, the watchdogs and the tunnels: last lines, then follows (Ctrl-C stops; --no-follow just prints)
-wgt history [N]       # every change made here, when and by whom (--all: the whole year)
+wgt history [N]       # every change made here, when and by whom (--all: everything kept)
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
 wgt rollback          # stop everything, remove all rules, restore original files and the hostname
@@ -788,15 +788,16 @@ empty: `init` and `sync` make it, and `remove` deletes it if nothing is left in
 it. That's how wireguard-tunnels knows which servers exist. `remove` leaves the
 server's client configs in `devices/`: delete those by hand.
 
-**Client configs follow the server.** After `client add`, `rotate`, `rename` and
-`remove`, the `client` list and its action menu, `device rename` (on one
-server or `all`), and `jump add` or `jump-add` (a label is in its configs), `wgt-ctl` copies that server's client configs into
-`devices/<device>/config/`. So do `setup` and `restore`, which rewrite every
-config. `wgt-ctl <server> sync` (or `all sync`) does it on demand, such as after a
-`move`, or after `wgt setup` run on the server itself: sync before the next client
-change there, since after `--name` a rotated or removed config's old copy no longer
-matches. The server's copy is the live one,
-so it wins:
+**Client configs follow the server.** `wgt-ctl` copies a server's client configs
+into `devices/<device>/config/` after any command through it that can change them:
+`client add`, `rotate`, `rename` and `remove`; the `client` list and its action
+menu; `device rename` (on one server or `all`); `jump add` and `jump-add` (a
+jump's label is in its configs); and `setup`, `restore`, `init` and `move`, which
+rewrite every config. `wgt-ctl <server> sync` (or `all sync`) does it on demand:
+after a copy that failed or was interrupted, or after `wgt setup` run on the server
+itself (sync before the next client change there, since after `--name` a rotated
+or removed config's old copy no longer matches). The server's copy is the live
+one, so it wins:
 
 | On your machine | What happens |
 |---|---|
@@ -872,8 +873,8 @@ wgt-ctl dengar move                                                # a fresh cop
    whether to tear wireguard-tools off the old machine, including its backup
    archives (`--yes` tears it down without asking).
 
-If the endpoint changed, every config was rewritten: `wgt-ctl <server> sync`
-updates your copies in `~/wg-tunnels`.
+If the endpoint changed, every config was rewritten; `move`'s last step copies
+them to `~/wg-tunnels` (`wgt-ctl <server> sync` if that was interrupted).
 
 Without `--to`, the same steps run on the same machine, except that step 3 also
 deletes its keys and configs (`rollback --purge`) and re-clones the checkout, so
