@@ -35,8 +35,8 @@ WG_SUBNET=""                        # leave empty (it means every subnet WG_IF i
 WGT_SERVER=""
 # Jump codes are wgt's: 2-6 of a-z 0-9 -. Empty, they're made from the puck's
 # name, shortened to fit (grandma: grandm, LAN gran-l); tpk-ctl.sh config shows
-# them. A code the VPS already uses for something else is refused. Codes are per
-# VPS, so the same puck has the same code on each.
+# them. A code the VPS already uses for something else is refused. The same code
+# can be used on each VPS: codes are per server.
 JUMP_CODE=""                        # the puck's jump on the VPS; empty: the puck's name (6 at most)
 JUMP_LABEL=""                       # a label for it, e.g. "Friend's house"; empty: the puck's name
 JUMP_LAN=""                         # yes: a second jump in LAN mode (2.3), its code the jump's with -l (mom: mom-l)
