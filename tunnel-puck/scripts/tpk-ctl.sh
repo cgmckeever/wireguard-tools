@@ -1203,10 +1203,9 @@ each_vps() {
     for v in $names; do load_vps "$v"; "$fn" "$@"; done
 }
 
+link_and_exit() { cmd_link; cmd_exit; }
 cmd_all() {
-    names=$(the_vpses)
-    [ -n "$names" ] || die "$PUCK_NAME serves no VPS yet: tpk-ctl.sh $PUCK_NAME vps add <vps>"
-    for v in $names; do load_vps "$v"; cmd_link; cmd_exit; done
+    each_vps link_and_exit
     reset_vps
     auto_wifi
     cmd_test
