@@ -18,62 +18,33 @@ from ..errors import WgtError
 from ..system import Out, atomic_write
 
 ROOT = REPO_DIR
-
-
 LOCAL = os.path.join(ROOT, "local")
-
-
 LIST = os.path.join(LOCAL, "servers")
-
-
 DEVICES = os.path.join(LOCAL, "devices")               # each device's static number (fleet.py)
-
 
 DEF_DIR = "/opt/wireguard-tools"
 DEF_WGT = f"{DEF_DIR}/bin/wgt"
-
-
 REMOTE = Paths()                                       # where things are on a server
-
-
 STATE_FILE = REMOTE.state
-
-
 INBOX = os.path.join(REMOTE.exit_dir, "incoming")
 
-
 _SSH_BASE = ["-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15"]
-
-
 # Host keys must already be known (whatever ~/.ssh/config says); only the first
 # login to a new machine asks, so you can check the key against your provider's console.
 SSH_OPTS = _SSH_BASE + ["-o", "StrictHostKeyChecking=yes"]
-
-
 SSH_FIRST_LOGIN_OPTS = _SSH_BASE + ["-o", "StrictHostKeyChecking=ask", "-o", "BatchMode=no"]
 
-
 RESERVED = ("init", "clients", "devices", "summary", "all", "help", "list")
-
-
 SERVER_NAME_RULE = f"a letter first, then up to 31 of A-Za-z0-9_- (not {', '.join(RESERVED)} or a command's name)"
-
-
 # wgt-ctl's own per-server commands.
 CTL_COMMANDS = ("pull", "backup", "jump-add", "ssh", "branch", "forget", "remove", "move", "sync")
 # The wgt commands (anything else after a server word is a mistake, not a command).
 WGT_COMMANDS = ("setup", "summary", "status", "test", "log", "history", "backup", "restore", "rollback", "client",
                 "device", "jump", "exit", "tunnel", "warp")
 
-
 TARGET = re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.:\[\]-]+$")
-
-
 CHECKOUT_DIR = re.compile(r"^/[A-Za-z0-9._/-]+$")
-
-
 BRANCH = re.compile(r"^[A-Za-z0-9._/][A-Za-z0-9._/-]*$")
-
 
 out = Out()
 
