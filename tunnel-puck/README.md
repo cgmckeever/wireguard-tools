@@ -180,7 +180,7 @@ file holds the puck's own settings; each VPS it serves gets its own file in
 [2.1](#21-serve-a-vps-computer).
 
 ```sh
-scripts/tpk-ctl.sh new           # or: scripts/tpk-ctl.sh new home [--wifi]
+scripts/tpk-ctl.sh new           # or: scripts/tpk-ctl.sh new mom [--wifi]
 ```
 
 Fill it in (each line has a comment), then check it:
@@ -431,14 +431,13 @@ pucks, each serving any of your VPSes.
 One VPS can serve several pucks, say one at a friend's and one at your mom's.
 Each puck gets its own settings files, and `vps add` leaves `TPK_LINK` and
 `PUCK_PORT` empty in the new one: `link` picks a subnet and port nothing on the
-VPS uses, and saves them in that file. Both directions combine: any number of
-pucks, each serving any of your VPSes.
+VPS uses, and saves them in that file.
 
 ```sh
-scripts/tpk-ctl.sh new mom                     # then fill in configs/mom.conf: SSH_LAN ...
-scripts/tpk-ctl.sh mom config
-scripts/tpk-ctl.sh mom init                    # and so on through the steps, naming the puck each time
-scripts/tpk-ctl.sh mom vps add dengar
+scripts/tpk-ctl.sh new home                    # then fill in configs/home.conf: SSH_LAN ...
+scripts/tpk-ctl.sh home config
+scripts/tpk-ctl.sh home init                   # and so on through the steps, naming the puck each time
+scripts/tpk-ctl.sh home vps add dengar
 ```
 
 Each puck has its own link on the VPS (`wgpk-home`, `wgpk-mom`), with its own
