@@ -449,8 +449,7 @@ run() {
         if [ "$who" = puck ]; then log "[dry-run] on $PUCK: $script $*"; else log "[dry-run] on $VPS_SSH: $script $*"; fi
         return 0
     fi
-    { vars; cat "$HERE/ids.sh" "$HERE/$script"; } | to "$who" \
-        "if [ \"\$(id -u)\" = 0 ]; then sh -s -- $*; else sudo sh -s -- $*; fi"
+    { vars; cat "$HERE/ids.sh" "$HERE/$script"; } | to "$who" "$AS_ROOT sh -s -- $*"
 }
 
 # wgt_vps <wgt args...>: a wgt command on the VPS through wgt-ctl, which also
