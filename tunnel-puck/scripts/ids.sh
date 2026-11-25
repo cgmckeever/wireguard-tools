@@ -13,14 +13,7 @@
 # TPK_LINK still empty only the names are set; need_link stops a step that needs
 # the rest.
 link_ids() {
-    # Spelled out, not [a-z]: in some locales that range matches capitals too.
-    lower=abcdefghijklmnopqrstuvwxyz
-    case "${PUCK_NAME:-}" in
-        ["$lower"]*) case "$PUCK_NAME" in
-            *[!"$lower"0123456789-]*) ids_die "a puck's name is a-z, 0-9 and - (got: $PUCK_NAME)" ;;
-        esac ;;
-        *) ids_die "a puck's name starts with a lowercase letter (got: ${PUCK_NAME:-nothing})" ;;
-    esac
+    name_ok puck "${PUCK_NAME:-}"
     [ "${#PUCK_NAME}" -le 10 ] \
         || ids_die "a puck's name is at most 10 characters, so wgpk-<name> fits an interface name (got: $PUCK_NAME)"
     LINK_IF="wgpk-$PUCK_NAME"                        # the link's interface on the VPS (on the puck: wgpk<n>)
@@ -53,14 +46,20 @@ link_ids() {
 
 need_link() { [ -n "$LINK_NET" ] || ids_die "TPK_LINK isn't set yet: tpk-ctl.sh link picks it"; }
 
-# vps_name_ok <name>: a VPS's name in configs/<puck>.<vps>.conf: a-z, 0-9 and -,
-# starting with a letter, not "wifi" (configs/<puck>.wifi.conf is the Wi-Fi list).
+# vps_name_ok <name>: a VPS's name in configs/<puck>.<vps>.conf, not "wifi"
+# (configs/<puck>.wifi.conf is the Wi-Fi list).
 vps_name_ok() {
+    [ "$1" != wifi ] || ids_die "'wifi' can't be a VPS's name: configs/<puck>.wifi.conf is the puck's Wi-Fi list"
+    name_ok VPS "$1"
+}
+
+# name_ok puck|VPS <name>: a-z, 0-9 and -, starting with a letter.
+name_ok() {
+    # Spelled out, not [a-z]: in some locales that range matches capitals too.
     lower=abcdefghijklmnopqrstuvwxyz
-    case "$1" in
-        wifi) ids_die "'wifi' can't be a VPS's name: configs/<puck>.wifi.conf is the puck's Wi-Fi list" ;;
-        ["$lower"]*) case "$1" in *[!"$lower"0123456789-]*) ids_die "a VPS's name is a-z, 0-9 and - (got: $1)" ;; esac ;;
-        *) ids_die "a VPS's name starts with a lowercase letter (got: ${1:-nothing})" ;;
+    case "$2" in
+        ["$lower"]*) case "$2" in *[!"$lower"0123456789-]*) ids_die "a $1's name is a-z, 0-9 and - (got: $2)" ;; esac ;;
+        *) ids_die "a $1's name starts with a lowercase letter (got: ${2:-nothing})" ;;
     esac
 }
 
