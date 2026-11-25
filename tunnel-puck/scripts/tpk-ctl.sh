@@ -754,6 +754,9 @@ cmd_power() {
 
 # --- One VPS -------------------------------------------------------------------
 
+# result <KEY> <a script's output>: the value of its last KEY=<value> line.
+result() { printf '%s\n' "$2" | sed -n "s/^$1=//p" | tail -n 1; }
+
 cmd_link() {
     vps_config >/dev/null
     install_exit_script
@@ -765,9 +768,9 @@ cmd_link() {
         avoid=""; [ -z "$TPK_LINK_AVOID" ] || avoid=" (not $TPK_LINK_AVOID: the puck's other links)"
         log "VPS: choosing the link's subnet and port$avoid"
         out=$(run vps vps.sh pick)
-        picked=$(printf '%s\n' "$out" | sed -n 's/^LINK=//p' | tail -n 1)
+        picked=$(result LINK "$out")
         if [ -n "$picked" ] && [ "$picked" != "$TPK_LINK" ]; then TPK_LINK="$picked"; save TPK_LINK "$TPK_LINK"; link_ids; fi
-        picked=$(printf '%s\n' "$out" | sed -n 's/^PORT=//p' | tail -n 1)
+        picked=$(result PORT "$out")
         if [ -n "$picked" ] && [ "$picked" != "$PUCK_PORT" ]; then PUCK_PORT="$picked"; save PUCK_PORT "$PUCK_PORT"; fi
         if [ -n "$DRY" ] && [ -z "$TPK_LINK" ]; then
             host=0; while case " $TPK_LINK_AVOID " in *" 10.99.0.$host/30 "*) true ;; *) false ;; esac; do host=$((host + 4)); done
@@ -775,13 +778,13 @@ cmd_link() {
         fi
     fi
     log "puck: WireGuard and its key ($PK_IF)"
-    PUCK_PUBKEY=$(run puck puck.sh link | sed -n 's/^PUBKEY=//p' | tail -n 1)
+    PUCK_PUBKEY=$(result PUBKEY "$(run puck puck.sh link)")
     [ -n "$PUCK_PUBKEY" ] || [ -n "$DRY" ] || die "the puck didn't report its public key"
     routing=""; [ "$TPK_ROUTING" != tpk ] || [ -z "$CLIENT_IPS" ] || routing=", routing and a kill switch for $CLIENT_IPS"
     confirm_vps "the link $LINK_IF$routing"
     log "VPS: the link $LINK_IF"
     out=$(run vps vps.sh link)
-    VPS_PUBKEY=$(printf '%s\n' "$out" | sed -n 's/^PUBKEY=//p' | tail -n 1)
+    VPS_PUBKEY=$(result PUBKEY "$out")
     [ -n "$VPS_PUBKEY" ] || [ -n "$DRY" ] || die "the VPS didn't report its public key"
     [ -n "$VPS_PUBKEY" ] || VPS_PUBKEY=dry-run
     log "puck: the link ($PK_IF)"
@@ -821,7 +824,7 @@ jump_port() { if [ "$1" = lan ]; then echo "$RTUN_LAN_PORT"; else echo "$RTUN_PO
 add_jump() {
     guard_jump "$2" "$(jump_port "$1")"
     out=$(run puck puck.sh jump "$1")
-    file=$(printf '%s\n' "$out" | sed -n 's/^JUMPFILE=//p')
+    file=$(result JUMPFILE "$out")
     if [ -n "$file" ]; then
         confirm_vps "wgt jump add $2"
         log "VPS: wgt jump add $2 (the jump file goes puck -> VPS through a pipe, never shown)"
