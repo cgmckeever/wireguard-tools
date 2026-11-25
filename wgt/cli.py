@@ -90,15 +90,21 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
         sys.stdout.write(f"=== {name}\n{redact(text)}")
 
 
+def _line_count(words: List[str], usage: str) -> str:
+    """The [lines] word of log and history (default 40)."""
+    ops.no_more_words(words[1:], usage)
+    count = words[0] if words else "40"
+    if not store.is_uint(count):
+        raise WgtError(f"usage: {usage}")
+    return count
+
+
 def cmd_log(ctx: Ctx, words: List[str]) -> None:
-    """One time-ordered log: these tools' own steps, both watchdogs, and the
+    """One time-ordered log: these tools' own steps, the watchdogs, and the
     wg-quick units (wg0, warp, each jump's tunnels). Like tail -f: the
     last [lines] (default 40), then new entries until Ctrl-C. With
     --no-follow, or when the output isn't a terminal, it prints and stops."""
-    ops.no_more_words(words[1:], "wgt log [lines] [--no-follow]")
-    count = words[0] if words else "40"
-    if not store.is_uint(count):
-        raise WgtError("usage: wgt log [lines] [--no-follow]")
+    count = _line_count(words, "wgt log [lines] [--no-follow]")
     matches: List[str] = []
     for tag in (LOG_TAG, *ALL_WATCHDOGS, *map(error_tag, ALL_WATCHDOGS)):
         matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
@@ -118,10 +124,7 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
 def cmd_history(ctx: Ctx, words: List[str]) -> None:
     """wgt history [N] [--all]: the changes made on this server (by wgt, wgt-ctl and
     the watchdogs), with when and who: the last N lines, or with --all every one kept."""
-    ops.no_more_words(words[1:], "wgt history [lines] [--all]")
-    count = words[0] if words else "40"
-    if not store.is_uint(count):
-        raise WgtError("usage: wgt history [lines] [--all]")
+    count = _line_count(words, "wgt history [lines] [--all]")
     lines = system.read_history(ctx.paths.history_file)
     if not lines:
         ctx.out.info(f"no history yet ({ctx.paths.history_file}): it starts with the next change")
