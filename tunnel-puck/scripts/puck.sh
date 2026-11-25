@@ -312,6 +312,7 @@ uplink() { "$EXIT_SCRIPT" uplink 2>/dev/null || echo none; }
 
 # Saved Wi-Fi connections, one per line: <name>:<device it's on, or empty>
 wifi_conns() { nmcli -t -f NAME,TYPE,DEVICE connection show | awk -F: '$2 == "802-11-wireless" {print $1 ":" $3}'; }
+wifi_names() { wifi_conns | cut -d: -f1 | paste -sd, - | sed 's/,/, /g'; }    # on one line
 
 do_wifi_list() {
     need_nm
@@ -429,7 +430,7 @@ do_test() {
         printf 'INFO  no links yet (tpk-ctl.sh <puck> vps add <vps>)\n'
     fi
     if command -v nmcli >/dev/null; then
-        wifi=$(wifi_conns | cut -d: -f1 | paste -sd, - | sed 's/,/, /g')
+        wifi=$(wifi_names)
         printf 'INFO  uplink: %s. Saved Wi-Fi: %s\n' "$(uplink)" "${wifi:-none (ethernet only)}"
     fi
     ip=$(curl -s -m 10 https://ifconfig.me || true)
@@ -440,7 +441,7 @@ do_test() {
 # do_status: read-only, quick: no test traffic beyond one public-IP lookup.
 do_status() {
     echo "UPLINK=$(uplink)"
-    if command -v nmcli >/dev/null; then echo "WIFI=$(wifi_conns | cut -d: -f1 | paste -sd, - | sed 's/,/, /g')"; fi
+    if command -v nmcli >/dev/null; then echo "WIFI=$(wifi_names)"; fi
     echo "IP=$(curl -4 -s -m 8 https://ifconfig.me || true)"
     for f in "$WG"/wgpk*.conf "$WG"/wgrtun*.conf; do
         [ -e "$f" ] || continue
