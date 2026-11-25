@@ -1042,7 +1042,7 @@ cmd_status() {
     printf '  uplink %s, public IP %s, saved Wi-Fi: %s\n' "$(get UPLINK)" "$(get IP)" "${wifi:-none}"
     names=$(the_vpses)
     [ -n "$names" ] || { echo "  serves no VPS yet (tpk-ctl.sh $PUCK_NAME vps add <vps>)"; return 0; }
-    printf '%-10s %-9s %-20s %-21s %-26s %s\n' VPS STATE LINK RTUN JUMP CONFIGS
+    printf '%-10s %-9s %-20s %-21s %s\n' VPS STATE LINK RTUN JUMP
     for v in $names; do
         QUIET=1 load_vps "$v"
         if [ -z "$LINK_NET" ]; then printf '%-10s %s\n' "$v" "no link yet (tpk-ctl.sh $PUCK_NAME.$v link)"; continue; fi
@@ -1055,11 +1055,13 @@ cmd_status() {
             jump="$JUMP_CODE ${jump:-(not on $v)}"
             # shellcheck disable=SC2086
             configs=$(wgt_vps client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $JUMP_CODE $JUMP_LAN_CODE " \
-                'index(codes, " " $2 " ") {printf "%s%s (%s)", sep, $1, $4; sep = ", "}')
+                'index(codes, " " $2 " ") {printf "  %-28s %s\n", $1, ($4 == "disabled" ? "disabled" : "last handshake: " $4)}')
+            [ -n "$configs" ] || configs="  no configs on the jump yet (tpk-ctl.sh $PUCK_NAME.$v client <device>)"
         else
-            rtun="-" jump="-" configs="CLIENT_IPS: ${CLIENT_IPS:-none}"
+            rtun="-" jump="-" configs="  clients (CLIENT_IPS): ${CLIENT_IPS:-none}"
         fi
-        printf '%-10s %-9s %-20s %-21s %-26s %s\n' "$v" "$state" "$link" "$rtun" "$jump" "${configs:-none yet}"
+        printf '%-10s %-9s %-20s %-21s %s\n' "$v" "$state" "$link" "$rtun" "$jump"
+        printf '%s\n' "$configs"
     done
 }
 

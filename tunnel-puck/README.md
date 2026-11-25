@@ -628,15 +628,19 @@ in at all, bring the puck home to change it.
   answers.
 - **At a glance:** `scripts/tpk-ctl.sh status`, read-only and quick: how the
   puck was reached, its uplink, public IP and Wi-Fi, then per VPS whether it's
-  serving, the link's and rtun's last handshakes, the jump's state, and each
-  config on it with its last handshake. `test` says why something's off.
+  serving, the link's and rtun's last handshakes and the jump's state, and
+  under it each config on the jump with its last handshake (or `disabled`).
+  `test` says why something's off.
 
   ```
   mom: via the link to dengar, through root@dengar.example.com
     uplink eth0, public IP 203.0.113.7, saved Wi-Fi: none
-  VPS        STATE     LINK                 RTUN                  JUMP                       CONFIGS
-  dengar     partly    wgpk0 19s ago        wgrtun0 8m ago        mom idle                   mom.iphone (none), mom.laptop (disabled)
-  ig88       serving   wgpk1 78s ago        wgrtun1 5m ago        mom up, no WARP (1 active) mom.iphone (1m ago)
+  VPS        STATE     LINK                 RTUN                  JUMP
+  dengar     partly    wgpk0 19s ago        wgrtun0 8m ago        mom idle
+    mom.iphone                   last handshake: 3h ago
+    mom.laptop                   disabled
+  ig88       serving   wgpk1 78s ago        wgrtun1 5m ago        mom up, no WARP (1 active)
+    mom.iphone                   last handshake: 1m ago
   ```
 
 ## Turning clients off and on
