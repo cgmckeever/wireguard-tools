@@ -3,17 +3,17 @@
 #
 # scripts/tpk-ctl.sh on your computer streams this file to the puck over ssh, after the
 # settings it needs and ids.sh. To run it on the puck yourself instead:
-#   cat ids.sh puck.sh | sudo TPK_CONF=/path/to/configs/<puck>.<vps>.conf sh -s -- <step>
+#   cat ids.sh puck.sh | sudo TPK_CONF=/path/to/configs/<puck>.<gateway>.conf sh -s -- <step>
 #
 # Steps (each is safe to run again):
 #   init                 packages, automatic updates, watchdog; cloudflared too when
 #                        CF_TOKEN is set (tpk-ctl.sh sends it when SSH_CLOUDFLARE is set)
-#   link                 WireGuard and the link to one VPS, wgpk<n> (n from TPK_LINK: ids.sh).
-#                        Prints PUBKEY=<the puck's public key>; with VPS_PUBKEY set it also
+#   link                 WireGuard and the link to one gateway, wgpk<n> (n from TPK_LINK: ids.sh).
+#                        Prints PUBKEY=<the puck's public key>; with GATEWAY_PUBKEY set it also
 #                        writes and starts wgpk<n>
 #   jump isolated|lan    TPK_ROUTING=wgt: that link's reverse tunnel (wgrtun<n>, or wgrtunlan<n>
 #                        for lan). Prints JUMPFILE=<path> when it made a new jump file, else JUMP=exists
-#   jump-done isolated|lan   delete the jump file once the VPS has it
+#   jump-done isolated|lan   delete the jump file once the gateway has it
 #   dns                  TPK_ROUTING=tpk: the DNS resolver for that link's puck-exit clients
 #   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2.3)
 #   wifi-list            the saved Wi-Fi networks, and which one is in use
@@ -38,7 +38,9 @@ main() {
     if [ -n "${TPK_CONF:-}" ]; then . "$TPK_CONF"; fi
     : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf | cut -d. -f1)}"
     link_ids
-    : "${TPK_ROUTING:=tpk}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}" "${WIFI_LIST:=}"
+    # VPS_HOST, VPS_PUBKEY: their names before the gateway was called that (an old TPK_CONF)
+    : "${GATEWAY_HOST:=${VPS_HOST:-}}" "${GATEWAY_PUBKEY:=${VPS_PUBKEY:-}}"
+    : "${TPK_ROUTING:=tpk}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}" "${WIFI_LIST:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
@@ -70,7 +72,10 @@ log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'puck.sh: %s\n' "$*" >&2; exit 1; }
 need() { for v in "$@"; do eval "x=\${$v:-}"; [ -n "$x" ] || die "$v is not set"; done; }
 
-# put <mode> <path>: write stdin to <path> if it differs; CHANGED=1 when it did.
+# put <mode> <path>: write stdin to <path> if it differs; CHANGED=1 when it did, and
+# the interface restarts. So the files it writes keep their old wording ("the VPS",
+# from before the gateway was called that): new words would restart every link.
+# The jump file keeps its old name too (jump-for-vps<n>.conf).
 CHANGED=0
 put() {
     tmp=$(mktemp); cat > "$tmp"
@@ -182,11 +187,11 @@ EOF
     fi
     need_link
     echo "PUBKEY=$(keypair "$PK_IF")"
-    if [ -z "$VPS_PUBKEY" ]; then
-        log "keys ready; $PK_IF is written once VPS_PUBKEY is known (tpk-ctl.sh link does this)"
+    if [ -z "$GATEWAY_PUBKEY" ]; then
+        log "keys ready; $PK_IF is written once GATEWAY_PUBKEY is known (tpk-ctl.sh link does this)"
         return 0
     fi
-    need VPS_HOST PUCK_PORT
+    need GATEWAY_HOST PUCK_PORT
 
     exit_lines=""
     if [ "$TPK_ROUTING" = tpk ]; then
@@ -197,7 +202,7 @@ PostDown = $EXIT_SCRIPT down %i"
     fi
     CHANGED=0
     put 600 "$WG/$PK_IF.conf" <<EOF
-# tunnel-puck: the link to the VPS $VPS_HOST (written by puck.sh link)
+# tunnel-puck: the link to the VPS $GATEWAY_HOST (written by puck.sh link)
 [Interface]
 Address = $PUCK_LINK/30
 MTU = 1420
@@ -206,9 +211,9 @@ $exit_lines
 
 [Peer]
 # the VPS
-PublicKey = $VPS_PUBKEY
-Endpoint = $VPS_HOST:$PUCK_PORT
-AllowedIPs = $VPS_LINK/32
+PublicKey = $GATEWAY_PUBKEY
+Endpoint = $GATEWAY_HOST:$PUCK_PORT
+AllowedIPs = $GATEWAY_LINK/32
 PersistentKeepalive = 25
 EOF
     start_or_restart "wg-quick@$PK_IF"
@@ -216,7 +221,7 @@ EOF
 }
 
 # jump_vars isolated|lan: the names and addresses of that reverse tunnel: a
-# WireGuard server on the puck that the VPS reaches in through, over its link
+# WireGuard server on the puck that the gateway reaches in through, over its link
 # (wgt calls it a jump).
 jump_vars() {
     need_link
@@ -236,12 +241,12 @@ do_jump() {
         echo "JUMP=exists"
         return 0
     fi
-    # The VPS's private key for this jump is made here and leaves only in the jump
+    # The gateway's private key for this jump is made here and leaves only in the jump
     # file, which tpk-ctl.sh pipes straight to `wgt jump add` and then deletes.
     rm -f "$WG/$JIF.key"
     server_pub=$(keypair "$JIF")
-    vps_key=$(wg genkey)
-    vps_pub=$(printf '%s\n' "$vps_key" | wg pubkey)
+    gateway_key=$(wg genkey)
+    gateway_pub=$(printf '%s\n' "$gateway_key" | wg pubkey)
     CHANGED=0
     put 600 "$WG/$JIF.conf" <<EOF
 # tunnel-puck: the reverse tunnel, the VPS's way in over $PK_IF; a wgt jump (written by puck.sh jump $1)
@@ -255,12 +260,12 @@ PostDown = $EXIT_SCRIPT down %i
 
 [Peer]
 # the VPS, as a jump client
-PublicKey = $vps_pub
+PublicKey = $gateway_pub
 AllowedIPs = $JPEER/32
 EOF
     put 600 "$WG/$JFILE" <<EOF
 [Interface]
-PrivateKey = $vps_key
+PrivateKey = $gateway_key
 Address = $JPEER/32
 
 [Peer]
@@ -268,13 +273,13 @@ Address = $JPEER/32
 PublicKey = $server_pub
 Endpoint = $PUCK_LINK:$JPORT
 EOF
-    vps_key=""
+    gateway_key=""
     start_or_restart "wg-quick@$JIF"
     echo "JUMPFILE=$WG/$JFILE"
 }
 
 # unbound: tunnel-puck.conf for the puck itself, and tunnel-puck-<n>.conf for each
-# tpk link's clients (their VPS redirects their port 53 to the puck's end of it).
+# tpk link's clients (their gateway redirects their port 53 to the puck's end of it).
 UNBOUND=/etc/unbound/unbound.conf.d/tunnel-puck
 do_dns() {
     need_link
@@ -427,7 +432,7 @@ do_test() {
         check "IP forwarding is on" "[ \"\$(sysctl -n net.ipv4.ip_forward)\" = 1 ]"
         printf 'INFO  links: %s\n' "$links"
     else
-        printf 'INFO  no links yet (tpk-ctl.sh <puck> vps add <vps>)\n'
+        printf 'INFO  no links yet (tpk-ctl.sh <puck> gateway add <gateway>)\n'
     fi
     if command -v nmcli >/dev/null; then
         wifi=$(wifi_names)
@@ -457,8 +462,8 @@ do_test_link() {
     if [ ! -f "$WG/$PK_IF.conf" ]; then fail "$PK_IF isn't set up (tpk-ctl.sh link)"; return "$FAILED"; fi
     check "$PK_IF is up" "ip link show $PK_IF"
     age=$(handshake_age "$PK_IF")
-    if [ "$age" -lt 180 ]; then pass "$PK_IF handshake ${age}s ago"; else fail "$PK_IF has no recent handshake (is PUCK_PORT/udp open on the VPS?)"; fi
-    check "the VPS answers on the link (ping $VPS_LINK)" "ping -c 2 -W 2 $VPS_LINK"
+    if [ "$age" -lt 180 ]; then pass "$PK_IF handshake ${age}s ago"; else fail "$PK_IF has no recent handshake (is PUCK_PORT/udp open on the gateway?)"; fi
+    check "the gateway answers on the link (ping $GATEWAY_LINK)" "ping -c 2 -W 2 $GATEWAY_LINK"
     for ifc in "$RTUN_IF" "$RTUN_LAN_IF"; do
         [ -f "$WG/$ifc.conf" ] || continue
         check "$ifc is up ($(current_mode "$ifc"))" "ip link show $ifc"

@@ -6,20 +6,21 @@
 # can be left out while there's only one). No secrets go in here: the Cloudflare
 # token stays in its own file.
 #
-# Each VPS the puck serves has its own file, configs/<name>.<vps>.conf
-# (puck.vps.conf.example): tpk-ctl.sh <name> vps add <vps> makes it. The Wi-Fi
-# list, if any, is configs/<name>.wifi.conf (puck.wifi.conf.example).
+# Each gateway the puck serves (the WireGuard server your clients connect to) has
+# its own file, configs/<name>.<gateway>.conf (puck.gateway.conf.example):
+# tpk-ctl.sh <name> gateway add <gateway> makes it. The Wi-Fi list, if any, is
+# configs/<name>.wifi.conf (puck.wifi.conf.example).
 
 # tpk-ctl.sh reaches the puck the first way that answers, and says which it used:
 #   1. SSH_LAN, on your home network while you build it
-#   2. through each VPS over its WireGuard link, the everyday way after drop-off
+#   2. through each gateway over its WireGuard link, the everyday way after drop-off
 #   3. SSH_CLOUDFLARE, the emergency door (below), when the links are down
 SSH_LAN="pi@tunnel-puck.local"      # user@name of the puck on your home network (the user and hostname set when flashing it)
 
 # Optional: the emergency door. SSH through a Cloudflare Tunnel, which doesn't
 # depend on the WireGuard links, so you can still get in and fix the puck when
-# they're down (a blocked port, a changed VPS IP, a bad change). Costs a domain on
-# Cloudflare and step 1.2b. Empty: no Cloudflare; if the links are down after
+# they're down (a blocked port, a changed gateway IP, a bad change). Costs a domain
+# on Cloudflare and step 1.2b. Empty: no Cloudflare; if the links are down after
 # drop-off, the puck must be power-cycled, or brought home.
 SSH_CLOUDFLARE=""                   # e.g. ssh.puck.example.com, a hostname on your Cloudflare domain
 CF_TOKEN_FILE="$HOME/.config/tunnel-puck/cloudflared.token"    # with SSH_CLOUDFLARE: the tunnel token alone, mode 600

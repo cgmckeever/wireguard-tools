@@ -1,19 +1,19 @@
 #!/bin/sh
-# vps.sh <step>: the VPS's side of tunnel-puck. Runs as root.
+# gateway.sh <step>: the gateway's side of tunnel-puck. Runs as root.
 #
-# scripts/tpk-ctl.sh on your computer streams this file to the VPS over ssh, after the
-# settings it needs and ids.sh. To run it on the VPS yourself instead:
-#   cat ids.sh vps.sh | TPK_CONF=/path/to/configs/<puck>.<vps>.conf PUCK_PUBKEY=<the puck's key> sh -s -- <step>
+# scripts/tpk-ctl.sh on your computer streams this file to the gateway over ssh, after the
+# settings it needs and ids.sh. To run it on the gateway yourself instead:
+#   cat ids.sh gateway.sh | TPK_CONF=/path/to/configs/<puck>.<gateway>.conf PUCK_PUBKEY=<the puck's key> sh -s -- <step>
 #
-# Each puck on this VPS has its own link, wgpk-<name>, with its own subnet,
+# Each puck on this gateway has its own link, wgpk-<name>, with its own subnet,
 # routing table and rules (ids.sh); a step touches only its own puck's.
 #
 # Steps (each is safe to run again):
 #   pick    choose the link's subnet (TPK_LINK) and UDP port (PUCK_PORT) where
 #           they're empty, and print them (LINK=, PORT=) for tpk-ctl.sh to save.
 #           The subnet is free here and isn't one in TPK_LINK_AVOID (the puck's
-#           links to other VPSes: on the puck they must differ too)
-#   link    the link to the puck (PUCK_PUBKEY needed). Prints PUBKEY=<the VPS's
+#           links to other gateways: on the puck they must differ too)
+#   link    the link to the puck (PUCK_PUBKEY needed). Prints PUBKEY=<the gateway's
 #           public key>. With TPK_ROUTING=tpk it also writes the routing for CLIENT_IPS
 #           and the kill switch
 #   test    PASS/FAIL for the link and, by TPK_ROUTING, the routing or the wgt jump(s)
@@ -23,7 +23,7 @@
 #           with wgt itself first (see the README's Undo)
 #
 # TPK_DISABLED=yes (tpk-ctl.sh disable, TPK_ROUTING=tpk): link writes no routing for
-# CLIENT_IPS, so only the kill switch applies to them: no internet, never this VPS's IP.
+# CLIENT_IPS, so only the kill switch applies to them: no internet, never this gateway's IP.
 #
 # It never changes WG_IF (the clients' interface) or wgt's files. Logs go to stderr;
 # stdout is a step's result: LINK=, PORT=, PUBKEY= for tpk-ctl.sh, test's PASS/FAIL.
@@ -46,7 +46,7 @@ main() {
         test) do_test ;;
         clients) do_clients ;;
         undo) do_undo ;;
-        *) die "unknown step '${1:-}' (see the top of vps.sh)" ;;
+        *) die "unknown step '${1:-}' (see the top of gateway.sh)" ;;
     esac
 }
 
@@ -65,9 +65,12 @@ do_clients() {
 }
 
 log() { printf '==> %s\n' "$*" >&2; }
-die() { printf 'vps.sh: %s\n' "$*" >&2; exit 1; }
+die() { printf 'gateway.sh: %s\n' "$*" >&2; exit 1; }
 need() { for v in "$@"; do eval "x=\${$v:-}"; [ -n "$x" ] || die "$v is not set"; done; }
 
+# put <mode> <path>: write stdin to <path> if it differs; CHANGED=1 when it did, and the
+# link restarts. So the files it writes keep their old wording ("vps.sh", "the VPS",
+# from before the gateway was called that): new words would restart every link.
 CHANGED=0
 put() {
     tmp=$(mktemp); cat > "$tmp"
@@ -90,7 +93,7 @@ preflight() {
     command -v wg >/dev/null || die "wg isn't installed (apt install wireguard-tools)"
     [ "$TPK_ROUTING" != tpk ] || ip link show "$WG_IF" >/dev/null 2>&1 || die "no interface $WG_IF here: set WG_IF to the WireGuard interface your clients connect to"
     # The link's addresses must be free (or already this link's)
-    other=$(link_users "$VPS_LINK" "$PUCK_LINK")
+    other=$(link_users "$GATEWAY_LINK" "$PUCK_LINK")
     [ -z "$other" ] || die "$LINK_NET is already used here, by $other: empty TPK_LINK and link picks a free one"
     # PUCK_PORT must be free (or already this link's)
     if [ "$(wg show "$LINK_IF" listen-port 2>/dev/null || true)" != "$PUCK_PORT" ] \
@@ -98,11 +101,11 @@ preflight() {
         die "UDP port $PUCK_PORT is already in use (ss -ulpn)"
     fi
     if [ "$TPK_ROUTING" = wgt ]; then
-        command -v wgt >/dev/null || die "TPK_ROUTING=wgt needs wgt on this VPS (or use TPK_ROUTING=tpk)"
+        command -v wgt >/dev/null || die "TPK_ROUTING=wgt needs wgt on this gateway (or use TPK_ROUTING=tpk)"
     fi
 }
 
-# link_users <address>...: what else on this VPS has these addresses: an interface,
+# link_users <address>...: what else on this gateway has these addresses: an interface,
 # or a WireGuard config (up or not). Never this puck's own link.
 link_users() {
     for a in "$@"; do
@@ -124,7 +127,7 @@ pick_link() {
         host=0
         while [ "$host" -le 252 ]; do
             case " $TPK_LINK_AVOID " in
-                *" 10.99.0.$host/30 "*) ;;    # the puck's link to another VPS
+                *" 10.99.0.$host/30 "*) ;;    # the puck's link to another gateway
                 *) [ -n "$(link_users "10.99.0.$((host + 1))" "10.99.0.$((host + 2))")" ] || break ;;
             esac
             host=$((host + 4))
@@ -166,7 +169,7 @@ do_link() {
         put 600 "$WG/$LINK_IF.conf" <<EOF
 # tunnel-puck: the link the puck dials (written by vps.sh link; not wgt's)
 [Interface]
-Address = $VPS_LINK/30
+Address = $GATEWAY_LINK/30
 ListenPort = $PUCK_PORT
 MTU = 1420
 PostUp = wg set %i private-key $WG/$LINK_IF.key
@@ -228,7 +231,7 @@ hand_conf() {
     cat <<EOF
 # tunnel-puck: the link the puck dials, and the clients routed through it (written by vps.sh link)
 [Interface]
-Address = $VPS_LINK/30
+Address = $GATEWAY_LINK/30
 ListenPort = $PUCK_PORT
 MTU = 1420
 # Table = off: no routes from AllowedIPs; the rules below choose who uses the link
@@ -238,7 +241,7 @@ PostUp = wg set %i private-key $WG/$LINK_IF.key
 $(for net in $WG_SUBNET; do echo "PostUp = ip route replace $net dev $WG_IF table $TABLE"; done)
 PostUp = ip route replace default dev %i table $TABLE
 PostDown = ip route flush table $TABLE
-# Forward into the link and NAT onto it (the puck sees only $VPS_LINK)
+# Forward into the link and NAT onto it (the puck sees only $GATEWAY_LINK)
 PostUp = iptables -I FORWARD -i $WG_IF -o %i -j ACCEPT
 PostUp = iptables -I FORWARD -i %i -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 PostUp = iptables -t nat -A POSTROUTING -o %i -j MASQUERADE
@@ -269,7 +272,7 @@ EOF
 }
 
 # The kill switch: outside the link, so stopping it blocks these clients rather
-# than letting them out through the VPS's own IP.
+# than letting them out through the gateway's own IP.
 killswitch() {
     up="" down=""
     for ip in $CLIENT_IPS; do
@@ -324,7 +327,7 @@ open_port() {
         ufw allow "$PUCK_PORT/udp" >/dev/null
         log "ufw: allowed $PUCK_PORT/udp"
     else
-        log "ufw isn't active here: make sure $PUCK_PORT/udp is open in this VPS's firewall (and the provider's)"
+        log "ufw isn't active here: make sure $PUCK_PORT/udp is open in this gateway's firewall (and the provider's)"
     fi
 }
 
