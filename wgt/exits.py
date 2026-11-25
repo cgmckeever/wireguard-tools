@@ -330,8 +330,9 @@ def _refresh_exit_lines(ctx: Ctx, code: str) -> None:
     for c in ctx.snap.exit_clients(code):
         path = ctx.paths.client_conf(ctx.cfg.SERVER_NAME, c.name)
         text = store.read_text(path)
-        if text is not None and render.with_exit_line(ctx.snap, text, c.name) != text:
-            ctx.files.write(path, 0o600, render.with_exit_line(ctx.snap, text, c.name))
+        new = text and render.with_exit_line(ctx.snap, text, c.name)
+        if new and new != text:   # not Files.write's "unchanged:" for every other config
+            ctx.files.write(path, 0o600, new)
 
 
 def _read_jump(src: str) -> str:
@@ -441,7 +442,7 @@ def cmd_test(ctx: Ctx, words: List[str]) -> int:
     code = words[0] if words else ""
     ops.no_more_words(words[1:], "wgt jump test [<code>]")
     if code and not ctx.snap.exit(code):
-        raise WgtError(f"no jump '{code}' (wgt jump list)")
+        raise WgtError(f"no jump '{code}' (see: wgt jump list)")
     ops.take_lock(ctx)
     ctx.out.log(f"Jump test: {code}" if code else "Jump tests")
     res = results.Results(out=ctx.out.line)
@@ -497,10 +498,9 @@ def tables_ok(ctx: Ctx, e: store.Exit) -> bool:
     client_table, jump_table, mark = rules.exit_wtable(e), rules.exit_ptable(e), rules.exit_mark(e)
     if f"fwmark {mark:#x} lookup {jump_table}" not in live.rules(r):
         return False
-    for fam in ctx.cfg.families():   # IPv6 too: it stops WARP-off clients' IPv6
-        if "\nblackhole default" not in "\n" + live.table(r, fam, jump_table):
-            return False
-    return all("\nblackhole default" in "\n" + live.table(r, fam, client_table) for fam in ctx.cfg.families())
+    # IPv6 too: the jump table's stops WARP-off clients' IPv6.
+    return all("\nblackhole default" in "\n" + live.table(r, fam, table)
+               for table in (jump_table, client_table) for fam in ctx.cfg.families())
 
 
 def client_rules_ok(ctx: Ctx, e: store.Exit) -> bool:
