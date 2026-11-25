@@ -621,11 +621,7 @@ def _set_all_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
         ctx.runner.step(f"Enable the {len(names)} config(s) 'disable --all' turned off: "
                         f"{' '.join(names) or '(none left)'}", "wgt client disable --all")
         ops.lock_as_seen(ctx)
-    text = ctx.files.read(ctx.paths.disabled_db) or ""
-    for n in names:
-        text = store.set_disabled(text, n, disable)
-    ctx.files.write(ctx.paths.disabled_db, 0o600, text)
-    ctx.reload()
+    ops.set_disabled_many(ctx, names, disable)
     ops.write_wg_conf(ctx)
     if not ops.wg_up(ctx):
         ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")

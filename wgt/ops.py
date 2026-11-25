@@ -238,73 +238,68 @@ def write_wg_conf(ctx: Ctx) -> bool:
 # change to the same file builds on its first (rename = add new + drop old),
 # and each reloads ctx.snap: snapshot values read before them are stale after.
 
+def _rewrite(ctx: Ctx, db: str, change: Callable[[Optional[str]], str]) -> None:
+    """<db> (mode 600) as <change> makes it from its text now, in one write; reloads ctx.snap."""
+    ctx.files.write(db, 0o600, change(ctx.files.read(db)))
+    ctx.reload()
+
+
 def save_client(ctx: Ctx, entry: store.Client) -> None:
     """Add <entry> to clients.db, replacing any client of that name; reloads ctx.snap."""
-    _write_clients(ctx, entry.name, entry)
+    _rewrite(ctx, ctx.paths.client_db, lambda text: store.put_client(text, entry.name, entry))
 
 
 def remove_client(ctx: Ctx, name: str) -> None:
     """Drop <name> from clients.db; reloads ctx.snap."""
-    _write_clients(ctx, name, None)
+    _rewrite(ctx, ctx.paths.client_db, lambda text: store.put_client(text, name, None))
 
 
 def rename_client(ctx: Ctx, old: str, entry: store.Client) -> None:
     """<old>'s entry replaced by <entry> in one write: stopping in between must
     not lose its public key. Reloads ctx.snap."""
-    db = ctx.paths.client_db
-    ctx.files.write(db, 0o600, store.put_client(store.put_client(ctx.files.read(db), old, None), entry.name, entry))
-    ctx.reload()
+    _rewrite(ctx, ctx.paths.client_db,
+             lambda text: store.put_client(store.put_client(text, old, None), entry.name, entry))
 
 
 def replace_clients(ctx: Ctx, entries: List[store.Client]) -> None:
     """clients.db as exactly <entries>, in one write (setup's subnet move: a stop part-way
     must not leave some configs moved); reloads ctx.snap."""
-    ctx.files.write(ctx.paths.client_db, 0o600, store.format_clients(e.fields_line() for e in entries))
-    ctx.reload()
-
-
-def _write_clients(ctx: Ctx, name: str, entry: Optional[store.Client]) -> None:
-    db = ctx.paths.client_db
-    ctx.files.write(db, 0o600, store.put_client(ctx.files.read(db), name, entry))
-    ctx.reload()
+    _rewrite(ctx, ctx.paths.client_db, lambda _: store.format_clients(e.fields_line() for e in entries))
 
 
 def set_disabled(ctx: Ctx, name: str, disabled: bool) -> None:
     """Mark <name> disabled (or not) in clients.disabled; reloads ctx.snap."""
-    db = ctx.paths.disabled_db
-    ctx.files.write(db, 0o600, store.set_disabled(ctx.files.read(db), name, disabled))
-    ctx.reload()
+    set_disabled_many(ctx, [name], disabled)
+
+
+def set_disabled_many(ctx: Ctx, names: List[str], disabled: bool) -> None:
+    """Mark each of <names> disabled (or not) in clients.disabled, in one write; reloads ctx.snap."""
+    def change(text: Optional[str]) -> str:
+        for name in names:
+            text = store.set_disabled(text, name, disabled)
+        return text or ""
+    _rewrite(ctx, ctx.paths.disabled_db, change)
 
 
 def save_exit(ctx: Ctx, entry: store.Exit) -> None:
     """Add <entry> to exits.db, replacing any exit of that code; reloads ctx.snap."""
-    _write_exits(ctx, entry.code, entry)
+    _rewrite(ctx, ctx.paths.exit_db, lambda text: store.put_exit(text, entry.code, entry))
 
 
 def remove_exit(ctx: Ctx, code: str) -> None:
     """Drop <code> from exits.db; reloads ctx.snap."""
-    _write_exits(ctx, code, None)
-
-
-def _write_exits(ctx: Ctx, code: str, entry: Optional[store.Exit]) -> None:
-    db = ctx.paths.exit_db
-    ctx.files.write(db, 0o600, store.put_exit(ctx.files.read(db), code, entry))
-    ctx.reload()
+    _rewrite(ctx, ctx.paths.exit_db, lambda text: store.put_exit(text, code, None))
 
 
 def set_device(ctx: Ctx, name: str, number: Optional[int], groups: Optional[Tuple[str, ...]] = None) -> None:
     """Give device <name> a static <number>, or none, and <groups> (None: the
     ones it has); reloads ctx.snap."""
-    db = ctx.paths.device_db
-    ctx.files.write(db, 0o600, store.put_device(ctx.files.read(db), name, number, groups))
-    ctx.reload()
+    _rewrite(ctx, ctx.paths.device_db, lambda text: store.put_device(text, name, number, groups))
 
 
 def rename_device(ctx: Ctx, old: str, new: str) -> None:
     """Move <old>'s number and groups to <new>, in one write; reloads ctx.snap."""
-    db = ctx.paths.device_db
-    ctx.files.write(db, 0o600, store.rename_device(ctx.files.read(db), old, new))
-    ctx.reload()
+    _rewrite(ctx, ctx.paths.device_db, lambda text: store.rename_device(text, old, new))
 
 
 # --- command words ---

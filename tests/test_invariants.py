@@ -233,8 +233,7 @@ def test_every_hook_line_is_something_wgt_test_or_setup_would_miss(world, monkey
 
 def test_commands_hold_the_lock_when_they_write(world, monkeypatch):
     """A writer without the lock can lose a watchdog's or another command's change."""
-    for name in ("_write_clients", "replace_clients", "_write_exits", "set_disabled", "set_device", "rename_client",
-                 "rename_device", "write_wg_conf"):
+    for name in ("_rewrite", "write_wg_conf"):   # _rewrite: every database write
         real = getattr(ops, name)
 
         def checked(ctx, *a, _real=real, _name=name, **k):
