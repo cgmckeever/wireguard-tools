@@ -1,6 +1,7 @@
 """The watchdogs, run by systemd timers as `wgt watchdog warp` (every 30s),
 `wgt watchdog exits` and `wgt watchdog devices` (every 10s). Each run is quick and changes only
-what it must; what it does is logged to the journal (`wgt log`)."""
+what it must; what it does is logged to the journal (`wgt log`). The device watchdog also
+keeps each config's newest handshake (clients.handshakes) for `client list`."""
 
 from __future__ import annotations
 
@@ -18,7 +19,7 @@ from .const import (
     WATCHDOG_STALE,
 )
 from .errors import WgtError
-from .system import journal, read_marker
+from .system import journal, read_marker, write_private
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -182,8 +183,22 @@ def run_devices(ctx: Ctx) -> None:
         restore_wg0_rules(ctx)
         for msg in devices.sync(ctx):
             log_event(ctx, DEVICE_WATCHDOG, msg)
+        save_handshakes(ctx)
     finally:
         ops.release_lock(ctx)
+
+
+def save_handshakes(ctx: Ctx) -> None:
+    """Each config's newest handshake into clients.handshakes, so `client list`
+    still has it after wg0 reloads the peer. Only the clients there are now (a
+    removed one's goes); written only when one is newer, so every ~2 minutes
+    at most per active device, not every run."""
+    path = ctx.paths.handshake_db
+    saved = store.parse_handshakes(store.read_text(path))
+    merged = live.last_handshakes(ctx.runner, ctx.cfg.WG_IF, path)
+    keep = {c.pub: merged[c.pub] for c in ctx.snap.clients if merged.get(c.pub)}
+    if keep != saved and not ctx.runner.dry_run:
+        write_private(path, store.render_handshakes(keep))
 
 
 def restore_wg0_rules(ctx: Ctx) -> None:

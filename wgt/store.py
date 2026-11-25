@@ -5,6 +5,8 @@ so keep them compatible):
   clients.db         "name ip public-key allowed-ips" (no private keys)
   clients.disabled   one name per line
   clients.disabled-all   one name per line: what `client disable --all` turned off
+  clients.handshakes "public-key unix-time": each config's newest handshake, kept by
+                     the device watchdog (WireGuard forgets it when wg0 reloads a peer)
   exits.db           "code idx label..."
   devices.db         "device number [groups]" (its static address; who it can reach)
   wg-tools.backups   "path<TAB>original-copy|NEW"
@@ -254,6 +256,20 @@ def set_disabled(text: Optional[str], name: str, disabled: bool) -> str:
     if disabled:
         names.append(name)
     return "".join(n + "\n" for n in names)
+
+
+def parse_handshakes(text: Optional[str]) -> Dict[str, int]:
+    """clients.handshakes: public key -> unix time of its newest handshake."""
+    out: Dict[str, int] = {}
+    for line in (text or "").splitlines():
+        f = line.split()
+        if len(f) == 2 and is_uint(f[1]):
+            out[f[0]] = int(f[1])
+    return out
+
+
+def render_handshakes(times: Dict[str, int]) -> str:
+    return "".join(f"{pub} {ts}\n" for pub, ts in sorted(times.items()))
 
 
 # --- exits ---

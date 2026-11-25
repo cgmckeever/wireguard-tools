@@ -27,6 +27,15 @@ def handshakes(r: Runner, ifc: str) -> Dict[str, int]:
     return out
 
 
+def last_handshakes(r: Runner, ifc: str, saved_path: str) -> Dict[str, int]:
+    """handshakes(), with the newer of each and what the device watchdog saved:
+    a peer wg0 reloaded (restart, disable/enable) keeps its last one."""
+    times = store.parse_handshakes(store.read_text(saved_path))
+    for pub, ts in handshakes(r, ifc).items():
+        times[pub] = max(ts, times.get(pub, 0))
+    return times
+
+
 def peers(r: Runner, ifc: str) -> List[str]:
     """The public keys of an interface's peers, running now."""
     return [line.split()[0] for line in r.query(["wg", "show", ifc, "allowed-ips"]).splitlines() if line.strip()]

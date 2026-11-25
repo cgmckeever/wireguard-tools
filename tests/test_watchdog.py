@@ -364,3 +364,29 @@ def test_a_setup_restart_leaves_a_jumps_warp_down_and_gets_the_watchdogs_patienc
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{pub(ctx, 'nyc-us.phone')}\t{NOW - 30}\n")
     watchdog.run_exits(ctx)
     assert not any(c.startswith("systemctl restart") for c in ctx.runner.calls)
+
+
+def test_handshakes_are_kept_across_wg0_reloading_a_peer(make):
+    """wg0 forgets a peer's handshake when it reloads it (restart, disable/enable):
+    the device watchdog keeps the newest, and client list shows that."""
+    from wgt import clients, store
+    ctx = make({})
+    a, b = ctx.snap.clients[0], ctx.snap.clients[1]
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{a.pub}\t{NOW - 300}\n{b.pub}\t0\n")
+    watchdog.save_handshakes(ctx)
+    assert store.parse_handshakes(Path(ctx.paths.handshake_db).read_text()) == {a.pub: NOW - 300}
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{a.pub}\t0\n")   # reloaded
+    rows = {r.name: r.seen for r in clients.client_rows(ctx)}
+    assert rows[a.name] == "5m ago" and rows[b.name] in ("none", "disabled")
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{a.pub}\t{NOW - 10}\n")
+    watchdog.save_handshakes(ctx)
+    assert store.parse_handshakes(Path(ctx.paths.handshake_db).read_text()) == {a.pub: NOW - 10}
+
+
+def test_saved_handshakes_drop_removed_clients(make):
+    from wgt import store
+    ctx = make({})
+    Path(ctx.paths.handshake_db).write_text(f"gone-key= {NOW - 99}\n")
+    ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, "")
+    watchdog.save_handshakes(ctx)
+    assert store.parse_handshakes(Path(ctx.paths.handshake_db).read_text()) == {}

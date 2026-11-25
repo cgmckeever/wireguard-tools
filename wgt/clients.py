@@ -237,7 +237,7 @@ def hand_over(ctx: Ctx, conf: str) -> None:
 
 def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
     """A table row per client, in clients.db order."""
-    hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
+    hs = live.last_handshakes(ctx.runner, ctx.cfg.WG_IF, ctx.paths.handshake_db)
     tx = live.transfers(ctx.runner, ctx.cfg.WG_IF)
     now = ctx.clock()
     rows = []

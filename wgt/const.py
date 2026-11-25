@@ -210,6 +210,11 @@ class Paths:
         return self.wg("clients.disabled-all")
 
     @property
+    def handshake_db(self) -> str:
+        """Each config's newest handshake, kept across wg0 reloading its peer."""
+        return self.wg("clients.handshakes")
+
+    @property
     def psk_dir(self) -> str:
         return self.wg("psk")
 

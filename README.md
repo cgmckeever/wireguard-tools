@@ -305,6 +305,12 @@ Each command takes a config name. Leave it out on `rotate`, `remove`,
 `disable`, `enable`, `show` or `share` to pick from a numbered list (`wgt
 client` alone is `list`). Changes apply live; other configs stay connected.
 
+`list`'s LAST HANDSHAKE is the config's newest WireGuard handshake: a connected
+device makes one about every two minutes. WireGuard forgets it when wg0 reloads
+the peer (a restart, `disable`/`enable`), so the device watchdog keeps the
+newest in `/etc/wireguard/clients.handshakes`; `none` means no handshake since
+that file began.
+
 These commands act on one config, not the whole device: `wgt client disable
 phone` leaves `warp.phone` working. To cut off or remove a device, run the
 command for each of its configs. To rename a device, use `wgt device rename`;
@@ -1115,6 +1121,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/clients.db` | one line per config: `name address public-key allowed-ips`, no private keys |
 | `/etc/wireguard/clients.disabled` | names of disabled configs |
 | `/etc/wireguard/clients.disabled-all` | the configs `client disable --all` turned off, for `enable --all` (gone once they're back) |
+| `/etc/wireguard/clients.handshakes` | each config's newest handshake (public key, time), kept by the device watchdog for `client list` |
 | `/etc/wireguard/devices.db` | each device's static number and groups: `device number [group,group]` |
 | `/etc/wireguard/psk/<name>.psk` | per-config preshared keys |
 | `/etc/wireguard/clients/<server>.<name>.conf` | config files (each one's private key is kept only here, in change copies and in backup archives, and with `wgt-ctl` in `~/wg-tunnels`) |
