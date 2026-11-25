@@ -89,6 +89,17 @@ def servers() -> List[Server]:
     return found
 
 
+NO_SERVERS = "no servers yet (add one: wgt-ctl init)"
+
+
+def listed() -> List[Server]:
+    """servers(), refused if there are none."""
+    found = servers()
+    if not found:
+        raise WgtError(NO_SERVERS)
+    return found
+
+
 def find(sel: str) -> Server:
     """A server by name or list number."""
     for i, s in enumerate(servers(), 1):
@@ -99,8 +110,7 @@ def find(sel: str) -> Server:
 
 def pick() -> Server:
     """Ask which server, from the numbered list."""
-    if not servers():
-        raise WgtError("no servers yet (add one: wgt-ctl init)")
+    listed()
     if not ui.have_tty():
         raise WgtError("no server given (and no terminal to pick one)")
     cmd_list(quick=True)
@@ -177,7 +187,7 @@ def cmd_list(quick: bool = False) -> None:
     from .tunnels import staged  # tunnels imports this module
     ss = servers()
     if not ss:
-        out.info("no servers yet (add one: wgt-ctl init)")
+        out.info(NO_SERVERS)
         return
     print("")
     for i, s in enumerate(ss, 1):

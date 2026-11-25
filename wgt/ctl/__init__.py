@@ -62,9 +62,7 @@ def cmd_summary() -> int:
     def fetch(s: Server) -> Tuple[int, str]:
         return remote.ssh(s.target, f"{s.wgt} summary 2>&1", batch=True, capture=True)
 
-    todo = remote.servers()
-    if not todo:
-        raise WgtError("no servers yet (add one: wgt-ctl init)")
+    todo = remote.listed()
     with ThreadPoolExecutor(max_workers=len(todo)) as pool:
         answers = list(pool.map(fetch, todo))
     rc = 0
@@ -149,8 +147,7 @@ def _on_all(cmd: str, args: List[str]) -> int:
     first failure's, or 0."""
     if cmd in CTL and cmd not in ALL_OK:
         raise WgtError(f"'{cmd}' takes one server, not all")
-    if not remote.servers():
-        raise WgtError("no servers yet (add one: wgt-ctl init)")
+    remote.listed()
     sub, rest = remote.subcommand(args)   # flags may come first, as wgt reads them
     if cmd in ("client", "device") and sub == "rename":
         return fleet_cmds.rename_everywhere(rest)
