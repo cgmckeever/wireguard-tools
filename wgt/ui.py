@@ -20,7 +20,9 @@ def ago(ts: int, now: Optional[float] = None) -> str:
         return f"{d}s ago"
     if d < 7200:
         return f"{d // 60}m ago"
-    return f"{d // 3600}h ago"
+    if d < 172800:
+        return f"{d // 3600}h ago"
+    return f"{d // 86400}d ago"
 
 
 def size(n: int) -> str:
