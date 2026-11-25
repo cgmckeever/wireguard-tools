@@ -54,7 +54,7 @@ iPhone went through both. Still untested: the rest of phase 3 (fail closed, a
 DNS leak test), `tpk` routing and the Cloudflare door.
 Run it first on a VPS nobody else depends on.
 
-## Done when
+## Installation success
 
 1. A chosen client's public IP (`curl https://ifconfig.me`) is the residential
    (or other) IP of the network where the tunnel-puck sits.
