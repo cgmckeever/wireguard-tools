@@ -21,7 +21,8 @@
 #   tpk-ctl.sh [<puck>[.<gateway>]] link          the link to the gateway (puck and gateway), keys exchanged for you
 #   tpk-ctl.sh [<puck>[.<gateway>]] exit          by TPK_ROUTING: tpk's DNS resolver, or the wgt jump(s)
 #   tpk-ctl.sh [<puck>[.<gateway>]] client <device> [lan]   2.2, TPK_ROUTING=wgt: a config for <device> through the puck (lan: the LAN jump)
-#   tpk-ctl.sh [<puck>[.<gateway>]] lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpk<n> or wgrtun<n>)
+#   tpk-ctl.sh [<puck>[.<gateway>]] mode [--egress [--lan]] [<interface>]   2.3: the internet only, or the friend's LAN too
+#                                                 (default: wgpk<n> or wgrtun<n>); no flags: show it
 #   tpk-ctl.sh [<puck>[.<gateway>]] disable [<device>]   the puck's clients (or one device's) on each gateway, or that one, off;
 #                                                 links, keys and configs stay
 #   tpk-ctl.sh [<puck>[.<gateway>]] enable [<device>]   let back in what disable turned off
@@ -50,7 +51,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 CONFIGS=$(cd "$HERE/../configs" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
-COMMANDS="new config ssh-config init gateway link exit client lan-mode disable enable status wifi test ssh reboot shutdown all undo"
+COMMANDS="new config ssh-config init gateway link exit client mode disable enable status wifi test ssh reboot shutdown all undo"
 # Cloudflare's trace (ip=... lines), as wgt's jump test uses (wgt/const.py TRACE_URL).
 TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 # The remote prefix that runs a command as root (sudo unless already root).
@@ -814,10 +815,10 @@ guard_jump() {
     log "jump '$1' points at $owner; taking it over (TPK_TAKEOVER=1)"
 }
 
-# jump_port isolated|lan: that rtun's port on the puck (ids.sh).
+# jump_port main|lan: that rtun's port on the puck (ids.sh).
 jump_port() { if [ "$1" = lan ]; then echo "$RTUN_LAN_PORT"; else echo "$RTUN_PORT"; fi; }
 
-# add_jump <isolated|lan> <code> <label>: the puck's rtun, added to wgt as a jump.
+# add_jump <main|lan> <code> <label>: the puck's rtun, added to wgt as a jump.
 add_jump() {
     guard_jump "$2" "$(jump_port "$1")"
     out=$(run puck puck.sh jump "$1")
@@ -847,7 +848,7 @@ cmd_exit() {
         return 0
     fi
     install_exit_script
-    add_jump isolated "$JUMP_CODE" "$JUMP_LABEL"
+    add_jump main "$JUMP_CODE" "$JUMP_LABEL"
     if [ -n "$JUMP_LAN_CODE" ]; then
         require JUMP_LAN_LABEL
         add_jump lan "$JUMP_LAN_CODE" "$JUMP_LAN_LABEL"
@@ -867,13 +868,28 @@ cmd_client() {
     log "made $code.$device on $GATEWAY_NAME; wgt-ctl put it in ~/wg-tunnels/devices/$device/config/ (or: bin/wgt-ctl $WGT_SERVER client show $code.$device --qr)"
 }
 
-cmd_lan_mode() {
-    mode="${1:-}"
-    case "$mode" in isolated|lan) ;; *) die "tpk-ctl.sh lan-mode isolated|lan [<interface>]" ;; esac
+# cmd_mode [--egress] [--lan] [<interface>]: what the gateway's clients reach
+# through the puck. --egress: the internet from the friend's IP (the default);
+# with --lan, the friend's LAN as well. --lan alone (the LAN, with the internet
+# from the gateway) isn't built yet. No flags: print the mode.
+cmd_mode() {
+    egress="" lan="" ifc=""
+    for a in "$@"; do
+        case "$a" in
+            --egress) egress=1 ;;
+            --lan) lan=1 ;;
+            -*) die "tpk-ctl.sh mode [--egress] [--lan] [<interface>]" ;;
+            *) ifc="$a" ;;
+        esac
+    done
     need_link_here
-    ifc="${2:-}"
     [ -n "$ifc" ] || { if [ "$TPK_ROUTING" = tpk ]; then ifc="$PK_IF"; else ifc="$RTUN_IF"; fi; }
-    run puck puck.sh lan-mode "$ifc" "$mode"
+    if [ -z "$egress$lan" ]; then
+        printf '%s %s: %s\n' "$GATEWAY_NAME" "$ifc" "$(result MODE "$(run puck puck.sh mode "$ifc")")"
+        return 0
+    fi
+    [ -n "$egress" ] || die "--lan alone (the friend's LAN, with the internet from the gateway) isn't built yet: --egress --lan gives both"
+    run puck puck.sh mode "$ifc" "egress${lan:++lan}"
 }
 
 # test_way_out: with wgt, do clients leave from the puck's network? wgt's jump
@@ -1130,7 +1146,7 @@ undo_gateway() {
     route_around "$GATEWAY_NAME"
     jumps="" configs=""
     if [ "$TPK_ROUTING" = wgt ] && [ -n "$LINK_NET" ]; then
-        for pair in "$JUMP_CODE isolated" "$JUMP_LAN_CODE lan"; do
+        for pair in "$JUMP_CODE main" "$JUMP_LAN_CODE lan"; do
             # shellcheck disable=SC2086
             set -- $pair; [ $# -eq 2 ] || continue    # no LAN jump
             if [ -n "$DRY" ]; then jumps="$jumps $1"; continue; fi
@@ -1308,7 +1324,7 @@ main() {
         link) one_gateway link; pick_puck; cmd_link ;;
         exit) one_gateway exit; pick_puck; cmd_exit ;;
         client) one_gateway client; cmd_client "$@" ;;
-        lan-mode) one_gateway lan-mode; pick_puck; cmd_lan_mode "$@" ;;
+        mode) one_gateway mode; pick_puck; cmd_mode "$@" ;;
         disable|enable) pick_puck; each_gateway "cmd_$cmd" "$@" ;;
         status) pick_puck
             case "${1:-}" in

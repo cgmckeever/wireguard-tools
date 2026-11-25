@@ -11,11 +11,12 @@
 #   link                 WireGuard and the link to one gateway, wgpk<n> (n from TPK_LINK: ids.sh).
 #                        Prints PUBKEY=<the puck's public key>; with GATEWAY_PUBKEY set it also
 #                        writes and starts wgpk<n>
-#   jump isolated|lan    TPK_ROUTING=wgt: that link's reverse tunnel (wgrtun<n>, or wgrtunlan<n>
-#                        for lan). Prints JUMPFILE=<path> when it made a new jump file, else JUMP=exists
-#   jump-done isolated|lan   delete the jump file once the gateway has it
+#   jump main|lan        TPK_ROUTING=wgt: that link's reverse tunnel: wgrtun<n> (egress), or
+#                        wgrtunlan<n> (the LAN jump: egress+lan). Prints JUMPFILE=<path> when it
+#                        made a new jump file, else JUMP=exists
+#   jump-done main|lan   delete the jump file once the gateway has it
 #   dns                  TPK_ROUTING=tpk: the DNS resolver for that link's puck-exit clients
-#   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2.3)
+#   mode <interface> [egress|egress+lan]   switch an exit interface's mode (2.3); none: print it
 #   wifi-list            the saved Wi-Fi networks, and which one is in use
 #   wifi-add             save the Wi-Fi network WIFI_SSID (password WIFI_PSK; empty: open)
 #   wifi-remove          remove the saved Wi-Fi network WIFI_SSID (all: every one)
@@ -47,7 +48,7 @@ main() {
         jump) do_jump "${1:-}" ;;
         jump-done) jump_vars "${1:-}"; rm -f "/etc/wireguard/$JFILE"; log "deleted $JFILE" ;;
         dns) do_dns ;;
-        lan-mode) do_lan_mode "${1:-}" "${2:-}" ;;
+        mode) do_mode "${1:-}" "${2:-}" ;;
         wifi-list) do_wifi_list ;;
         wifi-add) do_wifi_add ;;
         wifi-sync) do_wifi_sync ;;
@@ -94,9 +95,9 @@ start_or_restart() {
     if [ "$CHANGED" = 1 ]; then systemctl restart "$1"; else systemctl start "$1"; fi
 }
 
-# The exit mode written in an interface's .conf (isolated if none yet).
+# The exit mode written in an interface's .conf (egress if none yet).
 current_mode() {
-    sed -n "s|^PostUp = $EXIT_SCRIPT up %i \([a-z]*\)$|\1|p" "$WG/$1.conf" 2>/dev/null | head -n 1 | grep . || echo isolated
+    sed -n "s|^PostUp = $EXIT_SCRIPT up %i \([a-z+]*\)$|\1|p" "$WG/$1.conf" 2>/dev/null | head -n 1 | grep . || echo egress
 }
 
 do_init() {
@@ -216,15 +217,15 @@ EOF
     log "$PK_IF up; the first handshake can take a few seconds"
 }
 
-# jump_vars isolated|lan: the names and addresses of that reverse tunnel: a
+# jump_vars main|lan: the names and addresses of that reverse tunnel: a
 # WireGuard server on the puck that the gateway reaches in through, over its link
 # (wgt calls it a jump).
 jump_vars() {
     need_link
     case "$1" in
-        isolated) JIF=$RTUN_IF     JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=$RTUN_PORT     JFILE=jump-for-gateway$LINK_N.conf ;;
-        lan)      JIF=$RTUN_LAN_IF JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=$RTUN_LAN_PORT JFILE=jump-for-gateway$LINK_N-lan.conf ;;
-        *) die "jump needs isolated or lan" ;;
+        main) JIF=$RTUN_IF     JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=$RTUN_PORT     JFILE=jump-for-gateway$LINK_N.conf     JMODE=egress ;;
+        lan)  JIF=$RTUN_LAN_IF JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=$RTUN_LAN_PORT JFILE=jump-for-gateway$LINK_N-lan.conf JMODE=egress+lan ;;
+        *) die "jump needs main or lan" ;;
     esac
 }
 
@@ -251,7 +252,7 @@ Address = $JADDR
 ListenPort = $JPORT
 MTU = 1420
 PostUp = wg set %i private-key $WG/$JIF.key
-PostUp = $EXIT_SCRIPT up %i $1
+PostUp = $EXIT_SCRIPT up %i $JMODE
 PostDown = $EXIT_SCRIPT down %i
 
 [Peer]
@@ -298,11 +299,12 @@ EOF
     start_or_restart unbound
 }
 
-do_lan_mode() {
+do_mode() {
     ifc="$1" mode="$2"
-    case "$mode" in isolated|lan) ;; *) die "lan-mode <interface> isolated|lan" ;; esac
     grep -q "^PostUp = $EXIT_SCRIPT up %i " "$WG/$ifc.conf" 2>/dev/null \
         || die "$ifc has no exit (it's wgpk<n> with TPK_ROUTING=tpk, or wgrtun<n> / wgrtunlan<n>)"
+    if [ -z "$mode" ]; then echo "MODE=$(current_mode "$ifc")"; return 0; fi
+    case "$mode" in egress|egress+lan) ;; *) die "mode <interface> [egress|egress+lan]" ;; esac
     sed -i "s|^PostUp = $EXIT_SCRIPT up %i .*|PostUp = $EXIT_SCRIPT up %i $mode|" "$WG/$ifc.conf"
     systemctl restart "wg-quick@$ifc"
     journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-puck-exit:' | tail -n 1 >&2 || true
@@ -481,7 +483,7 @@ do_undo_link() {
         systemctl disable -q --now "wg-quick@$ifc" 2>/dev/null || true
         rm -f "$WG/$ifc.conf" "$WG/$ifc.key" "$WG/$ifc.pub"
     done
-    for m in isolated lan; do jump_vars "$m"; rm -f "$WG/$JFILE"; done
+    for m in main lan; do jump_vars "$m"; rm -f "$WG/$JFILE"; done
     if [ -f "$UNBOUND-$LINK_N.conf" ]; then rm -f "$UNBOUND-$LINK_N.conf"; systemctl restart unbound 2>/dev/null || true; fi
     log "$PK_IF removed"
 }

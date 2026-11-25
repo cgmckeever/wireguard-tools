@@ -41,6 +41,6 @@ WGT_SERVER=""
 # code can be used on each gateway: codes are per server.
 JUMP_CODE=""                        # the puck's jump on the gateway; empty: the puck's name (6 at most)
 JUMP_LABEL=""                       # a label for it, e.g. "Friend's house"; empty: the puck's name
-JUMP_LAN=""                         # yes: a second jump in LAN mode (2.3), its code the jump's with -l (mom: mom-l)
+JUMP_LAN=""                         # yes: a second jump with --egress --lan (2.3), its code the jump's with -l (mom: mom-l)
 JUMP_LAN_CODE=""                    # or name the LAN jump yourself (this also turns it on)
 JUMP_LAN_LABEL=""                   # empty: the jump's label with " (LAN)"

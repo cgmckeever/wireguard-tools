@@ -38,7 +38,7 @@ link_ids() {
     LINK_NET="$TPK_LINK"
     GATEWAY_LINK="10.99.0.$((host + 1))"     # the gateway's end of the link
     PUCK_LINK="10.99.0.$((host + 2))"    # the puck's end
-    JUMP_NET="10.98.$n"                  # wgt routing: jump servers $JUMP_NET.1/.2 and, LAN mode, .5/.6
+    JUMP_NET="10.98.$n"                  # wgt routing: jump servers $JUMP_NET.1/.2 and, the LAN jump, .5/.6
     TABLE=$((260 + n))                   # tpk routing: the table that goes to the puck
     PRIO_ROUTE=$((900 + 2 * n))          # tpk routing: the rule sending CLIENT_IPS to TABLE
     PRIO_KILL=$((PRIO_ROUTE + 1))        # tpk routing: the kill switch's rule
