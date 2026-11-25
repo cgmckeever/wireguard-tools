@@ -36,11 +36,14 @@ WG_SUBNET=""                        # leave empty (it means every subnet WG_IF i
 # init), and saves the answer here.
 WGT_SERVER=""
 # Jump codes are wgt's: 2-6 of a-z 0-9 -. Empty, they're made from the puck's
-# name, shortened to fit (grandma: grandm, LAN gran-l); tpk-ctl.sh config shows
+# name, shortened to fit (grandma: grandm, LAN jumps gran-a, gran-l); tpk-ctl.sh config shows
 # them. A code the gateway already uses for something else is refused. The same
 # code can be used on each gateway: codes are per server.
 JUMP_CODE=""                        # the puck's jump on the gateway; empty: the puck's name (6 at most)
 JUMP_LABEL=""                       # a label for it, e.g. "Friend's house"; empty: the puck's name
-JUMP_LAN=""                         # yes: a second jump with --egress --lan (2.3), its code the jump's with -l (mom: mom-l)
-JUMP_LAN_CODE=""                    # or name the LAN jump yourself (this also turns it on)
-JUMP_LAN_LABEL=""                   # empty: the jump's label with " (LAN)"
+JUMP_LAN=""                         # yes: a jump with the internet and the friend's LAN (2.3: client <device> --egress --lan), its code the jump's with -a (mom: mom-a)
+JUMP_LAN_CODE=""                    # or name that jump yourself (this also turns it on)
+JUMP_LAN_LABEL=""                   # empty: the jump's label with " (egress + LAN)"
+JUMP_LANONLY=""                     # yes: a jump with the friend's LAN only, the internet from the gateway (2.3: client <device> --lan), its code the jump's with -l (mom: mom-l)
+JUMP_LANONLY_CODE=""                # or name that jump yourself (this also turns it on)
+JUMP_LANONLY_LABEL=""               # empty: the jump's label with " (LAN only)"

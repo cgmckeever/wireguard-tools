@@ -58,7 +58,8 @@ TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
 # The settings in a configs/<puck>.<gateway>.conf.
 GATEWAY_VARS="TPK_ROUTING PUCK_PORT TPK_LINK GATEWAY_SSH GATEWAY_HOST CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET
-          WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL TPK_DISABLED TPK_DISABLED_CONFIGS"
+          WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL JUMP_LANONLY JUMP_LANONLY_CODE
+          JUMP_LANONLY_LABEL TPK_DISABLED TPK_DISABLED_CONFIGS"
 # link_ids, name_ok, gateway_name_ok: the link's names and numbers, as puck.sh and gateway.sh have them.
 # shellcheck source=ids.sh
 . "$HERE/ids.sh"
@@ -247,8 +248,10 @@ load_gateway() {
     : "${TPK_ROUTING:=tpk}" "${WG_IF:=wg0}"
     JUMP_CODE=$(jump_code "$JUMP_CODE" "$PUCK_NAME")
     : "${JUMP_LABEL:=$PUCK_NAME}"
-    JUMP_LAN_CODE=$(lan_code "$JUMP_LAN_CODE" "$JUMP_LAN" "$JUMP_CODE")
-    [ -z "$JUMP_LAN_CODE" ] || : "${JUMP_LAN_LABEL:=$JUMP_LABEL (LAN)}"
+    JUMP_LAN_CODE=$(lan_code "$JUMP_LAN_CODE" "$JUMP_LAN" "$JUMP_CODE" a)
+    [ -z "$JUMP_LAN_CODE" ] || : "${JUMP_LAN_LABEL:=$JUMP_LABEL (egress + LAN)}"
+    JUMP_LANONLY_CODE=$(lan_code "$JUMP_LANONLY_CODE" "$JUMP_LANONLY" "$JUMP_CODE" l)
+    [ -z "$JUMP_LANONLY_CODE" ] || : "${JUMP_LANONLY_LABEL:=$JUMP_LABEL (LAN only)}"
     link_ids
     case "$TPK_ROUTING" in
         wgt) wgt_gateway_settings ;;
@@ -267,11 +270,26 @@ shorten() {
 }
 # jump_code <JUMP_CODE> <puck name>: the jump code; empty, the puck's name (shortened to 6).
 jump_code() { if [ -n "$1" ]; then echo "$1"; else shorten "$2" 6; fi; }
-# lan_code <JUMP_LAN_CODE> <JUMP_LAN> <jump code>: the LAN jump's code, if there's
-# one: JUMP_LAN_CODE, else with JUMP_LAN=yes the jump code with -l (mom: mom-l).
+# lan_code <its code> <on> <jump code> <letter>: a LAN jump's code, if there's one:
+# the code set, else when on (yes) the jump code with -<letter>. The LAN jump
+# (JUMP_LAN, egress + LAN) is -a, for all (mom: mom-a); the LAN-only jump
+# (JUMP_LANONLY) -l (mom: mom-l).
 lan_code() {
     if [ -n "$1" ]; then echo "$1"
-    elif [ "$2" = yes ]; then echo "$(shorten "$3" 4)-l"; fi
+    elif [ "$2" = yes ]; then echo "$(shorten "$3" 4)-$4"; fi
+}
+
+# jump_codes: the loaded gateway's jump codes, on one line: the jump's, then the LAN
+# jump's and the LAN-only jump's, when they're on.
+# shellcheck disable=SC2086
+jump_codes() { echo $JUMP_CODE $JUMP_LAN_CODE $JUMP_LANONLY_CODE; }
+
+# rtun_ifs: the puck's rtuns for the loaded gateway's jumps, on one line.
+rtun_ifs() {
+    ifs="$RTUN_IF"
+    [ -z "$JUMP_LAN_CODE" ] || ifs="$ifs $RTUN_LAN_IF"
+    [ -z "$JUMP_LANONLY_CODE" ] || ifs="$ifs $RTUN_LO_IF"
+    echo "$ifs"
 }
 
 # wgt_gateway_settings: TPK_ROUTING=wgt drives the gateway through wgt-ctl: the gateway is
@@ -325,7 +343,7 @@ choose_wgt_server() {
 
 # The settings puck.sh and gateway.sh read, as sh assignments (sent ahead of ids.sh and the script).
 vars() {
-    for s in PUCK_NAME TPK_LINK TPK_LINK_AVOID GATEWAY_HOST PUCK_PORT TPK_ROUTING TPK_DISABLED WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS \
+    for s in PUCK_NAME TPK_LINK TPK_LINK_AVOID GATEWAY_HOST PUCK_PORT TPK_ROUTING TPK_DISABLED WG_IF JUMP_CODE JUMP_LAN_CODE JUMP_LANONLY_CODE CLIENT_IPS \
              CLIENT_IP6S WG_SUBNET SSH_CLOUDFLARE PUCK_PUBKEY GATEWAY_PUBKEY CF_TOKEN WIFI_SSID WIFI_PSK WIFI_LIST; do
         eval "val=\${$s}"
         printf '%s=%s\n' "$s" "$(q "$val")"
@@ -511,15 +529,15 @@ gateway_config() {
     # shellcheck disable=SC2086
     show_settings $GATEWAY_VARS
     if [ -n "$LINK_NET" ]; then
-        ifs="$PK_IF"; [ "$TPK_ROUTING" != wgt ] || ifs="$ifs, $RTUN_IF"
+        ifs="$PK_IF"; [ "$TPK_ROUTING" != wgt ] || ifs="$ifs $(rtun_ifs)"
         printf '  %-15s %s\n' "(on the puck)" "$ifs"
     fi
     require GATEWAY_SSH GATEWAY_HOST
     case "$PUCK_PORT" in *[!0-9]*) die "PUCK_PORT must be a number, or empty (link picks one)" ;; esac
     if [ "$TPK_ROUTING" = wgt ]; then
-        for code in $JUMP_CODE $JUMP_LAN_CODE; do    # wgt's own rule for a new jump's code
+        for code in $(jump_codes); do    # wgt's own rule for a new jump's code
             PYTHONPATH="$REPO" python3 -c 'import sys; from wgt import store; sys.exit(not store.new_exit_code(sys.argv[1]))' "$code" \
-                || die "jump code '$code' won't do: $(PYTHONPATH="$REPO" python3 -c 'from wgt import store; print(store.EXIT_CODE_RULE)'). Set JUMP_CODE (or JUMP_LAN_CODE) yourself"
+                || die "jump code '$code' won't do: $(PYTHONPATH="$REPO" python3 -c 'from wgt import store; print(store.EXIT_CODE_RULE)'). Set JUMP_CODE (or JUMP_LAN_CODE, JUMP_LANONLY_CODE) yourself"
         done
     elif [ -z "$CLIENT_IPS" ]; then
         log "note: CLIENT_IPS is empty, so no client goes through the puck on $GATEWAY_NAME yet (README 2.2)"
@@ -563,9 +581,10 @@ check_others() {
             [ -z "$PUCK_PORT" ] || [ "$(theirs PUCK_PORT)" != "$PUCK_PORT" ] \
                 || die "puck '$p' on the same gateway also uses PUCK_PORT $PUCK_PORT: empty it, and link picks a free one"
             [ "$(theirs TPK_ROUTING)" = "$TPK_ROUTING" ] || continue
-            if [ "$TPK_ROUTING" = wgt ]; then mine="$JUMP_CODE $JUMP_LAN_CODE" fix="set JUMP_CODE or JUMP_LAN_CODE"
+            if [ "$TPK_ROUTING" = wgt ]; then mine=$(jump_codes) fix="set JUMP_CODE, JUMP_LAN_CODE or JUMP_LANONLY_CODE"
                 ocode=$(jump_code "$(theirs JUMP_CODE)" "$p")
-                other="$ocode $(lan_code "$(theirs JUMP_LAN_CODE)" "$(theirs JUMP_LAN)" "$ocode")"
+                other="$ocode $(lan_code "$(theirs JUMP_LAN_CODE)" "$(theirs JUMP_LAN)" "$ocode" a)"
+                other="$other $(lan_code "$(theirs JUMP_LANONLY_CODE)" "$(theirs JUMP_LANONLY)" "$ocode" l)"
             else mine="$CLIENT_IPS" other="$(theirs CLIENT_IPS)" fix="take it out of one CLIENT_IPS"; fi
             for x in $mine; do
                 for y in $other; do
@@ -811,30 +830,63 @@ guard_jump() {
     owner=$(jump_owner "$1" "$2")
     case "$owner" in none|ours) return 0 ;; esac
     [ "${TPK_TAKEOVER:-}" = 1 ] \
-        || die "$GATEWAY_NAME already has a jump '$1', pointing at $owner, not this puck: set JUMP_CODE (or JUMP_LAN_CODE) to another code, or TPK_TAKEOVER=1 to take it over"
+        || die "$GATEWAY_NAME already has a jump '$1', pointing at $owner, not this puck: set JUMP_CODE (or JUMP_LAN_CODE, JUMP_LANONLY_CODE) to another code, or TPK_TAKEOVER=1 to take it over"
     log "jump '$1' points at $owner; taking it over (TPK_TAKEOVER=1)"
 }
 
-# jump_port main|lan: that rtun's port on the puck (ids.sh).
-jump_port() { if [ "$1" = lan ]; then echo "$RTUN_LAN_PORT"; else echo "$RTUN_PORT"; fi; }
+# jump_port main|lan|lanonly: that rtun's port on the puck (ids.sh).
+jump_port() {
+    case "$1" in
+        lan) echo "$RTUN_LAN_PORT" ;;
+        lanonly) echo "$RTUN_LO_PORT" ;;
+        *) echo "$RTUN_PORT" ;;
+    esac
+}
 
-# add_jump <main|lan> <code> <label>: the puck's rtun, added to wgt as a jump.
+# add_jump <main|lan|lanonly> <code> <label>: the puck's rtun, added to wgt as a jump.
+# lanonly: a routes-only jump (wgt jump add --routes), sending only the puck's LAN
+# into it; when it's there already, its routes follow the LAN (wgt jump routes).
 add_jump() {
     guard_jump "$2" "$(jump_port "$1")"
     out=$(run puck puck.sh jump "$1")
     file=$(result JUMPFILE "$out")
+    lan=""
+    if [ "$1" = lanonly ]; then
+        lan=$(result LAN "$out")
+        [ -n "$lan" ] || [ -n "$DRY" ] || die "the puck reported no LAN (its uplink has no IPv4 address?): the LAN-only jump needs one"
+        [ -n "$lan" ] || log "[dry-run] the LAN-only jump's routes: the puck's LAN, as puck.sh jump lanonly reports it"
+    fi
     if [ -n "$file" ]; then
-        confirm_gateway "wgt jump add $2"
-        log "gateway: wgt jump add $2 (the jump file goes puck -> gateway through a pipe, never shown)"
+        confirm_gateway "wgt jump add $2${lan:+ --routes $lan}"
+        log "gateway: wgt jump add $2${lan:+ --routes $lan} (the jump file goes puck -> gateway through a pipe, never shown)"
         if [ -n "$DRY" ]; then log "[dry-run] would pipe $file into wgt jump add $2"; return 0; fi
-        to puck "$AS_ROOT cat $file" | wgt_gateway jump add "$2" - --label "$3" --yes \
-            || die "wgt jump add $2 failed; the jump file stays on the puck ($file) so tpk-ctl.sh exit can try again with TPK_RENEW=1"
+        if [ -n "$lan" ]; then
+            to puck "$AS_ROOT cat $file" | wgt_gateway jump add "$2" - --label "$3" --routes "$lan" --yes
+        else
+            to puck "$AS_ROOT cat $file" | wgt_gateway jump add "$2" - --label "$3" --yes
+        fi || die "wgt jump add $2 failed; the jump file stays on the puck ($file) so tpk-ctl.sh exit can try again with TPK_RENEW=1"
         run puck puck.sh jump-done "$1"
     elif [ -z "$DRY" ]; then
         wgt_gateway jump list | grep -qw -- "$2" \
             || die "the puck's rtun exists but $GATEWAY_NAME has no jump '$2': run TPK_RENEW=1 tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME exit"
         log "jump '$2' is already on $GATEWAY_NAME"
+        [ -z "$lan" ] || follow_lan "$2" "$lan"
     fi
+}
+
+# jump_routes <code>: what wgt sends into that jump: cidr[,cidr], or none (a jump
+# that takes all traffic); nothing when wgt can't say.
+jump_routes() { wgt_gateway jump routes "$1" 2>/dev/null | tail -n 1 | tr -d ' \r'; }
+
+# follow_lan <code> <the puck's LAN>: the LAN-only jump's routes become the LAN, if
+# they aren't already (the puck moved to another network).
+follow_lan() {
+    now=$(jump_routes "$1")
+    [ -n "$now" ] || die "wgt jump routes $1 gave nothing (is wgt on $GATEWAY_NAME up to date?)"
+    if [ "$now" = "$2" ]; then log "jump '$1' sends $2 into the puck: its LAN"; return 0; fi
+    confirm_gateway "wgt jump routes $1 $2"
+    log "gateway: jump '$1' sent $now into the puck; its LAN is now $2: wgt jump routes $1 $2"
+    wgt_gateway jump routes "$1" "$2" || die "wgt jump routes $1 $2 failed"
 }
 
 need_link_here() { [ -n "$LINK_NET" ] || die "no link to $GATEWAY_NAME yet: tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME link first"; }
@@ -852,6 +904,10 @@ cmd_exit() {
     if [ -n "$JUMP_LAN_CODE" ]; then
         require JUMP_LAN_LABEL
         add_jump lan "$JUMP_LAN_CODE" "$JUMP_LAN_LABEL"
+    fi
+    if [ -n "$JUMP_LANONLY_CODE" ]; then
+        require JUMP_LANONLY_LABEL
+        add_jump lanonly "$JUMP_LANONLY_CODE" "$JUMP_LANONLY_LABEL"
     fi
     log "next: tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME client <device> to give a device a config through the puck"
 }
@@ -871,7 +927,7 @@ cmd_client() {
 # cmd_mode [--egress] [--lan] [<interface>]: what the gateway's clients reach
 # through the puck. --egress: the internet from the friend's IP (the default);
 # with --lan, the friend's LAN as well. --lan alone (the LAN, with the internet
-# from the gateway) isn't built yet. No flags: print the mode.
+# from the gateway) is per device, the LAN-only jump. No flags: print the mode.
 cmd_mode() {
     egress="" lan="" ifc=""
     for a in "$@"; do
@@ -888,7 +944,7 @@ cmd_mode() {
         printf '%s %s: %s\n' "$GATEWAY_NAME" "$ifc" "$(result MODE "$(run puck puck.sh mode "$ifc")")"
         return 0
     fi
-    [ -n "$egress" ] || die "--lan alone (the friend's LAN, with the internet from the gateway) isn't built yet: --egress --lan gives both"
+    [ -n "$egress" ] || die "--lan alone (the friend's LAN, with the internet from the gateway) is per device: JUMP_LANONLY=\"yes\" in $CONF, tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME exit, then bin/wgt-ctl $WGT_SERVER client add <device> --exit $JUMP_LANONLY_CODE (--egress --lan here gives both to every client)"
     run puck puck.sh mode "$ifc" "egress${lan:++lan}"
 }
 
@@ -915,6 +971,22 @@ test_way_out() {
     fi
 }
 
+# test_lan_routes: the LAN-only jump sends the puck's LAN into it, as it is now.
+test_lan_routes() {
+    code="$JUMP_LANONLY_CODE" fix="tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME exit"
+    lan=$(result LAN "$(run puck puck.sh lan 2>/dev/null)")
+    routes=$(jump_routes "$code")
+    if [ -z "$lan" ]; then
+        printf 'FAIL  the puck reports no LAN for the LAN-only jump %s (%s installs the current exit script)\n' "$code" "$fix"; return 1
+    elif [ -z "$routes" ]; then
+        printf 'FAIL  wgt jump routes %s gave nothing: is the jump on %s, and wgt up to date? (%s)\n' "$code" "$GATEWAY_NAME" "$fix"; return 1
+    elif [ "$routes" = "$lan" ]; then
+        printf 'PASS  the LAN-only jump %s sends the puck'"'"'s LAN into it: %s\n' "$code" "$lan"
+    else
+        printf 'FAIL  the LAN-only jump %s sends %s into the puck, but its LAN is %s: %s (it updates them)\n' "$code" "$routes" "$lan" "$fix"; return 1
+    fi
+}
+
 # test_gateway: the loaded gateway: the puck's end of its link, the gateway's, then end to end.
 test_gateway() {
     rc_v=0
@@ -927,6 +999,7 @@ test_gateway() {
     run puck puck.sh test-link || rc_v=1
     log "gateway $GATEWAY_NAME ($GATEWAY_SSH)"
     run gateway gateway.sh test || rc_v=1
+    if [ -z "$DRY" ] && [ "$TPK_ROUTING" = wgt ] && [ -n "$JUMP_LANONLY_CODE" ]; then test_lan_routes || rc_v=1; fi
     if [ -z "$DRY" ]; then
         log "end to end through $GATEWAY_NAME (a client's way out; up to 30s while wgt brings the jump up)"
         test_way_out || rc_v=1
@@ -953,7 +1026,7 @@ off_drop() { TPK_DISABLED_CONFIGS=$(words "$(printf '%s\n' $TPK_DISABLED_CONFIGS
 of_device() {
     d="$1"; shift
     for n in "$@"; do
-        for code in $JUMP_CODE $JUMP_LAN_CODE; do [ "$n" != "$code.$d" ] || echo "$n"; done
+        for code in $(jump_codes); do [ "$n" != "$code.$d" ] || echo "$n"; done
     done
 }
 
@@ -977,8 +1050,8 @@ cmd_disable() {
         return 0
     fi
     if [ -z "$device" ] && [ "$TPK_DISABLED" = yes ]; then log "$GATEWAY_NAME is disabled already${TPK_DISABLED_CONFIGS:+ ($TPK_DISABLED_CONFIGS)}"; return 0; fi
-    # shellcheck disable=SC2086
-    names=$(jump_configs on $JUMP_CODE $JUMP_LAN_CODE)
+    # shellcheck disable=SC2046
+    names=$(jump_configs on $(jump_codes))
     # shellcheck disable=SC2086
     [ -z "$device" ] || names=$(of_device "$device" $names)
     names=$(words "$names")
@@ -986,7 +1059,7 @@ cmd_disable() {
         log "$GATEWAY_NAME: $device has no config on the puck's jump that's on (wgt client list)"; return 0
     fi
     confirm_gateway "disable: wgt client disable ${names:-(no configs on the jump yet)}"
-    if [ -n "$DRY" ]; then log "[dry-run] would disable ${device:-the puck}'s configs on jump(s) $JUMP_CODE $JUMP_LAN_CODE"; return 0; fi
+    if [ -n "$DRY" ]; then log "[dry-run] would disable ${device:-the puck}'s configs on jump(s) $(jump_codes)"; return 0; fi
     [ -n "$device" ] || save TPK_DISABLED yes
     for c in $names; do
         wgt_gateway client disable "$c" --yes || die "wgt client disable $c failed; the ones before it are off and listed in TPK_DISABLED_CONFIGS"
@@ -1066,7 +1139,8 @@ cmd_status() {
     hs() { a=$(printf '%s\n' "$st" | awk -v i="$1" '$1 == "HS" && $2 == i {print $3}'); [ -n "$a" ] || a="missing"; ago "$a"; }
     wifi=$(get WIFI)
     printf '%s: via %s\n' "$PUCK_NAME" "$PUCK_VIA"
-    printf '  uplink %s, public IP %s, saved Wi-Fi: %s\n' "$(get UPLINK)" "$(get IP)" "${wifi:-none}"
+    lan=$(get LAN)
+    printf '  uplink %s%s, public IP %s, saved Wi-Fi: %s\n' "$(get UPLINK)" "${lan:+ (LAN $lan)}" "$(get IP)" "${wifi:-none}"
     names=$(the_gateways)
     [ -n "$names" ] || { echo "  serves no gateway yet (tpk-ctl.sh $PUCK_NAME gateway add <gateway>)"; return 0; }
     printf '%-10s %-9s %-20s %-21s %s\n' GATEWAY STATE LINK RTUN JUMP
@@ -1080,8 +1154,7 @@ cmd_status() {
             jump=$(wgt_gateway jump list 2>/dev/null | awk -v c="$JUMP_CODE" '$1 == c' \
                 | grep -oE '(up, no WARP|partly up|idle|up)( \([0-9]+ active\))?' | head -n 1)
             jump="$JUMP_CODE ${jump:-(not on $v)}"
-            # shellcheck disable=SC2086
-            configs=$(wgt_gateway client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $JUMP_CODE $JUMP_LAN_CODE " \
+            configs=$(wgt_gateway client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $(jump_codes) " \
                 'index(codes, " " $2 " ") {printf "  %-28s %s\n", $1, ($4 == "disabled" ? "disabled" : "last handshake: " $4)}')
             [ -n "$configs" ] || configs="  no configs on the jump yet (tpk-ctl.sh $PUCK_NAME.$v client <device>)"
         else
@@ -1146,9 +1219,9 @@ undo_gateway() {
     route_around "$GATEWAY_NAME"
     jumps="" configs=""
     if [ "$TPK_ROUTING" = wgt ] && [ -n "$LINK_NET" ]; then
-        for pair in "$JUMP_CODE main" "$JUMP_LAN_CODE lan"; do
+        for pair in "$JUMP_CODE main" "$JUMP_LAN_CODE lan" "$JUMP_LANONLY_CODE lanonly"; do
             # shellcheck disable=SC2086
-            set -- $pair; [ $# -eq 2 ] || continue    # no LAN jump
+            set -- $pair; [ $# -eq 2 ] || continue    # that LAN jump is off
             if [ -n "$DRY" ]; then jumps="$jumps $1"; continue; fi
             case "$(jump_owner "$1" "$(jump_port "$2")")" in
                 none) ;;    # already gone
@@ -1230,8 +1303,7 @@ cmd_gateway_list() {
     printf '%-12s %-8s %-8s %-24s %-15s %-26s %s\n' GATEWAY ROUTING STATE SERVER LINK "ON THE PUCK" JUMPS
     for v in $names; do
         ( QUIET=1; load_gateway "$v" 2>/dev/null
-          if [ "$TPK_ROUTING" = wgt ]; then server="$WGT_SERVER"; jumps=$(words "$JUMP_CODE $JUMP_LAN_CODE")
-              ifs="$PK_IF $RTUN_IF"; [ -z "$JUMP_LAN_CODE" ] || ifs="$ifs $RTUN_LAN_IF"
+          if [ "$TPK_ROUTING" = wgt ]; then server="$WGT_SERVER"; jumps=$(jump_codes); ifs="$PK_IF $(rtun_ifs)"
           else server="$GATEWAY_SSH"; jumps="-"; ifs="$PK_IF"; fi
           [ -n "$LINK_NET" ] || ifs="(no link yet)"
           state=$(gateway_state); [ -n "$LINK_NET" ] || state=-

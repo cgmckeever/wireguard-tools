@@ -37,7 +37,7 @@ main() {
     link_ids
     KILL="/usr/local/sbin/$KILL_NAME" KILL_UNIT="/etc/systemd/system/$KILL_NAME.service"
     : "${TPK_ROUTING:=tpk}" "${PUCK_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
-    : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}" "${WG_IF:=wg0}" "${TPK_DISABLED:=}"
+    : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}" "${JUMP_LANONLY_CODE:=}" "${WG_IF:=wg0}" "${TPK_DISABLED:=}"
     case "$WG_IF" in ''|*[!A-Za-z0-9_.-]*) die "WG_IF must be an interface name" ;; esac
     case "$TPK_ROUTING" in tpk|wgt) ;; *) die "TPK_ROUTING must be tpk or wgt" ;; esac
     case "${1:-}" in
@@ -359,7 +359,7 @@ do_test() {
             check "$ip: kill switch (rule $PRIO_KILL)" "ip rule show | grep -q '^$PRIO_KILL:.*from $ip .*unreachable'"
         done
     else
-        for code in $JUMP_CODE $JUMP_LAN_CODE; do
+        for code in $JUMP_CODE $JUMP_LAN_CODE $JUMP_LANONLY_CODE; do
             check "wgt has jump '$code'" "wgt jump list 2>/dev/null | grep -qw -- '$code'"
         done
     fi
