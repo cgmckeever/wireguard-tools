@@ -75,6 +75,7 @@ def test_logrotate_rule():
     text = render.render_logrotate("/var/log/wireguard-tools.log", "12")
     assert "/var/log/wireguard-tools.log {" in text
     assert "    monthly\n    rotate 12\n" in text and "create 0600 root root" in text
+    assert "    su root root\n" in text   # Ubuntu's /var/log is group-writable
 
 
 @pytest.mark.parametrize("months,ok", [("12", True), ("1", True), ("120", True), ("0", False), ("x", False)])

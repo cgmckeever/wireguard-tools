@@ -338,9 +338,11 @@ def render_sysctl(lines: List[str]) -> str:
 
 def render_logrotate(history_file: str, months: str) -> str:
     """logrotate's rule for the history: a new file each month, <months> old
-    ones kept (compressed, all but the last), mode 600 (it names addresses)."""
+    ones kept (compressed, all but the last), mode 600 (it names addresses). su:
+    Ubuntu's /var/log is group-writable (root:syslog 775), and logrotate skips a
+    file there unless told which user to rotate it as."""
     return (f"{MARKER}: the history of changes (wgt history), kept {months} months\n"
-            f"{history_file} {{\n    monthly\n    rotate {months}\n    compress\n    delaycompress\n"
+            f"{history_file} {{\n    su root root\n    monthly\n    rotate {months}\n    compress\n    delaycompress\n"
             "    missingok\n    notifempty\n    create 0600 root root\n}\n")
 
 
