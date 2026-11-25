@@ -23,7 +23,8 @@
 #   tpk-ctl.sh [<puck>[.<vps>]] disable [<device>]   the puck's clients (or one device's) on each VPS, or that one, off;
 #                                           links, keys and configs stay
 #   tpk-ctl.sh [<puck>[.<vps>]] enable [<device>]    let back in what disable turned off
-#   tpk-ctl.sh [<puck>[.<vps>]] status      at a glance: the puck, and per VPS its link, rtun, jump and configs
+#   tpk-ctl.sh [<puck>[.<vps>]] status [--watch [s]]   at a glance: the puck, and per VPS its link, rtun, jump and
+#                                           each config's (tpk: each client's) last handshake; --watch: redrawn every 5s
 #   tpk-ctl.sh [<puck>] wifi [list]         the puck's saved Wi-Fi networks, and its uplink now
 #   tpk-ctl.sh [<puck>] wifi add <name>     save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
@@ -1028,6 +1029,16 @@ ago() {
     esac
 }
 
+# client_lines: vps.sh clients' "CLIENT <ip> <age>" lines as status shows them.
+client_lines() {
+    while read -r tag ip age; do
+        [ "$tag" = CLIENT ] || continue
+        if [ "$age" = missing ]; then printf '  %-28s no peer on %s with this address\n' "$ip" "$WG_IF"
+        elif [ "$TPK_DISABLED" = yes ]; then printf '  %-28s disabled\n' "$ip"
+        else printf '  %-28s last handshake: %s\n' "$ip" "$(ago "$age")"; fi
+    done
+}
+
 # cmd_status: at a glance, read-only and quick (no jump is brought up): the puck
 # (how it was reached, uplink, Wi-Fi, public IP), then per VPS whether it's
 # serving, the link's and rtun's last handshakes (from the puck), the jump's state
@@ -1058,10 +1069,28 @@ cmd_status() {
                 'index(codes, " " $2 " ") {printf "  %-28s %s\n", $1, ($4 == "disabled" ? "disabled" : "last handshake: " $4)}')
             [ -n "$configs" ] || configs="  no configs on the jump yet (tpk-ctl.sh $PUCK_NAME.$v client <device>)"
         else
-            rtun="-" jump="-" configs="  clients (CLIENT_IPS): ${CLIENT_IPS:-none}"
+            rtun="-" jump="-"
+            configs=$(run vps vps.sh clients 2>/dev/null | client_lines)
+            [ -n "$configs" ] || configs="  clients (CLIENT_IPS): ${CLIENT_IPS:-none}"
         fi
         printf '%-10s %-9s %-20s %-21s %s\n' "$v" "$state" "$link" "$rtun" "$jump"
         printf '%s\n' "$configs"
+    done
+}
+
+
+# status_watch [seconds]: status, redrawn every <seconds> (default 5) until Ctrl-C.
+# Each round is a fresh status (a few ssh calls), drawn once it's all in.
+status_watch() {
+    every="${1:-5}"
+    case "$every" in ''|*[!0-9]*|0) die "status --watch [seconds]: a whole number of seconds" ;; esac
+    trap 'printf "\033[?1049l"; exit 0' INT TERM
+    printf '\033[?1049h'
+    while :; do
+        out=$(cmd_status 2>&1)
+        printf '\033[H\033[2J%s\n\n\033[2mtpk-ctl.sh %s status, %s: every %ss  Ctrl-C quits\033[0m\n' \
+            "$out" "$PUCK_NAME${VPS_PICK:+.$VPS_PICK}" "$(date +%H:%M:%S)" "$every"
+        sleep "$every"
     done
 }
 
@@ -1254,7 +1283,7 @@ main() {
         client) one_vps client; cmd_client "$@" ;;
         lan-mode) one_vps lan-mode; pick_puck; cmd_lan_mode "$@" ;;
         disable|enable) pick_puck; each_vps "cmd_$cmd" "$@" ;;
-        status) pick_puck; cmd_status ;;
+        status) pick_puck; if [ "${1:-}" = --watch ]; then shift; status_watch "$@"; else cmd_status; fi ;;
         wifi) pick_puck; cmd_wifi "$@" ;;
         test) pick_puck; cmd_test ;;
         ssh) pick_puck; cmd_ssh "$@" ;;

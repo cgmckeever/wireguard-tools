@@ -17,6 +17,8 @@
 #           public key>. With TPK_ROUTING=tpk it also writes the routing for CLIENT_IPS
 #           and the kill switch
 #   test    PASS/FAIL for the link and, by TPK_ROUTING, the routing or the wgt jump(s)
+#   clients TPK_ROUTING=tpk: each of CLIENT_IPS's last handshake on WG_IF, as
+#           "CLIENT <ip> <seconds ago|none|missing>" (read-only; for status)
 #   undo    remove the link (and TPK_ROUTING=tpk's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
@@ -42,12 +44,25 @@ main() {
         pick) pick_link; pick_port ;;
         link) do_link ;;
         test) do_test ;;
+        clients) do_clients ;;
         undo) do_undo ;;
         *) die "unknown step '${1:-}' (see the top of vps.sh)" ;;
     esac
 }
 
 WG=/etc/wireguard
+
+# do_clients: each of CLIENT_IPS's peer on WG_IF (the one whose AllowedIPs has
+# it) and how long ago it last handshook: none, or missing (no such peer).
+do_clients() {
+    now=$(date +%s)
+    dump=$(wg show "$WG_IF" dump 2>/dev/null | tail -n +2)
+    for ip in $CLIENT_IPS; do
+        printf '%s\n' "$dump" | awk -F '\t' -v ip="$ip" -v now="$now" '
+            { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == ip "/32") { hs = $5; found = 1 } }
+            END { print "CLIENT " ip " " (!found ? "missing" : hs == 0 ? "none" : now - hs) }'
+    done
+}
 
 log() { printf '==> %s\n' "$*" >&2; }
 die() { printf 'vps.sh: %s\n' "$*" >&2; exit 1; }

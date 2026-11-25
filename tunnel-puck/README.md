@@ -656,8 +656,11 @@ in at all, bring the puck home to change it.
 - **At a glance:** `scripts/tpk-ctl.sh status`, read-only and quick: how the
   puck was reached, its uplink, public IP and Wi-Fi, then per VPS whether it's
   serving, the link's and rtun's last handshakes and the jump's state, and
-  under it each config on the jump with its last handshake (or `disabled`).
-  `test` says why something's off.
+  under it each config on the jump with its last handshake (or `disabled`;
+  with `tpk`, each of `CLIENT_IPS`, from the VPS's WireGuard). `test` says why
+  something's off. `status --watch [seconds]` keeps it on screen, redrawn every
+  5s (each round takes a few seconds of ssh), until Ctrl-C; on a wgt VPS,
+  `../bin/wgt-ctl <vps> client list --watch` is the VPS's whole table, live.
 
   ```
   mom: via the link to dengar, through root@dengar.example.com
