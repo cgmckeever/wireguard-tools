@@ -37,6 +37,7 @@ wgt/                      the package (Python 3.8+, standard library only)
   results.py              PASS/FAIL counts shared by `test` and `jump test`
   watchdog.py             the watchdogs (the jump watchdog's rule is the pure `decide`)
   ui.py                   ages, prompts, numbered menus, the clients table's columns
+  logview.py              history --follow (tail -F) and log/history --step (the full-screen walk back)
 bin/wgt, bin/wgt-ctl      launchers (put the checkout on sys.path and call main)
 templates/                client config and systemd unit templates
 tests/                    pytest: unit, golden files, FakeRunner commands, setup -> rollback

@@ -505,7 +505,8 @@ wgt tunnel test       # every way out (each exit, with and without WARP), traced
 wgt summary           # at a glance: one line per fact, says what is wrong
 wgt status            # settings (and any not running yet), interfaces, configs, routes, rules
 wgt log [N]           # its changes, the watchdogs and the tunnels: last lines, then follows (Ctrl-C stops; --no-follow just prints)
-wgt history [N]       # every change made here, when and by whom (--all: everything kept)
+wgt history [N]       # every change made here, when and by whom (--all: everything kept; -f: then follows)
+wgt history --step    # walk back through it, newest first, one entry per key (also wgt log --step)
 wgt backup            # /var/backups/wireguard-tools/wireguard-tools.<host>.<date>.tar.gz
 wgt restore <archive> # set this server up from a backup
 wgt rollback          # stop everything, remove all rules, restore original files and the hostname
@@ -585,8 +586,28 @@ how `wgt-ctl`'s commands show up) and the sudo user, if any.
 wgt history                 # the last 40 lines
 wgt history 200             # the last 200
 wgt history --all           # everything kept
+wgt history -f              # the last 40, then each new one as it happens (Ctrl-C stops)
+wgt history --step          # review: walk back through it, entry by entry (below)
 wgt-ctl dengar history      # from your machine (or wgt-ctl all history)
+wgt-ctl dengar history -f   # -f and --step work from your machine too, one server at a time
 ```
+
+**Stepping back** (`--step`, for `wgt history` and `wgt log`) fills the
+terminal: the entries one per row with the current one highlighted, and under
+them the current one in full. It opens at the newest.
+
+| key | does |
+|---|---|
+| `k`, Enter, space, Up | one entry older |
+| `j`, Down | one entry newer |
+| `u` / `d` (or PgUp / PgDn) | half a screen older / newer |
+| `g` / `G` | the oldest / the newest |
+| `/text` Enter | the next older entry containing `text` (case ignored); `n` again, `N` the other way |
+| `q` (or Esc, Ctrl-C) | quit, leaving the terminal as it was |
+
+`--step` walks the whole history (`wgt history --step 200`: only the last 200)
+and the last 1000 lines of `wgt log` (`wgt log --step 5000` for more). It needs
+a terminal, so it isn't for `wgt-ctl all`.
 
 **Kept for a year by default.** logrotate starts a new file each month and keeps
 `HISTORY_MONTHS` old ones (compressed; `setup --history-months <n>`, 1 to 120,

@@ -8,7 +8,7 @@ import os
 import sys
 from typing import Callable, List, Optional
 
-from . import host, ops, render, rules, store, system
+from . import host, logview, ops, render, rules, store, system
 from .const import ALL_WATCHDOGS, DEVICE_ADDRESS_FORM, EXIT_WATCHDOG, LOG_TAG, WATCHDOGS, Paths, error_tag
 from .ctx import Args, Ctx, load, parse, settings_env
 from .errors import WgtError
@@ -25,8 +25,10 @@ Cloudflare WARP. The device picks one at a time.
   summary | status | test    at a glance / everything running / all checks
   log [N] [--no-follow]      changes, watchdogs and tunnels: last N lines, then follows (Ctrl-C stops;
                              --no-follow, or piped: print and stop)
-  history [N] [--all]        every change made here, with who made it: the last N lines (default
-                             40; --all: everything kept, HISTORY_MONTHS of it)
+  history [N] [--all] [-f]   every change made here, with who made it: the last N lines (default
+                             40; --all: everything kept, HISTORY_MONTHS of it; -f: then follows)
+  log|history --step [N]     walk back through it, newest first, one entry per key (q quits;
+                             N: only the last N; log's default is the last 1000)
   backup [dir] | restore <archive> [--old-names] | rollback [--purge]
 
   client list [--tsv] | add <device> [--exit host|<jump>[,..]] [--warp on|off|on,off] [--allowed-ips ..] [--group ..]
@@ -89,21 +91,34 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
         sys.stdout.write(f"=== {name}\n{system.redact(text)}")
 
 
-def _line_count(words: List[str], usage: str) -> str:
-    """The [lines] word of log and history (default 40)."""
+def _line_count(words: List[str], usage: str, default: str = "40") -> str:
+    """The [lines] word of log and history."""
     ops.no_more_words(words[1:], usage)
-    count = words[0] if words else "40"
+    count = words[0] if words else default
     if not store.is_uint(count):
         raise WgtError(f"usage: {usage}")
     return count
+
+
+def _stepping(ctx: Ctx) -> bool:
+    """--step asked for, and possible: a person at a terminal, not following."""
+    if not ctx.args.step:
+        return False
+    if ctx.args.follow:
+        raise WgtError("--step or --follow, not both")
+    if not logview.can_step():
+        raise WgtError("--step needs a terminal (from wgt-ctl: one server, not all)")
+    return True
 
 
 def cmd_log(ctx: Ctx, words: List[str]) -> None:
     """One time-ordered log: these tools' own steps, the watchdogs, and the
     wg-quick units (wg0, warp, each jump's tunnels). Like tail -f: the
     last [lines] (default 40), then new entries until Ctrl-C. With
-    --no-follow, or when the output isn't a terminal, it prints and stops."""
-    count = _line_count(words, "wgt log [lines] [--no-follow]")
+    --no-follow, or when the output isn't a terminal, it prints and stops.
+    --step: walk back through the last [lines] (default 1000)."""
+    stepping = _stepping(ctx)
+    count = _line_count(words, "wgt log [lines] [--no-follow|--step]", "1000" if stepping else "40")
     matches: List[str] = []
     for tag in (LOG_TAG, *ALL_WATCHDOGS, *map(error_tag, ALL_WATCHDOGS)):
         matches += [f"SYSLOG_IDENTIFIER={tag}", "+"]
@@ -112,8 +127,14 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
         ifcs += [e.px, e.wx]
     for ifc in ifcs:
         matches += [f"_SYSTEMD_UNIT=wg-quick@{ifc}.service", "+", f"UNIT=wg-quick@{ifc}.service", "+"]
-    follow = ctx.args.follow or (sys.stdout.isatty() and not ctx.args.no_follow)
+    follow = not stepping and (ctx.args.follow or (sys.stdout.isatty() and not ctx.args.no_follow))
     cmd = ["journalctl", "--no-pager", "-o", "short-iso", "-n", count] + (["-f"] if follow else []) + matches[:-1]
+    if stepping:
+        lines = [x for x in ctx.runner.query(cmd).splitlines() if x and not x.startswith("-- ")]
+        if not lines:
+            raise WgtError("nothing in the log yet")
+        logview.step(lines, "wgt log")
+        return
     try:
         os.execvp(cmd[0], cmd)
     except OSError as e:
@@ -121,17 +142,28 @@ def cmd_log(ctx: Ctx, words: List[str]) -> None:
 
 
 def cmd_history(ctx: Ctx, words: List[str]) -> None:
-    """wgt history [N] [--all]: the changes made on this server (by wgt, wgt-ctl and
-    the watchdogs), with when and who: the last N lines, or with --all every one kept."""
-    count = _line_count(words, "wgt history [lines] [--all]")
+    """wgt history [N] [--all] [-f|--step]: the changes made on this server (by wgt,
+    wgt-ctl and the watchdogs), with when and who: the last N lines, or with --all
+    every one kept. -f: then new ones as they come, until Ctrl-C. --step: walk back
+    through them all (or the last N)."""
+    stepping = _stepping(ctx)
+    count = _line_count(words, "wgt history [lines] [--all] [-f|--step]")
     lines = system.read_history(ctx.paths.history_file)
-    if not lines:
+    if not (ctx.args.all or (stepping and not words)):
+        lines = lines[-int(count):]
+    if not lines and not ctx.args.follow:
         ctx.out.info(f"no history yet ({ctx.paths.history_file}): it starts with the next change")
         return
-    for line in lines if ctx.args.all else lines[-int(count):]:
-        print(line)
     if not os.path.isfile(ctx.paths.logrotate_file):
         ctx.out.warn(f"no {ctx.paths.logrotate_file}: the history isn't rotated yet (wgt setup writes it)")
+    if stepping:
+        logview.step(lines, "wgt history")
+        return
+    for line in lines:
+        print(line)
+    if ctx.args.follow:
+        sys.stdout.flush()
+        logview.follow(ctx.paths.history_file)
 
 
 # command -> (module, function); a module is only imported when its command runs.

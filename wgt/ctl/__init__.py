@@ -155,6 +155,8 @@ def _on_all(cmd: str, args: List[str]) -> int:
     new_number_for = ""
     if cmd == "client" and sub == "add":
         args, new_number_for = fleet_cmds.numbered_add(args)
+    if cmd in ("log", "history") and {"--step", "--follow", "-f"} & set(args):
+        raise WgtError(f"{cmd} --step and --follow take one server, not all")
     if cmd == "log" and "--no-follow" not in args:
         args = args + ["--no-follow"]   # following one server would block the rest
     results = []
