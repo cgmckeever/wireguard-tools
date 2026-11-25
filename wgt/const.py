@@ -136,7 +136,6 @@ def error_tag(tag: str) -> str:
     return f"{tag}-error"
 
 
-MIB = 1024 * 1024
 KEEP_CHANGES = 5             # newest copies kept per file (plus its original)
 # What setup records about this host (wg-tools.state): restore drops them
 # (they belong to the old server) and rollback uses them. LOCATION too: setup

@@ -23,6 +23,15 @@ def ago(ts: int, now: Optional[float] = None) -> str:
     return f"{d // 3600}h ago"
 
 
+def size(n: int) -> str:
+    """A byte count, short: 0, 512B, 330K, 13M, 1.2G (1024s)."""
+    for unit, scale in (("G", 1 << 30), ("M", 1 << 20), ("K", 1 << 10)):
+        if n >= scale:
+            v = n / scale
+            return f"{v:.1f}{unit}" if v < 10 and unit != "K" else f"{v:.0f}{unit}"
+    return f"{n}B" if n else "0"
+
+
 def first_few(items: Sequence[str], sep: str, n: int = 3) -> str:
     """The first <n> of <items>, and how many more there are."""
     return sep.join(items[:n]) + (f" (+{len(items) - n} more)" if len(items) > n else "")
@@ -94,7 +103,7 @@ def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[i
 # --- the clients table (wgt client list, wgt-ctl clients) ---
 
 CLIENT_FMT = "{:<16} {:<24} {:<22} {:<4} {:<15} {:<13} {:<14} {:<12} {}"
-CLIENT_HEAD = ("DEVICE", "CONFIG", "EXIT", "WARP", "ADDRESS", "STATIC", "LAST HANDSHAKE", "RX/TX MiB", "ALLOWED IPS")
+CLIENT_HEAD = ("DEVICE", "CONFIG", "EXIT", "WARP", "ADDRESS", "STATIC", "LAST HANDSHAKE", "RX/TX", "ALLOWED IPS")
 
 
 class ClientRow(NamedTuple):
@@ -104,7 +113,7 @@ class ClientRow(NamedTuple):
     exit: str          # jump code, or host
     ip: str
     seen: str          # last handshake: "3m ago", "none", "disabled"
-    traffic: str       # "rx/tx" MiB
+    traffic: str       # "rx/tx" as the server counts it, e.g. "330K/75K" (size())
     allowed: str       # "0.0.0.0/0, ::/0"
     exit_label: str = ""   # the jump's full name ("Paris, France")
     static: str = ""       # the device's static address

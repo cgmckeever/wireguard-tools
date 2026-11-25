@@ -18,7 +18,7 @@
 #           and the kill switch
 #   test    PASS/FAIL for the link and, by TPK_ROUTING, the routing or the wgt jump(s)
 #   clients TPK_ROUTING=tpk: each of CLIENT_IPS's last handshake on WG_IF, as
-#           "CLIENT <ip> <seconds ago|none|missing>" (read-only; for status)
+#           "CLIENT <ip> <seconds ago|none|missing> <rx bytes> <tx bytes>" (read-only; for status)
 #   undo    remove the link (and TPK_ROUTING=tpk's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
@@ -59,8 +59,8 @@ do_clients() {
     dump=$(wg show "$WG_IF" dump 2>/dev/null | tail -n +2)
     for ip in $CLIENT_IPS; do
         printf '%s\n' "$dump" | awk -F '\t' -v ip="$ip" -v now="$now" '
-            { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == ip "/32") { hs = $5; found = 1 } }
-            END { print "CLIENT " ip " " (!found ? "missing" : hs == 0 ? "none" : now - hs) }'
+            { n = split($4, a, ","); for (i = 1; i <= n; i++) if (a[i] == ip "/32") { hs = $5; rx = $6; tx = $7; found = 1 } }
+            END { print "CLIENT " ip " " (!found ? "missing" : hs == 0 ? "none" : now - hs) " " (rx + 0) " " (tx + 0) }'
     done
 }
 

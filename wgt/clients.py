@@ -18,7 +18,7 @@ import time
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
 from . import devices, live, logview, net, ops, render, rules, store, system, ui, units
-from .const import DEVICE_ACTIVE, MIB, client_conf_name
+from .const import DEVICE_ACTIVE, client_conf_name
 from .errors import WgtError
 
 if TYPE_CHECKING:
@@ -246,7 +246,7 @@ def client_rows(ctx: Ctx) -> List[ui.ClientRow]:
         seen = "disabled" if ctx.snap.is_disabled(cl.name) else ui.ago(hs.get(cl.pub, 0), now)
         rx_b, tx_b = tx.get(cl.pub, (0, 0))
         rows.append(ui.ClientRow(cl.name, exit_short(cl.name), cl.ip, seen,
-                                 f"{rx_b // MIB}/{tx_b // MIB}", render.spaced(cl.allowed),
+                                 f"{ui.size(rx_b)}/{ui.size(tx_b)}", render.spaced(cl.allowed),
                                  exit_label(ctx, cl.name), devices.static_of(ctx, cl.name)))
     return rows
 

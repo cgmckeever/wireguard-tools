@@ -1139,12 +1139,20 @@ ago() {
 
 # client_lines: gateway.sh clients' "CLIENT <ip> <age>" lines as status shows them.
 client_lines() {
-    while read -r tag ip age; do
+    while read -r tag ip age rx tx; do
         [ "$tag" = CLIENT ] || continue
         if [ "$age" = missing ]; then printf '  %-28s no peer on %s with this address\n' "$ip" "$WG_IF"
         elif [ "$TPK_DISABLED" = yes ]; then printf '  %-28s disabled\n' "$ip"
-        else printf '  %-28s last handshake: %s\n' "$ip" "$(ago "$age")"; fi
+        else printf '  %-28s last handshake: %-9s rx/tx %s/%s\n' "$ip" "$(ago "$age")" "$(size "$rx")" "$(size "$tx")"; fi
     done
+}
+
+# size <bytes>: short, as wgt client list shows it: 0, 512B, 330K, 13M, 1.2G.
+size() {
+    awk -v n="${1:-0}" 'BEGIN {
+        if (n >= 1073741824) { v = n / 1073741824; u = "G" } else if (n >= 1048576) { v = n / 1048576; u = "M" }
+        else if (n >= 1024) { printf "%.0fK", n / 1024; exit } else { print (n > 0 ? n "B" : "0"); exit }
+        printf (v < 10 ? "%.1f%s" : "%.0f%s"), v, u }'
 }
 
 # cmd_status: at a glance, read-only and quick (no jump is brought up): the puck
@@ -1174,7 +1182,8 @@ cmd_status() {
                 | grep -oE '(up, no WARP|partly up|idle|up)( \([0-9]+ active\))?' | head -n 1)
             jump="$JUMP_CODE ${jump:-(not on $v)}"
             configs=$(wgt_gateway client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $(jump_codes) " \
-                'index(codes, " " $2 " ") {printf "  %-28s %s\n", $1, ($4 == "disabled" ? "disabled" : "last handshake: " $4)}')
+                'index(codes, " " $2 " ") {if ($4 == "disabled") printf "  %-28s disabled\n", $1
+                    else printf "  %-28s last handshake: %-9s rx/tx %s\n", $1, $4, $5}')
             [ -n "$configs" ] || configs="  no configs on the jump yet (tpk-ctl.sh $PUCK_NAME.$v client <device>)"
         else
             rtun="-" jump="-"
