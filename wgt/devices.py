@@ -37,6 +37,7 @@ from .errors import WgtError
 
 if TYPE_CHECKING:
     from .ctx import Ctx
+    from .system import Runner
 
 FAILED = "could not"   # starts sync's lines about a rule it couldn't change
 
@@ -167,6 +168,14 @@ def _enabled(snap: store.Snapshot, device: str) -> List[store.Client]:
     return [c for c in snap.device_clients(device) if not snap.is_disabled(c.name)]
 
 
+def _change(r: Runner, cmd: str, table: str, op: str, chain: str, spec: str) -> str:
+    """Add (-A, -I) or remove (-D) one rule of <chain>; "" if it worked, else the
+    line saying it didn't (it starts with FAILED)."""
+    if r.attempt([cmd, "-t", table, op, chain, *spec.split()]):
+        return ""
+    return f"{FAILED} {'remove from' if op == '-D' else 'add to'} {chain}: {spec}"
+
+
 def sync(ctx: Ctx) -> List[str]:
     """Make the chains match desired(), new rules before old ones go, so a
     forward never disappears in between. Returns what changed and what failed,
@@ -180,13 +189,15 @@ def sync(ctx: Ctx) -> List[str]:
         if have is None:
             continue
         for spec in (s for s in want if s not in have):
-            if not r.attempt(["iptables", "-t", "nat", "-A", chain, *spec.split()]):
-                log.append(f"{FAILED} add to {chain}: {spec}")
+            failed = _change(r, "iptables", "nat", "-A", chain, spec)
+            if failed:
+                log.append(failed)
             elif chain == DEVICE_CHAIN:
                 log.append(spec.replace(" -j DNAT --to-destination ", " -> ").replace("-d ", "").replace("/32", ""))
         for spec in (s for s in have if s not in want):
-            if not r.attempt(["iptables", "-t", "nat", "-D", chain, *spec.split()]):
-                log.append(f"{FAILED} remove from {chain}: {spec}")
+            failed = _change(r, "iptables", "nat", "-D", chain, spec)
+            if failed:
+                log.append(failed)
             elif chain == DEVICE_CHAIN and spec.split()[1].split("/")[0] not in forwards:
                 log.append(f"{spec.split()[1].split('/')[0]}: no config in use")
     return log + _sync_allowed(ctx)
@@ -256,17 +267,11 @@ def _sync_allowed(ctx: Ctx) -> List[str]:
         refusal = None if have is None else _refusal_at(have)
         if have is None or refusal is None:
             continue
-        for spec in have[refusal:]:
-            if spec.startswith("-s ") and not r.attempt([cmd, "-t", "filter", "-D", chain, *spec.split()]):
-                failed.append(f"{FAILED} remove from {chain}: {spec}")
-        have = have[:refusal]
-        for spec in want:
-            if spec not in have and not r.attempt([cmd, "-t", "filter", "-I", chain, *spec.split()]):
-                failed.append(f"{FAILED} add to {chain}: {spec}")
-        for spec in have:
-            if spec.startswith("-s ") and spec not in want \
-                    and not r.attempt([cmd, "-t", "filter", "-D", chain, *spec.split()]):
-                failed.append(f"{FAILED} remove from {chain}: {spec}")
+        above = have[:refusal]
+        changes = [("-D", s) for s in have[refusal:] if s.startswith("-s ")] \
+            + [("-I", s) for s in want if s not in above] \
+            + [("-D", s) for s in above if s.startswith("-s ") and s not in want]
+        failed += [f for f in (_change(r, cmd, "filter", op, chain, spec) for op, spec in changes) if f]
     return failed
 
 
