@@ -184,12 +184,11 @@ def do_move(s: Server, args: List[str]) -> int:
     if tested != 0:
         return _move_failed(s, new, in_place, archive, "tests failed")
 
-    if not in_place:
-        remote.set_target(s.name, new)
-        out.log(f"6. {s.name} is now {new} in {remote.LIST}")
     if in_place:
         out.log(f"{s.name} rebuilt")
     else:
+        remote.set_target(s.name, new)
+        out.log(f"6. {s.name} is now {new} in {remote.LIST}")
         out.info(f"the old machine ({s.target}) is down, its keys kept")
         # No by default: Enter, or a lost terminal, must not destroy the way back.
         # Its tests can't see a provider's firewall blocking the new machine's UDP port.
