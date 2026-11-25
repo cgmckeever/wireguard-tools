@@ -14,7 +14,7 @@ import time
 from typing import TYPE_CHECKING, Dict, Iterator, List, Optional, Tuple
 
 from . import live, ops, render, results, rules, store, ui, units, warp
-from .const import EXIT_IDLE, EXIT_MAX, EXIT_WARP_WAIT, EXIT_WATCHDOG, WATCHDOG_STALE
+from .const import EXIT_IDLE, EXIT_MAX, EXIT_WARP_WAIT, EXIT_WATCHDOG, WATCHDOG_STALE, watchdog
 from .errors import WgtError
 
 if TYPE_CHECKING:
@@ -564,7 +564,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False, only: str 
         else:
             res.result("PASS", f"jump {e.code}: idle, no active devices (comes up when one connects; "
                                f"'wgt jump test' checks it live)")
-    res.check("jump watchdog timer enabled and running", live.timer_on(r, EXIT_WATCHDOG))
+    res.check(watchdog(EXIT_WATCHDOG).check_text, live.timer_on(r, EXIT_WATCHDOG))
 
 
 EXIT_COMMANDS = {"list": cmd_list, "add": cmd_add, "remove": cmd_remove, "test": cmd_test}

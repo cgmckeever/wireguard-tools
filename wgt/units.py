@@ -7,7 +7,7 @@ import shutil
 from typing import TYPE_CHECKING, Iterable, List, Tuple
 
 from . import live, ops, render, store
-from .const import REPO_DIR, WATCHDOGS, Watchdog
+from .const import REPO_DIR, WATCHDOGS, Watchdog, watchdog
 
 if TYPE_CHECKING:
     from .ctx import Ctx
@@ -118,7 +118,7 @@ def unit_files(ctx: Ctx) -> List[Tuple[str, str]]:
 
 def write_watchdog(ctx: Ctx, name: str) -> None:
     """Install watchdog <name> and keep its timer on."""
-    w = next(x for x in WATCHDOGS if x.name == name)
+    w = watchdog(name)
     write_timer(ctx, w.name, w.step_what.format(warp_if=ctx.cfg.WARP_IF), *_watchdog_units(ctx, w))
 
 

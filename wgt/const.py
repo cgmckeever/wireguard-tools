@@ -117,6 +117,11 @@ WATCHDOGS = (
 ALL_WATCHDOGS = tuple(w.name for w in WATCHDOGS)
 
 
+def watchdog(name: str) -> Watchdog:
+    """Watchdog <name>'s row."""
+    return next(w for w in WATCHDOGS if w.name == name)
+
+
 def error_tag(tag: str) -> str:
     """The journal tag a watchdog's failed runs log under: its own tag is what it did
     (the last WARP port change is the WARP watchdog's last entry)."""
