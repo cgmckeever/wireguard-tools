@@ -12,21 +12,28 @@ it:
 - **or both:** the friend's IP and their home network ([2.3](#23-optional-access-mode)).
 
 The friend only plugs in power and an ethernet cable: no router settings, no
-open ports.
+open ports. If the link drops, the traffic meant for the puck stops: it never
+leaves from your gateway's IP instead. You reach the puck from afar through its
+link, or through an optional emergency door (SSH over Cloudflare) when the link
+is down.
 
 ```
 client ──WireGuard──▶ your gateway ──WireGuard link──▶ puck at the friend's ──▶ internet, and/or their home network
                                       ▲ the puck dials out and keeps it open, so the friend's NAT doesn't matter
 ```
 
-Your clients still connect to your gateway. The ones you choose get a config of
-their own for it (with `tpk`, their address is listed instead), and the gateway
-sends their traffic down a link the puck keeps open, and the puck sends it out
-under the friend's IP. You build and test everything at home; at drop-off the
-puck only needs power. One puck can serve several gateways, each over its own link
+You build and test everything at home; at drop-off the puck only needs power.
+One puck can serve several gateways, each over its own link
 ([One puck, several gateways](#one-puck-several-gateways)).
 
-**Where each tunnel starts and ends, and who sees the traffic.** With `wgt`:
+## How it works
+
+Your clients still connect to your gateway. The ones you choose get a config of
+their own for it (with `tpk` routing, their address is listed instead), and the
+gateway sends their traffic down a link the puck keeps open; the puck sends it
+out under the friend's IP, or to their home network.
+
+**Where each tunnel starts and ends, and who sees the traffic.** With `wgt` routing:
 
 ```
 client ══[1]══▶ gateway wg0 ─ plain ─▶ gateway ══[2 inside 3]══▶ puck wgpk0 → wgrtun0 ─ plain ─▶ friend's ISP ──▶ sites
@@ -57,7 +64,9 @@ tunnels do with WARP. tunnel-puck doesn't do that. Phones would need
 [sing-box](https://sing-box.sagernet.org) for it, and a Mac wireguard-tunnels,
 sing-box or two `wg-quick` configs.
 
-**Status:** tested only on a Raspberry Pi so far: a Pi 2 v1.1 (32-bit
+## Status
+
+Tested only on a Raspberry Pi so far: a Pi 2 v1.1 (32-bit
 Raspberry Pi OS Bookworm), with `TPK_ROUTING=wgt` against a test gateway. Phases 1
 and 2 ran from a fresh image, and an iPhone on cellular came out with the
 puck's home IP. Unplugged and moved behind a travel router, the puck came back
