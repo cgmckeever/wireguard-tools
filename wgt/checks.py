@@ -448,7 +448,8 @@ def summary_lines(ctx: Ctx) -> List[Tuple[str, str]]:
         users = len(ctx.snap.exit_clients(e.code))
         st = exits.state(ctx, e)
         state = f"{st}, {exits.active_count(ctx, e.code)} active" if st != "idle" else st
-        lines.append(("jumps" if i == 0 else "", f"{e.code} ({e.label}): {state}; {users} client(s)"))
+        lines.append(("jumps" if i == 0 else "", f"{e.code} ({exits.name_with_routes(ctx.snap, e)}): {state}; "
+                                                 f"{users} client(s)"))
 
     hs = live.handshakes(r, c.WG_IF)
     in_use = [cl for cl in ctx.snap.clients if not ctx.snap.is_disabled(cl.name)]

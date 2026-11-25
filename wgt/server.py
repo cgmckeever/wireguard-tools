@@ -545,6 +545,10 @@ def refuse_routed_subnet(ctx: Ctx) -> None:
     clash = net.routed_overlap(subnet, ctx.facts.routes4, own_if)
     if clash:
         raise WgtError(f"subnet {subnet} overlaps {clash}, which this host already routes; pick another")
+    for code, routes in ctx.snap.routes.items():
+        why = exits.route_clash(subnet, routes)
+        if why:
+            raise WgtError(f"jump {code}'s routes: {why} (wgt jump routes {code} ...); pick another subnet")
 
 
 def restart_needed(ctx: Ctx, keys_changed: bool = False) -> bool:

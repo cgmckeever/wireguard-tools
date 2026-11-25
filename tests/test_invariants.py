@@ -171,6 +171,18 @@ JOURNEY = [
     (["client", "remove", "lon-gb.tv3"], hasnt("lon-gb.tv3")),
     (["client", "remove", "warp.lon-gb.tv3"], hasnt("warp.lon-gb.tv3")),
     (["jump", "remove", "lon-gb"], lambda s: not s.exit("lon-gb")),
+    (["jump", "routes", "nyc-us", "10.20.30.0/24"], lambda s: s.exit_routes("nyc-us") == ("10.20.30.0/24",)),
+    (["client", "add", "tv5", "--exit", "nyc-us"],
+     lambda s: s.client("nyc-us.tv5") and not s.client("warp.nyc-us.tv5")),
+    (["client", "rename", "nyc-us.tv5", "tv5"], has("tv5")),          # they share main's rules
+    (["client", "rename", "tv5", "nyc-us.tv5"], has("nyc-us.tv5")),
+    (["jump", "routes", "nyc-us", "10.20.30.0/24,192.168.9.0/24"], lambda s: len(s.exit_routes("nyc-us")) == 2),
+    (["jump", "routes", "nyc-us", "none"], lambda s: not s.exit_routes("nyc-us")),
+    (["client", "remove", "nyc-us.tv5"], hasnt("nyc-us.tv5")),
+    (["jump", "add", "lan", "JUMPFILE", "--routes", "10.20.30.0/24"], lambda s: s.exit_routes("lan")),
+    (["client", "add", "lan.tv6"], has("lan.tv6")),
+    (["client", "remove", "lan.tv6"], hasnt("lan.tv6")),
+    (["jump", "remove", "lan"], lambda s: not s.exit("lan") and not s.routes),
     (["client", "remove", "warp.par-fr.tv"], hasnt("warp.par-fr.tv")),   # a disabled one
 ]
 
@@ -270,6 +282,8 @@ CRASHES = [
      and all(c.ip.startswith("10.2.12.") for c in s.clients), None),
     (["jump", "add", "lon-gb", "JUMPFILE", "--label", "London"], lambda s: s.exit("lon-gb"), None),
     (["jump", "remove", "nyc-us"], lambda s: not s.exit("nyc-us"), None),
+    (["jump", "routes", "nyc-us", "10.20.30.0/24"], lambda s: s.exit_routes("nyc-us") == ("10.20.30.0/24",), None),
+    (["jump", "add", "lan", "JUMPFILE", "--routes", "10.20.30.0/24"], lambda s: s.exit_routes("lan"), None),
 ]
 
 
@@ -395,7 +409,8 @@ def file_contents(top):
                                   ["client", "rename", "warp.par-fr.mbp-1", "phone2"],
                                   ["client", "disable", "warp.par-fr.mbp-1"],
                                   ["device", "set", "mbp-1", "99"], ["device", "group", "mbp-1", "server"],
-                                  ["device", "rename", "mbp-1", "mbp-9"], ["watchdog", "exits"], ["watchdog", "warp"],
+                                  ["device", "rename", "mbp-1", "mbp-9"], ["jump", "routes", "nyc-us", "10.20.30.0/24"],
+                                  ["watchdog", "exits"], ["watchdog", "warp"],
                                   ["watchdog", "devices"]], ids=" ".join)
 def test_a_dry_run_changes_nothing(world, argv):
     """Files (the run dir included), and the running state."""

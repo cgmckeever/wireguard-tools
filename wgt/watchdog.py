@@ -121,7 +121,7 @@ def _exits_pass(ctx: Ctx) -> None:
             continue
         users = exits.active_clients(ctx.snap, e.code, hs, now)
         active = bool(users)
-        need_wx = any(store.name_warp(c.name) for c in users)
+        need_wx = exits.warp_needed(ctx.snap, e.code, users)
         px_up, wx_up = live.if_exists(r, e.px), live.if_exists(r, e.wx)
         started_marker, port_marker = ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code)
         wx_last_hs = live.newest_hs(r, e.wx) if active and px_up and wx_up else 0

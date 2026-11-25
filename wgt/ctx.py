@@ -35,6 +35,7 @@ def _warp_choice(value: str) -> str:
 ARG_FLAGS: Dict[str, Tuple[str, Callable[[str], str]]] = {
     "--exit": ("exit_codes", str), "--label": ("exit_label", store.one_line), "--warp": ("warp", _warp_choice),
     "--location": ("location", store.one_line), "--device-number": ("device_number", str), "--group": ("groups", str),
+    "--routes": ("routes", str),
 }
 VALUE_FLAGS = (*SETTING_FLAGS, *ARG_FLAGS)
 BOOL_FLAGS = {
@@ -75,6 +76,7 @@ class Args:
     location: str = ""          # setup --location: where this server is, for people
     device_number: str = ""     # client add: the device's static number (wgt-ctl passes the fleet's)
     groups: str = ""            # client add --group: groups for the device
+    routes: str = ""            # jump add --routes: the subnets a routes-only jump carries
     dry_run: bool = False
     yes: bool = False
     force: bool = False

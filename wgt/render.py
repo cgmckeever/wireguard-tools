@@ -242,6 +242,9 @@ def exit_desc(snap: Snapshot, name: str) -> str:
     off = not name_warp(name)
     if code:
         e = snap.exit(code)
+        routes = snap.exit_routes(code) if off else ()
+        if routes:   # routes-only: the rest leaves from this server
+            return f"{code} = {e.label if e else ''} (jump for {','.join(routes)} only, no WARP)"
         return f"{code} = {e.label if e else ''} (jump{', no WARP' if off else ' -> Cloudflare WARP'})"
     return "this server's IP (no WARP)" if off else "this server -> Cloudflare WARP"
 

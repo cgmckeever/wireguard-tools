@@ -2,11 +2,17 @@
 (a VPN provider's, e.g. Proton VPN, or your own), with its own WARP inside it
 unless the client has WARP off (px-<code>, with wx-<code> inside). A jump is only up
 while one of its clients is connected (`wgt watchdog exits` brings it up and
-down); while it is down its clients are blocked, never sent out another way."""
+down); while it is down its clients are blocked, never sent out another way.
+
+A routes-only jump (`wgt jump routes`, exits.routes) carries only some subnets
+(a friend's home LAN, say) of its configs, which have WARP off; their internet
+leaves from this server, and its WARP is never used."""
 
 from __future__ import annotations
 
 import contextlib
+import dataclasses
+import ipaddress
 import os
 import re
 import sys
@@ -14,7 +20,7 @@ import time
 from typing import TYPE_CHECKING, Callable, Dict, Iterator, List, Optional, Tuple
 
 from . import live, ops, render, results, rules, store, ui, units, warp
-from .const import EXIT_IDLE, EXIT_MAX, EXIT_WARP_WAIT, EXIT_WATCHDOG, WATCHDOG_STALE, watchdog
+from .const import DEVICE_NET, EXIT_IDLE, EXIT_MAX, EXIT_WARP_WAIT, EXIT_WATCHDOG, WATCHDOG_STALE, watchdog
 from .errors import WgtError
 
 if TYPE_CHECKING:
@@ -50,10 +56,53 @@ def state(ctx: Ctx, e: store.Exit) -> str:
     return "partly up" if wx else "idle"
 
 
+def warp_needed(snap: store.Snapshot, code: str, users: List[store.Client]) -> bool:
+    """One of <users> (jump <code>'s active configs) has WARP on, so the jump's WARP
+    must run. Never for a routes-only jump: its configs have WARP off, and the far end
+    may route nothing but its own subnets."""
+    return not snap.exit_routes(code) and any(store.name_warp(c.name) for c in users)
+
+
 def needs_wx(ctx: Ctx, e: store.Exit) -> bool:
     """An active client of <e> has WARP on (so the jump's WARP must run)."""
     hs = live.handshakes(ctx.runner, ctx.cfg.WG_IF)
-    return any(store.name_warp(c.name) for c in active_clients(ctx.snap, e.code, hs, ctx.clock()))
+    return warp_needed(ctx.snap, e.code, active_clients(ctx.snap, e.code, hs, ctx.clock()))
+
+
+def routes_text(routes: Tuple[str, ...]) -> str:
+    """A jump's routes for people and scripts: comma-separated, or "none"."""
+    return ",".join(routes) or "none"
+
+
+def parse_routes_arg(ctx: Ctx, word: str) -> Tuple[str, ...]:
+    """--routes / `jump routes`' CIDR[,CIDR...] ("none": no routes, a normal jump),
+    checked against this server: a client address or a device's static one would
+    never reach wg0 again."""
+    if word == "none":
+        return ()
+    routes = store.parse_cidrs(word)
+    why = route_clash(ctx.cfg.WG_SUBNET, routes)
+    if why:
+        raise WgtError(why)
+    return routes
+
+
+def route_clash(subnet: str, routes: Tuple[str, ...]) -> str:
+    """Why <routes> can't be a routes-only jump's on a server with client <subnet>
+    ("" if they can): they mustn't overlap it or the devices' static addresses."""
+    for route in routes:
+        for other, what in ((subnet, "this server's client subnet"), (DEVICE_NET, "the devices' static addresses")):
+            if ipaddress.ip_network(route).overlaps(ipaddress.ip_network(other)):
+                return f"{route} overlaps {other}, {what}: a routes-only jump can't take it"
+    return ""
+
+
+def refuse_warp_configs(ctx: Ctx, code: str) -> None:
+    """A routes-only jump has no WARP configs: their traffic would have no way out."""
+    warped = [c.name for c in ctx.snap.exit_clients(code) if store.name_warp(c.name)]
+    if warped:
+        raise WgtError(f"jump '{code}' has configs with WARP on ({' '.join(warped)}): a routes-only jump's "
+                       "configs have WARP off; remove them first (wgt client remove <config>)")
 
 
 def active_count(ctx: Ctx, code: str) -> int:
@@ -75,7 +124,13 @@ def print_list(ctx: Ctx) -> None:
         st = state(ctx, e)
         st = f"{st} ({active_count(ctx, e.code)} active)" if st != "idle" else st
         ep = render.profile_endpoint(store.read_text(ctx.paths.px_conf(e.code)) or "")
-        out.info(fmt.format(e.code, e.label, st, n, ep or "?"))
+        out.info(fmt.format(e.code, name_with_routes(ctx.snap, e), st, n, ep or "?"))
+
+
+def name_with_routes(snap: store.Snapshot, e: store.Exit) -> str:
+    """A jump's label, and a routes-only one's routes: "Pat's house (routes 10.20.30.0/24)"."""
+    routes = snap.exit_routes(e.code)
+    return f"{e.label} (routes {routes_text(routes)})" if routes else e.label
 
 
 # --- configs, up and down ---
@@ -113,9 +168,9 @@ def up(ctx: Ctx, e: store.Exit) -> None:
     """Start an exit's tunnels, held from the watchdog until the caller is done.
     Restart, not start, as the watchdog does: a wg-quick unit stays "active" with its
     link gone, and start does nothing then. Only the ones not up: a running jump
-    tunnel may carry WARP-off clients."""
+    tunnel may carry WARP-off clients. A routes-only jump's WARP stays down: nothing uses it."""
     hold(ctx, e.code)
-    down_units = units_running(ctx, e, running=False)
+    down_units = units_running(ctx, e, running=False, only=tunnels_used(ctx, e))
     if down_units:
         ctx.runner.run(["systemctl", "restart", *down_units])
 
@@ -132,6 +187,11 @@ def down(ctx: Ctx, e: store.Exit, check: bool = True) -> bool:
     ctx.files.remove_markers(ctx.paths.exit_marker(e.code), ctx.paths.exit_port_marker(e.code),
                              ctx.paths.exit_hold(e.code))
     return not any_up(ctx, e)
+
+
+def tunnels_used(ctx: Ctx, e: store.Exit) -> List[str]:
+    """The interfaces a jump up for its configs runs: both, or a routes-only jump's tunnel alone."""
+    return [e.px] if ctx.snap.exit_routes(e.code) else [e.px, e.wx]
 
 
 def wait_hs(ctx: Ctx, ifc: str, seconds: int = EXIT_WARP_WAIT) -> None:
@@ -170,14 +230,15 @@ def probing(ctx: Ctx, e: store.Exit) -> Iterator[None]:
     if not ops.wg_up(ctx):
         raise WgtError(f"{ctx.cfg.WG_IF} is down, and its routing through the jump with it")
     px_was, wx_was = live.if_exists(ctx.runner, e.px), live.if_exists(ctx.runner, e.wx)
+    routes_only = bool(ctx.snap.exit_routes(e.code))
     hold(ctx, e.code)
     try:
-        if not (px_was and wx_was):
+        if not (px_was and (wx_was or routes_only)):
             up(ctx, e)
-        wait_hs(ctx, e.wx)
+        wait_hs(ctx, e.px if routes_only else e.wx)
         yield
     finally:
-        if px_was and wx_was:
+        if px_was and (wx_was or routes_only):
             unhold(ctx, e.code)
         elif px_was:
             ctx.runner.run(["systemctl", "stop", e.units[1]], check=False)
@@ -199,12 +260,19 @@ def probed(ctx: Ctx, res: results.Results, e: store.Exit, check: Callable[[], No
 
 
 def probe(ctx: Ctx, e: store.Exit) -> Tuple[bool, str]:
-    """Does traffic pass through the exit's WARP? (ok, what the trace said)."""
+    """Does traffic pass through the exit's WARP? (ok, what the trace said). A
+    routes-only jump: does its tunnel handshake? (its configs' internet never takes it)."""
+    routes_only = bool(ctx.snap.exit_routes(e.code))
     try:
         with probing(ctx, e):
+            if routes_only:
+                ok = live.newest_hs(ctx.runner, e.px) > 0
+                return ok, f"{e.px} {'handshakes' if ok else 'has no handshake yet'}"
             t = trace(ctx, e)
     except WgtError as err:
         t = f"could not bring it up: {err}"
+        if routes_only:
+            return False, t
     return live.is_warp_trace(t), t or "no answer"
 
 
@@ -285,25 +353,30 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     """jump add <code> <wg.conf|->: import (or replace) a WireGuard
     config as jump <code>, give it its own WARP registration, wire its
     routing into wg0 live, and check it end to end."""
-    usage = 'wgt jump add <code> <wg.conf|-> [--label "Paris, France"]'
+    usage = 'wgt jump add <code> <wg.conf|-> [--label "Paris, France"] [--routes CIDR[,CIDR...]]'
     if len(words) < 2:
         raise WgtError(f"usage: {usage}")
     ops.no_more_words(words[2:], usage)
     code, src = words[0], words[1]
     if not store.new_exit_code(code) and not (store.valid_exit_code(code) and ctx.snap.exit(code)):
         raise WgtError(f"jump code must be {store.EXIT_CODE_RULE}: '{code}'")
+    # None: as they are (none for a new jump).
+    routes = parse_routes_arg(ctx, ctx.args.routes) if ctx.args.routes else None
     raw = _read_jump(src)   # before the lock: "-" may wait on a terminal, and the watchdogs skip runs meanwhile
     ops.lock_unless_asking(ctx)
     existing = ctx.snap.exit(code)
+    if routes:
+        refuse_warp_configs(ctx, code)
+    only = f", carrying only {routes_text(routes)}" if routes else ""
     label = (ctx.args.exit_label or (existing.label if existing else "") or render.peer_hint(raw) or code)
     label = store.one_line(label)   # one line in exits.db, whatever the file's comment holds
     if existing is None:
         idx = free_idx(ctx)
-        ctx.runner.step(f"Add jump '{code}' ({label}): {render.profile_endpoint(raw)} -> its own WARP",
+        ctx.runner.step(f"Add jump '{code}' ({label}): {render.profile_endpoint(raw)} -> its own WARP{only}",
                         f"wgt jump remove {code}")
     else:
         idx = existing.idx
-        ctx.runner.step(f"Update jump '{code}' ({label})",
+        ctx.runner.step(f"Update jump '{code}' ({label}){only}",
                         f"wgt jump add {code} <the previous copy in "
                         f"{ctx.files.change_dir(ctx.paths.jump_source(code))}>")
     ops.confirm_then_lock(ctx, f"Set up jump {code}?", default_yes=True)
@@ -318,6 +391,8 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
                     render.with_first_line(raw, f"# exit {code}: ", f"# exit {code}: {label}"))
     e = store.Exit(code, idx, label)
     ops.save_exit(ctx, e)
+    if routes is not None:
+        set_routes(ctx, e, routes)
     _refresh_exit_lines(ctx, code)
     if ctx.runner.dry_run:
         # Its WARP profile doesn't exist yet in a dry run, so wx-<code>.conf
@@ -333,6 +408,26 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
     if changed and any_up(ctx, e):
         down(ctx, e)
     _check_new(ctx, e)
+
+
+def set_routes(ctx: Ctx, e: store.Exit, routes: Tuple[str, ...]) -> None:
+    """Jump <e> carries only <routes> of its configs' traffic (none: all of it): their
+    rules on a running wg0 first, new ones in before old ones out, then exits.routes
+    (wg0.conf is the caller's). In that order a stop anywhere is finished by a re-run:
+    until exits.routes changes, it still says which rules are the old ones."""
+    was = ctx.snap.routes.get(e.code, ())
+    after = {code: nets for code, nets in ctx.snap.routes.items() if code != e.code}
+    if routes:
+        after[e.code] = routes
+    new_snap = dataclasses.replace(ctx.snap, routes=after)
+    if ops.wg_up(ctx):
+        for c in ctx.snap.exit_clients(e.code):
+            old, new = rules.client_rules(ctx.cfg, ctx.snap, c), rules.client_rules(ctx.cfg, new_snap, c)
+            if old != new:
+                ctx.runner.sh_lines(rules.rule_cmds(new, up=True))
+                ctx.runner.sh_lines(rules.rule_cmds(old, up=False, keep=new))
+    if routes != was:
+        ops.set_routes(ctx, e.code, routes)
 
 
 def _refresh_exit_lines(ctx: Ctx, code: str) -> None:
@@ -375,6 +470,7 @@ def _check_new(ctx: Ctx, e: store.Exit) -> None:
     down: its WARP reaches the jump only by wg0's fwmark rule, and without it a trace
     would pass straight out of this server."""
     ctx.out.log(f"Checking jump '{e.code}'")
+    routes = ctx.snap.exit_routes(e.code)
     if not ops.wg_up(ctx):
         ctx.out.warn(f"{ctx.cfg.WG_IF} is down, and its routing through the jump with it: not checked "
                      "(wgt jump test once it's up)")
@@ -384,8 +480,47 @@ def _check_new(ctx: Ctx, e: store.Exit) -> None:
             ctx.out.info(f"jump '{e.code}' works: {said}")
         else:
             ctx.out.warn(f"jump '{e.code}' isn't passing traffic yet ({said}); check: wgt jump test")
+    if routes:
+        ctx.out.info(f"routes-only: its configs send {routes_text(routes)} through it, and the rest "
+                     "out of this server (WARP off)")
     ctx.out.info(f"it goes down when idle and comes up when a device connects; add one: "
                  f"wgt client add <device> --exit {e.code}")
+
+
+def cmd_routes(ctx: Ctx, words: List[str]) -> None:
+    """jump routes <code> [CIDR[,CIDR...]|none]: print a jump's routes, or make it
+    routes-only (its configs send only those subnets through it), or a normal jump
+    again (none). Live: their rules change on a running wg0, nothing restarts."""
+    usage = "wgt jump routes <code> [CIDR[,CIDR...]|none]"
+    if not words:
+        raise WgtError(f"usage: {usage}")
+    ops.no_more_words(words[2:], usage)
+    code = words[0]
+    if len(words) == 1:
+        if ctx.snap.exit(code) is None:
+            raise WgtError(f"no jump '{code}' (see: wgt jump list)")
+        ctx.out.line(routes_text(ctx.snap.exit_routes(code)))
+        return
+    routes = parse_routes_arg(ctx, words[1])
+    ops.lock_unless_asking(ctx)
+    e = ctx.snap.exit(code)
+    if e is None:
+        raise WgtError(f"no jump '{code}' (see: wgt jump list)")
+    if routes:
+        refuse_warp_configs(ctx, code)
+    undo = f"wgt jump routes {code} {routes_text(ctx.snap.exit_routes(code))}"
+    if routes:
+        ctx.runner.step(f"Jump '{code}' ({e.label}): its configs send only {routes_text(routes)} through it, "
+                        "the rest out of this server", undo)
+    else:
+        ctx.runner.step(f"Jump '{code}' ({e.label}): its configs send all their traffic through it", undo)
+    ops.confirm_then_lock(ctx, f"Change jump {code}'s routes?", default_yes=True)
+    set_routes(ctx, e, routes)
+    ops.write_wg_conf(ctx)
+    _refresh_exit_lines(ctx, code)
+    if routes:
+        ctx.out.info(f"its configs have WARP off (wgt client add <device> --exit {code}); while it's down, "
+                     f"{routes_text(routes)} is blocked for them, the internet isn't")
 
 
 def cmd_remove(ctx: Ctx, words: List[str]) -> None:
@@ -400,7 +535,7 @@ def cmd_remove(ctx: Ctx, words: List[str]) -> None:
     if e is None:
         ops.lock_as_seen(ctx)
         confs, dirs = _jump_files(ctx, code)
-        if not any(os.path.exists(path) for path in confs + dirs):
+        if not any(os.path.exists(path) for path in confs + dirs) and code not in ctx.snap.routes:
             raise WgtError(f"no jump '{code}' (see: wgt jump list)")
         ctx.out.info(f"finishing an earlier remove of jump '{code}'")
         _remove_jump_files(ctx, code)
@@ -432,8 +567,11 @@ def _jump_files(ctx: Ctx, code: str) -> Tuple[List[str], List[str]]:
 def _remove_jump_files(ctx: Ctx, code: str) -> None:
     """A jump already out of exits.db: wg0.conf without it, its files and keys,
     and the watchdog if it was the last. Safe to repeat: the watchdog goes first, as
-    once the files are gone a re-run finds nothing left to finish."""
+    once the files are gone a re-run finds nothing left to finish (its routes go before
+    them for the same reason)."""
     ops.write_wg_conf(ctx)
+    if code in ctx.snap.routes:
+        ops.set_routes(ctx, code, ())
     if not ctx.snap.exits:
         units.remove_timer(ctx, EXIT_WATCHDOG)
         ctx.runner.run(["systemctl", "daemon-reload"])
@@ -480,6 +618,10 @@ def cmd_tunnel_test(ctx: Ctx, words: List[str]) -> int:
     path_result(res, host, True, live.trace_summary(live.trace(ctx.runner, "--interface", ctx.cfg.WARP_IF)))
     for e in ctx.snap.exits:
         label = ctx.snap.jump_label(e.code)
+        routes = ctx.snap.exit_routes(e.code)
+        if routes:
+            res.result("SKIP", f"{label:<22} routes-only ({routes_text(routes)}): not a way out to the internet")
+            continue
 
         def both(e: store.Exit = e, label: str = label) -> None:
             path_result(res, label, False, trace(ctx, e, e.px))
@@ -533,6 +675,15 @@ def client_rules_ok(ctx: Ctx, e: store.Exit) -> bool:
     return True
 
 
+def routes_checks(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
+    """An up routes-only jump: its tunnel handshaking. Nothing is traced through it: its
+    configs' internet never takes it, and the far end may route only its own subnets."""
+    res.check(f"jump {e.code}: jump tunnel {e.px} handshake within {WATCHDOG_STALE}s",
+              live.hs_recent(ctx.runner, e.px, WATCHDOG_STALE, ctx.clock()))
+    res.result("SKIP", f"jump {e.code}: routes-only ({routes_text(ctx.snap.exit_routes(e.code))}): "
+                       "internet not traced through it (its configs' leaves from this server)")
+
+
 def tunnel_checks(ctx: Ctx, res: results.Results, e: store.Exit) -> None:
     """An up exit: both tunnels handshaking, and traffic leaving through its WARP."""
     for kind, ifc in (("jump", e.px), ("WARP", e.wx)):
@@ -559,16 +710,25 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False, only: str 
         res.check(f"jump {e.code}: tables with blackhole fallbacks, fwmark rule to the jump", tables_ok(ctx, e))
         users = ctx.snap.exit_clients(e.code)
         off = _warp_off(users)
-        res.check(f"jump {e.code}: one rule per address of its {len(users)} client(s)"
-                  + (f" ({off} without WARP, via the jump)" if off else ""), client_rules_ok(ctx, e))
+        routes = ctx.snap.exit_routes(e.code)
+        if routes:
+            res.check(f"jump {e.code}: rules of its {len(users)} client(s): {routes_text(routes)} via the jump, "
+                      "the rest via this server's IP", client_rules_ok(ctx, e))
+        else:
+            res.check(f"jump {e.code}: one rule per address of its {len(users)} client(s)"
+                      + (f" ({off} without WARP, via the jump)" if off else ""), client_rules_ok(ctx, e))
+        checks = routes_checks if routes else tunnel_checks
         act = active_count(ctx, e.code)
         if not bring_up and act > 0 and state(ctx, e) == "up, no WARP" and not needs_wx(ctx, e):
-            res.check(f"jump {e.code}: jump tunnel {e.px} handshake within {WATCHDOG_STALE}s "
-                      "(only WARP-off clients active; its WARP idle)",
-                      live.hs_recent(r, e.px, WATCHDOG_STALE, ctx.clock()))
-            plain_check(ctx, res, e)
+            if routes:
+                routes_checks(ctx, res, e)
+            else:
+                res.check(f"jump {e.code}: jump tunnel {e.px} handshake within {WATCHDOG_STALE}s "
+                          "(only WARP-off clients active; its WARP idle)",
+                          live.hs_recent(r, e.px, WATCHDOG_STALE, ctx.clock()))
+                plain_check(ctx, res, e)
         elif bring_up or is_up(ctx, e):
-            probed(ctx, res, e, lambda: tunnel_checks(ctx, res, e))   # noqa: B023 (run at once)
+            probed(ctx, res, e, lambda: checks(ctx, res, e))   # noqa: B023 (run at once)
         elif act > 0:
             res.result("FAIL", f"jump {e.code}: not (fully) up while {act} client(s) are active "
                                "(the watchdog brings it up within 10s)")
@@ -581,4 +741,4 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False, only: str 
     res.check(watchdog(EXIT_WATCHDOG).check_text, live.timer_on(r, EXIT_WATCHDOG))
 
 
-EXIT_COMMANDS = {"list": cmd_list, "add": cmd_add, "remove": cmd_remove, "test": cmd_test}
+EXIT_COMMANDS = {"list": cmd_list, "add": cmd_add, "routes": cmd_routes, "remove": cmd_remove, "test": cmd_test}

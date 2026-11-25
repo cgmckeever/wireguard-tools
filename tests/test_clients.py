@@ -238,7 +238,7 @@ def test_unknown_verb_lists_the_verbs(make_ctx):
     ctx = make_ctx()
     with pytest.raises(WgtError, match=r"unknown client command: nope \(list, add, show"):
         clients.cmd_client(ctx, ["nope"])
-    with pytest.raises(WgtError, match=r"unknown jump command: nope \(list, add, remove, test;"):
+    with pytest.raises(WgtError, match=r"unknown jump command: nope \(list, add, routes, remove, test;"):
         exits.cmd_exit(ctx, ["nope"])
 
 

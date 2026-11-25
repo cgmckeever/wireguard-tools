@@ -335,15 +335,23 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
             raise WgtError(f"no jump '{code}' on this server (see: wgt jump list)")
         if code not in uniq:
             uniq.append(code)
+    plain_only = [code for code in uniq if code != store.HOST_EXIT and ctx.snap.exit_routes(code)]
+    if plain_only and warps == [True]:
+        refuse_warp_on_routes_only(ctx, plain_only[0])
     if ctx.args.groups:
         store.parse_groups(ctx.args.groups)   # refused before anything is written
     endpoint = ops.resolve_endpoint(ctx)
     devices.ensure_number(ctx, base)
     devices.ensure_groups(ctx, base)
     planned: List[str] = []
+    for code in plain_only:
+        if True in warps:
+            ctx.out.info(f"jump '{code}' is routes-only: just {store.config_name(code, False, base)} (WARP off)")
     try:
         for code in uniq:
             for warp in warps:
+                if warp and code in plain_only:
+                    continue
                 add_one(ctx, store.config_name("" if code == store.HOST_EXIT else code, warp, base), planned,
                         endpoint)
     except BaseException:
@@ -354,6 +362,12 @@ def cmd_add(ctx: Ctx, words: List[str]) -> None:
         raise
     if ctx.snap.device_groups(base):
         devices.apply_now(ctx)   # its new configs get what its groups allow
+
+
+def refuse_warp_on_routes_only(ctx: Ctx, code: str) -> None:
+    """A routes-only jump's configs have WARP off: the jump carries only its subnets."""
+    raise WgtError(f"jump '{code}' is routes-only (it carries {','.join(ctx.snap.exit_routes(code))}): its configs "
+                   f"have WARP off ({code}.<device>; leave out --warp, or --warp off)")
 
 
 def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
@@ -534,6 +548,8 @@ def rename_config(ctx: Ctx, old: str, new: str) -> None:
     code = store.client_exit(new)
     if code and ctx.snap.exit(code) is None:
         raise WgtError(f"no jump '{code}' on this server (see: wgt jump list)")
+    if code and store.name_warp(new) and ctx.snap.exit_routes(code):
+        refuse_warp_on_routes_only(ctx, code)
     conf, newconf = client_conf(ctx, old), client_conf(ctx, new)
     text = store.read_text(conf)
     if text is None:
