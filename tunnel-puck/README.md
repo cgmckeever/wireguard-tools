@@ -90,7 +90,7 @@ fails exactly when the links are down (a blocked port, a changed VPS IP, a bad
 change). A Cloudflare Tunnel gives SSH
 to the puck that doesn't need the link. It costs a domain on Cloudflare (about
 $10–15 a year; the rest is free) and one extra step,
-[1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare).
+[1.2b](#12b-optional-the-emergency-door-cloudflare-browser).
 Without it, a dead link means the friend power-cycles the puck, or you take it
 home. If you skip it, set `PUCK_PORT="443"` in each VPS's settings file when
 you reach 2.1: networks rarely block it.
@@ -232,10 +232,10 @@ Fill it in (each line has a comment):
 | Setting | When | What to put |
 |---|---|---|
 | `SSH_LAN` | always | `user@hostname` for the puck on your home network: the ones you chose in [1.1](#11-flash-the-puck-hands) (`pi@tunnel-puck.local`) |
-| `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) |
-| `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) (the default is fine) |
+| `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.2b](#12b-optional-the-emergency-door-cloudflare-browser) |
+| `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.2b](#12b-optional-the-emergency-door-cloudflare-browser) (the default is fine) |
 
-### 1.2b The emergency door: Cloudflare **[Browser]** (skip without `SSH_CLOUDFLARE`)
+### 1.2b [Optional] The emergency door: Cloudflare **[Browser]**
 
 In Cloudflare Zero Trust (`one.dash.cloudflare.com`). Cloudflare renames these
 menus now and then; follow the nearest match.
@@ -847,8 +847,8 @@ the VPS through a pipe.
 | `/etc/wireguard/jump-for-vps<n>*.conf` | `wgt` | `exit`, briefly | the jump file for the VPS, deleted once wgt has it |
 | `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpk` or `wgt` | `init` | the hardware watchdog |
 | `unattended-upgrades` | `tpk` or `wgt` | `init` | automatic security updates |
-| Cloudflare's apt repository, `/etc/systemd/system/tunnel-puck-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `init` | cloudflared and its service |
-| `/etc/cloudflared/tunnel-puck.env` (when a Cloudflare Tunnel is configured, [1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `init` | the tunnel token (mode 600) |
+| Cloudflare's apt repository, `/etc/systemd/system/tunnel-puck-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.2b](#12b-optional-the-emergency-door-cloudflare-browser)) | `tpk` or `wgt` | `init` | cloudflared and its service |
+| `/etc/cloudflared/tunnel-puck.env` (when a Cloudflare Tunnel is configured, [1.2b](#12b-optional-the-emergency-door-cloudflare-browser)) | `tpk` or `wgt` | `init` | the tunnel token (mode 600) |
 | `/etc/NetworkManager/system-connections/tunnel-puck-*.nmconnection` | `tpk` or `wgt` | `wifi add`, `wifi sync` | a saved Wi-Fi network, with its password (mode 600) |
 
 **On the VPS:**
