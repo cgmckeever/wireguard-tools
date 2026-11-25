@@ -13,7 +13,7 @@
 #             when a network comes or goes (dispatcher.d/90-tunnel-puck).
 #   uplink    print the uplink's name
 set -e
-USAGE="usage: $0 up <interface> [isolated|lan] | down <interface> | refresh | uplink"
+usage() { echo "usage: $0 up <interface> [isolated|lan] | down <interface> | refresh | uplink" >&2; exit 2; }
 PRIVATE=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10
 STATE=/run/tunnel-puck-exit    # STATE.<interface>: "<uplink> <lan or ->" from up, for down and refresh
 
@@ -46,13 +46,13 @@ forward_rules() {
 
 IF="${2:-}"
 case "$1" in
-    up|down) [ -n "$IF" ] || { echo "$USAGE" >&2; exit 2; } ;;
+    up|down) [ -n "$IF" ] || usage ;;
 esac
 
 case "$1" in
     up)
         MODE="${3:-isolated}"
-        case "$MODE" in isolated|lan) ;; *) echo "$USAGE" >&2; exit 2 ;; esac
+        case "$MODE" in isolated|lan) ;; *) usage ;; esac
         UP=$(uplink)
         [ -n "$UP" ] || { say "no default route yet"; exit 1; }
         forward_rules "$IF" "$UP" | while read -r op rule; do
@@ -98,5 +98,5 @@ case "$1" in
     uplink)
         UP=$(uplink); [ -n "$UP" ] || exit 1; echo "$UP"
         ;;
-    *) echo "$USAGE" >&2; exit 2 ;;
+    *) usage ;;
 esac
