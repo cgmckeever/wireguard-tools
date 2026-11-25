@@ -90,7 +90,10 @@ Run it first on a gateway nobody else depends on.
    the gateway as before.
 6. You can reach the puck remotely.
 
-Phase 3 tests each of these.
+[Phase 3](#phase-3-finalize-and-validate-connectivity) tests each of these, in the table of
+[3.2](#32-the-away-from-home-test-hands-then-computer-and-client): 1 is its
+test 2, 2 is test 3, 3 is tests 5–8, 4 is test 9, 5 is test 10, and 6 is
+tests 1 and 6.
 
 ## Two choices along the way
 
@@ -211,7 +214,7 @@ On a Raspberry Pi: with Raspberry Pi Imager, write the OS from
 same way.) In Imager's settings: a hostname and user (say `tunnel-puck` and `pi`; they become
 `SSH_LAN` in [1.2a](#12a-fill-in-the-settings)), and **SSH with your public
 key only** (passwords off). Leave Wi-Fi out: step
-[3.1](#31-ethernet-or-wi-fi-at-the-friends-computer) handles it. Boot the puck at
+[4.1](#41-network-connectivity-computer) handles it. Boot the puck at
 home, on ethernet.
 
 **Check [Computer]:** `ssh pi@tunnel-puck.local true` (your user and hostname) works with no password prompt.
@@ -226,7 +229,7 @@ Three parts, in this order: the settings, the emergency door if you want one
 Each puck gets a settings file named for it, in `configs/` (git ignores them).
 The name is up to 10 characters of `a-z`, `0-9` and `-`, starting with a
 letter. `new` asks for it and makes the file from the template, and offers a
-Wi-Fi list too ([3.1](#31-ethernet-or-wi-fi-at-the-friends-computer)). This
+Wi-Fi list too ([4.1](#41-network-connectivity-computer)). This
 file holds the puck's own settings; each gateway it serves gets its own file in
 [2.1](#21-serve-a-gateway-computer).
 
@@ -595,44 +598,9 @@ ig88         wgt      serving  ig88                     10.99.0.4/30    wgpk1 wg
 
 ---
 
-# Phase 3: finish and prove it
+# Phase 3: Finalize and Validate Connectivity
 
-## 3.1 Ethernet or Wi-Fi at the friend's **[Computer]**
-
-The puck uses ethernet when it's plugged in, else any saved Wi-Fi in range, and
-moves between them on its own. Choose now:
-
-```sh
-scripts/tpk-ctl.sh wifi                              # what's saved, and what the puck is using
-scripts/tpk-ctl.sh wifi remove all                   # ethernet only: the usual choice
-scripts/tpk-ctl.sh wifi add "<friend's network>"     # or their Wi-Fi too (asks for the password)
-```
-
-Ethernet only is the most reliable, and the friend sets up nothing. Their
-Wi-Fi needs their password, and helps where a cable can't reach. `remove`
-won't remove the network the puck is using right now: plug in ethernet first.
-
-**Or keep a list:** several networks, most preferred first,
-in `configs/<puck>.wifi.conf` next to the puck's settings (git ignores it, and
-`tpk-ctl.sh` keeps it mode 600). One `name::password` per line, an empty
-password for an open network:
-
-```sh
-cp configs/puck.wifi.conf.example configs/<puck>.wifi.conf   # or tpk-ctl.sh new made it; fill it in
-scripts/tpk-ctl.sh wifi sync                                 # the puck's Wi-Fi becomes this list
-```
-
-Among networks in range, the puck joins the highest on the list, and moves on
-to the next if one fails to connect; ethernet still wins when plugged in.
-`sync` removes the networks tunnel-puck saved earlier that aren't on the list
-(not the one in use right now) and leaves others, like Raspberry Pi Imager's,
-alone. Edit the file and sync again to change it; `tpk-ctl.sh all` syncs it
-too. With no `<puck>.wifi.conf`, the puck's Wi-Fi is left as it is.
-
-**Check:** `scripts/tpk-ctl.sh test` shows `INFO  uplink: eth0. Saved Wi-Fi: ...`
-as you expect.
-
-## 3.2 Harden
+## 3.1 Harden
 
 - **Storage:** power cuts wear out SD cards. Use an SSD (USB boot) if you can.
   The SD-card alternative, raspi-config's overlay file system, also throws away
@@ -640,7 +608,7 @@ as you expect.
   turn it off first. If you use it, turn it on last, just before drop-off.
 - **Updates:** `init` turned on automatic security updates.
 
-## 3.3 The away-from-home test **[Hands]**, then **[Computer]** and **[client]**
+## 3.2 The away-from-home test **[Hands]**, then **[Computer]** and **[client]**
 
 Put the puck on a **phone hotspot**: like the friend's network, a NAT you don't
 control. Use a travel router on the hotspot with the puck's ethernet in it, a
@@ -668,7 +636,7 @@ is the hotspot's, which `tpk-ctl.sh test` prints.
 
 With several gateways, test 2 is worth running on a config of each.
 
-## 3.4 Survive a power cut **[Hands]**
+## 3.3 Survive a power cut **[Hands]**
 
 Unplug the puck and plug it back in.
 
@@ -678,14 +646,56 @@ network.
 
 ---
 
-# Phase 4: drop-off **[Hands]**
+# Phase 4: Final Preparation and Drop-off
+
+## 4.1 Network connectivity **[Computer]**
+
+By default the puck needs nothing here: plugged into the friend's router by
+ethernet, it gets its address by DHCP and works. That's the most reliable, and
+the friend sets up nothing.
+
+**Wi-Fi as a fallback (optional):** when no cable is in, the puck joins a saved
+Wi-Fi network in range, and it moves between ethernet and Wi-Fi on its own,
+ethernet winning when plugged in. It needs the friend's Wi-Fi password, and
+helps where a cable can't reach:
+
+```sh
+scripts/tpk-ctl.sh wifi                              # what's saved, and what the puck is using
+scripts/tpk-ctl.sh wifi add "<friend's network>"     # add their Wi-Fi (asks for the password)
+scripts/tpk-ctl.sh wifi remove all                   # back to ethernet only
+```
+
+`remove` won't remove the network the puck is using right now: plug in
+ethernet first.
+
+**Or keep a list:** several networks, most preferred first,
+in `configs/<puck>.wifi.conf` next to the puck's settings (git ignores it, and
+`tpk-ctl.sh` keeps it mode 600). One `name::password` per line, an empty
+password for an open network:
+
+```sh
+cp configs/puck.wifi.conf.example configs/<puck>.wifi.conf   # or tpk-ctl.sh new made it; fill it in
+scripts/tpk-ctl.sh wifi sync                                 # the puck's Wi-Fi becomes this list
+```
+
+Among networks in range, the puck joins the highest on the list, and moves on
+to the next if one fails to connect; ethernet still wins when plugged in.
+`sync` removes the networks tunnel-puck saved earlier that aren't on the list
+(not the one in use right now) and leaves others, like Raspberry Pi Imager's,
+alone. Edit the file and sync again to change it; `tpk-ctl.sh all` syncs it
+too. With no `<puck>.wifi.conf`, the puck's Wi-Fi is left as it is.
+
+**Check:** `scripts/tpk-ctl.sh test` shows `INFO  uplink: eth0. Saved Wi-Fi: ...`
+as you expect.
+
+## 4.2 Drop-off **[Hands]**
 
 The friend plugs in ethernet (unless you saved their Wi-Fi) and power. That's
 all.
 
 **Check [Computer], within a few minutes:** `scripts/tpk-ctl.sh test` passes
 and shows the friend's IP, and so does a puck-exit client's
-`curl https://ifconfig.me`. Tests 2–4 and 9–10 of [3.3](#33-the-away-from-home-test-hands-then-computer-and-client) are worth repeating. Run 5–8 there only with the emergency door working, or another gateway's link up: they cut a link, and without another way in only a power cycle brings it back.
+`curl https://ifconfig.me`. Tests 2–4 and 9–10 of [3.2](#32-the-away-from-home-test-hands-then-computer-and-client) are worth repeating. Run 5–8 there only with the emergency door working, or another gateway's link up: they cut a link, and without another way in only a power cycle brings it back.
 
 If it doesn't come up: ask the friend to check the ethernet lights, then to
 unplug the power and plug it back in. Still nothing usually means their
