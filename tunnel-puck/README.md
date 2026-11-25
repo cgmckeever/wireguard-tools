@@ -373,7 +373,7 @@ puck's own (`PASS  clients exit from the puck's network: <IP>`).
 
 ## 2.2 Device configs
 
-Each device that should exit through the puck needs a WireGuard config. How you
+Each device that should reach the puck needs a WireGuard config. How you
 make it depends on your routing.
 
 ### With `TPK_ROUTING=tpk`: by hand **[Gateway]**, then **[Computer]**
