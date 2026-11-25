@@ -218,8 +218,7 @@ load_puck() {
     SSH_LAN="" SSH_CLOUDFLARE="" CF_TOKEN_FILE=""
     # shellcheck disable=SC1090
     . "$PUCK_CONF"
-    # The puck's user: the part of SSH_LAN before an @ (none: ssh's default).
-    case "$SSH_LAN" in *@*) PUCK_USER="${SSH_LAN%%@*}" ;; *) PUCK_USER="" ;; esac
+    PUCK_USER=$(user_of "$SSH_LAN")
     reset_vps
     # Sent to the scripts when a step sets them; empty otherwise.
     CF_TOKEN="" WIFI_SSID="" WIFI_PSK="" WIFI_LIST=""
@@ -339,6 +338,8 @@ vars() {
 # in the log): set once per run by pick_puck.
 PUCK="" PUCK_ROUTE="" PUCK_HOP="" PUCK_VPS="" PUCK_VIA=""
 
+# user_of <SSH_LAN>: the puck's user, the part before an @ (none: ssh's default).
+user_of() { case "$1" in *@*) printf '%s\n' "${1%%@*}" ;; esac; }
 probe() { ssh -n -o BatchMode=yes -o ConnectTimeout=8 "$@" true 2>/dev/null; }
 link_target() { if [ -n "$PUCK_USER" ]; then echo "$PUCK_USER@$1"; else echo "$1"; fi; }
 # Through a link, the puck's host key is kept under its name, in tunnel-puck's
@@ -617,7 +618,7 @@ cmd_ssh_install() {
         door=$( (SSH_CLOUDFLARE=""; . "$CONFIGS/$o.conf"; printf '%s' "$SSH_CLOUDFLARE") )
         [ -n "$door" ] || continue    # no emergency door for this puck
         # shellcheck disable=SC1090
-        user=$( (SSH_LAN=""; . "$CONFIGS/$o.conf"; [ "${SSH_LAN#*@}" = "$SSH_LAN" ] || printf '%s' "${SSH_LAN%%@*}") )
+        user=$( (SSH_LAN=""; . "$CONFIGS/$o.conf"; user_of "$SSH_LAN") )
         printf '\n# %s\n' "$o" >> "$tmp"
         ssh_entry "$door" "$user" >> "$tmp"
         n=$((n + 1))
