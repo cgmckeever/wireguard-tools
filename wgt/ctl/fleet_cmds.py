@@ -74,6 +74,12 @@ def sweep() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str]]:
     return seen, missed
 
 
+def read_fleet() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str], Dict[str, fleet.Entry]]:
+    """sweep(), and local/devices refreshed from it (complete only if every server answered)."""
+    seen, missed = sweep()
+    return seen, missed, refresh_entries(seen, not missed)
+
+
 def print_problems(entries: Dict[str, fleet.Entry], seen: fleet.Seen) -> None:
     for line in fleet.problems(entries, seen):
         out.warn(line)
@@ -87,8 +93,7 @@ def numbered_add(args: List[str]) -> Tuple[List[str], str]:
     if not device or remote.flag_given(args, "--device-number"):
         return args, ""
     remote.ensure_local()
-    seen, missed = sweep()
-    entries = refresh_entries(seen, not missed)
+    seen, missed, entries = read_fleet()
     if missed:
         out.info(f"not read for the static number (local/devices covers them): {', '.join(missed)}")
     known = entries.get(device)
@@ -183,12 +188,10 @@ def cmd_devices(args: List[str]) -> int:
         return _devices_fix(args[1], int(args[2]))
     if not (verb in ("list", "sync") and len(args) <= 1):
         raise WgtError("usage: wgt-ctl devices [sync | fix <device> <number 2-254> | forget <device>]")
-    seen, missed = sweep()
-    entries = refresh_entries(seen, not missed)
+    seen, missed, entries = read_fleet()
     rc = _devices_sync(entries, seen) if verb == "sync" else 0
     if verb == "sync":
-        seen, missed = sweep()
-        entries = refresh_entries(seen, not missed)
+        seen, missed, entries = read_fleet()
     print("")
     print(f"  {'DEVICE':<32} {'STATIC':<14} SERVERS")
     for device, e in sorted(entries.items(), key=lambda kv: kv[1].number):
@@ -216,8 +219,7 @@ def _devices_sync(entries: Dict[str, fleet.Entry], seen: fleet.Seen) -> int:
 
 
 def _devices_fix(device: str, number: int) -> int:
-    seen, missed = sweep()
-    entries = refresh_entries(seen, not missed)
+    seen, missed, entries = read_fleet()
     owner = next((d for d, e in entries.items() if e.number == number and d != device), "")
     if owner:
         raise WgtError(f"{device_ip(number)} belongs to '{owner}' (wgt-ctl devices fix {owner} <another>, or "
@@ -237,8 +239,7 @@ def _devices_fix(device: str, number: int) -> int:
 
 
 def _devices_forget(device: str) -> int:
-    seen, missed = sweep()
-    entries = refresh_entries(seen, not missed)
+    seen, missed, entries = read_fleet()
     if device not in entries:
         raise WgtError(f"no device '{device}' in {remote.DEVICES}")
     if any(device in devices for devices in seen.values()):
