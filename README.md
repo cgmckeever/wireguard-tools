@@ -294,6 +294,8 @@ wgt client share laptop                # send the config via magic-wormhole
 wgt client rotate laptop               # new keys, same address; old config stops working (--allowed-ips to change those too)
 wgt client disable laptop              # cut it off now; keys, config and address kept
 wgt client enable laptop               # let it back in with the same config
+wgt client disable --all               # every config cut off at once (the server and its jumps stay up)
+wgt client enable --all                # just the ones --all turned off back in; one disabled on its own stays off
 wgt client rename warp.tablet tablet   # one config, a new name; same keys and address
 wgt client remove laptop
 ```
@@ -1047,6 +1049,7 @@ address to every config; re-send them. `--subnet6 off` disables it.
 | `/etc/wireguard/server.key`, `server.pub` | server keypair |
 | `/etc/wireguard/clients.db` | one line per config: `name address public-key allowed-ips`, no private keys |
 | `/etc/wireguard/clients.disabled` | names of disabled configs |
+| `/etc/wireguard/clients.disabled-all` | the configs `client disable --all` turned off, for `enable --all` (gone once they're back) |
 | `/etc/wireguard/devices.db` | each device's static number and groups: `device number [group,group]` |
 | `/etc/wireguard/psk/<name>.psk` | per-config preshared keys |
 | `/etc/wireguard/clients/<server>.<name>.conf` | config files (each one's private key is kept only here, in change copies and in backup archives, and with `wgt-ctl` in `~/wg-tunnels`) |

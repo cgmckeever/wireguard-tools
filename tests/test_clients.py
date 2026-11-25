@@ -80,6 +80,33 @@ def test_disable_and_enable(make_ctx):
     assert not ctx.snap.is_disabled("mbp-1")
 
 
+def test_disable_all_and_enable_all(make_ctx):
+    """--all cuts every enabled config off and lets back just those: one
+    disabled before stays off."""
+    ctx = make_ctx()
+    clients.cmd_disable(ctx, ["mbp-1"])
+    names = [c.name for c in ctx.snap.clients]
+    on = [n for n in names if not ctx.snap.is_disabled(n)]
+    off = [n for n in names if n not in on]
+    assert "mbp-1" in off and on
+    ctx.args.all = True
+    clients.cmd_disable(ctx, [])
+    assert all(ctx.snap.is_disabled(n) for n in names)
+    assert sorted(store.parse_disabled(store.read_text(ctx.paths.disabled_all_db))) == sorted(on)
+    clients.cmd_enable(ctx, [])
+    assert all(ctx.snap.is_disabled(n) for n in off)
+    assert not any(ctx.snap.is_disabled(n) for n in on)
+    assert not os.path.exists(ctx.paths.disabled_all_db)
+
+
+def test_enable_all_without_disable_all(make_ctx):
+    ctx = make_ctx()
+    clients.cmd_disable(ctx, ["mbp-1"])
+    ctx.args.all = True
+    clients.cmd_enable(ctx, [])
+    assert ctx.snap.is_disabled("mbp-1")   # not --all's to let back in
+
+
 def test_dry_run_changes_nothing(make_ctx):
     ctx = make_ctx(argv=["--dry-run"])
     before = store.read_text(ctx.paths.client_db)

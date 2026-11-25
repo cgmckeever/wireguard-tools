@@ -776,7 +776,8 @@ def _purge(ctx: Ctx) -> None:
         text = store.read_text(path)
         if text is not None and MARKER in text:
             files.remove(path)
-    files.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.state, p.backup_map, p.exit_db, p.device_db)
+    files.remove(p.server_key, p.server_pub, p.client_db, p.disabled_db, p.disabled_all_db, p.state, p.backup_map,
+                 p.exit_db, p.device_db)
     for d in (p.wgcf_dir, p.wgcf_scratch(p.wgcf_dir), p.client_dir, p.psk_dir, p.exit_dir):
         files.remove_tree(d)
     files.remove(p.wgt_link)

@@ -29,9 +29,10 @@ Cloudflare WARP. The device picks one at a time.
 
   client list [--tsv] | add <device> [--exit host|<jump>[,..]] [--warp on|off|on,off] [--allowed-ips ..] [--group ..]
          show <config> [--qr] | share <config> | rotate <config> [--allowed-ips ..]
-         rename <old> <new> | disable <config> | enable <config> | remove <config>
+         rename <old> <new> | disable <config>|--all | enable <config>|--all | remove <config>
          (add: per exit, <device> and warp.<device> (--warp on|off: one); a full config
-          name adds just that; rotate, remove, disable, enable, show, share: none picks)
+          name adds just that; rotate, remove, disable, enable, show, share: none picks;
+          disable --all: every config, and enable --all lets just those back in)
   device list [--tsv] | set <device> [number] | rename <device> <new> [--force]
                              a device's static address {DEVICE_ADDRESS_FORM}, whichever config it's using
          group [<device> <group,group>] | ungroup <device> [group,group]

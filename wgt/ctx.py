@@ -40,6 +40,7 @@ BOOL_FLAGS = {
     "--dry-run": "dry_run", "--yes": "yes", "-y": "yes", "--force": "force", "--new-server-keys": "new_server_keys",
     "--purge": "purge", "--old-names": "old_names",
     "--follow": "follow", "-f": "follow", "--no-follow": "no_follow", "--tsv": "tsv",
+    "--all": "all",
 }
 
 # Only these commands change the server's settings. Elsewhere a setting would be
@@ -82,6 +83,7 @@ class Args:
     follow: bool = False
     no_follow: bool = False
     tsv: bool = False
+    all: bool = False           # client disable/enable --all: every config
     qr: Optional[bool] = None   # --qr / --no-qr; None: show it when a person is watching
     help: bool = False
 

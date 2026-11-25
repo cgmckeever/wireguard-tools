@@ -186,6 +186,11 @@ class Paths:
         return self.wg("clients.disabled")
 
     @property
+    def disabled_all_db(self) -> str:
+        """The configs `client disable --all` turned off, for `enable --all`."""
+        return self.wg("clients.disabled-all")
+
+    @property
     def psk_dir(self) -> str:
         return self.wg("psk")
 

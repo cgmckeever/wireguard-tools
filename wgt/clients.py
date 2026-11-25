@@ -593,13 +593,70 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
         devices.apply_now(ctx)
 
 
+def _set_all_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
+    """client disable --all: every config still enabled is cut off, and its name kept
+    in clients.disabled-all (first, so a stop part-way can still be undone). enable
+    --all: those, and only those, back in (one disabled on its own stays off); then
+    the list goes. Keys, configs and addresses stay, as with one."""
+    ops.no_more_words(words, f"wgt client {'disable' if disable else 'enable'} --all")
+    ops.lock_unless_asking(ctx)
+    ops.require_server(ctx)
+    db = ctx.paths.disabled_all_db
+    held = store.parse_disabled(ctx.files.read(db))
+    if disable:
+        names = [c.name for c in ctx.snap.clients if not ctx.snap.is_disabled(c.name)]
+        if not names:
+            ctx.out.info("every config is disabled already")
+            return
+        ctx.runner.step(f"Disable all {len(names)} enabled config(s): {' '.join(names)}; "
+                        "keys, configs and addresses kept", "wgt client enable --all")
+        ops.confirm(ctx, f"Disable all {len(names)} config(s)?")
+        ops.lock_as_seen(ctx)
+        ctx.files.write(db, 0o600, "".join(n + "\n" for n in dict.fromkeys(held + names)))
+    else:
+        names = [n for n in held if ctx.snap.client(n) is not None and ctx.snap.is_disabled(n)]
+        if not held:
+            ctx.out.info("nothing to enable: no 'wgt client disable --all' is in effect")
+            return
+        ctx.runner.step(f"Enable the {len(names)} config(s) 'disable --all' turned off: "
+                        f"{' '.join(names) or '(none left)'}", "wgt client disable --all")
+        ops.lock_as_seen(ctx)
+    text = ctx.files.read(ctx.paths.disabled_db) or ""
+    for n in names:
+        text = store.set_disabled(text, n, disable)
+    ctx.files.write(ctx.paths.disabled_db, 0o600, text)
+    ctx.reload()
+    ops.write_wg_conf(ctx)
+    if not ops.wg_up(ctx):
+        ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
+    else:
+        for n in names:
+            c = ctx.snap.client(n)
+            if c is None:
+                continue
+            if disable:
+                ops.remove_live_peer(ctx, c.pub)
+            else:
+                ops.add_live_peer(ctx, n, c.pub, c.ip)
+        devices.apply_now(ctx)
+        ctx.out.info(f"{len(names)} peer(s) {'removed from' if disable else 'back on'} {ctx.cfg.WG_IF}")
+    if not disable:
+        ctx.files.remove(db)
+
+
 def cmd_disable(ctx: Ctx, words: List[str]) -> None:
-    """wgt client disable [name]"""
+    """wgt client disable [name] | --all"""
+    if ctx.args.all:
+        _set_all_disabled(ctx, words, True)
+        return
     _set_disabled(ctx, words, True)
 
 
 def cmd_enable(ctx: Ctx, words: List[str]) -> None:
-    """wgt client enable [name]"""
+    """wgt client enable [name] | --all"""
+    if ctx.args.all:
+        _set_all_disabled(ctx, words, False)
+        return
     _set_disabled(ctx, words, False)
 
 

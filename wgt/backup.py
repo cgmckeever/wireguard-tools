@@ -154,7 +154,7 @@ def cmd_restore(ctx: Ctx, words: List[str]) -> None:
     # tar only adds, so a database the archive lacks would survive and mix with it. One
     # just as the archive has it is this restore's own, stopped after extracting: a re-run finishes it.
     p = ctx.paths
-    dbs = (p.client_db, p.exit_db, p.device_db, p.disabled_db)
+    dbs = (p.client_db, p.exit_db, p.device_db, p.disabled_db, p.disabled_all_db)
     archived = _archive_files(archive, dbs)
     left = [path for path in dbs if os.path.exists(path) and store.read_text(path) != archived.get(path)]
     if left:

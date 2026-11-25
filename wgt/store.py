@@ -4,6 +4,7 @@ so keep them compatible):
   wg-tools.state     KEY=value lines; the last one for a key wins
   clients.db         "name ip public-key allowed-ips" (no private keys)
   clients.disabled   one name per line
+  clients.disabled-all   one name per line: what `client disable --all` turned off
   exits.db           "code idx label..."
   devices.db         "device number [groups]" (its static address; who it can reach)
   wg-tools.backups   "path<TAB>original-copy|NEW"
