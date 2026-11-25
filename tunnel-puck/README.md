@@ -20,8 +20,10 @@ puck only needs power. One puck can serve several VPSes, each over its own link
 Raspberry Pi OS Bookworm), with `TPK_ROUTING=wgt` against a test VPS. Phases 1
 and 2 ran from a fresh image, and an iPhone on cellular came out with the
 puck's home IP. Unplugged and moved behind a travel router, the puck came back
-on its own and was reached through the link. Still untested: the rest of
-phase 3 (fail closed, a DNS leak test), `tpk` routing and the Cloudflare door.
+on its own and was reached through the link. The same puck then served a
+second VPS alongside the first, each with its own link and jump, and the
+iPhone went through both. Still untested: the rest of phase 3 (fail closed, a
+DNS leak test), `tpk` routing and the Cloudflare door.
 Run it first on a VPS nobody else depends on.
 
 ## Done when
@@ -60,8 +62,9 @@ adopt one already running it). Your choice is saved in that VPS's settings
 file.
 
 **2. The emergency door (`SSH_CLOUDFLARE`): recommended.** Normally you reach
-the puck through the VPS, over the link. That fails exactly when the link is down
-(a blocked port, a changed VPS IP, a bad change). A Cloudflare Tunnel gives SSH
+the puck through a VPS, over its link (with several VPSes, any of them). That
+fails exactly when the links are down (a blocked port, a changed VPS IP, a bad
+change). A Cloudflare Tunnel gives SSH
 to the puck that doesn't need the link. It costs a domain on Cloudflare (about
 $10–15 a year; the rest is free) and step [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare). Without it, a dead link
 means the friend power-cycles the puck, or you take it home; if you skip it, use
@@ -148,8 +151,9 @@ means the friend power-cycles the puck, or you take it home; if you skip it, use
   may use.
 - **Some steps need a person:** everything marked **[Browser]** or
   **[Hands]**, the browser login on the first `ssh SSH_CLOUDFLARE`, making
-  client configs with `TPK_ROUTING=tpk`, and typing a Wi-Fi password. Stop,
-  say exactly what to do, and wait.
+  client configs with `TPK_ROUTING=tpk`, filling in a `tpk` VPS's settings
+  (`vps add` stops for it), and typing a Wi-Fi password. Stop, say exactly
+  what to do, and wait.
 - **Name the puck** on every command (`scripts/tpk-ctl.sh home all`) once
   there's more than one, and the VPS too (`home.dengar`) once a puck serves
   more than one: with no terminal, `tpk-ctl.sh` can't ask.
@@ -265,12 +269,15 @@ scripts/tpk-ctl.sh vps add dengar      # asks before it changes the VPS
   below, then run `vps add` again. (For a wgt server under another name, set
   `TPK_ROUTING="wgt"` and `WGT_SERVER` instead.)
 
-Then it builds the link at both ends (`wgpk<n>` on the puck, `wgpk-<name>` on
-the VPS), swapping the keys for you, and the exit: with `tpk`, the routing and
+Then it builds the link at both ends (`wgpk<n>` on the puck, `wgpk-<puck>` on
+the VPS, `<puck>` being the puck's name), swapping the keys for you, and the exit: with `tpk`, the routing and
 kill switch for `CLIENT_IPS` on the VPS and a DNS resolver on the puck; with
 `wgt`, a reverse tunnel on the puck (`wgrtun<n>`), added to wgt as jump
 `JUMP_CODE`. Last it runs `test` for that VPS. Reference lists the steps one by
-one; `link`, `exit` and `test` also run on their own.
+one; `link`, `exit` and `test` also run on their own. If a step fails, fix what
+it says and run `vps add` again: it picks up the settings file it made and
+carries on, and every step is safe to repeat. For a second VPS, run `vps add`
+again with its name ([One puck, several VPSes](#one-puck-several-vpses)).
 
 The first `link` picks the link's subnet (`TPK_LINK`) and, if empty,
 `PUCK_PORT`, from what's free on the VPS, and saves both in the VPS's settings
@@ -298,7 +305,7 @@ The VPS's settings (each line of the file has a comment):
 
 **Check:** `vps add` ends with `all tests passed` (later, `scripts/tpk-ctl.sh
 test` runs the same for every VPS), with handshakes on `wgpk<n>` and
-`wgpk-<name>` and, with `wgt`, on `wgrtun<n>`. With `wgt` its
+`wgpk-<puck>` and, with `wgt`, on `wgrtun<n>`. With `wgt` its
 last row tests a client's way out end to end, with no device needed: wgt brings
 the jump up and traces through it without WARP, and the IP it sees must be the
 puck's own (`PASS  clients exit from the puck's network: <IP>`).
@@ -380,11 +387,13 @@ as from the puck), by IP only (no AirPlay or network discovery, and names like
 ```sh
 scripts/tpk-ctl.sh lan-mode lan          # on
 scripts/tpk-ctl.sh lan-mode isolated     # off
+scripts/tpk-ctl.sh mom.ig88 lan-mode lan # with several VPSes: for that one's clients
 ```
 
-That switches the VPS's `wgpk<n>` (with `tpk`) or `wgrtun<n>` (with `wgt`); a
-third word picks another, such as `wgrtunlan<n>`. Every client of that
-interface gets the same mode. To choose per device with `wgt`, keep `wgrtun<n>`
+LAN mode is set per VPS: it switches the puck's interface for that VPS,
+`wgpk<n>` (with `tpk`) or `wgrtun<n>` (with `wgt`); a third word picks another,
+such as `wgrtunlan<n>`. Every client of that interface gets the same mode, and
+the other VPSes' clients keep theirs. To choose per device with `wgt`, keep `wgrtun<n>`
 isolated and set `JUMP_LAN="yes"`: `tpk-ctl.sh exit` adds a second jump,
 `wgrtunlan<n>`, in LAN
 mode, and each device picks by config (`mom.phone` isolated, `mom-l.laptop`
@@ -463,16 +472,18 @@ is the hotspot's, which `tpk-ctl.sh test` prints.
 
 | # | Test | Pass |
 |---|---|---|
-| 1 | **[Computer]** `scripts/tpk-ctl.sh test` | `all tests passed`; its first line says `via the link`. With `wgt`, the end-to-end row shows the puck's IP |
+| 1 | **[Computer]** `scripts/tpk-ctl.sh test` | `all tests passed`; its `puck: ... via` line says `via the link to <vps>`. With `wgt`, each VPS's end-to-end row shows the puck's IP |
 | 2 | **[client]** (a puck-exit config) `curl https://ifconfig.me` | the puck's IP |
 | 3 | **[client]** a DNS leak test (such as dnsleaktest.com) | `tpk`: only the puck's ISP. `wgt`: Cloudflare's resolvers, reached from the puck's IP |
 | 4 | **[client]** `curl -6 -m 10 https://ifconfig.me` | fails: IPv6 is blocked |
-| 5 | **[Computer]** stop the puck's end of the link: `scripts/tpk-ctl.sh ssh sudo systemctl stop wg-quick@wgpk0` (`wgpk<n>`: `scripts/tpk-ctl.sh vps` lists it; through that link, the session then hangs: Ctrl-C). Then **[client]** `curl -m 10 https://ifconfig.me` | times out. It must **not** print the VPS's IP |
-| 6 | the link still down: **[Computer]** `scripts/tpk-ctl.sh test` | emergency door, or another VPS's link: its first line says `via SSH_CLOUDFLARE` (or the other link) |
+| 5 | **[Computer]** stop the puck's end of one VPS's link: `scripts/tpk-ctl.sh ssh sudo systemctl stop wg-quick@wgpk0` (`wgpk<n>`: `scripts/tpk-ctl.sh vps` lists which is which; if `tpk-ctl.sh` came in through that link, the session then hangs: Ctrl-C). Then **[client]**, on a config of that VPS, `curl -m 10 https://ifconfig.me` | times out. It must **not** print the VPS's IP. Other VPSes' clients still work |
+| 6 | the link still down: **[Computer]** `scripts/tpk-ctl.sh test` | its `puck: ... via` line says `via the link to <another vps>` or `via SSH_CLOUDFLARE`; with neither, it can't reach the puck. That VPS's rows FAIL |
 | 7 | **[Computer]** `scripts/tpk-ctl.sh ssh sudo systemctl start wg-quick@wgpk0` (with no other way in: power-cycle the puck) | `tpk-ctl.sh test` passes again |
-| 8 | `tpk` only: **[VPS]** `systemctl stop wg-quick@wgpk-home` (`wgpk-<name>`), **[client]** `curl -m 10 https://ifconfig.me`, **[VPS]** `systemctl start wg-quick@wgpk-home` | times out (the kill switch). Never the VPS's IP |
+| 8 | `tpk` only: **[VPS]** `systemctl stop wg-quick@wgpk-home` (`wgpk-<puck>`), **[client]** `curl -m 10 https://ifconfig.me`, **[VPS]** `systemctl start wg-quick@wgpk-home` | times out (the kill switch). Never the VPS's IP |
 | 9 | **[client]** `ping -c2` the puck's router (`ip route` on the puck: after `default via`) | isolated: no reply. LAN mode: replies |
 | 10 | **[client]** a config that is **not** a puck exit: `curl https://ifconfig.me` | the same IP as before tunnel-puck |
+
+With several VPSes, test 2 is worth running on a config of each.
 
 ## 3.4 Survive a power cut **[Hands]**
 
@@ -497,19 +508,23 @@ If it doesn't come up: ask the friend to check the ethernet lights, then to
 unplug the power and plug it back in. Still nothing usually means their
 network blocks outbound UDP to `PUCK_PORT`. With the emergency door you'll see it
 (`ssh SSH_CLOUDFLARE` works, `test` shows no `wgpk<n>` handshake): set
-`PUCK_PORT="443"` in the VPS's settings (if free on the VPS) and run
-`scripts/tpk-ctl.sh link`.
-Without the door, bring the puck home to change it.
+`PUCK_PORT="443"` in that VPS's settings (if free on the VPS) and run
+`scripts/tpk-ctl.sh link` (`<puck>.<vps> link` with several). A puck with
+another VPS's link still up is reached through that one instead. With no way
+in at all, bring the puck home to change it.
 
 ---
 
 # Day to day
 
-- **Add or remove a `tpk` client:** edit `CLIENT_IPS` (and `CLIENT_IP6S`),
-  then `scripts/tpk-ctl.sh link`. A removed client's rules are removed too.
+- **Add or remove a `tpk` client:** edit `CLIENT_IPS` (and `CLIENT_IP6S`) in
+  that VPS's settings file, then `scripts/tpk-ctl.sh link`. A removed client's
+  rules are removed too.
 - **Add a `wgt` device:** `scripts/tpk-ctl.sh client <device>` ([2.2](#22-device-configs)).
+- **Serve another VPS, or stop serving one:** `vps add <vps>`, `vps remove <vps>`
+  ([One puck, several VPSes](#one-puck-several-vpses)).
 - **After `wgt restore` or `wgt-ctl move` on the VPS:** wgt's backups include
-  `wgpk-<name>`, but don't start it: run `scripts/tpk-ctl.sh link`.
+  `wgpk-<puck>`, but don't start it: run `scripts/tpk-ctl.sh <puck>.<vps> link`.
 - **Your VPS's IP changes:** the puck looks up `VPS_HOST` only when the link
   starts: `scripts/tpk-ctl.sh ssh sudo systemctl restart wg-quick@wgpk<n>` (it
   goes through another VPS's link or Cloudflare, since this link is down), or
@@ -520,9 +535,10 @@ Without the door, bring the puck home to change it.
 ## More than one tunnel-puck endpoint
 
 One VPS can serve several pucks, say one at a friend's and one at your mom's.
-Each puck gets its own settings file. Leave `TPK_LINK` and `PUCK_PORT` empty in
-the new one: `link` picks a subnet and port nothing on the VPS uses, and saves
-them in that file.
+Each puck gets its own settings files, and `vps add` leaves `TPK_LINK` and
+`PUCK_PORT` empty in the new one: `link` picks a subnet and port nothing on the
+VPS uses, and saves them in that file. Both directions combine: any number of
+pucks, each serving any of your VPSes.
 
 ```sh
 scripts/tpk-ctl.sh new mom                     # then fill in configs/mom.conf: SSH_LAN ...
@@ -533,8 +549,12 @@ scripts/tpk-ctl.sh mom vps add dengar
 
 Each puck has its own link on the VPS (`wgpk-home`, `wgpk-mom`), with its own
 subnet, routing table and rules, so they don't touch each other.
-`tpk-ctl.sh config` also refuses a clash with your other pucks' settings: the
-same subnet or port, or (below) the same jump code or client. How clients pick a puck depends on routing:
+`tpk-ctl.sh config` (and `link` and `exit`, which check first) also refuses a
+clash with your other pucks' settings for the same VPS: the same subnet or
+port, or (below) the same jump code or client. Two pucks' jumps on one VPS need
+different codes, so set `JUMP_CODE` when their names share the first six
+characters (`auntie-a` and `auntie-b` both shorten to `auntie`). How clients pick a puck depends on
+routing:
 
 - **`TPK_ROUTING=wgt`: each puck is another wgt jump, and a device picks its
   exit by config.** Each puck's jump is its name (`home`, `mom`), unless you
@@ -574,8 +594,13 @@ ig88         wgt      ig88                     10.99.0.4/30    wgpk1 wgrtun1    
 ```
 
 - **Commands for one VPS** (`link`, `exit`, `client`, `lan-mode`) take it as
-  `<puck>.<vps>`, or ask which when there are several. `test`, `config` and `all`
-  do every VPS, or one if named.
+  `<puck>.<vps>`, or ask which when there are several (with no terminal: name
+  it, or set `TPK_VPS`). `test`, `config` and `all` do every VPS, or one if
+  named. The puck's own commands (`init`, `wifi`, `ssh`, `reboot`, `shutdown`,
+  `undo`) don't depend on a VPS.
+- **A device gets a config on each VPS it should use** (`dengar.mom.iphone`,
+  `ig88.mom.iphone`): both come out at the puck, each through its own VPS. Its
+  wgt groups and number are per server, as always.
 - **Each link gets a subnet free on its VPS and different from the puck's other
   links**, which names its interfaces on the puck (`wgpk1`, `wgrtun1`). The jump
   code can be the same on each VPS: codes are per server.
@@ -586,9 +611,9 @@ ig88         wgt      ig88                     10.99.0.4/30    wgpk1 wgrtun1    
 
 ## Undo **[Computer]**
 
-With `TPK_ROUTING=wgt`, first remove each device's config (wgt won't remove a
-jump that configs use): `bin/wgt-ctl WGT_SERVER client remove <code>.<device>`.
-Then:
+With `TPK_ROUTING=wgt`, first remove each device's config on each VPS you're
+taking away (wgt won't remove a jump that configs use):
+`bin/wgt-ctl WGT_SERVER client remove <code>.<device>`. Then:
 
 ```sh
 scripts/tpk-ctl.sh vps remove dengar   # one VPS: its jumps and link, and its settings file
@@ -601,9 +626,10 @@ or `SSH_CLOUDFLARE`. `undo` keeps the settings files, so `vps add` (or `all`)
 builds it again. After `undo all`, delete the tunnel and the Access application
 in the dashboard **[Browser]**.
 
-**Check [VPS]:** `ip rule` shows none of this puck's rules (Fixed values),
-`wgt jump list` no
-longer shows the code(s), and clients are back on their usual routes.
+**Check [VPS], on each VPS taken away:** `ip rule` shows none of this puck's
+rules (Fixed values), `wgt jump list` no longer shows the code(s), and clients
+are back on their usual routes. `scripts/tpk-ctl.sh vps` no longer lists a
+removed VPS.
 
 ## Troubleshooting
 
@@ -611,18 +637,22 @@ longer shows the code(s), and clients are back on their usual routes.
 |---|---|
 | `test` says `via the link to ...` at home | `SSH_LAN` didn't answer: is the puck on, and does `ssh SSH_LAN true` work without a prompt? |
 | `test` says `via SSH_CLOUDFLARE` | the links are down; you're in through the emergency door. The rows below say why |
+| `can't reach <puck>: SSH_LAN ... didn't answer, nor did its links` | away from home, every link is down and there's no emergency door: the friend power-cycles the puck. At home: is `SSH_LAN` right? |
+| `which VPS? tpk-ctl.sh <puck>.<vps> ...` | the puck serves several VPSes and there's no terminal to ask on: name one, or set `TPK_VPS` |
+| `is the same VPS as ...: one settings file per VPS` | two of the puck's VPS files point at one server: remove one (`vps remove`, or delete the file if it was never built) |
+| `also has TPK_LINK ..., and on the puck they must differ` | a VPS file copied from another: empty its `TPK_LINK` (and `PUCK_PORT`), and `link` picks new ones |
 | `still holds a VPS's settings (the old layout)` | the puck's file is from before several VPSes: move its VPS settings (`TPK_ROUTING` on) into `configs/<puck>.<vps>.conf`, as in `configs/puck.vps.conf.example` |
 | the puck can't be reached at all | with the door: is the tunnel Healthy in the dashboard, your email in the Access policy, is `cloudflared` installed on this computer? Without it: the friend power-cycles the puck |
 | `tpk-ctl.sh` waits at "This changes the VPS ... Continue?" | run it in a terminal, or `TPK_YES=1` once the person has agreed |
 | `10.99.0.x/30 is already used here` or `port ... in use` | something else on the VPS has them: empty `TPK_LINK` (or `PUCK_PORT`), and `link` picks a free one |
 | FAIL `wgpk<n> has no recent handshake` | **[VPS]** is `PUCK_PORT/udp` open (`ss -ulpn`, ufw, the provider's firewall)? **[Puck]** does `VPS_HOST` resolve? Then `scripts/tpk-ctl.sh link` again |
 | **[Puck]** `wg-quick@wgpk<n>` keeps restarting | `journalctl -u wg-quick@wgpk<n> -n 20`: `no default route yet` is no network; a failed lookup is `VPS_HOST` |
-| `wgt jump add` fails | **[VPS]** `wg show wgpk-<name>` (the link first: a recent handshake?), then `wg show px-JUMP_CODE` (it exists only while a device uses the jump); **[Puck]** `sudo wg show wgrtun<n>`. Then `TPK_RENEW=1 scripts/tpk-ctl.sh exit` (new jump keys) |
+| `wgt jump add` fails | **[VPS]** `wg show wgpk-<puck>` (the link first: a recent handshake?), then `wg show px-JUMP_CODE` (it exists only while a device uses the jump); **[Puck]** `sudo wg show wgrtun<n>`. Then `TPK_RENEW=1 scripts/tpk-ctl.sh exit` (new jump keys) |
 | `the puck's rtun exists but <vps> has no jump` | `TPK_RENEW=1 scripts/tpk-ctl.sh <puck>.<vps> exit` |
 | `tpk`: handshake, but no internet on the client | **[VPS]** `ip rule` (this puck's rules, Fixed values), `ip route show table <the puck's table>` (Fixed values); **[Puck]** `sudo iptables -t nat -L -v`, `journalctl -u wg-quick@wgpk<n>` (its `tunnel-puck-exit:` line names the uplink) |
 | `tpk`: sites load, names don't resolve | **[Puck]** `systemctl status unbound`; **[VPS]** `iptables -t nat -L PREROUTING -v` |
 | large pages hang | MTU: a client config's `MTU` above 1280 needs lowering. The jump runs inside the link, so a packet much bigger than a client's 1280 gets split in two on the way, and behind a busy NAT that can cut the speed to a few Mbit/s |
-| a client shows the VPS's IP | `tpk`: is it in `CLIENT_IPS`? `systemctl status tunnel-puck-killswitch-<name>`. `wgt`: is the config named `<code>.<device>`? |
+| a client shows the VPS's IP | `tpk`: is it in `CLIENT_IPS`? `systemctl status tunnel-puck-killswitch-<puck>`. `wgt`: is the config named `<code>.<device>`? |
 | traffic stops after the puck changes networks | **[Puck]** `journalctl -t tunnel-puck-exit -n 20` shows each move; if none, reboot the puck |
 | LAN mode: some LAN addresses don't answer | the friend's LAN overlaps the client's own network (a café on `192.168.1.0/24` too), a subnet of `WG_IF`, or the link's addresses (Fixed values). Try the client from another network |
 
@@ -632,7 +662,9 @@ longer shows the code(s), and clients are back on their usual routes.
 
 ## Commands
 
-All from **[Computer]**, as `scripts/tpk-ctl.sh [<puck>[.<vps>]] <command>`:
+All from **[Computer]**, as `scripts/tpk-ctl.sh [<puck>[.<vps>]] <command>`
+(`<puck>` can be left out with one puck, `.<vps>` with one VPS; with several it
+asks):
 
 | Command | Does |
 |---|---|
@@ -644,7 +676,7 @@ All from **[Computer]**, as `scripts/tpk-ctl.sh [<puck>[.<vps>]] <command>`:
 | `vps add <vps>` | serve a VPS: its settings file if missing (`wgt`, ready, for a server in `bin/wgt-ctl list`; else `tpk`, to fill in), then `link`, `exit` and `test` for it |
 | `vps [list]` | the VPSes the puck serves: routing, server, link subnet, the puck's interfaces, jumps |
 | `vps remove <vps>` | its jumps, its link on both ends, then its settings file |
-| `link` | one VPS. The VPS picks a free subnet (apart from the puck's other links) and port the first time. The puck: WireGuard, IP forwarding, a retry at boot, its key, and a hook that moves the exit rules when the network changes. The VPS: its key, its end of the link (`wgpk-<name>`), `PUCK_PORT/udp` in ufw if active, and with `tpk` the routing and kill switch for `CLIENT_IPS`. Then the puck's end (`wgpk<n>`) |
+| `link` | one VPS. The VPS picks a free subnet (apart from the puck's other links) and port the first time. The puck: WireGuard, IP forwarding, a retry at boot, its key, and a hook that moves the exit rules when the network changes. The VPS: its key, its end of the link (`wgpk-<puck>`), `PUCK_PORT/udp` in ufw if active, and with `tpk` the routing and kill switch for `CLIENT_IPS`. Then the puck's end (`wgpk<n>`) |
 | `exit` | one VPS. `tpk`: the DNS resolver (unbound) on the puck. `wgt`: the reverse tunnel(s) on the puck (`wgrtun<n>`), piped into `wgt jump add` on the VPS |
 | `all` | `link` and `exit` for each VPS (or the one named), then `wifi sync` (only with a `<puck>.wifi.conf`), `test` |
 | `client <device> [lan]` | `wgt`, one VPS: a config for the device (`lan`: through the LAN-mode jump) |
@@ -693,7 +725,7 @@ says which:
 | `scripts/tunnel-puck-exit` | installed on the puck: the exit's firewall rules |
 
 **The puck's host key**, when reached through the link, is kept under its name
-(`tunnel-puck-<name>`) in `~/.config/tunnel-puck/known_hosts`, not under its
+(`tunnel-puck-<puck>`) in `~/.config/tunnel-puck/known_hosts`, not under its
 link address: link addresses are reused, by a reflashed puck or a new puck on
 an old one's subnet. `link` forgets it each time it builds the link, and the
 next connection learns it again; the link itself is authenticated by
@@ -727,9 +759,9 @@ the VPS through a pipe.
 
 | File or setting | Routing | Made by | What it is |
 |---|---|---|---|
-| `/etc/wireguard/wgpk-<name>.*` | `tpk` or `wgt` | `link` | the link to the puck: config and keys. With `tpk`, it also routes `CLIENT_IPS` to the puck and redirects their DNS |
+| `/etc/wireguard/wgpk-<puck>.*` | `tpk` or `wgt` | `link` | the link to the puck: config and keys. With `tpk`, it also routes `CLIENT_IPS` to the puck and redirects their DNS |
 | a ufw rule for `PUCK_PORT/udp` | `tpk` or `wgt` | `link`, if ufw is active | lets the puck dial in |
-| `/usr/local/sbin/tunnel-puck-killswitch-<name>`, `/etc/systemd/system/tunnel-puck-killswitch-<name>.service` | `tpk` | `link` | the kill switch (with `wgt`, wgt's own fail-closed does this) |
+| `/usr/local/sbin/tunnel-puck-killswitch-<puck>`, `/etc/systemd/system/tunnel-puck-killswitch-<puck>.service` | `tpk` | `link` | the kill switch (with `wgt`, wgt's own fail-closed does this) |
 | wgt's jumps and client configs | `wgt` | `exit`, `client` | made by wgt itself (`wgt jump add`, `wgt client add`) |
 
 Nothing changes `WG_IF`'s configuration, existing client configs, or wgt's
@@ -745,14 +777,14 @@ links. They're chosen to avoid wgt's numbers (tables `100`, `200`–`250`, rules
 
 | Value | From | `home`, `10.99.0.8/30` (n = 2) | What it is |
 |---|---|---|---|
-| link interface on the VPS | `wgpk-<name>` | `wgpk-home` | the link, at the VPS's end |
+| link interface on the VPS | `wgpk-<puck>` | `wgpk-home` | the link, at the VPS's end |
 | link interface on the puck | `wgpk<n>` | `wgpk2` | the link, at the puck's end |
 | link addresses | `TPK_LINK`: VPS `+1`, puck `+2` | VPS `10.99.0.9`, puck `10.99.0.10` | the two ends of the link |
 | reverse tunnels on the puck | `wgrtun<n>`, `wgrtunlan<n>`, UDP `51822 + 2n`, `51823 + 2n` | `wgrtun2` on `51826`, `wgrtunlan2` on `51827` | `wgt`: what the VPS reaches in through (its jumps) |
 | jump addresses | `10.98.n.0/29`: puck `.1`, VPS `.2`; LAN-mode jump `.5`, `.6` | `10.98.2.1`, `10.98.2.2` | `wgt`: the ends of the reverse tunnels |
 | routing table | `260 + n` | `262` | `tpk`: the table that goes to the puck |
 | rule priorities | `900 + 2n`, `901 + 2n` | `904`, `905` | `tpk`: the rule sending a listed client to the table, and the kill switch that drops its traffic when the first can't apply |
-| kill switch | `tunnel-puck-killswitch-<name>` | `tunnel-puck-killswitch-home` | `tpk`: its script and service on the VPS |
+| kill switch | `tunnel-puck-killswitch-<puck>` | `tunnel-puck-killswitch-home` | `tpk`: its script and service on the VPS |
 
 ## Why not carry WireGuard over Cloudflare?
 
