@@ -148,3 +148,30 @@ def test_client_list_watch_redraws_the_table(make_ctx, monkeypatch):
     monkeypatch.setattr(logview, "can_step", lambda: False)
     with pytest.raises(WgtError, match="terminal"):
         clients.cmd_list(ctx, [])
+
+
+def test_alerts_ring_when_a_config_comes_on():
+    a = logview.Alerts()
+    assert a.update({"iphone"}, "10:00") is False          # the first look only learns
+    assert a.update({"iphone"}, "10:01") is False
+    assert a.update({"iphone", "laptop"}, "10:02") is True
+    assert a.update({"laptop"}, "10:03") is False         # going idle shows, without the bell
+    assert a.lines == ["10:03 iphone went idle", "10:02 laptop came on"]
+
+
+def test_client_list_alert_marks_and_rings(make_ctx, monkeypatch):
+    from wgt import clients
+    ctx = make_ctx()
+    ctx.args.alert = True
+    c = ctx.snap.clients[0]
+    drawn, hs = [], {}
+
+    def two_looks(draw, title):
+        drawn.append(draw())
+        hs[c.pub] = int(time.time()) - 5    # it comes on
+        drawn.append(draw())
+    monkeypatch.setattr(logview, "can_step", lambda: True)
+    monkeypatch.setattr(logview, "watch", two_looks)
+    monkeypatch.setattr(clients.live, "last_handshakes", lambda r, ifc, path: dict(hs))
+    clients.cmd_list(ctx, [])
+    assert not drawn[0].endswith("\a") and drawn[1].endswith("\a") and f"{c.name} came on" in drawn[1]

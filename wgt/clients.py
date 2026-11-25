@@ -14,10 +14,11 @@ import re
 import shutil
 import subprocess
 import sys
-from typing import TYPE_CHECKING, List, Optional, Tuple
+import time
+from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
 from . import devices, live, logview, net, ops, render, rules, store, system, ui, units
-from .const import MIB, client_conf_name
+from .const import DEVICE_ACTIVE, MIB, client_conf_name
 from .errors import WgtError
 
 if TYPE_CHECKING:
@@ -710,16 +711,12 @@ def cmd_share(ctx: Ctx, words: List[str]) -> None:
 
 def cmd_list(ctx: Ctx, words: List[str]) -> None:
     """The clients table (or --tsv rows), then in a terminal the action menu.
-    --watch: the table redrawn every 2s, the newest handshakes and traffic, until q."""
-    ops.no_more_words(words, "wgt client list [--tsv|--watch]")
-    if ctx.args.watch:
-        if not logview.can_step():
-            raise WgtError("--watch needs a terminal (from wgt-ctl: one server, not all)")
-
-        def table() -> str:
-            ctx.reload()   # a config added or removed meanwhile shows up
-            return "\n".join(clients_table(ctx, numbered=False)[0])
-        logview.watch(table, f"wgt client list on {ctx.cfg.SERVER_NAME}")
+    --watch: the table redrawn every 2s, the newest handshakes and traffic, until q.
+    --alert: the same, and the terminal's bell when a config comes on (a handshake
+    within DEVICE_ACTIVE after none), with a line saying which."""
+    ops.no_more_words(words, "wgt client list [--tsv|--watch|--alert]")
+    if ctx.args.watch or ctx.args.alert:
+        watch_clients(ctx, ctx.args.alert)
         return
     if ctx.args.tsv:
         for row in client_rows(ctx):
@@ -728,6 +725,29 @@ def cmd_list(ctx: Ctx, words: List[str]) -> None:
     names = print_clients(ctx, numbered=True)
     if names and sys.stdout.isatty() and not ctx.args.yes and ui.have_tty():
         list_menu(ctx, names)
+
+
+def active_configs(ctx: Ctx, now: float) -> Set[str]:
+    """The configs in use: a handshake within DEVICE_ACTIVE, and not disabled."""
+    hs = live.last_handshakes(ctx.runner, ctx.cfg.WG_IF, ctx.paths.handshake_db)
+    return {c.name for c in ctx.snap.clients
+            if not ctx.snap.is_disabled(c.name) and live.seen_within(hs, c.pub, DEVICE_ACTIVE, now)}
+
+
+def watch_clients(ctx: Ctx, bell: bool) -> None:
+    """client list --watch / --alert: the table, live."""
+    if not logview.can_step():
+        raise WgtError("--watch and --alert need a terminal (from wgt-ctl: one server, not all)")
+    alerts = logview.Alerts()
+
+    def table() -> str:
+        ctx.reload()   # a config added or removed meanwhile shows up
+        text = "\n".join(clients_table(ctx, numbered=False)[0])
+        if not bell:
+            return text
+        ring = alerts.update(active_configs(ctx, ctx.clock()), time.strftime("%H:%M:%S"))
+        return text + "".join("\n  " + line for line in [""] + alerts.lines) + ("\a" if ring else "")
+    logview.watch(table, f"wgt client list on {ctx.cfg.SERVER_NAME}" + (", bell on" if bell else ""))
 
 
 # The action menu after `client list`: (action, what it does). "toggle" shows

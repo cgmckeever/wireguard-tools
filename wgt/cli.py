@@ -32,7 +32,7 @@ Cloudflare WARP. The device picks one at a time.
   backup [dir] | restore <archive> [--old-names] | rollback [--purge]
 
   client list [--tsv] | add <device> [--exit host|<jump>[,..]] [--warp on|off|on,off] [--allowed-ips ..] [--group ..]
-         list --watch (the table live, every 2s; q quits)
+         list --watch (the table live, every 2s; q quits) | list --alert (and a bell when one comes on)
          show <config> [--qr] | share <config> | rotate <config> [--allowed-ips ..]
          rename <old> <new> | disable <config>|--all | enable <config>|--all | remove <config>
          (add: per exit, <device> and warp.<device> (--warp on|off: one); a full config

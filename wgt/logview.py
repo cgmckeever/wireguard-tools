@@ -1,6 +1,7 @@
 """Live views on the terminal: a log as it grows and stepping back through it
 (`wgt history --follow`, `--step` for `wgt history` and `wgt log`), and a
-table kept up to date (`wgt client list --watch`).
+table kept up to date (`wgt client list --watch`, and `--alert`: with a bell when
+a config comes on).
 
 follow() tails a file the way tail -F does (a rotated file is reopened from its
 start). step() is a full-screen view that opens at the newest entry and walks
@@ -14,7 +15,7 @@ import shutil
 import sys
 import textwrap
 import time
-from typing import Callable, List, Optional, TextIO
+from typing import Callable, List, Optional, Set, TextIO
 
 HELP = "k/Enter older  j newer  u/d page  g/G oldest/newest  /text search back  n/N again  q quit"
 SHORT_HELP = "k older  j newer  / search  q quit"
@@ -158,6 +159,25 @@ def step(lines: List[str], title: str) -> None:
         termios.tcsetattr(fd, termios.TCSADRAIN, saved)
         w("\x1b[?25h\x1b[?1049l")
         sys.stdout.flush()
+
+
+class Alerts:
+    """For --alert: which names came on (became active) since the last look, kept
+    as a few lines to show under the table. The first look only learns."""
+    KEEP = 5
+
+    def __init__(self) -> None:
+        self.active: Optional[Set[str]] = None
+        self.lines: List[str] = []
+
+    def update(self, active: Set[str], stamp: str) -> bool:
+        """Note <active> now; True (ring) if a name in it wasn't active before."""
+        new = sorted(active - self.active) if self.active is not None else []
+        gone = sorted(self.active - active) if self.active is not None else []
+        self.active = set(active)
+        self.lines = ([f"{stamp} {n} came on" for n in new] + [f"{stamp} {n} went idle" for n in gone]
+                      + self.lines)[:self.KEEP]
+        return bool(new)
 
 
 def watch(draw: Callable[[], str], title: str, every: float = 2.0) -> None:
