@@ -85,3 +85,10 @@ server, bossk too.
    included.
 6. **Constraints.** Stdlib only; Python 3.8 on servers (CI runs it). Private
    keys never on a command line or in a log: files or stdin.
+7. **Test clients are named `test-<something>`** (`test-phone`, `test-tab`), on
+   any server, by wgt, wgt-ctl, tunnel-puck or `tools/trial.sh`. Every config
+   is delivered to `~/wg-tunnels/devices/<device>/config/`, where an unmarked
+   test device looks like a real one and nobody knows whether to keep it.
+   Remove them when the test is done (`wgt-ctl <server> client remove`). Real
+   devices are named for what they are (`iphone`, `steve`), and only when the
+   person asks for one.

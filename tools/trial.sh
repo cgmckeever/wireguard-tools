@@ -55,36 +55,36 @@ DESC="watchdog units run wgt"; ok grep -q 'ExecStart=/usr/local/sbin/wgt watchdo
 
 echo "=== jump and clients"
 DESC="jump add par-fr"; ok W jump add par-fr "$jump" --label "Paris, France" --yes >/root/trial-exit.log 2>&1
-DESC="client add phone (host + par-fr, plain + warp)"; ok W client add phone --exit host,par-fr --no-qr --yes >/dev/null 2>&1
-DESC="four configs"; ok test "$(ls /etc/wireguard/clients/bossk.*phone.conf | wc -l)" = 4
-device_up /etc/wireguard/clients/bossk.warp.par-fr.phone.conf
+DESC="client add test-phone (host + par-fr, plain + warp)"; ok W client add test-phone --exit host,par-fr --no-qr --yes >/dev/null 2>&1
+DESC="four configs"; ok test "$(ls /etc/wireguard/clients/bossk.*test-phone.conf | wc -l)" = 4
+device_up /etc/wireguard/clients/bossk.warp.par-fr.test-phone.conf
 DESC="device exits in Paris (on demand)"; ok wait_loc FR
 systemctl stop wg-tools-exit-watchdog.timer; systemctl stop wg-quick@wx-par-fr wg-quick@px-par-fr
 DESC="device blocked while the jump is down"; ok test -z "$(probe)"
 systemctl start wg-tools-exit-watchdog.timer
 DESC="watchdog brings it back"; ok wait_loc FR
-device_up /etc/wireguard/clients/bossk.warp.phone.conf
+device_up /etc/wireguard/clients/bossk.warp.test-phone.conf
 DESC="host + WARP exits via WARP (US)"; ok wait_loc US
 DESC="jump test"; ok W jump test >/dev/null 2>&1
 DESC="remove refused while used"; ok bash -c '! bin/wgt jump remove par-fr --yes >/dev/null 2>&1'
 
 echo "=== plain configs (no WARP)"
-device_up /etc/wireguard/clients/bossk.par-fr.phone.conf
+device_up /etc/wireguard/clients/bossk.par-fr.test-phone.conf
 DESC="jump without WARP: Paris, warp=off"; ok wait_probe "loc=FR warp=off"
-DESC="rename par-fr.phone -> warp.par-fr.phone2 (live)"; ok W client rename par-fr.phone warp.par-fr.phone2 --yes >/dev/null 2>&1
+DESC="rename par-fr.test-phone -> warp.par-fr.test-phone2 (live)"; ok W client rename par-fr.test-phone warp.par-fr.test-phone2 --yes >/dev/null 2>&1
 DESC="same tunnel now through WARP"; ok wait_probe "loc=FR warp=on"
-device_up /etc/wireguard/clients/bossk.phone.conf
+device_up /etc/wireguard/clients/bossk.test-phone.conf
 DESC="host without WARP: warp=off"; ok wait_probe "warp=off"
 DESC="host without WARP: no IPv6 through WARP"; ok bash -c '! ip netns exec dev curl -6 -s -m 5 https://[2606:4700:4700::1111]/cdn-cgi/trace | grep -q warp=on'
 DESC="wgt test with plain configs"; ok W test >/dev/null 2>&1
 
 echo "=== static addresses and groups"
-DESC="phone has a static number"; ok bash -c "bin/wgt device list --tsv | grep -qE '^phone2?\s[0-9]+'"
-DESC="group add"; ok W device group phone trial,server --yes >/dev/null 2>&1
-DESC="group shows"; ok bash -c "bin/wgt device list --tsv | grep -qE '^phone\s[0-9]+\strial,server'"
+DESC="test-phone has a static number"; ok bash -c "bin/wgt device list --tsv | grep -qE '^test-phone2?\s[0-9]+'"
+DESC="group add"; ok W device group test-phone trial,server --yes >/dev/null 2>&1
+DESC="group shows"; ok bash -c "bin/wgt device list --tsv | grep -qE '^test-phone\s[0-9]+\strial,server'"
 sleep 20
 DESC="the watchdog lets it reach the server"; ok bash -c "iptables -S WGT-SERVER | grep -- '-s ' | grep -q ACCEPT"
-DESC="ungroup"; ok W device ungroup phone --yes >/dev/null 2>&1
+DESC="ungroup"; ok W device ungroup test-phone --yes >/dev/null 2>&1
 sleep 20
 DESC="isolated again"; ok bash -c "! iptables -S WGT-SERVER | grep -- '-s ' | grep -q ACCEPT"
 DESC="wgt test after groups"; ok W test >/dev/null 2>&1
@@ -111,7 +111,7 @@ rm -f "$archive"   # purge keeps archives (they're the way back): this one is th
 DESC="restore succeeds"; ok W restore /root/trial-archive.tgz --yes >/root/trial-restore.log 2>&1
 DESC="same keys after restore"; ok test "$keys_before" = "$(md5sum /etc/wireguard/server.key /etc/wireguard/clients/*.conf | md5sum)"
 DESC="jump back"; ok bash -c 'bin/wgt jump list | grep -q par-fr'
-device_up /etc/wireguard/clients/bossk.warp.par-fr.phone.conf
+device_up /etc/wireguard/clients/bossk.warp.par-fr.test-phone.conf
 DESC="old device config still exits in Paris"; ok wait_loc FR
 ip netns del dev
 
