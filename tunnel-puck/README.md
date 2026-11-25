@@ -111,7 +111,7 @@ you reach 2.1: networks rarely block it.
   **Tested only on a Raspberry Pi**, and the steps below use one: Raspberry Pi
   Imager and Raspberry Pi OS Lite (64-bit), Bookworm or later. Another board
   that meets the list above should work, but hasn't been tried; flash its
-  Debian image your usual way instead of 1.2.
+  Debian image your usual way instead of 1.1.
 
   **Which Raspberry Pi:** a 3 or later with ethernet (3B, 3B+, 4 or 5). A 4 or
   5 is fastest; on a 3, its 100–300 Mbit/s ethernet is the ceiling, though the
@@ -197,7 +197,19 @@ you reach 2.1: networks rarely block it.
 
 # Phase 1: prepare the puck
 
-## 1.1 Fill in the settings **[Computer]**
+## 1.1 Flash the puck **[Hands]**
+
+On a Raspberry Pi: with Raspberry Pi Imager, write the OS from
+[What you need](#what-you-need). (Another board: its Debian image, set up the
+same way.) In Imager's settings: a hostname and user (say `tunnel-puck` and `pi`; they become
+`SSH_LAN` in [1.2](#12-fill-in-the-settings-computer)), and **SSH with your public
+key only** (passwords off). Leave Wi-Fi out: step
+[3.1](#31-ethernet-or-wi-fi-at-the-friends-computer) handles it. Boot the puck at
+home, on ethernet.
+
+**Check [Computer]:** `ssh pi@tunnel-puck.local true` (your user and hostname) works with no password prompt.
+
+## 1.2 Fill in the settings **[Computer]**
 
 Each puck gets a settings file named for it, in `configs/` (git ignores them).
 The name is up to 10 characters of `a-z`, `0-9` and `-`, starting with a
@@ -214,7 +226,7 @@ Fill it in (each line has a comment), then check it:
 
 | Setting | When | What to put |
 |---|---|---|
-| `SSH_LAN` | always | `user@hostname` for the puck on your home network. You choose both in [1.2](#12-flash-the-puck-hands) (`pi@tunnel-puck.local`) |
+| `SSH_LAN` | always | `user@hostname` for the puck on your home network: the ones you chose in [1.1](#11-flash-the-puck-hands) (`pi@tunnel-puck.local`) |
 | `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) |
 | `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) (the default is fine) |
 
@@ -223,17 +235,6 @@ scripts/tpk-ctl.sh config
 ```
 
 **Check:** it ends with `settings look complete`.
-
-## 1.2 Flash the puck **[Hands]**
-
-On a Raspberry Pi: with Raspberry Pi Imager, write the OS from
-[What you need](#what-you-need). (Another board: its Debian image, set up the
-same way.) In Imager's settings: the hostname and user from `SSH_LAN`, and **SSH with your public
-key only** (passwords off). Leave Wi-Fi out: step
-[3.1](#31-ethernet-or-wi-fi-at-the-friends-computer) handles it. Boot the puck at
-home, on ethernet.
-
-**Check [Computer]:** `ssh SSH_LAN true` works with no password prompt.
 
 ## 1.3 The emergency door: Cloudflare **[Browser]** (skip without `SSH_CLOUDFLARE`)
 
