@@ -660,8 +660,11 @@ in at all, bring the puck home to change it.
   under it each config on the jump with its last handshake (or `disabled`;
   with `tpk`, each of `CLIENT_IPS`, from the gateway's WireGuard). `test` says why
   something's off. `status --watch [seconds]` keeps it on screen, redrawn every
-  5s (each round takes a few seconds of ssh), until Ctrl-C; on a wgt gateway,
-  `../bin/wgt-ctl <gateway> client list --watch` is the gateway's whole table, live.
+  5s (each round takes a few seconds of ssh), until Ctrl-C. `status --alert`
+  is the same with the terminal's bell when a config comes on (its last
+  handshake under 3 minutes, after it wasn't), and a line saying which; it's
+  silent otherwise. On a wgt gateway, `../bin/wgt-ctl <gateway> client list
+  --watch` (or `--alert`) is the gateway's whole table, live.
 
   ```
   mom: via the link to dengar, through root@dengar.example.com

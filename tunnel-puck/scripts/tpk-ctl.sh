@@ -25,8 +25,9 @@
 #   tpk-ctl.sh [<puck>[.<gateway>]] disable [<device>]   the puck's clients (or one device's) on each gateway, or that one, off;
 #                                                 links, keys and configs stay
 #   tpk-ctl.sh [<puck>[.<gateway>]] enable [<device>]   let back in what disable turned off
-#   tpk-ctl.sh [<puck>[.<gateway>]] status [--watch [s]]   at a glance: the puck, and per gateway its link, rtun, jump and
-#                                                 each config's (tpk: each client's) last handshake; --watch: redrawn every 5s
+#   tpk-ctl.sh [<puck>[.<gateway>]] status [--watch|--alert [s]]   at a glance: the puck, and per gateway its link, rtun,
+#                                                 jump and each config's (tpk: each client's) last handshake; --watch: redrawn
+#                                                 every 5s; --alert: and a bell when one comes on
 #   tpk-ctl.sh [<puck>] wifi [list]               the puck's saved Wi-Fi networks, and its uplink now
 #   tpk-ctl.sh [<puck>] wifi add <name>           save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all    remove saved Wi-Fi (all: ethernet only)
@@ -1078,19 +1079,46 @@ cmd_status() {
 }
 
 
-# status_watch [seconds]: status, redrawn every <seconds> (default 5) until Ctrl-C.
-# Each round is a fresh status (a few ssh calls), drawn once it's all in.
+# status_watch <bell> [seconds]: status, redrawn every <seconds> (default 5) until
+# Ctrl-C. Each round is a fresh status (a few ssh calls), drawn once it's all in.
+# bell (status --alert): the terminal's bell when a config (or tpk client) comes
+# on, its last handshake under 3 minutes after it wasn't, with a line saying which.
 status_watch() {
-    every="${1:-5}"
-    case "$every" in ''|*[!0-9]*|0) die "status --watch [seconds]: a whole number of seconds" ;; esac
+    bell="$1" every="${2:-5}"
+    case "$every" in ''|*[!0-9]*|0) die "status --watch|--alert [seconds]: a whole number of seconds" ;; esac
     trap 'printf "\033[?1049l"; exit 0' INT TERM
     printf '\033[?1049h'
+    was="" first=1 events=""
     while :; do
         out=$(cmd_status 2>&1)
-        printf '\033[H\033[2J%s\n\n\033[2mtpk-ctl.sh %s status, %s: every %ss  Ctrl-C quits\033[0m\n' \
-            "$out" "$PUCK_NAME${GATEWAY_PICK:+.$GATEWAY_PICK}" "$(date +%H:%M:%S)" "$every"
+        ring=""
+        if [ -n "$bell" ]; then
+            now=$(printf '%s\n' "$out" | active_names)
+            if [ -z "$first" ]; then
+                stamp=$(date +%H:%M:%S)
+                for n in $now; do
+                    case " $was " in *" $n "*) ;; *) ring=1 events="$stamp $n came on
+$events" ;; esac
+                done
+                for n in $was; do
+                    case " $now " in *" $n "*) ;; *) events="$stamp $n went idle
+$events" ;; esac
+                done
+                events=$(printf '%s\n' "$events" | head -n 5)   # the newest five
+            fi
+            was=$(words "$now") first=""
+        fi
+        printf '\033[H\033[2J%s\n%s\n\033[2mtpk-ctl.sh %s status, %s: every %ss%s  Ctrl-C quits\033[0m\n%s' \
+            "$out" "$(printf '%s' "$events" | sed 's/^/  /')" "$PUCK_NAME${GATEWAY_PICK:+.$GATEWAY_PICK}" \
+            "$(date +%H:%M:%S)" "$every" "${bell:+, bell on}" "${ring:+$(printf '\a')}"
         sleep "$every"
     done
+}
+
+# active_names: from status's lines, the configs (or tpk clients) in use: a last
+# handshake under 3 minutes (ago prints seconds under 2 minutes, then 2m).
+active_names() {
+    awk '/last handshake: ([0-9]+s|2m) ago/ {print $1}'
 }
 
 
@@ -1282,7 +1310,12 @@ main() {
         client) one_gateway client; cmd_client "$@" ;;
         lan-mode) one_gateway lan-mode; pick_puck; cmd_lan_mode "$@" ;;
         disable|enable) pick_puck; each_gateway "cmd_$cmd" "$@" ;;
-        status) pick_puck; if [ "${1:-}" = --watch ]; then shift; status_watch "$@"; else cmd_status; fi ;;
+        status) pick_puck
+            case "${1:-}" in
+                --watch) shift; status_watch "" "$@" ;;
+                --alert) shift; status_watch bell "$@" ;;
+                *) cmd_status ;;
+            esac ;;
         wifi) pick_puck; cmd_wifi "$@" ;;
         test) pick_puck; cmd_test ;;
         ssh) pick_puck; cmd_ssh "$@" ;;
