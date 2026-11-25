@@ -51,20 +51,9 @@ def restore_history(ctx: Ctx, archive: str, members: List[str]) -> None:
                 body = body + here
             elif os.path.exists(path):
                 continue
-            write_private_bytes(path, body)
+            write_private(path, body.decode("utf-8", errors="surrogateescape"))   # the same bytes back
     if p in members:
         ctx.out.info(f"history: the archive's kept, ahead of this server's ({p})")
-
-
-def write_private_bytes(path: str, data: bytes) -> None:
-    """<path> written whole, mode 600."""
-    tmp = path + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    try:
-        os.write(fd, data)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
 
 
 def check_archive(archive: str, paths: Paths) -> List[str]:
