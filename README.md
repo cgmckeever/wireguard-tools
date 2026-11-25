@@ -522,78 +522,11 @@ so re-cloning the tools keeps them); `backup <dir>` writes elsewhere. Each
 `backup` also prunes old archives and file copies. A backup holds private keys
 (it's created mode 600); keep it somewhere safe.
 
-### History: what changed, when, and who did it
-
-Every change wgt makes, by hand, through `wgt-ctl` or by a watchdog, is one
-line in `/var/log/wireguard-tools.log`: the time (UTC), what changed, and in
-brackets the command and where it came from (the ssh client's address, as
-`wgt-ctl`'s commands arrive; the sudo user).
-
-```
-2026-11-23T13:20:37Z wg-tools: wgt: Add config 'tablet' at 10.77.1.4 (host:Buffalo, no WARP)  [wgt client add tablet --no-qr --yes; ssh from 203.0.113.5]
-2026-11-24T02:11:09Z wg-tools-exit-watchdog: jump par-fr: a client is active; brought up  [wgt watchdog exits]
-```
-
-```bash
-wgt history                 # the last 40 lines
-wgt history 200             # the last 200
-wgt history --all           # everything kept
-wgt-ctl dengar history      # from your machine (or wgt-ctl all history)
-```
-
-**Kept for a year by default.** logrotate starts a new file each month and keeps
-`HISTORY_MONTHS` old ones (compressed; `setup --history-months <n>`, 1 to 120,
-saved like the other settings), so `--all` reaches back that many months plus
-the current one. The journal (`wgt log`) has the same lines and more, but
-journald keeps only as much as fits its share of the disk, and on a public
-server ssh login attempts fill that within weeks or months; the history file
-isn't shared with anything.
-
-- **Rotation** is set by `wgt setup` (`/etc/logrotate.d/wireguard-tools`). Until
-  a server's next setup it isn't rotated, and `wgt history` says so.
-- **Backups carry it,** rotated months included, and `restore` (so `wgt-ctl
-  move`) puts the old server's lines first, then the new one's: one history
-  across the move.
-- **Mode 600,** root only: it names addresses. Nothing secret goes in it (no
-  keys; commands never carry them).
-- **`rollback` keeps it** (even `--purge`: it's a record, not configuration);
-  `wgt-ctl <server> remove` deletes it with the rest.
-- A dry run writes nothing to it, and a full disk or missing `/var/log` never
-  stops a change: the line is just lost.
-
 `rollback --purge` also removes the `wgt` link (afterwards use
 `/opt/wireguard-tools/bin/wgt`), and leaves the packages, `/usr/local/bin/wgcf`, the
 checkout and the archives, which still hold every private key: `rm -rf
 /var/backups/wireguard-tools` when you no longer need them, or use `wgt-ctl
 <server> remove`.
-
-### Rotate WARP accounts
-
-Rotate when WARP connections stop working, or when you want a new account for
-security. A server's WARP account is made at setup and each jump's at `jump add`;
-rotating registers a fresh one:
-
-```bash
-wgt warp rotate            # this server's own WARP (or: host)
-wgt warp rotate par-fr     # a jump's WARP
-wgt warp rotate all        # this server's and every jump's
-```
-
-The new account is registered first, so if Cloudflare refuses, that account
-doesn't change (with `all`, the run stops there, and ones already rotated stay
-rotated). Then it replaces the old one (backed up like any changed file), the
-WARP tunnel restarts, and a trace checks traffic still leaves through WARP. Device
-configs don't change, so there's nothing to re-send.
-
-- **This server's WARP:** `warp.` configs pause for a few seconds. Plain configs
-  aren't affected.
-- **A jump's WARP:** the whole jump goes down, so both its `warp.` and plain
-  configs stop until the watchdog brings it back.
-
-If the trace fails, the new account stays and the command exits non-zero. To undo,
-restore the backed-up wgcf files ([Files](#files)), then run `wgt setup`. A server
-that needed [Register WARP on another machine](#register-warp-on-another-machine)
-will probably be refused here too.
 
 ### Restoring from a backup by hand
 
@@ -634,6 +567,73 @@ Setup checks the restored subnet against this host's routes. If it overlaps one,
 setup stops with the files restored: run `/opt/wireguard-tools/bin/wgt setup --subnet
 <free subnet>` (configs move; re-send them), or pass `--subnet` to `restore` up
 front. The location is looked up again for the new machine (or pass `--location`).
+
+### History: what changed, when, and who did it
+
+Every change wgt makes, by hand, through `wgt-ctl` or by a watchdog, is one
+line in `/var/log/wireguard-tools.log`: the time (UTC), what changed, and in
+brackets the command and where it came from (the ssh client's address, as
+`wgt-ctl`'s commands arrive; the sudo user).
+
+```
+2026-11-23T13:20:37Z wg-tools: wgt: Add config 'tablet' at 10.77.1.4 (host:Buffalo, no WARP)  [wgt client add tablet --no-qr --yes; ssh from 203.0.113.5]
+2026-11-24T02:11:09Z wg-tools-exit-watchdog: jump par-fr: a client is active; brought up  [wgt watchdog exits]
+```
+
+```bash
+wgt history                 # the last 40 lines
+wgt history 200             # the last 200
+wgt history --all           # everything kept
+wgt-ctl dengar history      # from your machine (or wgt-ctl all history)
+```
+
+**Kept for a year by default.** logrotate starts a new file each month and keeps
+`HISTORY_MONTHS` old ones (compressed; `setup --history-months <n>`, 1 to 120,
+saved like the other settings), so `--all` reaches back that many months plus
+the current one. The journal (`wgt log`) has the same lines and more, but
+journald keeps only as much as fits its share of the disk, and on a public
+server ssh login attempts fill that within weeks or months; the history file
+isn't shared with anything.
+
+- **Rotation** is set by `wgt setup` (`/etc/logrotate.d/wireguard-tools`). Until
+  a server's next setup it isn't rotated, and `wgt history` says so.
+- **Backups carry it,** rotated months included, and `restore` (so `wgt-ctl
+  move`) puts the old server's lines first, then the new one's: one history
+  across the move.
+- **Mode 600,** root only: it names addresses. Nothing secret goes in it (no
+  keys; commands never carry them).
+- **`rollback` keeps it** (even `--purge`: it's a record, not configuration);
+  `wgt-ctl <server> remove` deletes it with the rest.
+- A dry run writes nothing to it, and a full disk or missing `/var/log` never
+  stops a change: the line is just lost.
+
+### Rotate WARP accounts
+
+Rotate when WARP connections stop working, or when you want a new account for
+security. A server's WARP account is made at setup and each jump's at `jump add`;
+rotating registers a fresh one:
+
+```bash
+wgt warp rotate            # this server's own WARP (or: host)
+wgt warp rotate par-fr     # a jump's WARP
+wgt warp rotate all        # this server's and every jump's
+```
+
+The new account is registered first, so if Cloudflare refuses, that account
+doesn't change (with `all`, the run stops there, and ones already rotated stay
+rotated). Then it replaces the old one (backed up like any changed file), the
+WARP tunnel restarts, and a trace checks traffic still leaves through WARP. Device
+configs don't change, so there's nothing to re-send.
+
+- **This server's WARP:** `warp.` configs pause for a few seconds. Plain configs
+  aren't affected.
+- **A jump's WARP:** the whole jump goes down, so both its `warp.` and plain
+  configs stop until the watchdog brings it back.
+
+If the trace fails, the new account stays and the command exits non-zero. To undo,
+restore the backed-up wgcf files ([Files](#files)), then run `wgt setup`. A server
+that needed [Register WARP on another machine](#register-warp-on-another-machine)
+will probably be refused here too.
 
 ## Fleet management
 
