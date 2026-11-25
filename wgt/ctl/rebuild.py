@@ -114,8 +114,7 @@ def do_move(s: Server, args: List[str]) -> int:
     opts, setup_args, sure = parse_move(args)
     if s.dir != remote.DEF_DIR:
         raise WgtError(f"move needs the checkout at {remote.DEF_DIR} (this one is {s.dir})")
-    if not remote.BRANCH.match(opts["--branch"]):
-        raise WgtError(f"bad branch name: {opts['--branch']}")
+    remote.check_branch(opts["--branch"])
     user = opts["--user"] or s.target.split("@", 1)[0]
     in_place = not opts["--to"]
     new = s.target if in_place else f"{user}@{opts['--to']}"

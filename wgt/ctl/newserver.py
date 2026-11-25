@@ -81,8 +81,7 @@ def _ask_identity(opts: Dict[str, str]) -> Tuple[str, str, str]:
     if not remote.valid_server(name):
         raise WgtError(f"server name must be {remote.SERVER_NAME_RULE}: '{name}'")
     _refuse_listed(name)
-    if not remote.BRANCH.match(opts["--branch"]):
-        raise WgtError(f"bad branch name: {opts['--branch']}")
+    remote.check_branch(opts["--branch"])
     target = f"{opts['--user']}@{address}"
     if not remote.TARGET.match(target):
         raise WgtError(f"bad --user or --address: {target}")

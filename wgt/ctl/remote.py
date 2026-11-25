@@ -218,6 +218,12 @@ def do_wgt(s: Server, args: List[str]) -> int:
     return ssh(s.target, f"WGT_SSH_TARGET={shlex.quote(s.target)} {s.wgt} {q(*args)}", tty=True)[0]
 
 
+def check_branch(branch: str) -> None:
+    """A branch name safe to pass to git there (init and move's --branch)."""
+    if not BRANCH.match(branch):
+        raise WgtError(f"bad branch name: {branch}")
+
+
 def no_args(cmd: str, args: List[str]) -> None:
     if args:
         raise WgtError(f"wgt-ctl <server> {cmd} takes no arguments (got: {' '.join(args)})")
