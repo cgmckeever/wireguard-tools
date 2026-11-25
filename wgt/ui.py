@@ -71,14 +71,18 @@ def pick_number(prompt: str, count: int) -> Optional[int]:
     return int(reply)
 
 
-def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[int]:
-    """A numbered menu on the terminal; returns the 0-based choice, None on Enter."""
+def show_menu(title: str, items: Sequence[str]) -> None:
+    """A numbered list on the terminal, under its title (if any)."""
     lines: List[str] = ["", f"  {title}"] if title else [""]
     lines += [f"    {i + 1}) {it}" for i, it in enumerate(items)]
     say("\n".join(lines) + "\n")
+
+
+def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[int]:
+    """A numbered menu on the terminal; returns the 0-based choice, None on Enter."""
+    show_menu(title, items)
     n = pick_number(f"  {prompt} [1-{len(items)}, Enter exits]: ", len(items))
     return None if n is None else n - 1
-
 
 
 # --- the clients table (wgt client list, wgt-ctl clients) ---

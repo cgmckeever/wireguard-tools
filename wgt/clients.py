@@ -78,7 +78,7 @@ def pick_exits(ctx: Ctx, name: str) -> List[str]:
     codes = [e.code for e in ctx.snap.exits]
     items = [f"{store.HOST_EXIT:<6} {ctx.cfg.SERVER_NAME} itself (default)"]
     items += [f"{e.code:<6} {e.label}" for e in ctx.snap.exits]
-    ui.say("\n".join(["", f"  Exit for {name}:"] + [f"    {i + 1}) {it}" for i, it in enumerate(items)]) + "\n")
+    ui.show_menu(f"Exit for {name}:", items)   # several may be picked: not ui.menu
     reply = ui.ask("  Exit [Enter = 1 (host); several: 1,2]: ")
     if not reply:
         return [store.HOST_EXIT]
