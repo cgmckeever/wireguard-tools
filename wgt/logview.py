@@ -1,7 +1,7 @@
 """Live views on the terminal: a log as it grows and stepping back through it
 (`wgt history --follow`, `--step` for `wgt history` and `wgt log`), and a
 table kept up to date (`wgt client list --watch`, and `--alert`: with a bell when
-a config comes on).
+a config connects).
 
 follow() tails a file the way tail -F does (a rotated file is reopened from its
 start). step() is a full-screen view that opens at the newest entry and walks
@@ -163,7 +163,7 @@ def step(lines: List[str], title: str) -> None:
 
 
 class Alerts:
-    """For --alert: which names came on (became active) since the last look, kept
+    """For --alert: which names connected (became active) since the last look, kept
     as a few lines to show under the table. The first look only learns."""
     KEEP = 5
 
@@ -172,11 +172,11 @@ class Alerts:
         self.lines: List[str] = []
 
     def update(self, active: Set[str], stamp: str) -> List[str]:
-        """Note <active> now; the names that came on (ring for them), oldest look excluded."""
+        """Note <active> now; the names that connected (ring for them), oldest look excluded."""
         new = sorted(active - self.active) if self.active is not None else []
         gone = sorted(self.active - active) if self.active is not None else []
         self.active = set(active)
-        self.lines = ([f"{stamp} {n} came on" for n in new] + [f"{stamp} {n} went idle" for n in gone]
+        self.lines = ([f"{stamp} {n} connected" for n in new] + [f"{stamp} {n} went idle" for n in gone]
                       + self.lines)[:self.KEEP]
         return new
 

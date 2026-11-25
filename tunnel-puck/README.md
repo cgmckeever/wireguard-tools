@@ -714,7 +714,7 @@ in at all, bring the puck home to change it.
   with `tpk`, each of `CLIENT_IPS`, from the gateway's WireGuard). `test` says why
   something's off. `status --watch [seconds]` keeps it on screen, redrawn every
   5s (each round takes a few seconds of ssh), until Ctrl-C. `status --alert`
-  is the same with an alert when a config comes on (its last handshake under
+  is the same with an alert when a config connects (its last handshake under
   3 minutes, after it wasn't): a desktop notification with a sound (macOS, or
   `notify-send` on Linux), the terminal's bell, and a line saying which; it's
   silent otherwise. On a wgt gateway, `../bin/wgt-ctl <gateway> client list

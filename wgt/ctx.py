@@ -89,7 +89,7 @@ class Args:
     all: bool = False           # client disable/enable --all: every config
     step: bool = False          # log/history --step: walk back through it, entry by entry
     watch: bool = False         # client list --watch: the table, redrawn until q
-    alert: bool = False         # client list --alert: --watch, and a bell when a config comes on
+    alert: bool = False         # client list --alert: --watch, and a bell when a config connects
     qr: Optional[bool] = None   # --qr / --no-qr; None: show it when a person is watching
     help: bool = False
 

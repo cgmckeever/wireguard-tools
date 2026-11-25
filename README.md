@@ -290,7 +290,7 @@ them only to that device's owner.
 ```bash
 wgt client list                        # each config: device, exit, WARP, address, static address, last handshake, traffic, allowed IPs
 wgt client list --watch                # the same, live: redrawn every 2s, q quits (wgt-ctl <server> client list --watch from your machine)
-wgt client list --alert                # --watch, and an alert when a config comes on (a handshake after 3 minutes without)
+wgt client list --alert                # --watch, and an alert when a config connects (a handshake after 3 minutes without)
 wgt client show laptop                 # config with keys redacted
 wgt client show laptop --qr            # QR code again (phones: WireGuard app → scan)
 wgt client share laptop                # send the config via magic-wormhole

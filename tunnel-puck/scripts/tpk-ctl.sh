@@ -30,7 +30,7 @@
 #   tpk-ctl.sh [<puck>[.<gateway>]] enable [<device>]   let back in what disable turned off
 #   tpk-ctl.sh [<puck>[.<gateway>]] status [--watch|--alert [s]]   at a glance: the puck, and per gateway its link, rtun,
 #                                                 jump and each config's (tpk: each client's) last handshake; --watch: redrawn
-#                                                 every 5s; --alert: and a bell when one comes on
+#                                                 every 5s; --alert: and a bell when one connects
 #   tpk-ctl.sh [<puck>] wifi [list]               the puck's saved Wi-Fi networks, and its uplink now
 #   tpk-ctl.sh [<puck>] wifi add <name>           save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all    remove saved Wi-Fi (all: ethernet only)
@@ -1205,8 +1205,8 @@ status_watch() {
             if [ -z "$first" ]; then
                 stamp=$(date +%H:%M:%S)
                 for n in $now; do
-                    case " $was " in *" $n "*) ;; *) ring=1 events="$stamp $n came on
-$events"; notify "$n came on ($PUCK_NAME)" ;; esac
+                    case " $was " in *" $n "*) ;; *) ring=1 events="$stamp $n connected
+$events"; notify "$n connected ($PUCK_NAME)" ;; esac
                 done
                 for n in $was; do
                     case " $now " in *" $n "*) ;; *) events="$stamp $n went idle

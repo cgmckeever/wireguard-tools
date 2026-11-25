@@ -728,7 +728,7 @@ def cmd_share(ctx: Ctx, words: List[str]) -> None:
 def cmd_list(ctx: Ctx, words: List[str]) -> None:
     """The clients table (or --tsv rows), then in a terminal the action menu.
     --watch: the table redrawn every 2s, the newest handshakes and traffic, until q.
-    --alert: the same, and the terminal's bell when a config comes on (a handshake
+    --alert: the same, and the terminal's bell when a config connects (a handshake
     within DEVICE_ACTIVE after none), with a line saying which."""
     ops.no_more_words(words, "wgt client list [--tsv|--watch|--alert]")
     if ctx.args.watch or ctx.args.alert:
@@ -762,7 +762,7 @@ def watch_clients(ctx: Ctx, bell: bool) -> None:
         if not bell:
             return text
         new = alerts.update(active_configs(ctx, ctx.clock()), time.strftime("%H:%M:%S"))
-        ring = "".join(logview.notice(f"{n} came on ({ctx.cfg.SERVER_NAME})") for n in new) + ("\a" if new else "")
+        ring = "".join(logview.notice(f"{n} connected ({ctx.cfg.SERVER_NAME})") for n in new) + ("\a" if new else "")
         return text + "".join("\n  " + line for line in [""] + alerts.lines) + ring
     logview.watch(table, f"wgt client list on {ctx.cfg.SERVER_NAME}" + (", bell on" if bell else ""))
 
