@@ -11,9 +11,10 @@ from .store import device_of, is_uint, name_warp
 
 
 def ago(ts: int, now: Optional[float] = None) -> str:
-    """Human-readable age of a handshake timestamp."""
+    """Human-readable age of a handshake timestamp; "none" when there's none
+    (WireGuard forgets a peer's when wg0 reloads it: restart, disable/enable)."""
     if not ts:
-        return "never"
+        return "none"
     d = int((now or time.time()) - ts)
     if d < 120:
         return f"{d}s ago"
@@ -93,7 +94,7 @@ def menu(title: str, items: Sequence[str], prompt: str = "Choice") -> Optional[i
 # --- the clients table (wgt client list, wgt-ctl clients) ---
 
 CLIENT_FMT = "{:<16} {:<24} {:<22} {:<4} {:<15} {:<13} {:<14} {:<12} {}"
-CLIENT_HEAD = ("DEVICE", "CONFIG", "EXIT", "WARP", "ADDRESS", "STATIC", "LAST SEEN", "RX/TX MiB", "ALLOWED IPS")
+CLIENT_HEAD = ("DEVICE", "CONFIG", "EXIT", "WARP", "ADDRESS", "STATIC", "LAST HANDSHAKE", "RX/TX MiB", "ALLOWED IPS")
 
 
 class ClientRow(NamedTuple):
@@ -102,7 +103,7 @@ class ClientRow(NamedTuple):
     name: str          # config name, e.g. warp.par-fr.mbp-1
     exit: str          # jump code, or host
     ip: str
-    seen: str          # "3m ago", "never", "disabled"
+    seen: str          # last handshake: "3m ago", "none", "disabled"
     traffic: str       # "rx/tx" MiB
     allowed: str       # "0.0.0.0/0, ::/0"
     exit_label: str = ""   # the jump's full name ("Paris, France")

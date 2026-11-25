@@ -919,7 +919,7 @@ test_vps() {
 
 # jump_configs all|on <code>...: the VPS's client configs whose exit is one of these
 # jumps (wgt client list --tsv: the config's name, then its exit); on: without the
-# ones disabled already (the 4th column, last seen, says "disabled").
+# ones disabled already (the 4th column, last handshake, says "disabled").
 jump_configs() {
     which="$1"; shift
     wgt_vps client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $* " -v which="$which" \
@@ -1031,7 +1031,7 @@ ago() {
 # cmd_status: at a glance, read-only and quick (no jump is brought up): the puck
 # (how it was reached, uplink, Wi-Fi, public IP), then per VPS whether it's
 # serving, the link's and rtun's last handshakes (from the puck), the jump's state
-# and the configs on it, with when each was last seen (from wgt). test says why.
+# and the configs on it, with each one's last handshake (from wgt). test says why.
 cmd_status() {
     reset_vps
     st=$(run puck puck.sh status 2>/dev/null || true)

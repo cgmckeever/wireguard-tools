@@ -288,7 +288,7 @@ them only to that device's owner.
 #### Other client commands
 
 ```bash
-wgt client list                        # each config: device, exit, WARP, address, static address, last seen, traffic, allowed IPs
+wgt client list                        # each config: device, exit, WARP, address, static address, last handshake, traffic, allowed IPs
 wgt client show laptop                 # config with keys redacted
 wgt client show laptop --qr            # QR code again (phones: WireGuard app → scan)
 wgt client share laptop                # send the config via magic-wormhole
@@ -752,7 +752,7 @@ already another device.
 ```bash
 wgt-ctl [list]                         # the servers: branch@commit (or unreachable), jump files in carriers/
 wgt-ctl summary                        # every server at a glance (wgt summary on each, one block each)
-wgt-ctl clients                        # every config on every server: device, exit, static address, last seen, traffic
+wgt-ctl clients                        # every config on every server: device, exit, static address, last handshake, traffic
 wgt-ctl devices                        # each device's number and servers, with warnings (below)
 wgt-ctl devices sync                   # give numbers to devices with none, the same on every server; doesn't correct mismatches
 wgt-ctl devices fix phone 12           # set a device's number (2-254) on every server that has it; also the fix for a mismatch
