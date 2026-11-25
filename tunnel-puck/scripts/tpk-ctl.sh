@@ -1129,9 +1129,10 @@ gateway_state() {
     else echo serving; fi
 }
 
-# ago <seconds>: 45s ago, 12m ago, 3h ago.
+# ago <seconds|none>: 45s ago, 12m ago, 3h ago, 14d ago; never.
 ago() {
     case "$1" in
+        none) echo never ;;    # no handshake (as puck.sh and gateway.sh report it)
         ''|*[!0-9]*) echo "$1" ;;
         *) if [ "$1" -lt 120 ]; then echo "${1}s ago"; elif [ "$1" -lt 7200 ]; then echo "$(( $1 / 60 ))m ago"
            elif [ "$1" -lt 172800 ]; then echo "$(( $1 / 3600 ))h ago"; else echo "$(( $1 / 86400 ))d ago"; fi ;;

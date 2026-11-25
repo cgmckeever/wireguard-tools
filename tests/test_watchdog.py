@@ -377,7 +377,7 @@ def test_handshakes_are_kept_across_wg0_reloading_a_peer(make):
     assert store.parse_handshakes(Path(ctx.paths.handshake_db).read_text()) == {a.pub: NOW - 300}
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{a.pub}\t0\n")   # reloaded
     rows = {r.name: r.seen for r in clients.client_rows(ctx)}
-    assert rows[a.name] == "5m ago" and rows[b.name] in ("none", "disabled")
+    assert rows[a.name] == "5m ago" and rows[b.name] in ("never", "disabled")
     ctx.runner.answers["wg show wg0 latest-handshakes"] = (0, f"{a.pub}\t{NOW - 10}\n")
     watchdog.save_handshakes(ctx)
     assert store.parse_handshakes(Path(ctx.paths.handshake_db).read_text()) == {a.pub: NOW - 10}

@@ -316,7 +316,7 @@ client` alone is `list`). Changes apply live; other configs stay connected.
 `list`'s LAST HANDSHAKE is the config's newest WireGuard handshake: a connected
 device makes one about every two minutes. WireGuard forgets it when wg0 reloads
 the peer (a restart, `disable`/`enable`), so the device watchdog keeps the
-newest in `/etc/wireguard/clients.handshakes`; `none` means no handshake since
+newest in `/etc/wireguard/clients.handshakes`; `never` means no handshake since
 that file began.
 
 These commands act on one config, not the whole device: `wgt client disable

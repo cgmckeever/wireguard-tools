@@ -11,10 +11,10 @@ from .store import device_of, is_uint, name_warp
 
 
 def ago(ts: int, now: Optional[float] = None) -> str:
-    """Human-readable age of a handshake timestamp; "none" when there's none
-    (WireGuard forgets a peer's when wg0 reloads it: restart, disable/enable)."""
+    """Human-readable age of a handshake timestamp; "never" when there's none (the
+    device watchdog keeps the newest across wg0 reloading a peer: clients.handshakes)."""
     if not ts:
-        return "none"
+        return "never"
     d = int((now or time.time()) - ts)
     if d < 120:
         return f"{d}s ago"
@@ -114,7 +114,7 @@ class ClientRow(NamedTuple):
     name: str          # config name, e.g. warp.par-fr.mbp-1
     exit: str          # jump code, or host
     ip: str
-    seen: str          # last handshake: "3m ago", "none", "disabled"
+    seen: str          # last handshake: "3m ago", "never", "disabled"
     traffic: str       # "rx/tx" as the server counts it, e.g. "330K/75K" (size())
     allowed: str       # "0.0.0.0/0, ::/0"
     exit_label: str = ""   # the jump's full name ("Paris, France")
