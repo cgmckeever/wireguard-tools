@@ -11,19 +11,22 @@
 #   link                 WireGuard and the link to one gateway, wgpk<n> (n from TPK_LINK: ids.sh).
 #                        Prints PUBKEY=<the puck's public key>; with GATEWAY_PUBKEY set it also
 #                        writes and starts wgpk<n>
-#   jump main|lan        TPK_ROUTING=wgt: that link's reverse tunnel: wgrtun<n> (egress), or
-#                        wgrtunlan<n> (the LAN jump: egress+lan). Prints JUMPFILE=<path> when it
-#                        made a new jump file, else JUMP=exists
-#   jump-done main|lan   delete the jump file once the gateway has it
+#   jump main|lan|lanonly   TPK_ROUTING=wgt: that link's reverse tunnel: wgrtun<n> (egress),
+#                        wgrtunlan<n> (the LAN jump: egress+lan) or wgrtunlo<n> (the LAN-only
+#                        jump: lan). Prints JUMPFILE=<path> when it made a new jump file, else
+#                        JUMP=exists; lanonly also LAN=<the LAN>, which the gateway routes into it
+#   jump-done main|lan|lanonly   delete the jump file once the gateway has it
 #   dns                  TPK_ROUTING=tpk: the DNS resolver for that link's puck-exit clients
-#   mode <interface> [egress|egress+lan]   switch an exit interface's mode (2.3); none: print it
+#   mode <interface> [egress|egress+lan]   switch an exit interface's mode (2.3); none: print it.
+#                        wgrtunlo<n> keeps lan, the LAN-only jump's
+#   lan                  LAN=<the uplink's subnet, as a network: 192.168.1.0/24>
 #   wifi-list            the saved Wi-Fi networks, and which one is in use
 #   wifi-add             save the Wi-Fi network WIFI_SSID (password WIFI_PSK; empty: open)
 #   wifi-remove          remove the saved Wi-Fi network WIFI_SSID (all: every one)
 #   wifi-sync            make tunnel-puck's saved Wi-Fi match WIFI_LIST ("ssid::password"
 #                        lines, most preferred first): the first gets the highest priority
-#   status               the puck at a glance, as lines for tpk-ctl.sh status: UPLINK=, WIFI=,
-#                        IP=, then "HS <interface> <seconds since its handshake, none, or down>"
+#   status               the puck at a glance, as lines for tpk-ctl.sh status: UPLINK=, LAN=,
+#                        WIFI=, IP=, then "HS <interface> <seconds since its handshake, none, or down>"
 #   test                 PASS/FAIL for the puck itself (cloudflared, uplink, Wi-Fi, public IP)
 #   test-link            PASS/FAIL for one link (TPK_LINK) and its rtuns
 #   undo-link            remove one link (TPK_LINK) and its rtuns
@@ -49,6 +52,7 @@ main() {
         jump-done) jump_vars "${1:-}"; rm -f "/etc/wireguard/$JFILE"; log "deleted $JFILE" ;;
         dns) do_dns ;;
         mode) do_mode "${1:-}" "${2:-}" ;;
+        lan) echo "LAN=$(lan_net)" ;;
         wifi-list) do_wifi_list ;;
         wifi-add) do_wifi_add ;;
         wifi-sync) do_wifi_sync ;;
@@ -217,7 +221,7 @@ EOF
     log "$PK_IF up; the first handshake can take a few seconds"
 }
 
-# jump_vars main|lan: the names and addresses of that reverse tunnel: a
+# jump_vars main|lan|lanonly: the names and addresses of that reverse tunnel: a
 # WireGuard server on the puck that the gateway reaches in through, over its link
 # (wgt calls it a jump).
 jump_vars() {
@@ -225,13 +229,15 @@ jump_vars() {
     case "$1" in
         main) JIF=$RTUN_IF     JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=$RTUN_PORT     JFILE=jump-for-gateway$LINK_N.conf     JMODE=egress ;;
         lan)  JIF=$RTUN_LAN_IF JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=$RTUN_LAN_PORT JFILE=jump-for-gateway$LINK_N-lan.conf JMODE=egress+lan ;;
-        *) die "jump needs main or lan" ;;
+        lanonly) JIF=$RTUN_LO_IF JADDR=$JUMP_NET.9/30 JPEER=$JUMP_NET.10 JPORT=$RTUN_LO_PORT JFILE=jump-for-gateway$LINK_N-lanonly.conf JMODE=lan ;;
+        *) die "jump needs main, lan or lanonly" ;;
     esac
 }
 
 do_jump() {
     jump_vars "$1"
     [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpk-ctl.sh link installs it)"
+    [ "$JMODE" != lan ] || echo "LAN=$(lan_net)"    # what the gateway sends into the LAN-only jump
     if [ -f "$WG/$JIF.conf" ] && [ "${TPK_RENEW:-}" != 1 ]; then
         systemctl enable -q --now "wg-quick@$JIF"
         log "$JIF already exists; its jump file was handed over when it was made (TPK_RENEW=1 makes new keys)"
@@ -302,9 +308,11 @@ EOF
 do_mode() {
     ifc="$1" mode="$2"
     grep -q "^PostUp = $EXIT_SCRIPT up %i " "$WG/$ifc.conf" 2>/dev/null \
-        || die "$ifc has no exit (it's wgpk<n> with TPK_ROUTING=tpk, or wgrtun<n> / wgrtunlan<n>)"
+        || die "$ifc has no exit (it's wgpk<n> with TPK_ROUTING=tpk, or wgrtun<n> / wgrtunlan<n> / wgrtunlo<n>)"
     if [ -z "$mode" ]; then echo "MODE=$(current_mode "$ifc")"; return 0; fi
     case "$mode" in egress|egress+lan) ;; *) die "mode <interface> [egress|egress+lan]" ;; esac
+    # The gateway sends only the LAN into the LAN-only jump: another mode there gives nothing more.
+    [ "$(current_mode "$ifc")" != lan ] || die "$ifc is the LAN-only jump's: it stays lan"
     sed -i "s|^PostUp = $EXIT_SCRIPT up %i .*|PostUp = $EXIT_SCRIPT up %i $mode|" "$WG/$ifc.conf"
     systemctl restart "wg-quick@$ifc"
     journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-puck-exit:' | tail -n 1 >&2 || true
@@ -312,6 +320,7 @@ do_mode() {
 
 need_nm() { command -v nmcli >/dev/null || die "Wi-Fi needs NetworkManager (Debian Bookworm or later, e.g. Raspberry Pi OS)"; }
 uplink() { "$EXIT_SCRIPT" uplink 2>/dev/null || echo none; }
+lan_net() { "$EXIT_SCRIPT" lan 2>/dev/null || true; }    # the LAN, 192.168.1.0/24 (nothing: none)
 
 # Saved Wi-Fi connections, one per line: <name>:<device it's on, or empty>
 wifi_conns() { nmcli -t -f NAME,TYPE,DEVICE connection show | awk -F: '$2 == "802-11-wireless" {print $1 ":" $3}'; }
@@ -444,6 +453,7 @@ do_test() {
 # do_status: read-only, quick: no test traffic beyond one public-IP lookup.
 do_status() {
     echo "UPLINK=$(uplink)"
+    echo "LAN=$(lan_net)"
     if command -v nmcli >/dev/null; then echo "WIFI=$(wifi_names)"; fi
     echo "IP=$(curl -4 -s -m 8 https://ifconfig.me || true)"
     for f in "$WG"/wgpk*.conf "$WG"/wgrtun*.conf; do
@@ -462,9 +472,12 @@ do_test_link() {
     age=$(handshake_age "$PK_IF")
     if [ "$age" -lt 180 ]; then pass "$PK_IF handshake ${age}s ago"; else fail "$PK_IF has no recent handshake (is PUCK_PORT/udp open on the gateway?)"; fi
     check "the gateway answers on the link (ping $GATEWAY_LINK)" "ping -c 2 -W 2 $GATEWAY_LINK"
-    for ifc in "$RTUN_IF" "$RTUN_LAN_IF"; do
+    for ifc in "$RTUN_IF" "$RTUN_LAN_IF" "$RTUN_LO_IF"; do
         [ -f "$WG/$ifc.conf" ] || continue
         check "$ifc is up ($(current_mode "$ifc"))" "ip link show $ifc"
+        if [ "$ifc" = "$RTUN_LO_IF" ] && [ "$(current_mode "$ifc")" != lan ]; then
+            fail "$ifc (the LAN-only jump) isn't in mode lan: TPK_RENEW=1 tpk-ctl.sh exit makes it again"
+        fi
         age=$(handshake_age "$ifc")
         if [ "$age" -lt 180 ]; then pass "$ifc handshake ${age}s ago"
         else printf 'INFO  %s: no recent handshake (normal while no device uses the jump: wgt brings it up on demand)\n' "$ifc"; fi
@@ -479,11 +492,11 @@ do_test_link() {
 # do_undo_link: one link (TPK_LINK), its rtuns and its DNS.
 do_undo_link() {
     need_link
-    for ifc in "$RTUN_LAN_IF" "$RTUN_IF" "$PK_IF"; do
+    for ifc in "$RTUN_LO_IF" "$RTUN_LAN_IF" "$RTUN_IF" "$PK_IF"; do
         systemctl disable -q --now "wg-quick@$ifc" 2>/dev/null || true
         rm -f "$WG/$ifc.conf" "$WG/$ifc.key" "$WG/$ifc.pub"
     done
-    for m in main lan; do jump_vars "$m"; rm -f "$WG/$JFILE"; done
+    for m in main lan lanonly; do jump_vars "$m"; rm -f "$WG/$JFILE"; done
     if [ -f "$UNBOUND-$LINK_N.conf" ]; then rm -f "$UNBOUND-$LINK_N.conf"; systemctl restart unbound 2>/dev/null || true; fi
     log "$PK_IF removed"
 }
