@@ -1,5 +1,5 @@
 #!/bin/sh
-# tunnel-puck-exit up <interface> [egress|egress+lan] | down <interface> | refresh | uplink
+# tunnel-puck-exit up <interface> [egress|egress+lan|lan] | down <interface> | refresh | uplink | lan
 #
 # Installed on the puck as /usr/local/sbin/tunnel-puck-exit; wg-quick runs it from
 # the PostUp and PostDown lines of the interfaces that are exits.
@@ -7,15 +7,17 @@
 #             interface with the default route), NATed to the network's IP.
 #             egress: never into the local LAN or any private range. egress+lan:
 #             the LAN (the uplink's subnet) too, still no other private range.
+#             lan: the LAN only, never the internet or another private range.
 #   down      remove what up added (the shared NAT rule stays)
-#   refresh   for every exit that's up: if the uplink, or its subnet with egress+lan,
-#             changed, move the rules to the new one. NetworkManager runs this
-#             when a network comes or goes (dispatcher.d/90-tunnel-puck).
+#   refresh   for every exit that's up: if the uplink, or its subnet with egress+lan
+#             or lan, changed, move the rules to the new one. NetworkManager runs
+#             this when a network comes or goes (dispatcher.d/90-tunnel-puck).
 #   uplink    print the uplink's name
+#   lan       print the uplink's subnet, the LAN, as a network (192.168.1.0/24)
 set -e
-usage() { echo "usage: $0 up <interface> [egress|egress+lan] | down <interface> | refresh | uplink" >&2; exit 2; }
+usage() { echo "usage: $0 up <interface> [egress|egress+lan|lan] | down <interface> | refresh | uplink | lan" >&2; exit 2; }
 PRIVATE=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10
-STATE=/run/tunnel-puck-exit    # STATE.<interface>: "<uplink> <lan or ->" from up, for down and refresh
+STATE=/run/tunnel-puck-exit    # STATE.<interface>: "<uplink> <lan or -> <mode>" from up, for down and refresh
 
 # One change at a time: wg-quick and the NetworkManager hook can start this at the
 # same moment, and two runs would each add every rule. refresh holds the lock for
@@ -36,11 +38,23 @@ ensure() { t="$1" op="$2"; shift 2; iptables -t "$t" -C "$@" 2>/dev/null || ipta
 
 uplink() { ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") {print $(i+1); exit}}'; }
 subnet() { ip -4 -o addr show dev "$1" | awk '{print $4; exit}'; }    # e.g. 192.168.1.50/24
+# network <address/bits>: the network it's on, 192.168.1.50/24 -> 192.168.1.0/24.
+network() {
+    printf '%s\n' "$1" | awk -F '[./]' '{a = (($1 * 256 + $2) * 256 + $3) * 256 + $4; n = a - a % 2 ^ (32 - $5)
+        printf "%d.%d.%d.%d/%d\n", int(n / 16777216), int(n / 65536) % 256, int(n / 256) % 256, n % 256, $5}'
+}
+# lan_mode <mode>: true for the modes that let the LAN in.
+lan_mode() { [ "$1" = egress+lan ] || [ "$1" = lan ]; }
 
-# The rules up adds for <interface> <uplink>, as "-I|-A <rule>" lines (the LAN one apart).
+# The rules up adds for <interface> <uplink> <mode>, as "-I|-A <rule>" lines (the LAN
+# one apart). lan: everything from <interface> dropped, but for the LAN's rule above it.
 forward_rules() {
-    echo "-I FORWARD -i $1 -d $PRIVATE -j DROP"
-    echo "-A FORWARD -i $1 -o $2 -j ACCEPT"
+    if [ "$3" = lan ]; then
+        echo "-I FORWARD -i $1 -j DROP"
+    else
+        echo "-I FORWARD -i $1 -d $PRIVATE -j DROP"
+        echo "-A FORWARD -i $1 -o $2 -j ACCEPT"
+    fi
     echo "-A FORWARD -i $2 -o $1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
 }
 
@@ -52,31 +66,35 @@ esac
 case "$1" in
     up)
         MODE="${3:-egress}"
-        case "$MODE" in egress|egress+lan) ;; *) usage ;; esac
+        case "$MODE" in egress|egress+lan|lan) ;; *) usage ;; esac
         UP=$(uplink)
         [ -n "$UP" ] || { say "no default route yet"; exit 1; }
-        forward_rules "$IF" "$UP" | while read -r op rule; do
+        forward_rules "$IF" "$UP" "$MODE" | while read -r op rule; do
             # shellcheck disable=SC2086
             ensure filter "$op" $rule
         done
         LAN=-
-        if [ "$MODE" = egress+lan ]; then
+        if lan_mode "$MODE"; then
             LAN=$(subnet "$UP")
             if [ -n "$LAN" ]; then
                 ensure filter -I FORWARD -i "$IF" -o "$UP" -d "$LAN" -j ACCEPT    # above the DROP
+            elif [ "$MODE" = lan ]; then
+                LAN=-; say "$UP has no IPv4 address; $IF reaches nothing"
             else
                 LAN=-; say "$UP has no IPv4 address; $IF has egress only"
             fi
         fi
         ensure nat -A POSTROUTING -o "$UP" -j MASQUERADE
-        echo "$UP $LAN" > "$STATE.$IF"
-        if [ "$LAN" = - ]; then say "$IF -> $UP, egress only"; else say "$IF -> $UP, LAN $LAN reachable"; fi
+        echo "$UP $LAN $MODE" > "$STATE.$IF"
+        if [ "$MODE" = lan ]; then [ "$LAN" = - ] || say "$IF -> $UP, LAN $LAN reachable, no internet"
+        elif [ "$LAN" = - ]; then say "$IF -> $UP, egress only"; else say "$IF -> $UP, LAN $LAN reachable"; fi
         ;;
     down)
         [ -r "$STATE.$IF" ] || exit 0
-        read -r UP LAN < "$STATE.$IF"
+        # A state file without the mode is from before lan: its rules were egress's.
+        read -r UP LAN MODE < "$STATE.$IF"
         [ "$LAN" = - ] || iptables -D FORWARD -i "$IF" -o "$UP" -d "$LAN" -j ACCEPT || true
-        forward_rules "$IF" "$UP" | while read -r op rule; do
+        forward_rules "$IF" "$UP" "${MODE:-egress}" | while read -r op rule; do
             # shellcheck disable=SC2086
             iptables -D $rule || true
         done
@@ -89,14 +107,19 @@ case "$1" in
             # The mode written in the interface's config; no such PostUp line, no exit.
             MODE=$(sed -n 's|^PostUp = .*tunnel-puck-exit up %i \([a-z+]*\)$|\1|p' "/etc/wireguard/$IF.conf" 2>/dev/null | head -n 1)
             [ -n "$MODE" ] || continue
-            LAN=-; [ "$MODE" != egress+lan ] || LAN=$(subnet "$UP")
-            [ "$(cat "$STATE.$IF" 2>/dev/null)" != "$UP ${LAN:--}" ] || continue
+            LAN=-; ! lan_mode "$MODE" || LAN=$(subnet "$UP")
+            [ "$(cat "$STATE.$IF" 2>/dev/null)" != "$UP ${LAN:--} $MODE" ] || continue
             "$0" down "$IF"
             "$0" up "$IF" "$MODE" || say "$IF couldn't move to $UP"
         done
         ;;
     uplink)
         UP=$(uplink); [ -n "$UP" ] || exit 1; echo "$UP"
+        ;;
+    lan)
+        UP=$(uplink); [ -n "$UP" ] || exit 1
+        LAN=$(subnet "$UP"); [ -n "$LAN" ] || exit 1
+        network "$LAN"
         ;;
     *) usage ;;
 esac
