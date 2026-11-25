@@ -561,13 +561,13 @@ check_others() {
             [ -z "$PUCK_PORT" ] || [ "$(theirs PUCK_PORT)" != "$PUCK_PORT" ] \
                 || die "puck '$p' on the same VPS also uses PUCK_PORT $PUCK_PORT: empty it, and link picks a free one"
             [ "$(theirs TPK_ROUTING)" = "$TPK_ROUTING" ] || continue
-            if [ "$TPK_ROUTING" = wgt ]; then mine="$JUMP_CODE $JUMP_LAN_CODE"
+            if [ "$TPK_ROUTING" = wgt ]; then mine="$JUMP_CODE $JUMP_LAN_CODE" fix="set JUMP_CODE or JUMP_LAN_CODE"
                 ocode=$(jump_code "$(theirs JUMP_CODE)" "$p")
                 other="$ocode $(lan_code "$(theirs JUMP_LAN_CODE)" "$(theirs JUMP_LAN)" "$ocode")"
-            else mine="$CLIENT_IPS" other="$(theirs CLIENT_IPS)"; fi
+            else mine="$CLIENT_IPS" other="$(theirs CLIENT_IPS)" fix="take it out of one CLIENT_IPS"; fi
             for x in $mine; do
                 for y in $other; do
-                    [ "$x" != "$y" ] || die "puck '$p' on the same VPS also uses $x: a jump code or client goes to one puck (set JUMP_CODE or JUMP_LAN_CODE)"
+                    [ "$x" != "$y" ] || die "puck '$p' on the same VPS also uses $x: a jump code or client goes to one puck ($fix)"
                 done
             done
         done
