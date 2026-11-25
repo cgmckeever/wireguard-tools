@@ -63,7 +63,6 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
     From the functions setup writes with, or "identical" there wouldn't mean what setup
     would do (test_invariants holds it to that)."""
     from . import exits, server, units, warp
-    from .system import redact
     target = what[0] if what else "all"
     pieces = []
     if target in ("all", "wg0"):
@@ -87,7 +86,7 @@ def cmd_debug(ctx: Ctx, what: List[str]) -> None:
         pieces.append(("sysctl", render.render_sysctl(server.sysctl_wanted(ctx)[0])))
         pieces.append(("packages", "".join(p + "\n" for p in server.PACKAGES)))
     for name, text in pieces:
-        sys.stdout.write(f"=== {name}\n{redact(text)}")
+        sys.stdout.write(f"=== {name}\n{system.redact(text)}")
 
 
 def _line_count(words: List[str], usage: str) -> str:
@@ -201,10 +200,9 @@ def run_watchdog(args: Args, rest: List[str], out: Out) -> int:
         ctx = load(args, env={}, facts=quick)
         return command("watchdog")(ctx, rest) or 0
     except Exception as e:   # a timer job must log, not crash (a bad database line too: `wgt log` shows it)
-        from .system import journal
         r = Runner()
         r.history_file = Paths().history_file
-        journal(r, error_tag(tag), f"error: {type(e).__name__}: {e}")
+        system.journal(r, error_tag(tag), f"error: {type(e).__name__}: {e}")
         out.error(f"{type(e).__name__}: {e}")
         return 1
 
