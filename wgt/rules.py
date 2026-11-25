@@ -15,6 +15,10 @@ How it fits together (see README "How it works"):
   way out); a host config gets `lookup main`
   plus a blackhole rule behind it, so a missing main route (IPv6 on an
   IPv4-only server) stops there rather than falling through to WARP's rule.
+- A routes-only jump (exits.routes) carries only some subnets of its configs
+  (WARP off, all of them): a rule per subnet to the jump table, ahead of the
+  same two rules a plain host config gets. Its internet leaves from this
+  server; while the jump is down, its subnets hit the jump table's blackhole.
 
 Per client, then, the way out is exit (host | jump) x WARP (on | off):
 
@@ -50,6 +54,7 @@ from .const import (
     EXIT_MARK_BASE,
     EXIT_MARK_PRIO,
     EXIT_PTABLE_BASE,
+    EXIT_ROUTE_PRIO,
     EXIT_RULE_PRIO,
     EXIT_TABLE_BASE,
     WARP_RULE_PRIO,
@@ -58,6 +63,7 @@ from .const import (
 from .store import Client, Exit, Snapshot, name_warp
 
 IptRule = Tuple[str, str, str, str]   # command, table, chain, rule
+RuleSpec = Tuple[str, str]            # family, an `ip rule` spec
 
 
 def exit_wtable(e: Exit) -> int:
@@ -256,42 +262,60 @@ def _rule_as_printed(spec: str) -> str:
 
 
 def client_table(snap: Snapshot, client: Client) -> str:
-    """The routing table a config's own rules point at ("" for none: the
-    subnet's WARP rule)."""
+    """The routing table a config's own rule points at ("" for none: the
+    subnet's WARP rule). A routes-only jump's config: main, as for a plain host
+    config (its subnets' rules point at the jump table: client_rules)."""
     off = not name_warp(client.name)
     if client.exit:
         e = snap.exit(client.exit)
         if e is None:
             return ""
+        if snap.client_routes(client):
+            return "main"
         return str(exit_ptable(e) if off else exit_wtable(e))
     return "main" if off else ""
 
 
-def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool) -> List[str]:
-    """Policy rules sending one client's addresses (ip, ip6) to its way out
-    (client_table): added (<up>) or removed. A WARP-off client without a
-    jump also gets a blackhole rule right behind, so it can't reach WARP's rule.
-
-    Adding never deletes first (the kernel refuses an identical rule), so
-    re-applying live rules (setup, rotate) leaves no moment in which the client
-    falls through to another way out; the blackhole goes in before `lookup main`."""
+def client_rules(cfg: Config, snap: Snapshot, client: Client) -> List[RuleSpec]:
+    """The policy rules sending one config's addresses (ip, ip6) to its way out
+    (client_table), in the order they go in. One whose way out is main also gets a
+    blackhole rule right behind, so it can't reach WARP's rule, and that goes in
+    first; a routes-only jump's config gets its subnets' rules (IPv4) ahead of
+    main, going in before it. Equal lists mean the same way out."""
     table = client_table(snap, client)
     if not table or not client.ip:
         return []
-    out = []
+    routes = snap.client_routes(client)
+    e = snap.exit(client.exit) if routes else None
+    out: List[RuleSpec] = []
     for f in cfg.families():
         a = f"{cfg.ip6_of(client.ip)}/128" if f == "ip -6" else f"{client.ip}/32"
-        lookup = f"from {a} lookup {table} priority {EXIT_RULE_PRIO}"
-        stop = f"from {a} priority {DIRECT_STOP_PRIO} blackhole"
-        if up:
-            if table == "main":
-                out.append(f"{f} rule add {stop} 2>/dev/null || true")
-            out.append(f"{f} rule add {lookup} 2>/dev/null || true")
-        else:
-            out.append(_rule_del(f, lookup))
-            if table == "main":
-                out.append(_rule_del(f, stop))
+        if table == "main":
+            out.append((f, f"from {a} priority {DIRECT_STOP_PRIO} blackhole"))
+        if e is not None and f == "ip":
+            out += [(f, f"from {a} to {net} lookup {exit_ptable(e)} priority {EXIT_ROUTE_PRIO}") for net in routes]
+        out.append((f, f"from {a} lookup {table} priority {EXIT_RULE_PRIO}"))
     return out
+
+
+def rule_cmds(specs: Sequence[RuleSpec], up: bool, keep: Sequence[RuleSpec] = ()) -> List[str]:
+    """Policy rules added (<up>) in their order, or removed, each family's in reverse,
+    but for those in <keep> (a config's new way out shares them).
+
+    Adding never deletes first (the kernel refuses an identical rule), so
+    re-applying live rules (setup, rotate) leaves no moment in which the client
+    falls through to another way out."""
+    if up:
+        return [f"{f} rule add {spec} 2>/dev/null || true" for f, spec in specs]
+    out: List[str] = []
+    for fam in dict.fromkeys(f for f, _ in specs):
+        out += [_rule_del(f, spec) for f, spec in reversed(specs) if f == fam and (f, spec) not in keep]
+    return out
+
+
+def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool) -> List[str]:
+    """One config's rules (client_rules) added (<up>) or removed."""
+    return rule_cmds(client_rules(cfg, snap, client), up)
 
 
 def jump_table_cmds(cfg: Config, e: Exit) -> List[str]:

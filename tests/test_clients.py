@@ -159,6 +159,20 @@ def test_rename_same_exit_leaves_rules(make_ctx):
     assert not [c for c in ctx.runner.changes() if " rule " in c]
 
 
+def test_rename_onto_a_routes_only_jump_keeps_the_main_rule(make_ctx):
+    """A plain host config and a routes-only jump's share their main and blackhole rules:
+    moving between them adds the subnets' rules and removes nothing."""
+    ctx = make_ctx()
+    ops.take_lock(ctx)
+    ops.set_routes(ctx, "nyc-us", ("10.20.30.0/24",))
+    ops.release_lock(ctx)
+    _conf(ctx, "mbp-1")
+    clients.cmd_rename(ctx, ["mbp-1", "nyc-us.mbp-1"])
+    rules_changed = [c for c in ctx.runner.changes() if " rule " in c]
+    assert any("rule add from 10.2.10.2/32 to 10.20.30.0/24 lookup 233 priority 9450" in c for c in rules_changed)
+    assert not [c for c in rules_changed if " rule del " in c]
+
+
 def test_rename_without_psk_refused(make_ctx):
     ctx = make_ctx()
     _conf(ctx, "mbp-1")

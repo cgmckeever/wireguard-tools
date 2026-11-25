@@ -301,6 +301,40 @@ def test_client_table_per_cell():
     assert [c.name for c in snap.direct_clients()] == ["a"]
 
 
+def test_routes_only_config_rules():
+    """Its subnets to the jump table ahead of main, main ahead of the blackhole (IPv4); IPv6 as a
+    plain host config's. They go in stop first, routes before main, and come out the other way."""
+    from conftest import Server
+
+    from wgt import rules
+    srv = Server("routes")
+    phone = srv.snap.client("nyc-us.phone")
+    assert rules.client_table(srv.snap, phone) == "main"
+    assert rules.client_rule_cmds(srv.cfg, srv.snap, phone, up=True) == [
+        "ip rule add from 10.2.10.4/32 priority 9501 blackhole 2>/dev/null || true",
+        "ip rule add from 10.2.10.4/32 to 10.20.30.0/24 lookup 233 priority 9450 2>/dev/null || true",
+        "ip rule add from 10.2.10.4/32 to 192.168.7.0/24 lookup 233 priority 9450 2>/dev/null || true",
+        "ip rule add from 10.2.10.4/32 lookup main priority 9500 2>/dev/null || true",
+        "ip -6 rule add from fdfc:cd08:368e::4/128 priority 9501 blackhole 2>/dev/null || true",
+        "ip -6 rule add from fdfc:cd08:368e::4/128 lookup main priority 9500 2>/dev/null || true"]
+    down = rules.client_rule_cmds(srv.cfg, srv.snap, phone, up=False)
+    assert [d.split(" rule del ")[1].split(" 2>")[0] for d in down] == [
+        "from 10.2.10.4/32 lookup main priority 9500", "from 10.2.10.4/32 to 192.168.7.0/24 lookup 233 priority 9450",
+        "from 10.2.10.4/32 to 10.20.30.0/24 lookup 233 priority 9450", "from 10.2.10.4/32 priority 9501 blackhole",
+        "from fdfc:cd08:368e::4/128 lookup main priority 9500", "from fdfc:cd08:368e::4/128 priority 9501 blackhole"]
+    # The same address as a plain host config: what both have stays.
+    host = rules.client_rules(srv.cfg, srv.snap, store.Client("phone", "10.2.10.4", "K"))
+    left = rules.rule_cmds(rules.client_rules(srv.cfg, srv.snap, phone), up=False, keep=host)
+    assert left == ["while ip rule del from 10.2.10.4/32 to 192.168.7.0/24 lookup 233 priority 9450 2>/dev/null; "
+                    "do :; done",
+                    "while ip rule del from 10.2.10.4/32 to 10.20.30.0/24 lookup 233 priority 9450 2>/dev/null; "
+                    "do :; done"]
+    expected = rules.hook_expectations(srv.cfg, srv.snap, srv.pub_if)
+    assert ("ip", "rule", "9450:\tfrom 10.2.10.4 to 10.20.30.0/24 lookup 233", "") in expected
+    assert ("ip", "rule", "9500:\tfrom 10.2.10.4 lookup main", "") in expected
+    assert ("ip -6", "rule", "9501:\tfrom fdfc:cd08:368e::4 blackhole", "") in expected
+
+
 def test_next_free_subnet():
     # in order, skipping the fleet's subnets (any size) and the server's own routes
     assert net.next_free_subnet("", []) == "10.200.200.0/24"

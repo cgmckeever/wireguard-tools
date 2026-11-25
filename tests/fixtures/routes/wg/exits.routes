@@ -1,0 +1,2 @@
+# wireguard-tools jump routes: code cidr[,cidr] (wgt jump routes; none listed: all its traffic)
+nyc-us 10.20.30.0/24,192.168.7.0/24

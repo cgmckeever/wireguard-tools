@@ -519,12 +519,15 @@ def _warp_off(users: List[store.Client]) -> int:
 
 
 def client_rules_ok(ctx: Ctx, e: store.Exit) -> bool:
-    """One rule per client address: to its WARP table, or (WARP off) its jump table."""
+    """As many rules to its WARP table and its jump table as its configs' rules say
+    (rules.client_rules): one per address, to the one or the other (WARP off), or a
+    routes-only jump's one per subnet to the jump table."""
     users = ctx.snap.exit_clients(e.code)
-    off = _warp_off(users)
     for fam in ctx.cfg.families():
         lines = [line for line in live.rules(ctx.runner, fam).splitlines() if "fwmark" not in line]
-        for table, want in ((rules.exit_wtable(e), len(users) - off), (rules.exit_ptable(e), off)):
+        specs = [spec for c in users for f, spec in rules.client_rules(ctx.cfg, ctx.snap, c) if f == fam]
+        for table in (rules.exit_wtable(e), rules.exit_ptable(e)):
+            want = sum(1 for spec in specs if re.search(rf"lookup {table}\b", spec))
             if sum(1 for line in lines if re.search(rf"lookup {table}\b", line)) != want:
                 return False
     return True

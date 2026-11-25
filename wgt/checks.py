@@ -158,11 +158,12 @@ class Tests:
                     and re.search(rf"^{net} dev {re.escape(self.cfg.WG_IF)}( |$)", t, re.M))
 
     def direct_rules_ok(self, family: str) -> bool:
-        """Each WARP-off client without a jump: its main-table rule and the
-        blackhole behind it, once each, and no others of either kind."""
+        """Each config whose internet leaves from this server (WARP off, no jump or a
+        routes-only one): its main-table rule and the blackhole behind it, once each,
+        and no others of either kind."""
         out = live.rules(self.runner, family).splitlines()
         want = set()
-        for c in self.ctx.snap.direct_clients():
+        for c in self.ctx.snap.main_clients():
             want.add(self.cfg.ip6_of(c.ip) if family == "ip -6" else c.ip)
         patterns = (rf"^{EXIT_RULE_PRIO}:\s+from (\S+) lookup main\b",
                     rf"^{DIRECT_STOP_PRIO}:\s+from (\S+) blackhole\b")
@@ -268,9 +269,11 @@ class Tests:
             res.check(f"{f} rule: from {net} lookup {c.RT_TABLE} (exactly once)", self.warp_rule_ok(f))
             res.check(f"{f} table {c.RT_TABLE}: default via {c.WARP_IF}, blackhole fallback, {net} via {c.WG_IF}",
                       self.rt_table_ok(f))
-            direct = len(self.ctx.snap.direct_clients())
-            res.check(f"{f} rules: {direct} plain host config(s) leave via this server's IP "
-                      "(main, then blackhole; no stale ones)", self.direct_rules_ok(f))
+            direct, routed = len(self.ctx.snap.direct_clients()), len(self.ctx.snap.main_clients())
+            routed -= direct
+            res.check(f"{f} rules: {direct} plain host config(s)"
+                      + (f" and {routed} of routes-only jumps" if routed else "")
+                      + " leave via this server's IP (main, then blackhole; no stale ones)", self.direct_rules_ok(f))
         res.check(f"static addresses: {device_ip(DEVICE_SERVER)} on {c.WG_IF}; one with no config in use "
                   "is unreachable", self.device_net_ok())
         missing = self.hooks_missing()

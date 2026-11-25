@@ -442,9 +442,9 @@ def _drop_left_rules(ctx: Ctx, name: str) -> None:
     if not ip or not ops.wg_up(ctx) or not ctx.cfg.first_host <= net.ip2int(ip) <= ctx.cfg.last_host:
         return
     was = store.Client(name, ip, "")
-    table = rules.client_table(ctx.snap, was)
+    left = rules.client_rules(ctx.cfg, ctx.snap, was)
     # A config at that address now, with the same way out, has these very rules.
-    if any(c.ip == ip and rules.client_table(ctx.snap, c) == table for c in ctx.snap.clients):
+    if any(c.ip == ip and rules.client_rules(ctx.cfg, ctx.snap, c) == left for c in ctx.snap.clients):
         return
     ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, was, up=False))
 
@@ -527,8 +527,7 @@ def rename_config(ctx: Ctx, old: str, new: str) -> None:
         # An earlier rename stopped after saving: its old name's rules and files are left.
         ctx.out.info(f"finishing an earlier rename of '{old}' to '{new}'")
         was = store.Client(old, moved.ip, moved.pub, moved.allowed)
-        _after_rename(ctx, old, moved, rules.client_rule_cmds(ctx.cfg, ctx.snap, was, up=False),
-                      rules.client_table(ctx.snap, was))
+        _after_rename(ctx, old, moved, rules.client_rules(ctx.cfg, ctx.snap, was))
         return
     if ctx.snap.client(new):
         raise WgtError(f"a config '{new}' already exists")
@@ -547,16 +546,15 @@ def rename_config(ctx: Ctx, old: str, new: str) -> None:
                     f"wgt client rename {new} {old}")
     ctx.files.write(newconf, 0o600, render.with_client_name(ctx.cfg, ctx.snap, text, new))
     ctx.files.write(ctx.paths.psk(new), 0o600, psk)
-    old_down = rules.client_rule_cmds(ctx.cfg, ctx.snap, c, up=False)
-    old_table = rules.client_table(ctx.snap, c)
+    old_rules = rules.client_rules(ctx.cfg, ctx.snap, c)
     # In this order, a stop at any point keeps a disabled config disabled.
     if ctx.snap.is_disabled(old):
         ops.set_disabled(ctx, new, True)
     ops.rename_client(ctx, old, new_c)
-    _after_rename(ctx, old, new_c, old_down, old_table)
+    _after_rename(ctx, old, new_c, old_rules)
 
 
-def _after_rename(ctx: Ctx, old: str, new_c: store.Client, old_down: List[str], old_table: str) -> None:
+def _after_rename(ctx: Ctx, old: str, new_c: store.Client, old_rules: List[rules.RuleSpec]) -> None:
     """The entry already has its new name: everything that follows from that. Safe to repeat."""
     new = new_c.name
     conf, newconf = client_conf(ctx, old), client_conf(ctx, new)
@@ -564,11 +562,13 @@ def _after_rename(ctx: Ctx, old: str, new_c: store.Client, old_down: List[str], 
         ops.set_disabled(ctx, old, False)
     ops.write_wg_conf(ctx)
     # Moving between exits: the new exit's rules go in before the old ones come
-    # out, so the client never falls back to the default exit in between.
-    if ops.wg_up(ctx) and old_table != rules.client_table(ctx.snap, new_c):
+    # out, so the client never falls back to the default exit in between; those
+    # both have (main's, between a host config and a routes-only jump's) stay.
+    new_rules = rules.client_rules(ctx.cfg, ctx.snap, new_c)
+    if ops.wg_up(ctx) and old_rules != new_rules:
         ensure_jump_live(ctx, new_c)
-        ctx.runner.sh_lines(rules.client_rule_cmds(ctx.cfg, ctx.snap, new_c, up=True))
-        ctx.runner.sh_lines(old_down)
+        ctx.runner.sh_lines(rules.rule_cmds(new_rules, up=True))
+        ctx.runner.sh_lines(rules.rule_cmds(old_rules, up=False, keep=new_rules))
     ctx.files.forget(conf)
     ctx.files.forget(ctx.paths.psk(old))
     ctx.out.info(f"config now: {newconf} (same keys: the device's tunnel keeps working; rename it there if you like)")
