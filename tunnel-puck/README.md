@@ -22,7 +22,8 @@ client ──WireGuard──▶ your gateway ──WireGuard link──▶ puck 
                                       ▲ the puck dials out and keeps it open, so the friend's NAT doesn't matter
 ```
 
-You build and test everything at home; at drop-off the puck only needs power.
+You build and test everything at home; at drop-off the puck only needs power
+and a network (Wi-Fi or ethernet).
 One puck can serve several gateways, each over its own link
 ([One puck, several gateways](#one-puck-several-gateways)).
 
