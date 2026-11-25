@@ -197,15 +197,28 @@ def ipt_cmds(rules: Iterable[IptRule], up: bool) -> List[str]:
             for x, t, c, r in rules]
 
 
+def _rule_del(family: str, spec: str) -> str:
+    """Remove every copy of a policy rule (none is fine)."""
+    return f"while {family} rule del {spec} 2>/dev/null; do :; done"
+
+
+def _rule_replace(family: str, spec: str) -> str:
+    """A policy rule, exactly once."""
+    return f"{_rule_del(family, spec)}; {family} rule add {spec}"
+
+
+def _table_routes(cfg: Config, family: str, table: object, dev: str) -> List[str]:
+    """A WARP table's routes: replies to the clients on wg0, out through <dev> (optional:
+    it may be down) and a blackhole fallback."""
+    return [f"{family} route replace {cfg.family_net(family)} dev {cfg.WG_IF} table {table}",
+            f"{family} route replace default dev {dev} table {table} 2>/dev/null || true",
+            f"{family} route replace blackhole default metric {BLACKHOLE_METRIC} table {table}"]
+
+
 def warp_rule_cmds(cfg: Config, on: bool) -> List[str]:
     """Add (on) or remove (off) the policy rules sending client
     traffic to RT_TABLE."""
-    out = []
-    for f in cfg.families():
-        spec = rule_spec(cfg, f)
-        line = f"while {f} rule del {spec} 2>/dev/null; do :; done"
-        out.append(f"{line}; {f} rule add {spec}" if on else line)
-    return out
+    return [(_rule_replace if on else _rule_del)(f, rule_spec(cfg, f)) for f in cfg.families()]
 
 
 def hook_expectations(cfg: Config, snap: Snapshot, pub_if: str) -> List[Tuple[str, str, str, str]]:
@@ -275,9 +288,9 @@ def client_rule_cmds(cfg: Config, snap: Snapshot, client: Client, up: bool) -> L
                 out.append(f"{f} rule add {stop} 2>/dev/null || true")
             out.append(f"{f} rule add {lookup} 2>/dev/null || true")
         else:
-            out.append(f"while {f} rule del {lookup} 2>/dev/null; do :; done")
+            out.append(_rule_del(f, lookup))
             if table == "main":
-                out.append(f"while {f} rule del {stop} 2>/dev/null; do :; done")
+                out.append(_rule_del(f, stop))
     return out
 
 
@@ -300,16 +313,14 @@ def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
     """One exit's part of wg0's PostUp (<up>) or PostDown: its tables with blackhole fallbacks, the
     fwmark rule sending its WARP tunnel's packets through the jump, and its
     clients' rules (its firewall rules come with ipt_rules)."""
-    wtable, jump_table, mark = exit_wtable(e), exit_ptable(e), exit_mark(e)
+    wtable, jump_table = exit_wtable(e), exit_ptable(e)
+    mark_rule = f"fwmark {exit_mark(e)} lookup {jump_table} priority {EXIT_MARK_PRIO}"
     out: List[str] = []
     if up:
         out += jump_table_cmds(cfg, e)
-        out.append(f"while ip rule del fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
-                   f"do :; done; ip rule add fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO}")
+        out.append(_rule_replace("ip", mark_rule))
         for fam in cfg.families():
-            out.append(f"{fam} route replace {cfg.family_net(fam)} dev {cfg.WG_IF} table {wtable}")
-            out.append(f"{fam} route replace default dev {e.wx} table {wtable} 2>/dev/null || true")
-            out.append(f"{fam} route replace blackhole default metric {BLACKHOLE_METRIC} table {wtable}")
+            out += _table_routes(cfg, fam, wtable, e.wx)
         for c in snap.exit_clients(e.code):
             out += client_rule_cmds(cfg, snap, c, up=True)
     else:
@@ -317,8 +328,7 @@ def exit_hook_cmds(cfg: Config, snap: Snapshot, e: Exit, up: bool) -> List[str]:
             out += client_rule_cmds(cfg, snap, c, up=False)
         for fam in reversed(cfg.families()):
             out.append(f"{fam} route flush table {wtable} 2>/dev/null || true")
-        out.append(f"while ip rule del fwmark {mark} lookup {jump_table} priority {EXIT_MARK_PRIO} 2>/dev/null; "
-                   "do :; done")
+        out.append(_rule_del("ip", mark_rule))
         for fam in reversed(cfg.families()):
             out.append(f"{fam} route flush table {jump_table} 2>/dev/null || true")
     return out
@@ -331,14 +341,11 @@ def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
     out: List[str] = []
     if up:
         for f in cfg.families():
-            out.append(f"{f} route replace {cfg.family_net(f)} dev {wg} table {rt}")
-            out.append(f"{f} route replace default dev {warp} table {rt} 2>/dev/null || true")
-            out.append(f"{f} route replace blackhole default metric {BLACKHOLE_METRIC} table {rt}")
+            out += _table_routes(cfg, f, rt, warp)
         out += warp_rule_cmds(cfg, True)
         out += [f"{x} -t {t} -N {c} 2>/dev/null || true" for x, t, c in device_chains(cfg)]
         out += ipt_cmds(ipt_rules(cfg, pub_if, snap.exits), up=True)
-        spec = device_rule(cfg)
-        out.append(f"while ip rule del {spec} 2>/dev/null; do :; done; ip rule add {spec}")
+        out.append(_rule_replace("ip", device_rule(cfg)))
         for e in snap.exits:
             out += exit_hook_cmds(cfg, snap, e, up=True)
         for c in snap.direct_clients():
@@ -348,7 +355,7 @@ def hook_cmds(cfg: Config, snap: Snapshot, pub_if: str, up: bool) -> List[str]:
             out += client_rule_cmds(cfg, snap, c, up=False)
         for e in reversed(snap.exits):
             out += exit_hook_cmds(cfg, snap, e, up=False)
-        out.append(f"while ip rule del {device_rule(cfg)} 2>/dev/null; do :; done")
+        out.append(_rule_del("ip", device_rule(cfg)))
         out += ipt_cmds(reversed(ipt_rules(cfg, pub_if, snap.exits)), up=False)
         for cmd, table, chain in reversed(device_chains(cfg)):
             out.append(f"{cmd} -t {table} -F {chain} 2>/dev/null || true")
