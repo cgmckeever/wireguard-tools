@@ -189,13 +189,10 @@ def read_history(path: str) -> List[str]:
     """Every line of the history, oldest first, rotated files included."""
     lines: List[str] = []
     for f in history_files(path):
+        opener = gzip.open if f.endswith(".gz") else open
         try:
-            if f.endswith(".gz"):
-                with gzip.open(f, "rt", encoding="utf-8", errors="replace") as fh:
-                    lines += fh.read().splitlines()
-            else:
-                with open(f, encoding="utf-8", errors="replace") as fh:
-                    lines += fh.read().splitlines()
+            with opener(f, "rt", encoding="utf-8", errors="replace") as fh:
+                lines += fh.read().splitlines()
         except OSError:
             continue
     return lines
@@ -209,6 +206,7 @@ class Runner:
         self.dry_run = dry_run
         self.out = out or Out()
         self.current_step = "startup"
+        self.history_file: Optional[str] = None   # set by ctx.load; None: don't write one
 
     # --- changes ---
 
@@ -283,8 +281,6 @@ class Runner:
         return p.returncode, p.stdout or ""
 
     # --- the history ---
-
-    history_file: Optional[str] = None   # set by ctx.load; None: don't write one
 
     def record(self, tag: str, msg: str) -> None:
         """Append one line to the history file (mode 600: it names addresses). Never
@@ -397,13 +393,12 @@ class Files:
         if self.runner.dry_run:
             if is_secret(path, self.paths):
                 self.out.info(f"[dry-run] would write {path} (mode {mode:o}; secret, not shown)")
-                self.pending[path] = content
-                return True
-            self.out.info(f"[dry-run] would write {path} (mode {mode:o}):")
-            diff = difflib.unified_diff(redact(old or "").splitlines(True), redact(content).splitlines(True),
-                                        fromfile=path, tofile=f"{path} (new)")
-            for line in diff:
-                self.out.info("  " + line.rstrip("\n"))
+            else:
+                self.out.info(f"[dry-run] would write {path} (mode {mode:o}):")
+                diff = difflib.unified_diff(redact(old or "").splitlines(True), redact(content).splitlines(True),
+                                            fromfile=path, tofile=f"{path} (new)")
+                for line in diff:
+                    self.out.info("  " + line.rstrip("\n"))
             self.pending[path] = content
             return True
         self.backup(path)
