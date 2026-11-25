@@ -480,10 +480,7 @@ install_exit_script() {
 
 cmd_config() {
     printf 'puck: %s\n' "$PUCK_CONF"
-    for s in SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE; do
-        eval "val=\${$s}"
-        printf '  %-15s %s\n' "$s" "${val:-(empty)}"
-    done
+    show_settings SSH_LAN SSH_CLOUDFLARE CF_TOKEN_FILE
     require SSH_LAN
     if [ -n "$SSH_CLOUDFLARE" ]; then
         require SSH_CLOUDFLARE CF_TOKEN_FILE
@@ -497,13 +494,19 @@ cmd_config() {
     log "settings look complete"
 }
 
-# vps_config: the loaded VPS's settings, shown and checked.
-vps_config() {
-    printf 'VPS %s: %s\n' "$VPS_NAME" "$CONF"
-    for s in $VPS_VARS; do
+# show_settings <SETTING>...: one line each, its name and value.
+show_settings() {
+    for s in "$@"; do
         eval "val=\${$s}"
         printf '  %-15s %s\n' "$s" "${val:-(empty)}"
     done
+}
+
+# vps_config: the loaded VPS's settings, shown and checked.
+vps_config() {
+    printf 'VPS %s: %s\n' "$VPS_NAME" "$CONF"
+    # shellcheck disable=SC2086
+    show_settings $VPS_VARS
     if [ -n "$LINK_NET" ]; then
         ifs="$PK_IF"; [ "$TPK_ROUTING" != wgt ] || ifs="$ifs, $RTUN_IF"
         printf '  %-15s %s\n' "(on the puck)" "$ifs"
