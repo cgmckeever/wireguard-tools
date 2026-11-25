@@ -51,7 +51,7 @@ Options: --dry-run, --yes/-y, --purge, --qr/--no-qr
   --old-names         restore: an archive from before config names said WARP
   --new-server-keys   setup: new server keypair (every client must then be rotated)
 Settings (for setup and restore; --allowed-ips also on client): --name --subnet --subnet6 --port --mtu --warp-mtu --dns
-  --endpoint --wg-if --warp-if --table --allowed-ips --location
+  --endpoint --wg-if --warp-if --table --allowed-ips --location --history-months
 """
 
 
