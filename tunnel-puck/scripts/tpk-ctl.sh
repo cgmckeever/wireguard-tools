@@ -534,41 +534,37 @@ server_of() { if [ "$1" = wgt ]; then echo "wgt:$2"; else echo "ssh:$3"; fi; }
 # from it). Another puck on the same VPS: not its TPK_LINK, PUCK_PORT, and by
 # routing a jump code (wgt) or a client address (tpk). The VPS checks the link's
 # subnet and port again when link runs.
+# theirs <SETTING>: its value in the other VPS file check_others is at, configs/<p>.<o>.conf
+# ($f), read in a subshell so that file's settings don't leak into these.
+theirs() {
+    # shellcheck disable=SC1090
+    ( for s in $VPS_VARS; do eval "$s=''"; done; TPK_ROUTING=tpk
+      . "$f"; [ "$TPK_ROUTING" != wgt ] || : "${WGT_SERVER:=$o}"; eval "echo \"\${$1}\"" )
+}
+
 check_others() {
     me=$(server_of "$TPK_ROUTING" "$WGT_SERVER" "$VPS_SSH")
     for p in $(pucks); do
         for o in $(vpses_of "$p"); do
             f="$CONFIGS/$p.$o.conf"
             [ "$f" != "$CONF" ] || continue
-            # Each value read in a subshell, so the other file's settings don't leak into these.
-            # shellcheck disable=SC1090,SC2016
-            theirs() { ( for s in $VPS_VARS; do eval "$s=''"; done; TPK_ROUTING=tpk
-                         . "$f"; [ "$TPK_ROUTING" != wgt ] || : "${WGT_SERVER:=$o}"; eval "echo \"$1\"" ); }
-            # shellcheck disable=SC2016
-            them=$(server_of "$(theirs '$TPK_ROUTING')" "$(theirs '$WGT_SERVER')" "$(theirs '$VPS_SSH')")
+            them=$(server_of "$(theirs TPK_ROUTING)" "$(theirs WGT_SERVER)" "$(theirs VPS_SSH)")
             if [ "$p" = "$PUCK_NAME" ]; then
                 [ "$them" != "$me" ] || die "configs/$p.$o.conf is the same VPS as $CONF: one settings file per VPS"
-                # shellcheck disable=SC2016
-                [ -z "$TPK_LINK" ] || [ "$(theirs '$TPK_LINK')" != "$TPK_LINK" ] \
+                [ -z "$TPK_LINK" ] || [ "$(theirs TPK_LINK)" != "$TPK_LINK" ] \
                     || die "$p's link to $o also has TPK_LINK $TPK_LINK, and on the puck they must differ: empty it in $CONF, and link picks another"
                 continue
             fi
             [ "$them" = "$me" ] || continue
-            # shellcheck disable=SC2016
-            [ -z "$TPK_LINK" ] || [ "$(theirs '$TPK_LINK')" != "$TPK_LINK" ] \
+            [ -z "$TPK_LINK" ] || [ "$(theirs TPK_LINK)" != "$TPK_LINK" ] \
                 || die "puck '$p' on the same VPS also has TPK_LINK $TPK_LINK: empty it, and link picks a free one"
-            # shellcheck disable=SC2016
-            [ -z "$PUCK_PORT" ] || [ "$(theirs '$PUCK_PORT')" != "$PUCK_PORT" ] \
+            [ -z "$PUCK_PORT" ] || [ "$(theirs PUCK_PORT)" != "$PUCK_PORT" ] \
                 || die "puck '$p' on the same VPS also uses PUCK_PORT $PUCK_PORT: empty it, and link picks a free one"
-            # shellcheck disable=SC2016
-            [ "$(theirs '$TPK_ROUTING')" = "$TPK_ROUTING" ] || continue
+            [ "$(theirs TPK_ROUTING)" = "$TPK_ROUTING" ] || continue
             if [ "$TPK_ROUTING" = wgt ]; then mine="$JUMP_CODE $JUMP_LAN_CODE"
-                # shellcheck disable=SC2016
-                ocode=$(jump_code "$(theirs '$JUMP_CODE')" "$p")
-                # shellcheck disable=SC2016
-                other="$ocode $(lan_code "$(theirs '$JUMP_LAN_CODE')" "$(theirs '$JUMP_LAN')" "$ocode")"
-            # shellcheck disable=SC2016
-            else mine="$CLIENT_IPS" other="$(theirs '$CLIENT_IPS')"; fi
+                ocode=$(jump_code "$(theirs JUMP_CODE)" "$p")
+                other="$ocode $(lan_code "$(theirs JUMP_LAN_CODE)" "$(theirs JUMP_LAN)" "$ocode")"
+            else mine="$CLIENT_IPS" other="$(theirs CLIENT_IPS)"; fi
             for x in $mine; do
                 for y in $other; do
                     [ "$x" != "$y" ] || die "puck '$p' on the same VPS also uses $x: a jump code or client goes to one puck (set JUMP_CODE or JUMP_LAN_CODE)"
