@@ -38,9 +38,11 @@ With `tpk` there's no [2]: the VPS routes the listed clients straight into the
 link, so it's [1], then [3] alone. Who sees what is the same.
 
 To keep the traffic from the VPS too, the client would have to wrap it
-itself, a puck tunnel inside its VPS tunnel, as wireguard-tunnels' warped
-tunnels do with WARP. tunnel-puck doesn't do that. Phones would need sing-box
-for it, and a Mac wireguard-tunnels, sing-box or two `wg-quick` configs.
+itself, a puck tunnel inside its VPS tunnel, as
+[wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels)' warped
+tunnels do with WARP. tunnel-puck doesn't do that. Phones would need
+[sing-box](https://sing-box.sagernet.org) for it, and a Mac wireguard-tunnels,
+sing-box or two `wg-quick` configs.
 
 **Status:** tested only on a Raspberry Pi so far: a Pi 2 v1.1 (32-bit
 Raspberry Pi OS Bookworm), with `TPK_ROUTING=wgt` against a test VPS. Phases 1
