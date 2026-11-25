@@ -16,7 +16,7 @@
 #   tpk-ctl.sh ssh-config install                 add every puck's entry to your ssh config (its own file, one Include)
 #   tpk-ctl.sh [<puck>] init                      1.2c, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
 #   tpk-ctl.sh [<puck>] gateway add <gateway>     2.1: serve a gateway: configs/<puck>.<gateway>.conf, then link, exit and test
-#   tpk-ctl.sh [<puck>] gateway [list]            the gateways the puck serves: routing, link, interfaces, jumps (old name: vps)
+#   tpk-ctl.sh [<puck>] gateway [list]            the gateways the puck serves: routing, link, interfaces, jumps
 #   tpk-ctl.sh [<puck>] gateway remove <gateway>  stop serving one: its configs and jumps (wgt), its link, its settings file
 #   tpk-ctl.sh [<puck>[.<gateway>]] link          the link to the gateway (puck and gateway), keys exchanged for you
 #   tpk-ctl.sh [<puck>[.<gateway>]] exit          by TPK_ROUTING: tpk's DNS resolver, or the wgt jump(s)
@@ -49,8 +49,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 CONFIGS=$(cd "$HERE/../configs" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
-# vps: the gateway command's old name, still taken
-COMMANDS="new config ssh-config init gateway vps link exit client lan-mode disable enable status wifi test ssh reboot shutdown all undo"
+COMMANDS="new config ssh-config init gateway link exit client lan-mode disable enable status wifi test ssh reboot shutdown all undo"
 # Cloudflare's trace (ip=... lines), as wgt's jump test uses (wgt/const.py TRACE_URL).
 TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 # The remote prefix that runs a command as root (sudo unless already root).
@@ -58,9 +57,6 @@ AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
 # The settings in a configs/<puck>.<gateway>.conf.
 GATEWAY_VARS="TPK_ROUTING PUCK_PORT TPK_LINK GATEWAY_SSH GATEWAY_HOST CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET
           WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL TPK_DISABLED TPK_DISABLED_CONFIGS"
-# Settings renamed when the VPS became the gateway, old=new. A file that still has
-# an old name gets the new one as it's loaded (old_keys).
-OLD_KEYS="VPS_SSH=GATEWAY_SSH VPS_HOST=GATEWAY_HOST"
 # link_ids, name_ok, gateway_name_ok: the link's names and numbers, as puck.sh and gateway.sh have them.
 # shellcheck source=ids.sh
 . "$HERE/ids.sh"
@@ -107,32 +103,6 @@ save() {
         END {if (!done) print line}' "$CONF" > "$tmp"
     cat "$tmp" > "$CONF"; rm -f "$tmp"
     log "saved $1=\"$2\" in $CONF"
-}
-
-# old_keys <file>: rename OLD_KEYS's old names in a settings file to the new ones,
-# once: just the names at the start of their lines, values and comments as they
-# were. A dry run changes nothing (old_values maps them as the file is read).
-old_keys() {
-    found="" renamed=""
-    for s in $OLD_KEYS; do
-        ! grep -q "^${s%=*}=" "$1" || { found="$found${found:+, }${s%=*}"; renamed="$renamed${renamed:+, }${s#*=}"; }
-    done
-    [ -n "$found" ] || return 0
-    if [ -n "$DRY" ]; then log "[dry-run] would rename $found to $renamed in configs/${1##*/} (read as the new names meanwhile)"; return 0; fi
-    tmp=$(mktemp)
-    awk -v keys="$OLD_KEYS" 'BEGIN {n = split(keys, k, " ")}
-        {for (i = 1; i <= n; i++) {split(k[i], p, "="); if (index($0, p[1] "=") == 1) {$0 = p[2] substr($0, length(p[1]) + 1); break}} print}' \
-        "$1" > "$tmp"
-    cat "$tmp" > "$1"; rm -f "$tmp"
-    log "renamed $found to $renamed in configs/${1##*/} (the VPS is the gateway now)"
-}
-
-# old_values: after reading a settings file, an old name's value under its new
-# name (unless the new one is set too), and the old name emptied.
-old_values() {
-    for s in $OLD_KEYS; do
-        eval "[ -z \"\${${s%=*}:-}\" ] || [ -n \"\${${s#*=}:-}\" ] || ${s#*=}=\"\${${s%=*}}\"; ${s%=*}=''"
-    done
 }
 
 # choose <what> <names, one per line> <default> <hint>: PICK. One name: that one.
@@ -204,7 +174,7 @@ one_gateway() {
     if [ -n "$GATEWAY_PICK" ]; then load_gateway "$GATEWAY_PICK"; return 0; fi
     names=$(gateways)
     [ -n "$names" ] || die "$PUCK_NAME serves no gateway yet: tpk-ctl.sh $PUCK_NAME gateway add <gateway>"
-    choose gateway "$names" "${TPK_GATEWAY:-${TPK_VPS:-}}" "which gateway? tpk-ctl.sh $PUCK_NAME.<gateway> $1, or TPK_GATEWAY=<gateway>"
+    choose gateway "$names" "${TPK_GATEWAY:-}" "which gateway? tpk-ctl.sh $PUCK_NAME.<gateway> $1, or TPK_GATEWAY=<gateway>"
     load_gateway "$PICK"
 }
 
@@ -245,17 +215,10 @@ load_puck() {
     puck_name_ok "$PUCK_NAME"
     PUCK_CONF="$CONFIGS/$PUCK_NAME.conf"
     [ -r "$PUCK_CONF" ] || die "no puck '$PUCK_NAME': configs/$PUCK_NAME.conf doesn't exist (configured: $(words "$(pucks)"))"
-    if grep -qE '^(TPK_ROUTING|WGT_SERVER|GATEWAY_SSH|VPS_SSH|TPK_LINK|PUCK_PORT)="[^"]' "$PUCK_CONF"; then
-        die "configs/$PUCK_NAME.conf still holds a gateway's settings (the old layout): move them into configs/$PUCK_NAME.<gateway>.conf, as in configs/puck.gateway.conf.example"
-    fi
     log "puck: $PUCK_NAME (configs/$PUCK_NAME.conf)"
-    # Every one of its files, here: a gateway's is often read quietly (status, list).
-    old_keys "$PUCK_CONF"
-    for g in $(gateways_of "$PUCK_NAME"); do old_keys "$CONFIGS/$PUCK_NAME.$g.conf"; done
     SSH_LAN="" SSH_CLOUDFLARE="" CF_TOKEN_FILE=""
     # shellcheck disable=SC1090
     . "$PUCK_CONF"
-    old_values
     PUCK_USER=$(user_of "$SSH_LAN")
     reset_gateway
     # Sent to the scripts when a step sets them; empty otherwise.
@@ -264,7 +227,7 @@ load_puck() {
 
 # reset_gateway: no gateway loaded: its settings empty, saves go to the puck's file.
 reset_gateway() {
-    for s in $GATEWAY_VARS $OLD_KEYS; do eval "${s%=*}=''"; done
+    for s in $GATEWAY_VARS; do eval "$s=''"; done
     GATEWAY_NAME="" CONF="$PUCK_CONF" CONFIRMED="" TPK_LINK_AVOID="" PUCK_PUBKEY="" GATEWAY_PUBKEY=""
     link_ids
 }
@@ -279,7 +242,6 @@ load_gateway() {
     [ -n "${QUIET:-}" ] || log "gateway: $1 (configs/$PUCK_NAME.$1.conf)"
     # shellcheck disable=SC1090
     . "$CONF"
-    old_values
     : "${TPK_ROUTING:=tpk}" "${WG_IF:=wg0}"
     JUMP_CODE=$(jump_code "$JUMP_CODE" "$PUCK_NAME")
     : "${JUMP_LABEL:=$PUCK_NAME}"
@@ -576,8 +538,8 @@ server_of() { if [ "$1" = wgt ]; then echo "wgt:$2"; else echo "ssh:$3"; fi; }
 # ($f), read in a subshell so that file's settings don't leak into these.
 theirs() {
     # shellcheck disable=SC1090
-    ( for s in $GATEWAY_VARS $OLD_KEYS; do eval "${s%=*}=''"; done; TPK_ROUTING=tpk
-      . "$f"; old_values; [ "$TPK_ROUTING" != wgt ] || : "${WGT_SERVER:=$o}"; eval "echo \"\${$1}\"" )
+    ( for s in $GATEWAY_VARS; do eval "$s=''"; done; TPK_ROUTING=tpk
+      . "$f"; [ "$TPK_ROUTING" != wgt ] || : "${WGT_SERVER:=$o}"; eval "echo \"\${$1}\"" )
 }
 
 check_others() {
@@ -1314,7 +1276,7 @@ main() {
         config) cmd_config ;;
         ssh-config) cmd_ssh_config ;;
         init) cmd_init ;;
-        gateway|vps) cmd_gateway "$@" ;;    # vps: its old name
+        gateway) cmd_gateway "$@" ;;
         link) one_gateway link; pick_puck; cmd_link ;;
         exit) one_gateway exit; pick_puck; cmd_exit ;;
         client) one_gateway client; cmd_client "$@" ;;

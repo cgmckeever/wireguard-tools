@@ -69,8 +69,7 @@ die() { printf 'gateway.sh: %s\n' "$*" >&2; exit 1; }
 need() { for v in "$@"; do eval "x=\${$v:-}"; [ -n "$x" ] || die "$v is not set"; done; }
 
 # put <mode> <path>: write stdin to <path> if it differs; CHANGED=1 when it did, and the
-# link restarts. So the files it writes keep their old wording ("vps.sh", "the VPS",
-# from before the gateway was called that): new words would restart every link.
+# link restarts.
 CHANGED=0
 put() {
     tmp=$(mktemp); cat > "$tmp"
@@ -167,7 +166,7 @@ do_link() {
     CHANGED=0
     if [ "$TPK_ROUTING" = wgt ]; then
         put 600 "$WG/$LINK_IF.conf" <<EOF
-# tunnel-puck: the link the puck dials (written by vps.sh link; not wgt's)
+# tunnel-puck: the link the puck dials (written by gateway.sh link; not wgt's)
 [Interface]
 Address = $GATEWAY_LINK/30
 ListenPort = $PUCK_PORT
@@ -229,7 +228,7 @@ hand_conf() {
     fi
     for net in $WG_SUBNET; do v4 "$net"; done
     cat <<EOF
-# tunnel-puck: the link the puck dials, and the clients routed through it (written by vps.sh link)
+# tunnel-puck: the link the puck dials, and the clients routed through it (written by gateway.sh link)
 [Interface]
 Address = $GATEWAY_LINK/30
 ListenPort = $PUCK_PORT
@@ -237,7 +236,7 @@ MTU = 1420
 # Table = off: no routes from AllowedIPs; the rules below choose who uses the link
 Table = off
 PostUp = wg set %i private-key $WG/$LINK_IF.key
-# Table $TABLE: the puck for everything, except the VPS's own clients, which stay on $WG_IF
+# Table $TABLE: the puck for everything, except the gateway's own clients, which stay on $WG_IF
 $(for net in $WG_SUBNET; do echo "PostUp = ip route replace $net dev $WG_IF table $TABLE"; done)
 PostUp = ip route replace default dev %i table $TABLE
 PostDown = ip route flush table $TABLE
@@ -292,8 +291,8 @@ ip rule add iif $WG_IF from $ip unreachable priority $PRIO_KILL
     done
     put 755 "$KILL" <<EOF
 #!/bin/sh
-# $KILL_NAME up|down (written by vps.sh link, for the puck $PUCK_NAME): puck-exit clients never
-# fall back to the VPS's own IP, and their IPv6 is blocked (the link is IPv4 only).
+# $KILL_NAME up|down (written by gateway.sh link, for the puck $PUCK_NAME): puck-exit clients never
+# fall back to the gateway's own IP, and their IPv6 is blocked (the link is IPv4 only).
 case "\$1" in
 up)
 ${up};;
@@ -303,7 +302,7 @@ esac
 EOF
     put 644 "$KILL_UNIT" <<EOF
 [Unit]
-Description=tunnel-puck: puck-exit clients never fall back to the VPS's IP
+Description=tunnel-puck: puck-exit clients never fall back to the gateway's IP
 After=network-online.target
 
 [Service]

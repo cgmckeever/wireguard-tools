@@ -737,7 +737,6 @@ removed gateway.
 | `which gateway? tpk-ctl.sh <puck>.<gateway> ...` | the puck serves several gateways and there's no terminal to ask on: name one, or set `TPK_GATEWAY` |
 | `is the same gateway as ...: one settings file per gateway` | two of the puck's gateway files point at one server: remove one (`gateway remove`, or delete the file if it was never built) |
 | `also has TPK_LINK ..., and on the puck they must differ` | a gateway file copied from another: empty its `TPK_LINK` (and `PUCK_PORT`), and `link` picks new ones |
-| `still holds a gateway's settings (the old layout)` | the puck's file is from before several gateways: move its gateway settings (`TPK_ROUTING` on) into `configs/<puck>.<gateway>.conf`, as in `configs/puck.gateway.conf.example` |
 | the puck can't be reached at all | with the door: is the tunnel Healthy in the dashboard, your email in the Access policy, is `cloudflared` installed on this computer? Without it: the friend power-cycles the puck |
 | `tpk-ctl.sh` waits at "This changes the gateway ... Continue?" | run it in a terminal, or `TPK_YES=1` once the person has agreed |
 | `10.99.0.x/30 is already used here` or `port ... in use` | something else on the gateway has them: empty `TPK_LINK` (or `PUCK_PORT`), and `link` picks a free one |
@@ -786,11 +785,6 @@ asks):
 | `reboot` | restart the puck, and wait until it answers again |
 | `shutdown` | power the puck off cleanly, safe to unplug (asks first: away from home, someone must replug it) |
 | `undo [all]` | take it off every gateway, device configs included, as `gateway remove` does, and the puck (`all`: cloudflared too); the settings files stay |
-
-`vps` still works for `gateway`, its old name, and `TPK_VPS` for
-`TPK_GATEWAY`. A gateway's settings file from before the rename, with
-`VPS_SSH` and `VPS_HOST`, gets the new names the first time `tpk-ctl.sh` loads
-its puck (a dry run reads it as is).
 
 Environment variables:
 
@@ -851,7 +845,7 @@ the gateway through a pipe.
 | `/etc/NetworkManager/dispatcher.d/90-tunnel-puck` | `tpk` or `wgt` | `link` | moves the exit rules when the network changes |
 | `/etc/unbound/unbound.conf.d/tunnel-puck.conf`, `tunnel-puck-<n>.conf` | `tpk` | `exit` | the DNS resolver for puck-exit clients, and each link's address for it |
 | `/etc/wireguard/wgrtun<n>.*`, `wgrtunlan<n>.*` | `wgt` | `exit` | the reverse tunnel(s) one gateway reaches in through (wgt's jump): config, keys and exit rules |
-| `/etc/wireguard/jump-for-vps<n>*.conf` | `wgt` | `exit`, briefly | the jump file for the gateway, deleted once wgt has it |
+| `/etc/wireguard/jump-for-gateway<n>*.conf` | `wgt` | `exit`, briefly | the jump file for the gateway, deleted once wgt has it |
 | `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpk` or `wgt` | `init` | the hardware watchdog |
 | `unattended-upgrades` | `tpk` or `wgt` | `init` | automatic security updates |
 | Cloudflare's apt repository, `/etc/systemd/system/tunnel-puck-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.2b](#12b-optional-the-emergency-door-cloudflare-browser)) | `tpk` or `wgt` | `init` | cloudflared and its service |

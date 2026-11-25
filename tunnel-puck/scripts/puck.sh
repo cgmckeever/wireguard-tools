@@ -38,8 +38,6 @@ main() {
     if [ -n "${TPK_CONF:-}" ]; then . "$TPK_CONF"; fi
     : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf | cut -d. -f1)}"
     link_ids
-    # VPS_HOST, VPS_PUBKEY: their names before the gateway was called that (an old TPK_CONF)
-    : "${GATEWAY_HOST:=${VPS_HOST:-}}" "${GATEWAY_PUBKEY:=${VPS_PUBKEY:-}}"
     : "${TPK_ROUTING:=tpk}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}" "${WIFI_LIST:=}"
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
@@ -73,9 +71,7 @@ die() { printf 'puck.sh: %s\n' "$*" >&2; exit 1; }
 need() { for v in "$@"; do eval "x=\${$v:-}"; [ -n "$x" ] || die "$v is not set"; done; }
 
 # put <mode> <path>: write stdin to <path> if it differs; CHANGED=1 when it did, and
-# the interface restarts. So the files it writes keep their old wording ("the VPS",
-# from before the gateway was called that): new words would restart every link.
-# The jump file keeps its old name too (jump-for-vps<n>.conf).
+# the interface restarts.
 CHANGED=0
 put() {
     tmp=$(mktemp); cat > "$tmp"
@@ -202,7 +198,7 @@ PostDown = $EXIT_SCRIPT down %i"
     fi
     CHANGED=0
     put 600 "$WG/$PK_IF.conf" <<EOF
-# tunnel-puck: the link to the VPS $GATEWAY_HOST (written by puck.sh link)
+# tunnel-puck: the link to the gateway $GATEWAY_HOST (written by puck.sh link)
 [Interface]
 Address = $PUCK_LINK/30
 MTU = 1420
@@ -210,7 +206,7 @@ PostUp = wg set %i private-key $WG/$PK_IF.key
 $exit_lines
 
 [Peer]
-# the VPS
+# the gateway
 PublicKey = $GATEWAY_PUBKEY
 Endpoint = $GATEWAY_HOST:$PUCK_PORT
 AllowedIPs = $GATEWAY_LINK/32
@@ -226,8 +222,8 @@ EOF
 jump_vars() {
     need_link
     case "$1" in
-        isolated) JIF=$RTUN_IF     JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=$RTUN_PORT     JFILE=jump-for-vps$LINK_N.conf ;;
-        lan)      JIF=$RTUN_LAN_IF JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=$RTUN_LAN_PORT JFILE=jump-for-vps$LINK_N-lan.conf ;;
+        isolated) JIF=$RTUN_IF     JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=$RTUN_PORT     JFILE=jump-for-gateway$LINK_N.conf ;;
+        lan)      JIF=$RTUN_LAN_IF JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=$RTUN_LAN_PORT JFILE=jump-for-gateway$LINK_N-lan.conf ;;
         *) die "jump needs isolated or lan" ;;
     esac
 }
@@ -249,7 +245,7 @@ do_jump() {
     gateway_pub=$(printf '%s\n' "$gateway_key" | wg pubkey)
     CHANGED=0
     put 600 "$WG/$JIF.conf" <<EOF
-# tunnel-puck: the reverse tunnel, the VPS's way in over $PK_IF; a wgt jump (written by puck.sh jump $1)
+# tunnel-puck: the reverse tunnel, the gateway's way in over $PK_IF; a wgt jump (written by puck.sh jump $1)
 [Interface]
 Address = $JADDR
 ListenPort = $JPORT
@@ -259,7 +255,7 @@ PostUp = $EXIT_SCRIPT up %i $1
 PostDown = $EXIT_SCRIPT down %i
 
 [Peer]
-# the VPS, as a jump client
+# the gateway, as a jump client
 PublicKey = $gateway_pub
 AllowedIPs = $JPEER/32
 EOF
@@ -496,7 +492,7 @@ do_undo() {
         [ -e "$f" ] || continue
         systemctl disable -q --now "wg-quick@$(basename "$f" .conf)" 2>/dev/null || true
     done
-    rm -f "$WG"/wgpk* "$WG"/wgrtun* "$WG"/jump-for-vps*.conf "$EXIT_SCRIPT" \
+    rm -f "$WG"/wgpk* "$WG"/wgrtun* "$WG"/jump-for-gateway*.conf "$EXIT_SCRIPT" \
           "$UNBOUND".conf "$UNBOUND"-*.conf /etc/sysctl.d/99-tunnel-puck.conf \
           /etc/systemd/system/wg-quick@.service.d/tunnel-puck-retry.conf "$DISPATCHER"
     systemctl restart unbound 2>/dev/null || true
