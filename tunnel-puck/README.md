@@ -69,7 +69,7 @@ Run it first on a VPS nobody else depends on.
 
 Phase 3 tests each of these.
 
-## Choose your setup
+## Choose your routing
 
 Two choices: the routing for each VPS the puck serves (in that VPS's settings
 file), and the emergency door for the puck (in its own).
