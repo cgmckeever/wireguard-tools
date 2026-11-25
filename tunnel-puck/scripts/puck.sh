@@ -22,13 +22,14 @@
 #   wifi-sync            make tunnel-puck's saved Wi-Fi match WIFI_LIST ("ssid::password"
 #                        lines, most preferred first): the first gets the highest priority
 #   status               the puck at a glance, as lines for tpk-ctl.sh status: UPLINK=, WIFI=,
-#                        IP=, then "HS <interface> <seconds since its handshake, or none>"
+#                        IP=, then "HS <interface> <seconds since its handshake, none, or down>"
 #   test                 PASS/FAIL for the puck itself (cloudflared, uplink, Wi-Fi, public IP)
 #   test-link            PASS/FAIL for one link (TPK_LINK) and its rtuns
 #   undo-link            remove one link (TPK_LINK) and its rtuns
 #   undo [all]           remove every link and the shared parts (all: cloudflared too)
 #
-# Logs go to stderr; only results meant for tpk-ctl.sh (PUBKEY=, JUMPFILE=) go to stdout.
+# Logs go to stderr; stdout is a step's result: lines tpk-ctl.sh reads (PUBKEY=,
+# JUMPFILE=, status's), or shows (wifi-list, the tests' PASS/FAIL).
 
 main() {
     set -eu
