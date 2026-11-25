@@ -37,6 +37,7 @@ DEVICES_HEADER = "# wireguard-tools devices: device number [group,group] (its st
 
 _EXIT_CODE = re.compile(r"[a-z][a-z0-9-]{0,4}[a-z0-9]")
 _CLIENT_BASE = re.compile(r"[A-Za-z0-9_-]{1,32}")
+_SURROGATE = re.compile(r"[\ud800-\udfff]")   # a byte read_text kept that wasn't UTF-8
 
 
 def read_text(path: str) -> Optional[str]:
@@ -77,9 +78,7 @@ def state_get(text: Optional[str], key: str) -> str:
 def state_set(text: Optional[str], key: str, value: str) -> str:
     if "\n" in value or "\r" in value:   # it would read back as another key
         raise WgtError(f"a saved value can't span lines: {key}")
-    lines = [line for line in (text or "").splitlines() if not line.startswith(key + "=")]
-    lines.append(f"{key}={value}")
-    return "\n".join(lines) + "\n"
+    return state_unset(text, key) + f"{key}={value}\n"
 
 
 def state_unset(text: Optional[str], key: str) -> str:
@@ -99,12 +98,12 @@ def one_line(value: str) -> str:
     location), and UTF-8: a byte that isn't (read_text keeps it as a surrogate, from
     an old export's comment, say) becomes "?". Labels reach every config of a jump,
     and wireguard-tunnels refuses a config that isn't UTF-8."""
-    return " ".join(re.sub(r"[\ud800-\udfff]", "?", value).split())
+    return " ".join(_SURROGATE.sub("?", value).split())
 
 
 def is_utf8(text: str) -> bool:
     """<text> (read with read_text, or ssh's "surrogateescape") was UTF-8 throughout."""
-    return not re.search(r"[\ud800-\udfff]", text)
+    return not _SURROGATE.search(text)
 
 
 def is_uint(word: str) -> bool:
@@ -116,6 +115,7 @@ EXIT_CODE_RULE = ("2-6 of a-z0-9 and -, starting with a letter, not ending in -,
                   "(e.g. par-fr)")
 HOST_EXIT = "host"   # the --exit word for this server's own way out
 ALL_JUMPS = "all"    # warp rotate's word for this server and every jump
+WARP_TAG = "warp"    # the name part of a config that goes through WARP
 
 
 def valid_exit_code(code: str) -> bool:
@@ -128,9 +128,6 @@ def new_exit_code(code: str) -> bool:
     """A code a new jump may take: valid, and not ALL_JUMPS (reserved later: a jump
     called that, if any, still reads, but couldn't be rotated alone)."""
     return valid_exit_code(code) and code != ALL_JUMPS
-
-
-WARP_TAG = "warp"   # the name part of a config that goes through WARP
 
 
 def split_name(name: str) -> Tuple[str, bool, str]:
@@ -227,9 +224,14 @@ def parse_clients(text: Optional[str]) -> List[Client]:
     return out
 
 
+def _with_header(header: str, lines: Iterable[str]) -> str:
+    """A database's text: its header, then one line per entry."""
+    return "\n".join([header, *lines]) + "\n"
+
+
 def format_clients(lines: Iterable[str]) -> str:
     """clients.db text: the header, then one line per client."""
-    return "\n".join([CLIENTS_HEADER, *lines]) + "\n"
+    return _with_header(CLIENTS_HEADER, lines)
 
 
 def put_client(text: Optional[str], name: str, entry: Optional[Client] = None) -> str:
@@ -252,8 +254,6 @@ def set_disabled(text: Optional[str], name: str, disabled: bool) -> str:
     if disabled:
         names.append(name)
     return "".join(n + "\n" for n in names)
-
-
 
 
 # --- exits ---
@@ -309,7 +309,7 @@ def put_exit(text: Optional[str], code: str, entry: Optional[Exit] = None) -> st
     lines = [e.line() for e in parse_exits(text) if e.code != code]
     if entry is not None:
         lines.append(entry.fields_line())
-    return "\n".join([EXITS_HEADER, *lines]) + "\n"
+    return _with_header(EXITS_HEADER, lines)
 
 
 # --- devices ---
@@ -374,10 +374,10 @@ def put_device(text: Optional[str], name: str, number: Optional[int] = None,
     <groups> (None: the ones it has)."""
     found = parse_devices(text)
     had = next((d.groups for d in found if d.name == name), ())
-    entries = [d for d in found if d.name != name]
+    kept = [d for d in found if d.name != name]
     if number is not None:
-        entries.append(Device(name, number, had if groups is None else groups))
-    return "\n".join([DEVICES_HEADER, *(d.line() for d in entries)]) + "\n"
+        kept.append(Device(name, number, had if groups is None else groups))
+    return _with_header(DEVICES_HEADER, (d.line() for d in kept))
 
 
 def next_direct_number(devices: Iterable[Device]) -> Optional[int]:
