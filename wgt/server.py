@@ -743,7 +743,8 @@ def _remove_units(ctx: Ctx) -> None:
 
 
 def _restore_forwarding(ctx: Ctx, state: Optional[str]) -> None:
-    """The sysctl file and the forwarding values recorded before setup."""
+    """The system files setup wrote (sysctl, logrotate, networkd) and the forwarding
+    values recorded before setup."""
     r = ctx.runner
     ctx.files.restore_original(ctx.paths.sysctl_file, remove_new=True)
     ctx.files.restore_original(ctx.paths.logrotate_file, remove_new=True)
@@ -799,9 +800,7 @@ def _purge(ctx: Ctx) -> None:
 def _keep(ctx: Ctx) -> None:
     """Without --purge: mark the server not set up, keep keys, clients and accounts."""
     p = ctx.paths
-    # Not set up any more (wgt client and restore check this).
-    for key in SET_UP_KEYS:
-        ops.state_unset(ctx, key)
+    ops.state_unset(ctx, *SET_UP_KEYS)   # not set up any more (wgt client and restore check this)
     kept = f"keys, clients ({p.client_db}, {p.client_dir})"
     if os.path.isdir(p.wgcf_dir):
         kept += f", WARP account ({p.wgcf_dir})"
