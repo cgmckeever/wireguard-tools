@@ -25,12 +25,12 @@ def wgt_command(ctx: Ctx) -> str:
     return link if os.path.exists(link) else checkout_wgt()
 
 
-def agree_restart(ctx: Ctx, ifc: str) -> None:
-    """Announce and ask for a restart of <ifc> to load a new config. Asked before the
-    config is written: a no then leaves the file as the interface runs it, where after
-    the write a re-run would find it unchanged and never restart."""
+def agree_restart(ctx: Ctx, ifc: str, what: str = "") -> None:
+    """Announce (<what>, or the plain step) and ask for a restart of <ifc> to load a new
+    config. Asked before the config is written: a no then leaves the file as the interface
+    runs it, where after the write a re-run would find it unchanged and never restart."""
     unit = f"wg-quick@{ifc}"
-    ctx.runner.step(f"Restart {unit} to apply its new config",
+    ctx.runner.step(what or f"Restart {unit} to apply its new config",
                     f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
     ops.confirm(ctx, f"Restart {ifc} now?")
 

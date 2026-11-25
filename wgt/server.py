@@ -553,16 +553,14 @@ def restart_needed(ctx: Ctx, keys_changed: bool = False) -> bool:
     client configs rewritten, so a no leaves both as wg0 runs them. A subnet
     move (renumbering, not yet done) always changes wg0's Address, and new server
     keys (<keys_changed>) its key, which wg0.conf only names by path."""
-    unit = f"wg-quick@{ctx.cfg.WG_IF}"
     current = ctx.files.read(ctx.cfg.wg_conf)
     if not ops.wg_up(ctx) or current is None:
         return False   # down or new: nothing to restart
     if not renumbering(ctx) and not keys_changed \
             and store.entries(current) == store.entries(ops.render_wg_conf(ctx)):
         return False   # only comments differ
-    ctx.runner.step(f"Restart {ctx.cfg.WG_IF} for its new config (clients reconnect in a few seconds)",
-                    f"restore the .bak in {ctx.paths.change_dir}, then systemctl restart {unit}")
-    ops.confirm(ctx, f"Restart {ctx.cfg.WG_IF} now?")
+    units.agree_restart(ctx, ctx.cfg.WG_IF,
+                        f"Restart {ctx.cfg.WG_IF} for its new config (clients reconnect in a few seconds)")
     return True
 
 
