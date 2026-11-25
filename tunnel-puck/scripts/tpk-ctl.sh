@@ -1133,7 +1133,8 @@ gateway_state() {
 ago() {
     case "$1" in
         ''|*[!0-9]*) echo "$1" ;;
-        *) if [ "$1" -lt 120 ]; then echo "${1}s ago"; elif [ "$1" -lt 7200 ]; then echo "$(( $1 / 60 ))m ago"; else echo "$(( $1 / 3600 ))h ago"; fi ;;
+        *) if [ "$1" -lt 120 ]; then echo "${1}s ago"; elif [ "$1" -lt 7200 ]; then echo "$(( $1 / 60 ))m ago"
+           elif [ "$1" -lt 172800 ]; then echo "$(( $1 / 3600 ))h ago"; else echo "$(( $1 / 86400 ))d ago"; fi ;;
     esac
 }
 
@@ -1143,7 +1144,7 @@ client_lines() {
         [ "$tag" = CLIENT ] || continue
         if [ "$age" = missing ]; then printf '  %-28s no peer on %s with this address\n' "$ip" "$WG_IF"
         elif [ "$TPK_DISABLED" = yes ]; then printf '  %-28s disabled\n' "$ip"
-        else printf '  %-28s last handshake: %-9s rx/tx %s/%s\n' "$ip" "$(ago "$age")" "$(size "$rx")" "$(size "$tx")"; fi
+        else printf '  %-28s last handshake: %-9s rx: %s / tx: %s\n' "$ip" "$(ago "$age")" "$(size "$rx")" "$(size "$tx")"; fi
     done
 }
 
@@ -1183,7 +1184,7 @@ cmd_status() {
             jump="$JUMP_CODE ${jump:-(not on $v)}"
             configs=$(wgt_gateway client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $(jump_codes) " \
                 'index(codes, " " $2 " ") {if ($4 == "disabled") printf "  %-28s disabled\n", $1
-                    else printf "  %-28s last handshake: %-9s rx/tx %s\n", $1, $4, $5}')
+                    else {split($5, t, "/"); printf "  %-28s last handshake: %-9s rx: %s / tx: %s\n", $1, $4, t[1], t[2]}}')
             [ -n "$configs" ] || configs="  no configs on the jump yet (tpk-ctl.sh $PUCK_NAME.$v client <device>)"
         else
             rtun="-" jump="-"
