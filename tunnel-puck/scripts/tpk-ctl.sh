@@ -1006,7 +1006,8 @@ cmd_enable() {
         wgt_vps client enable "$c" --yes || die "wgt client enable $c failed; still off: $TPK_DISABLED_CONFIGS"
         off_drop "$c"
     done
-    [ -n "$device" ] || save TPK_DISABLED ""
+    # Anything back on: the VPS isn't wholly off any more (status: partly, or serving).
+    [ "$TPK_DISABLED" != yes ] || save TPK_DISABLED ""
     log "$VPS_NAME: ${names:-nothing} back on"
 }
 
