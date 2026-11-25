@@ -494,8 +494,8 @@ wgt jump remove par-fr     # refused while configs use it (no code: pick from a 
 **On demand.** A jump is only up while one of its configs is connected, so an
 idle jump holds no connection. A device switching to an idle jump's config waits
 for it to come up the first time: the watchdog checks every 10 seconds, and a
-`warp.` config then waits a few seconds more for the jump's WARP. While a jump is down, or broken, its
-configs are blocked, never sent out another way.
+`warp.` config then waits a few seconds more for the jump's WARP. While a jump
+is down, or broken, its configs are blocked, never sent out another way.
 
 ### Check, back up, restore, clean up
 
