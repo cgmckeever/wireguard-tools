@@ -3,7 +3,7 @@
 #
 # scripts/tpk-ctl.sh on your computer streams this file to the VPS over ssh, after the
 # settings it needs and ids.sh. To run it on the VPS yourself instead:
-#   cat ids.sh vps.sh | TPK_CONF=/path/to/configs/<name>.conf PUCK_PUBKEY=<the puck's key> sh -s -- <step>
+#   cat ids.sh vps.sh | TPK_CONF=/path/to/configs/<puck>.<vps>.conf PUCK_PUBKEY=<the puck's key> sh -s -- <step>
 #
 # Each puck on this VPS has its own link, wgpk-<name>, with its own subnet,
 # routing table and rules (ids.sh); a step touches only its own puck's.
@@ -31,7 +31,7 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TPK_CONF:-}" ]; then . "$TPK_CONF"; fi
-    : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf)}" "${TPK_LINK:=}" "${PUCK_PORT:=}" "${TPK_LINK_AVOID:=}"
+    : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf | cut -d. -f1)}" "${TPK_LINK:=}" "${PUCK_PORT:=}" "${TPK_LINK_AVOID:=}"
     link_ids
     KILL="/usr/local/sbin/$KILL_NAME" KILL_UNIT="/etc/systemd/system/$KILL_NAME.service"
     : "${TPK_ROUTING:=tpk}" "${PUCK_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"

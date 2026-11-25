@@ -3,7 +3,7 @@
 #
 # scripts/tpk-ctl.sh on your computer streams this file to the puck over ssh, after the
 # settings it needs and ids.sh. To run it on the puck yourself instead:
-#   cat ids.sh puck.sh | sudo TPK_CONF=/path/to/configs/<name>.conf sh -s -- <step>
+#   cat ids.sh puck.sh | sudo TPK_CONF=/path/to/configs/<puck>.<vps>.conf sh -s -- <step>
 #
 # Steps (each is safe to run again):
 #   init                 packages, automatic updates, watchdog; cloudflared too when
@@ -36,7 +36,7 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TPK_CONF:-}" ]; then . "$TPK_CONF"; fi
-    : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf)}"
+    : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf | cut -d. -f1)}"
     link_ids
     : "${TPK_ROUTING:=tpk}" "${VPS_PUBKEY:=}" "${CF_TOKEN:=}" "${SSH_CLOUDFLARE:=}" "${WIFI_SSID:=}" "${WIFI_PSK:=}" "${WIFI_LIST:=}"
     export DEBIAN_FRONTEND=noninteractive
