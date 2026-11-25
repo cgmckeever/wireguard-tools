@@ -8,8 +8,8 @@ it:
   ([2.2](#22-device-configs));
 - **remote access to the friend's home network:** their NAS, printer or
   router's page, while the client's internet stays on your gateway
-  ([2.3](#23-optional-mode-egress-and-lan));
-- **or both:** the friend's IP and their home network ([2.3](#23-optional-mode-egress-and-lan)).
+  ([2.3](#23-optional-access-mode));
+- **or both:** the friend's IP and their home network ([2.3](#23-optional-access-mode)).
 
 The friend only plugs in power and an ethernet cable: no router settings, no
 open ports.
@@ -75,7 +75,7 @@ Run it first on a gateway nobody else depends on.
 3. When the link is down, that client gets no connection at all. It never
    falls back to the gateway's IP.
 4. Nothing from the tunnel reaches devices on the friend's LAN, unless you
-   turn that on ([Mode (2.3)](#23-optional-mode-egress-and-lan)).
+   turn that on ([Access Mode (2.3)](#23-optional-access-mode)).
 5. The gateway's other clients, the ones not sent to the puck, still go out through
    the gateway as before.
 6. You can reach the puck remotely.
@@ -351,9 +351,9 @@ The gateway's settings (each line of the file has a comment):
 | `WG_SUBNET` | `tpk` | leave empty (it means every subnet `WG_IF` is on) |
 | `WGT_SERVER` | `wgt` | the gateway's name in `../bin/wgt-ctl list`; its ssh target and address come from there. Empty: the file's `<gateway>` if wgt-ctl lists it, else `tpk-ctl.sh` asks (or adds a new server) and saves it |
 | `JUMP_CODE`, `JUMP_LABEL` | `wgt`, optional | the puck's jump on the gateway (wgt's codes are 2–6 of `a-z`, `0-9`, `-`) and a label for it. Empty: the puck's name, the code shortened to 6 (`grandma`: `grandm`); `config` shows it. A code the gateway already uses for something else is refused |
-| `JUMP_LAN` | `wgt`, optional | `yes`: a jump with the internet and the friend's LAN, for `client <device> --egress --lan` ([2.3](#23-optional-mode-egress-and-lan)), coded as the jump's with `-a` (`mom`: `mom-a`; `grandma`: `gran-a`) |
+| `JUMP_LAN` | `wgt`, optional | `yes`: a jump with the internet and the friend's LAN, for `client <device> --egress --lan` ([2.3](#23-optional-access-mode)), coded as the jump's with `-a` (`mom`: `mom-a`; `grandma`: `gran-a`) |
 | `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | name that jump yourself (this also turns it on); the label defaults to the jump's with " (egress + LAN)" |
-| `JUMP_LANONLY` | `wgt`, optional | `yes`: a jump with the friend's LAN only, the internet from the gateway, for `client <device> --lan` ([2.3](#23-optional-mode-egress-and-lan)), coded as the jump's with `-l` (`mom`: `mom-l`; `grandma`: `gran-l`) |
+| `JUMP_LANONLY` | `wgt`, optional | `yes`: a jump with the friend's LAN only, the internet from the gateway, for `client <device> --lan` ([2.3](#23-optional-access-mode)), coded as the jump's with `-l` (`mom`: `mom-l`; `grandma`: `gran-l`) |
 | `JUMP_LANONLY_CODE`, `JUMP_LANONLY_LABEL` | `wgt`, optional | name that jump yourself (this also turns it on); the label defaults to the jump's with " (LAN only)" |
 
 Among `gateway add`'s output with `wgt`, `wgt jump add` also tests the new jump and prints
@@ -405,7 +405,7 @@ by config, and can have one of each. For a puck called `mom`:
 | egress + LAN | the friend's internet and their LAN | `JUMP_LAN="yes"`, then `exit` | `client laptop --egress --lan` | `mom-a.laptop` |
 | LAN only | the friend's LAN; its internet stays on the gateway | `JUMP_LANONLY="yes"`, then `exit` | `client laptop --lan` | `mom-l.laptop` |
 
-The settings go in `configs/<puck>.<gateway>.conf`; [2.3](#23-optional-mode-egress-and-lan) has
+The settings go in `configs/<puck>.<gateway>.conf`; [2.3](#23-optional-access-mode) has
 the details, and what "the LAN" is. On the server `dengar`:
 
 ```sh
@@ -442,7 +442,7 @@ test from a real device (`tpk-ctl.sh test`'s end-to-end row tests the same path
 from the gateway). A LAN-only config shows the gateway's IP instead, and
 reaches the friend's LAN.
 
-## 2.3 [Optional] Mode: egress and LAN
+## 2.3 [Optional] Access Mode
 
 By default the puck gives clients **egress** only: the friend's internet and
 nothing else. With **the LAN** they can also reach devices on the friend's LAN
