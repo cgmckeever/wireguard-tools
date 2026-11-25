@@ -416,10 +416,9 @@ pick_puck() {
                 break
             fi
         done
-        if [ -n "$PUCK" ]; then :
-        elif [ -n "$SSH_CLOUDFLARE" ]; then
+        if [ -z "$PUCK" ] && [ -n "$SSH_CLOUDFLARE" ]; then
             PUCK="$SSH_CLOUDFLARE" PUCK_ROUTE=cloudflare PUCK_VIA="SSH_CLOUDFLARE: Cloudflare, the emergency door (SSH_LAN and the links didn't answer)"
-        else
+        elif [ -z "$PUCK" ]; then
             others=""; [ -z "$(vpses)" ] || others=", nor did its links${skip:+ (not counting the one to $skip, which this takes down)}"
             die "can't reach $PUCK_NAME: SSH_LAN ($SSH_LAN) didn't answer$others, and there's no emergency door (SSH_CLOUDFLARE)"
         fi
