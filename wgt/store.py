@@ -443,7 +443,7 @@ class Snapshot:
         return next((e for e in self.exits if e.code == code), None)
 
     def exit_clients(self, code: str) -> List[Client]:
-        return [c for c in self.clients if client_exit(c.name) == code]
+        return [c for c in self.clients if c.exit == code]
 
     def device_number(self, name: str) -> Optional[int]:
         """Device <name>'s static number (None if it has none)."""

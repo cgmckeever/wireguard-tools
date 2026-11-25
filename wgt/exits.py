@@ -513,10 +513,15 @@ def tables_ok(ctx: Ctx, e: store.Exit) -> bool:
                for table in (jump_table, client_table) for fam in ctx.cfg.families())
 
 
+def _warp_off(users: List[store.Client]) -> int:
+    """How many of a jump's configs go without WARP (straight through the jump)."""
+    return sum(1 for c in users if not store.name_warp(c.name))
+
+
 def client_rules_ok(ctx: Ctx, e: store.Exit) -> bool:
     """One rule per client address: to its WARP table, or (WARP off) its jump table."""
     users = ctx.snap.exit_clients(e.code)
-    off = sum(1 for c in users if not store.name_warp(c.name))
+    off = _warp_off(users)
     for fam in ctx.cfg.families():
         lines = [line for line in live.rules(ctx.runner, fam).splitlines() if "fwmark" not in line]
         for table, want in ((rules.exit_wtable(e), len(users) - off), (rules.exit_ptable(e), off)):
@@ -550,7 +555,7 @@ def run_tests(ctx: Ctx, res: results.Results, bring_up: bool = False, only: str 
             continue
         res.check(f"jump {e.code}: tables with blackhole fallbacks, fwmark rule to the jump", tables_ok(ctx, e))
         users = ctx.snap.exit_clients(e.code)
-        off = sum(1 for c in users if not store.name_warp(c.name))
+        off = _warp_off(users)
         res.check(f"jump {e.code}: one rule per address of its {len(users)} client(s)"
                   + (f" ({off} without WARP, via the jump)" if off else ""), client_rules_ok(ctx, e))
         act = active_count(ctx, e.code)
