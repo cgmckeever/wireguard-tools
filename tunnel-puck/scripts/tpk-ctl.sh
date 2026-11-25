@@ -1206,7 +1206,7 @@ status_watch() {
                 stamp=$(date +%H:%M:%S)
                 for n in $now; do
                     case " $was " in *" $n "*) ;; *) ring=1 events="$stamp $n came on
-$events" ;; esac
+$events"; notify "$n came on ($PUCK_NAME)" ;; esac
                 done
                 for n in $was; do
                     case " $now " in *" $n "*) ;; *) events="$stamp $n went idle
@@ -1221,6 +1221,17 @@ $events" ;; esac
             "$(date +%H:%M:%S)" "$every" "${bell:+, bell on}" "${ring:+$(printf '\a')}"
         sleep "$every"
     done
+}
+
+# notify <text>: a desktop notification on this computer, for status --alert:
+# macOS (with a sound) or Linux (notify-send); nothing elsewhere (the bell rings).
+notify() {
+    if command -v osascript >/dev/null 2>&1; then
+        osascript -e 'on run argv' -e 'display notification (item 1 of argv) with title "tpk-ctl" sound name "Glass"' \
+            -e 'end run' "$1" >/dev/null 2>&1 &
+    elif command -v notify-send >/dev/null 2>&1; then
+        notify-send tpk-ctl "$1" >/dev/null 2>&1 &
+    fi
 }
 
 # active_names: from status's lines, the configs (or tpk clients) in use: a last
