@@ -334,7 +334,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
         out.line(line)
     if rep.pending:
         out.warn(f"{rep.pending} saved setting(s) pending (not running yet); apply with: wgt setup")
-    out.log(f"WARP (warp.* configs leave via {c.WARP_IF}, the rest straight out)")
+    out.info(f"warp.* configs leave via {c.WARP_IF}, the rest straight out")
     out.log("Interfaces")
     for ifc in (c.WARP_IF, c.WG_IF):
         active, enabled = live.unit_state(r, f"wg-quick@{ifc}")
