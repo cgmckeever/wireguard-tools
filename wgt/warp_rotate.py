@@ -14,6 +14,8 @@ from .errors import WgtError
 if TYPE_CHECKING:
     from .ctx import Ctx
 
+USAGE = "wgt warp rotate [host|<jump code>|all]"
+
 
 def new_warp_account(ctx: Ctx, d: str) -> None:
     """Register a new WARP account for <d> (a wgcf directory): registered in a
@@ -78,8 +80,7 @@ def cmd_warp_rotate(ctx: Ctx, words: List[str]) -> int:
     """wgt warp rotate [host|<jump>|all]: new WARP accounts (new keys, a new
     Cloudflare identity) for this server's own WARP (default), a jump's, or
     all of them. Device configs don't change."""
-    if len(words) > 1:
-        raise WgtError("usage: wgt warp rotate [host|<jump code>|all]")
+    ops.no_more_words(words[1:], USAGE)
     which = words[0] if words else "host"
     ops.lock_unless_asking(ctx)   # the jumps are the ones exits.db lists once no one else is changing it
     host_too = which in (store.HOST_EXIT, store.ALL_JUMPS)
@@ -108,5 +109,5 @@ def cmd_warp(ctx: Ctx, words: List[str]) -> Optional[int]:
     """wgt warp <command>: only rotate for now."""
     ops.require_setup(ctx)
     if not words:
-        raise WgtError("usage: wgt warp rotate [host|<jump code>|all]")
+        raise WgtError(f"usage: {USAGE}")
     return ops.dispatch(ctx, "warp", words, {"rotate": cmd_warp_rotate})
