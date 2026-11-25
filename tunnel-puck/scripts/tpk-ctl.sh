@@ -1018,7 +1018,14 @@ cmd_enable() {
 
 # --- Status ----------------------------------------------------------------------
 
-# ago <seconds>: 45s, 12m, 3h.
+# vps_state: the loaded VPS's, by what disable turned off: serving, partly or disabled.
+vps_state() {
+    if [ "$TPK_DISABLED" = yes ]; then echo disabled
+    elif [ -n "$TPK_DISABLED_CONFIGS" ]; then echo partly
+    else echo serving; fi
+}
+
+# ago <seconds>: 45s ago, 12m ago, 3h ago.
 ago() {
     case "$1" in
         ''|*[!0-9]*) echo "$1" ;;
@@ -1044,8 +1051,7 @@ cmd_status() {
     for v in $names; do
         QUIET=1 load_vps "$v"
         if [ -z "$LINK_NET" ]; then printf '%-10s %s\n' "$v" "no link yet (tpk-ctl.sh $PUCK_NAME.$v link)"; continue; fi
-        state=serving
-        if [ "$TPK_DISABLED" = yes ]; then state=disabled; elif [ -n "$TPK_DISABLED_CONFIGS" ]; then state=partly; fi
+        state=$(vps_state)
         link="$PK_IF $(hs "$PK_IF")"
         if [ "$TPK_ROUTING" = wgt ]; then
             rtun="$RTUN_IF $(hs "$RTUN_IF")"
@@ -1159,7 +1165,7 @@ cmd_vps_list() {
               ifs="$PK_IF $RTUN_IF"; [ -z "$JUMP_LAN_CODE" ] || ifs="$ifs $RTUN_LAN_IF"
           else server="$VPS_SSH"; jumps="-"; ifs="$PK_IF"; fi
           [ -n "$LINK_NET" ] || ifs="(no link yet)"
-          state=serving; [ -z "$TPK_DISABLED_CONFIGS" ] || state=partly; [ "$TPK_DISABLED" != yes ] || state=disabled; [ -n "$LINK_NET" ] || state=-
+          state=$(vps_state); [ -n "$LINK_NET" ] || state=-
           printf '%-12s %-8s %-8s %-24s %-15s %-26s %s\n' "$v" "$TPK_ROUTING" "$state" "$server" "${TPK_LINK:--}" "$ifs" "$jumps" ) \
             || printf '%-12s (its settings file has a problem: tpk-ctl.sh %s.%s config)\n' "$v" "$PUCK_NAME" "$v"
     done
