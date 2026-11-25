@@ -411,7 +411,7 @@ jump comes up only once a device connects through it, so this is its first
 test from a real device (`tpk-ctl.sh test`'s end-to-end row tests the same path
 from the VPS).
 
-## 2.3 Optional: LAN mode
+## 2.3 [Optional] LAN mode
 
 By default the puck is **isolated**: clients get the friend's internet and
 nothing else. **LAN mode** also lets them reach devices on the friend's LAN by
@@ -446,7 +446,7 @@ when it moves. It must not overlap the client's own network (see
 `tunnel-puck-exit: ... LAN 192.168.1.50/24 reachable` (the puck's address on that
 LAN).
 
-## 2.4 Optional: more pucks, more VPSes
+## 2.4 [Optional] More pucks, more VPSes
 
 Skip this with one puck and one VPS. Both directions combine: any number of
 pucks, each serving any of your VPSes.
