@@ -104,7 +104,7 @@ server, bossk too.
      the device's number once it has no configs left);
    - on this machine: wgt-ctl renames the copy in `~/wg-tunnels` to `.bak`;
      delete those, and the device's folder once nothing else is in it;
-   - what the test added for them: a jump, a tunnel-puck VPS (`tpk-ctl.sh
-     <puck> vps remove <vps>`), QR images.
+   - what the test added for them: a jump, a tunnel-puck gateway (`tpk-ctl.sh
+     <puck> gateway remove <gateway>`), QR images.
 
    A test that stops part-way still cleans up what it made before it stops.
