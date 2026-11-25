@@ -6,7 +6,7 @@
 #   cat ids.sh puck.sh | sudo TPK_CONF=/path/to/configs/<name>.conf sh -s -- <step>
 #
 # Steps (each is safe to run again):
-#   base                 packages, automatic updates, watchdog; cloudflared too when
+#   init                 packages, automatic updates, watchdog; cloudflared too when
 #                        CF_TOKEN is set (tpk-ctl.sh sends it when SSH_CLOUDFLARE is set)
 #   link                 WireGuard and the wgpk link to the VPS. Prints PUBKEY=<the puck's
 #                        public key>; with VPS_PUBKEY set it also writes and starts wgpk
@@ -36,7 +36,7 @@ main() {
     export DEBIAN_FRONTEND=noninteractive
     step="${1:-}"; [ $# -gt 0 ] && shift
     case "$step" in
-        base) do_base ;;
+        init) do_init ;;
         link) do_link ;;
         jump) do_jump "${1:-}" ;;
         jump-done) jump_vars "${1:-}"; rm -f "/etc/wireguard/$JFILE"; log "deleted $JFILE" ;;
@@ -89,7 +89,7 @@ current_mode() {
     sed -n "s|^PostUp = $EXIT_SCRIPT up %i \([a-z]*\)$|\1|p" "$WG/$1.conf" 2>/dev/null | head -n 1 | grep . || echo isolated
 }
 
-do_base() {
+do_init() {
     log "updating packages (this can take a while)"
     apt-get update -q
     apt-get -y -q full-upgrade
@@ -105,7 +105,7 @@ do_base() {
 
     if [ -n "$CF_TOKEN" ]; then do_cloudflared
     else log "no CF_TOKEN (SSH_CLOUDFLARE is empty): no cloudflared, so no emergency door"; fi
-    log "base done. Reboot once so the watchdog starts: tpk-ctl.sh reboot"
+    log "init done. Reboot once so the watchdog starts: tpk-ctl.sh reboot"
 }
 
 # cloudflared, the emergency door: SSH through Cloudflare that doesn't depend on the link.
@@ -401,7 +401,7 @@ do_test() {
     if systemctl cat tunnel-puck-cloudflared.service >/dev/null 2>&1; then
         check "cloudflared (the emergency door) is running" "systemctl is-active -q tunnel-puck-cloudflared.service"
     elif [ -n "$SSH_CLOUDFLARE" ]; then
-        fail "cloudflared isn't set up, but SSH_CLOUDFLARE is (tpk-ctl.sh base)"
+        fail "cloudflared isn't set up, but SSH_CLOUDFLARE is (tpk-ctl.sh init)"
     else
         printf 'INFO  no cloudflared (SSH_CLOUDFLARE is empty): no emergency door if the link goes down\n'
     fi

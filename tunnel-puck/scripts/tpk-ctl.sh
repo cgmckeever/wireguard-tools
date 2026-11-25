@@ -8,7 +8,7 @@
 #   tpk-ctl.sh [<puck>] config              show the settings and check they're filled in
 #   tpk-ctl.sh [<puck>] ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
 #   tpk-ctl.sh ssh-config install           add every puck's entry to your ssh config (its own file, one Include)
-#   tpk-ctl.sh [<puck>] base                1.4, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
+#   tpk-ctl.sh [<puck>] init                1.4, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
 #   tpk-ctl.sh [<puck>] link                2.1: the link (puck and VPS), keys exchanged for you
 #   tpk-ctl.sh [<puck>] exit                2.1, by TPK_ROUTING: tpk's DNS resolver, or the wgt jump(s)
 #   tpk-ctl.sh [<puck>] client <device> [lan]   2.2, TPK_ROUTING=wgt: a config for <device> through the puck (lan: the LAN jump)
@@ -21,7 +21,7 @@
 #   tpk-ctl.sh [<puck>] ssh [<command>]     a shell (or a command) on the puck, the first way that answers
 #   tpk-ctl.sh [<puck>] reboot              restart the puck, and wait until it answers again
 #   tpk-ctl.sh [<puck>] shutdown            power the puck off, safe to unplug (asks first)
-#   tpk-ctl.sh [<puck>] all                 link, exit, wifi sync (with a <puck>.wifi.conf), test (after base)
+#   tpk-ctl.sh [<puck>] all                 link, exit, wifi sync (with a <puck>.wifi.conf), test (after init)
 #   tpk-ctl.sh [<puck>] undo [all]          remove it from the VPS and the puck (all: cloudflared too)
 #
 # The puck is reached the first way that answers: SSH_LAN (at home), then through
@@ -35,7 +35,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 CONFIGS=$(cd "$HERE/../configs" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
-COMMANDS="new config ssh-config base link exit client lan-mode wifi test ssh reboot shutdown all undo"
+COMMANDS="new config ssh-config init link exit client lan-mode wifi test ssh reboot shutdown all undo"
 # Cloudflare's trace (ip=... lines), as wgt's jump test uses (wgt/const.py TRACE_URL).
 TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 # The remote prefix that runs a command as root (sudo unless already root).
@@ -398,7 +398,7 @@ cmd_config() {
     fi
     if [ -n "$SSH_CLOUDFLARE" ]; then
         require SSH_CLOUDFLARE CF_TOKEN_FILE
-        [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tpk-ctl.sh base needs it: step 1.3)"
+        [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tpk-ctl.sh init needs it: step 1.3)"
     else
         log "note: no SSH_CLOUDFLARE, so no emergency door: if the link is down after drop-off, the puck must be power-cycled"
     fi
@@ -490,14 +490,14 @@ cmd_ssh_install() {
     log "added '$include' at the top of $user_conf"
 }
 
-cmd_base() {
+cmd_init() {
     if [ -n "$SSH_CLOUDFLARE" ]; then
         [ -r "$CF_TOKEN_FILE" ] || die "SSH_CLOUDFLARE is set but CF_TOKEN_FILE ($CF_TOKEN_FILE) isn't readable: do step 1.3 first, or empty SSH_CLOUDFLARE"
         CF_TOKEN=$(tr -d ' \n\r' < "$CF_TOKEN_FILE")
         [ -n "$CF_TOKEN" ] || die "CF_TOKEN_FILE ($CF_TOKEN_FILE) is empty"
     fi
     pick_puck
-    run puck puck.sh base
+    run puck puck.sh init
     CF_TOKEN=""
 }
 
@@ -794,7 +794,7 @@ main() {
         config) cmd_config ;;
         ssh-config) cmd_ssh_config ;;
         client) cmd_client "$@" ;;
-        base) cmd_base ;;
+        init) cmd_init ;;
         link) pick_puck; cmd_link ;;
         exit) pick_puck; cmd_exit ;;
         lan-mode) pick_puck; cmd_lan_mode "$@" ;;

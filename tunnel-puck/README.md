@@ -218,7 +218,7 @@ menus now and then; follow the nearest match.
    install -m 600 /dev/stdin ~/.config/tunnel-puck/cloudflared.token   # paste the token, then Ctrl-D
    ```
 
-   Don't run the dashboard's install command: [1.4](#14-set-up-the-pucks-base-computer) does that.
+   Don't run the dashboard's install command: [1.4](#14-set-up-the-puck-init-computer) does that.
 2. On the tunnel's **Public Hostname** tab (or **Published application
    routes**): add `SSH_CLOUDFLARE`, type `SSH`, URL `localhost:22`.
 3. **Access → Applications → Add an application → Self-hosted**, for
@@ -227,10 +227,10 @@ menus now and then; follow the nearest match.
 **Check:** `scripts/tpk-ctl.sh config` no longer prints a note about
 `CF_TOKEN_FILE`.
 
-## 1.4 Set up the puck's base **[Computer]**
+## 1.4 Set up the puck: init **[Computer]**
 
 ```sh
-scripts/tpk-ctl.sh base          # updates, automatic security updates, watchdog, cloudflared
+scripts/tpk-ctl.sh init          # updates, automatic security updates, watchdog, cloudflared
 scripts/tpk-ctl.sh reboot        # once, so the hardware watchdog starts
 scripts/tpk-ctl.sh ssh-config install   # emergency door only: so your own ssh reaches it
 ```
@@ -242,7 +242,7 @@ passes `cloudflared` to ssh itself. `ssh-config install` is for your own
 `Include` line for it at the top of `~/.ssh/config`, after a backup; the rest
 of that file is left alone. (`ssh-config` alone prints the entry instead.)
 
-**Check:** `base` ends with `base done`, and `reboot` ends with `<name> is back`
+**Check:** `init` ends with `init done`, and `reboot` ends with `<name> is back`
 (your puck's name). With the emergency door: the dashboard shows the tunnel
 **Healthy**, and `ssh SSH_CLOUDFLARE` opens a browser login once **[Browser]**,
 then a shell.
@@ -417,7 +417,7 @@ as you expect.
   The SD-card alternative, raspi-config's overlay file system, also throws away
   every later change, `tpk-ctl.sh` commands and updates included, unless you
   turn it off first. If you use it, turn it on last, just before drop-off.
-- **Updates:** `base` turned on automatic security updates.
+- **Updates:** `init` turned on automatic security updates.
 
 ## 3.3 The away-from-home test **[Hands]**, then **[Computer]** and **[client]**
 
@@ -497,7 +497,7 @@ them in that file.
 ```sh
 scripts/tpk-ctl.sh new mom                     # then fill in configs/mom.conf: SSH_LAN, the VPS, routing ...
 scripts/tpk-ctl.sh mom config
-scripts/tpk-ctl.sh mom base                    # and so on through the steps, naming the puck each time
+scripts/tpk-ctl.sh mom init                    # and so on through the steps, naming the puck each time
 ```
 
 Each puck has its own link on the VPS (`wgpk-home`, `wgpk-mom`), with its own
@@ -573,7 +573,7 @@ All from **[Computer]**, as `scripts/tpk-ctl.sh <command>`:
 | `config` | prints the settings and checks them |
 | `ssh-config` | print the `~/.ssh/config` entry for `SSH_CLOUDFLARE` |
 | `ssh-config install` | every puck's entry into your ssh config (its own file, plus one `Include` line); not needed by `tpk-ctl.sh` itself |
-| `base` | the puck: package updates, automatic security updates, the hardware watchdog, and with the door, cloudflared |
+| `init` | the puck: package updates, automatic security updates, the hardware watchdog, and with the door, cloudflared |
 | `link` | the puck: WireGuard, IP forwarding, a retry at boot, its key, and a hook that moves the exit rules when the network changes. The VPS: its key, its end of the link (`wgpk-<name>`, picking a free subnet and port the first time), `PUCK_PORT/udp` in ufw if active, and with `tpk` the routing and kill switch for `CLIENT_IPS`. Then the puck's end |
 | `exit` | `tpk`: the DNS resolver (unbound) on the puck. `wgt`: the jump server(s) on the puck, piped into `wgt jump add` on the VPS |
 | `all` | `link`, `exit`, `wifi sync` (only with a `<puck>.wifi.conf`), `test` |
@@ -647,10 +647,10 @@ the VPS through a pipe.
 | `/etc/unbound/unbound.conf.d/tunnel-puck.conf` | `tpk` | `exit` | the DNS resolver for puck-exit clients |
 | `/etc/wireguard/wgrtun*`, `wgrtunlan*` | `wgt` | `exit` | the reverse tunnel(s), which the VPS reaches in through (wgt's jump): config, keys and exit rules |
 | `/etc/wireguard/jump-for-vps*.conf` | `wgt` | `exit`, briefly | the jump file for the VPS, deleted once wgt has it |
-| `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpk` or `wgt` | `base` | the hardware watchdog |
-| `unattended-upgrades` | `tpk` or `wgt` | `base` | automatic security updates |
-| Cloudflare's apt repository, `/etc/systemd/system/tunnel-puck-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `base` | cloudflared and its service |
-| `/etc/cloudflared/tunnel-puck.env` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `base` | the tunnel token (mode 600) |
+| `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpk` or `wgt` | `init` | the hardware watchdog |
+| `unattended-upgrades` | `tpk` or `wgt` | `init` | automatic security updates |
+| Cloudflare's apt repository, `/etc/systemd/system/tunnel-puck-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `init` | cloudflared and its service |
+| `/etc/cloudflared/tunnel-puck.env` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `init` | the tunnel token (mode 600) |
 | `/etc/NetworkManager/system-connections/tunnel-puck-*.nmconnection` | `tpk` or `wgt` | `wifi add`, `wifi sync` | a saved Wi-Fi network, with its password (mode 600) |
 
 **On the VPS:**
