@@ -331,7 +331,7 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
     out.log(f"Settings (saved in {ctx.paths.state})")
     rep = settings_table(ctx, running=True)
     for line in rep.lines:
-        ctx.out.line(line)
+        out.line(line)
     if rep.pending:
         out.warn(f"{rep.pending} saved setting(s) pending (not running yet); apply with: wgt setup")
     out.log(f"WARP (warp.* configs leave via {c.WARP_IF}, the rest straight out)")
@@ -362,11 +362,11 @@ def cmd_status(ctx: Ctx, words: List[str]) -> None:
         found = [line for line in live.rules(r, f).splitlines() if f"lookup {c.RT_TABLE}" in line]
         if found:
             for line in found:
-                ctx.out.info(f"{f} rule: {line}")
+                out.info(f"{f} rule: {line}")
         else:
             out.info(f"{f} rule: MISSING (run: wgt setup)")
         for line in live.table(r, f, c.RT_TABLE).splitlines():
-            ctx.out.info(f"{f} table {c.RT_TABLE}: {line}")
+            out.info(f"{f} table {c.RT_TABLE}: {line}")
     out.log("Rules")
     for x, t, ch, rule in rules.ipt_rules(c, ctx.pub_if, ctx.snap.exits):
         present = live.ipt_present(r, (x, t, ch, rule))
