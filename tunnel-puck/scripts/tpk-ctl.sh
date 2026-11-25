@@ -12,7 +12,7 @@
 #   tpk-ctl.sh [<puck>] config              show the settings, the puck's and each VPS's, and check them
 #   tpk-ctl.sh [<puck>] ssh-config          print the ~/.ssh/config entry for SSH_CLOUDFLARE
 #   tpk-ctl.sh ssh-config install           add every puck's entry to your ssh config (its own file, one Include)
-#   tpk-ctl.sh [<puck>] init                1.4, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
+#   tpk-ctl.sh [<puck>] init                1.2c, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
 #   tpk-ctl.sh [<puck>] vps add <vps>       2.1: serve a VPS: configs/<puck>.<vps>.conf, then link, exit and test
 #   tpk-ctl.sh [<puck>] vps [list]          the VPSes the puck serves: routing, link, interfaces, jumps
 #   tpk-ctl.sh [<puck>] vps remove <vps>    stop serving one: its configs and jumps (wgt), its link, its settings file
@@ -202,7 +202,7 @@ cmd_new() {
         (umask 077; cp "$CONFIGS/puck.wifi.conf.example" "$CONFIGS/$name.wifi.conf")
         log "made configs/$name.wifi.conf: one name::password per line, most preferred first"
     fi
-    log "then: tpk-ctl.sh $name init (1.4), and tpk-ctl.sh $name vps add <vps> for each VPS it serves (2.1)"
+    log "then: tpk-ctl.sh $name init (1.2c), and tpk-ctl.sh $name vps add <vps> for each VPS it serves (2.1)"
 }
 
 
@@ -486,7 +486,7 @@ cmd_config() {
     require SSH_LAN
     if [ -n "$SSH_CLOUDFLARE" ]; then
         require SSH_CLOUDFLARE CF_TOKEN_FILE
-        [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tpk-ctl.sh init needs it: step 1.3)"
+        [ -r "$CF_TOKEN_FILE" ] || log "note: CF_TOKEN_FILE $CF_TOKEN_FILE isn't readable yet (tpk-ctl.sh init needs it: step 1.2b)"
     else
         log "note: no SSH_CLOUDFLARE, so no emergency door: if the links are down after drop-off, the puck must be power-cycled"
     fi
@@ -643,7 +643,7 @@ cmd_ssh_install() {
 
 cmd_init() {
     if [ -n "$SSH_CLOUDFLARE" ]; then
-        [ -r "$CF_TOKEN_FILE" ] || die "SSH_CLOUDFLARE is set but CF_TOKEN_FILE ($CF_TOKEN_FILE) isn't readable: do step 1.3 first, or empty SSH_CLOUDFLARE"
+        [ -r "$CF_TOKEN_FILE" ] || die "SSH_CLOUDFLARE is set but CF_TOKEN_FILE ($CF_TOKEN_FILE) isn't readable: do step 1.2b first, or empty SSH_CLOUDFLARE"
         CF_TOKEN=$(tr -d ' \n\r' < "$CF_TOKEN_FILE")
         [ -n "$CF_TOKEN" ] || die "CF_TOKEN_FILE ($CF_TOKEN_FILE) is empty"
     fi

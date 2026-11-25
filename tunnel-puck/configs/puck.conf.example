@@ -19,7 +19,7 @@ SSH_LAN="pi@tunnel-puck.local"      # user@name of the puck on your home network
 # Optional: the emergency door. SSH through a Cloudflare Tunnel, which doesn't
 # depend on the WireGuard links, so you can still get in and fix the puck when
 # they're down (a blocked port, a changed VPS IP, a bad change). Costs a domain on
-# Cloudflare and step 1.3. Empty: no Cloudflare; if the links are down after
+# Cloudflare and step 1.2b. Empty: no Cloudflare; if the links are down after
 # drop-off, the puck must be power-cycled, or brought home.
 SSH_CLOUDFLARE=""                   # e.g. ssh.puck.example.com, a hostname on your Cloudflare domain
 CF_TOKEN_FILE="$HOME/.config/tunnel-puck/cloudflared.token"    # with SSH_CLOUDFLARE: the tunnel token alone, mode 600

@@ -90,7 +90,7 @@ fails exactly when the links are down (a blocked port, a changed VPS IP, a bad
 change). A Cloudflare Tunnel gives SSH
 to the puck that doesn't need the link. It costs a domain on Cloudflare (about
 $10–15 a year; the rest is free) and one extra step,
-[1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare).
+[1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare).
 Without it, a dead link means the friend power-cycles the puck, or you take it
 home. If you skip it, set `PUCK_PORT="443"` in each VPS's settings file when
 you reach 2.1: networks rarely block it.
@@ -195,21 +195,26 @@ you reach 2.1: networks rarely block it.
 
 ---
 
-# Phase 1: prepare the puck
+# Phase 1: puck config
 
 ## 1.1 Flash the puck **[Hands]**
 
 On a Raspberry Pi: with Raspberry Pi Imager, write the OS from
 [What you need](#what-you-need). (Another board: its Debian image, set up the
 same way.) In Imager's settings: a hostname and user (say `tunnel-puck` and `pi`; they become
-`SSH_LAN` in [1.2](#12-fill-in-the-settings-computer)), and **SSH with your public
+`SSH_LAN` in [1.2a](#12a-fill-in-the-settings)), and **SSH with your public
 key only** (passwords off). Leave Wi-Fi out: step
 [3.1](#31-ethernet-or-wi-fi-at-the-friends-computer) handles it. Boot the puck at
 home, on ethernet.
 
 **Check [Computer]:** `ssh pi@tunnel-puck.local true` (your user and hostname) works with no password prompt.
 
-## 1.2 Fill in the settings **[Computer]**
+## 1.2 Set up the puck **[Computer]**
+
+Three parts, in this order: the settings, the emergency door if you want one
+(its token is a setting, and `init` installs it), then the check and `init`.
+
+### 1.2a Fill in the settings
 
 Each puck gets a settings file named for it, in `configs/` (git ignores them).
 The name is up to 10 characters of `a-z`, `0-9` and `-`, starting with a
@@ -222,21 +227,15 @@ file holds the puck's own settings; each VPS it serves gets its own file in
 scripts/tpk-ctl.sh new           # or: scripts/tpk-ctl.sh new mom [--wifi]
 ```
 
-Fill it in (each line has a comment), then check it:
+Fill it in (each line has a comment):
 
 | Setting | When | What to put |
 |---|---|---|
 | `SSH_LAN` | always | `user@hostname` for the puck on your home network: the ones you chose in [1.1](#11-flash-the-puck-hands) (`pi@tunnel-puck.local`) |
-| `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) |
-| `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) (the default is fine) |
+| `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) |
+| `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare) (the default is fine) |
 
-```sh
-scripts/tpk-ctl.sh config
-```
-
-**Check:** it ends with `settings look complete`.
-
-## 1.3 The emergency door: Cloudflare **[Browser]** (skip without `SSH_CLOUDFLARE`)
+### 1.2b The emergency door: Cloudflare **[Browser]** (skip without `SSH_CLOUDFLARE`)
 
 In Cloudflare Zero Trust (`one.dash.cloudflare.com`). Cloudflare renames these
 menus now and then; follow the nearest match.
@@ -250,18 +249,16 @@ menus now and then; follow the nearest match.
    install -m 600 /dev/stdin ~/.config/tunnel-puck/cloudflared.token   # paste the token, then Ctrl-D
    ```
 
-   Don't run the dashboard's install command: [1.4](#14-set-up-the-puck-init-computer) does that.
+   Don't run the dashboard's install command: [1.2c](#12c-check-and-init) does that.
 2. On the tunnel's **Public Hostname** tab (or **Published application
    routes**): add `SSH_CLOUDFLARE`, type `SSH`, URL `localhost:22`.
 3. **Access → Applications → Add an application → Self-hosted**, for
    `SSH_CLOUDFLARE`, with one **Allow** policy: *Emails* = your email.
 
-**Check:** `scripts/tpk-ctl.sh config` no longer prints a note about
-`CF_TOKEN_FILE`.
-
-## 1.4 Set up the puck: init **[Computer]**
+### 1.2c Check and init
 
 ```sh
+scripts/tpk-ctl.sh config        # the settings: ends with "settings look complete"
 scripts/tpk-ctl.sh init          # updates, automatic security updates, watchdog, cloudflared
 scripts/tpk-ctl.sh reboot        # once, so the hardware watchdog starts
 scripts/tpk-ctl.sh ssh-config install   # emergency door only: so your own ssh reaches it
@@ -274,13 +271,13 @@ passes `cloudflared` to ssh itself. `ssh-config install` is for your own
 `Include` line for it at the top of `~/.ssh/config`, after a backup; the rest
 of that file is left alone. (`ssh-config` alone prints the entry instead.)
 
-**Check:** `init` ends with `init done`, and `reboot` ends with `<puck> is back`. With the emergency door: the dashboard shows the tunnel
+**Check:** `config` ends with `settings look complete` and, with the emergency door, prints no note about `CF_TOKEN_FILE`. `init` ends with `init done`, and `reboot` ends with `<puck> is back`. With the emergency door: the dashboard shows the tunnel
 **Healthy**, and `ssh SSH_CLOUDFLARE` opens a browser login once **[Browser]**,
 then a shell.
 
 ---
 
-# Phase 2: WireGuard
+# Phase 2: tunnel config
 
 The puck stays at home for this phase.
 
@@ -850,8 +847,8 @@ the VPS through a pipe.
 | `/etc/wireguard/jump-for-vps<n>*.conf` | `wgt` | `exit`, briefly | the jump file for the VPS, deleted once wgt has it |
 | `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpk` or `wgt` | `init` | the hardware watchdog |
 | `unattended-upgrades` | `tpk` or `wgt` | `init` | automatic security updates |
-| Cloudflare's apt repository, `/etc/systemd/system/tunnel-puck-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `init` | cloudflared and its service |
-| `/etc/cloudflared/tunnel-puck.env` (when a Cloudflare Tunnel is configured, [1.3](#13-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `init` | the tunnel token (mode 600) |
+| Cloudflare's apt repository, `/etc/systemd/system/tunnel-puck-cloudflared.service` (when a Cloudflare Tunnel is configured, [1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `init` | cloudflared and its service |
+| `/etc/cloudflared/tunnel-puck.env` (when a Cloudflare Tunnel is configured, [1.2b](#12b-the-emergency-door-cloudflare-browser-skip-without-ssh_cloudflare)) | `tpk` or `wgt` | `init` | the tunnel token (mode 600) |
 | `/etc/NetworkManager/system-connections/tunnel-puck-*.nmconnection` | `tpk` or `wgt` | `wifi add`, `wifi sync` | a saved Wi-Fi network, with its password (mode 600) |
 
 **On the VPS:**
