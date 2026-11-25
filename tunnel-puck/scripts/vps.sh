@@ -17,6 +17,9 @@
 #           public key>. With TPK_ROUTING=tpk it also writes the routing for CLIENT_IPS
 #           and the kill switch
 #   test    PASS/FAIL for the link and, by TPK_ROUTING, the routing or the wgt jump(s)
+#
+# TPK_DISABLED=yes (tpk-ctl.sh disable, TPK_ROUTING=tpk): link writes no routing for
+# CLIENT_IPS, so only the kill switch applies to them: no internet, never this VPS's IP.
 #   undo    remove the link (and TPK_ROUTING=tpk's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
@@ -32,7 +35,7 @@ main() {
     link_ids
     KILL="/usr/local/sbin/$KILL_NAME" KILL_UNIT="/etc/systemd/system/$KILL_NAME.service"
     : "${TPK_ROUTING:=tpk}" "${PUCK_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
-    : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}" "${WG_IF:=wg0}"
+    : "${JUMP_CODE:=}" "${JUMP_LAN_CODE:=}" "${WG_IF:=wg0}" "${TPK_DISABLED:=}"
     case "$WG_IF" in ''|*[!A-Za-z0-9_.-]*) die "WG_IF must be an interface name" ;; esac
     case "$TPK_ROUTING" in tpk|wgt) ;; *) die "TPK_ROUTING must be tpk or wgt" ;; esac
     case "${1:-}" in
@@ -228,7 +231,10 @@ PostDown = iptables -D FORWARD -i $WG_IF -o %i -j ACCEPT
 PostDown = iptables -D FORWARD -i %i -o $WG_IF -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 PostDown = iptables -t nat -D POSTROUTING -o %i -j MASQUERADE
 EOF
-    for ip in $CLIENT_IPS; do
+    # Disabled (tpk-ctl.sh disable): no client is routed to the puck, so the kill
+    # switch blocks them all; the link itself stays up.
+    [ "$TPK_DISABLED" != yes ] || echo "# disabled: CLIENT_IPS ($CLIENT_IPS) get no routing here, so the kill switch blocks them"
+    [ "$TPK_DISABLED" = yes ] || for ip in $CLIENT_IPS; do
         v4 "$ip"
         echo "# $ip: through the puck, its DNS answered by the puck"
         echo "PostUp = ip rule del iif $WG_IF from $ip lookup $TABLE priority $PRIO_ROUTE 2>/dev/null; ip rule add iif $WG_IF from $ip lookup $TABLE priority $PRIO_ROUTE"
@@ -324,8 +330,13 @@ do_test() {
     if [ "$TPK_ROUTING" = tpk ]; then
         check "kill switch is on" "systemctl is-active -q $KILL_NAME.service"
         check "table $TABLE sends to the puck" "ip route show table $TABLE | grep -q 'default dev $LINK_IF'"
+        [ "$TPK_DISABLED" != yes ] || printf 'INFO  disabled: CLIENT_IPS get no routing to the puck, only the kill switch (tpk-ctl.sh enable)\n'
         for ip in $CLIENT_IPS; do
-            check "$ip: routed through the puck (rule $PRIO_ROUTE)" "ip rule show | grep -q '^$PRIO_ROUTE:.*from $ip .*lookup $TABLE'"
+            if [ "$TPK_DISABLED" = yes ]; then
+                check "$ip: not routed through the puck (disabled)" "! ip rule show | grep -q '^$PRIO_ROUTE:.*from $ip .*lookup $TABLE'"
+            else
+                check "$ip: routed through the puck (rule $PRIO_ROUTE)" "ip rule show | grep -q '^$PRIO_ROUTE:.*from $ip .*lookup $TABLE'"
+            fi
             check "$ip: kill switch (rule $PRIO_KILL)" "ip rule show | grep -q '^$PRIO_KILL:.*from $ip .*unreachable'"
         done
     else

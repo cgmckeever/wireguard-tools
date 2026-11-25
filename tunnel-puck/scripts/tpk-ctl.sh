@@ -14,11 +14,15 @@
 #   tpk-ctl.sh [<puck>] init                1.4, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
 #   tpk-ctl.sh [<puck>] vps add <vps>       2.1: serve a VPS: configs/<puck>.<vps>.conf, then link, exit and test
 #   tpk-ctl.sh [<puck>] vps [list]          the VPSes the puck serves: routing, link, interfaces, jumps
-#   tpk-ctl.sh [<puck>] vps remove <vps>    stop serving one: its jumps, its link on both ends, its settings file
+#   tpk-ctl.sh [<puck>] vps remove <vps>    stop serving one: its configs and jumps (wgt), its link, its settings file
 #   tpk-ctl.sh [<puck>[.<vps>]] link        the link to the VPS (puck and VPS), keys exchanged for you
 #   tpk-ctl.sh [<puck>[.<vps>]] exit        by TPK_ROUTING: tpk's DNS resolver, or the wgt jump(s)
 #   tpk-ctl.sh [<puck>[.<vps>]] client <device> [lan]   2.2, TPK_ROUTING=wgt: a config for <device> through the puck (lan: the LAN jump)
 #   tpk-ctl.sh [<puck>[.<vps>]] lan-mode isolated|lan [<interface>]   2.3: switch LAN mode (default: wgpk<n> or wgrtun<n>)
+#   tpk-ctl.sh [<puck>[.<vps>]] disable [<device>]   the puck's clients (or one device's) on each VPS, or that one, off;
+#                                           links, keys and configs stay
+#   tpk-ctl.sh [<puck>[.<vps>]] enable [<device>]    let back in what disable turned off
+#   tpk-ctl.sh [<puck>[.<vps>]] status      at a glance: the puck, and per VPS its link, rtun, jump and configs
 #   tpk-ctl.sh [<puck>] wifi [list]         the puck's saved Wi-Fi networks, and its uplink now
 #   tpk-ctl.sh [<puck>] wifi add <name>     save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all   remove saved Wi-Fi (all: ethernet only)
@@ -41,14 +45,14 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 CONFIGS=$(cd "$HERE/../configs" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
-COMMANDS="new config ssh-config init vps link exit client lan-mode wifi test ssh reboot shutdown all undo"
+COMMANDS="new config ssh-config init vps link exit client lan-mode disable enable status wifi test ssh reboot shutdown all undo"
 # Cloudflare's trace (ip=... lines), as wgt's jump test uses (wgt/const.py TRACE_URL).
 TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 # The remote prefix that runs a command as root (sudo unless already root).
 AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
 # The settings in a configs/<puck>.<vps>.conf.
 VPS_VARS="TPK_ROUTING PUCK_PORT TPK_LINK VPS_SSH VPS_HOST CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET
-          WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL"
+          WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL TPK_DISABLED TPK_DISABLED_CONFIGS"
 
 
 # --- Small helpers -------------------------------------------------------------
@@ -319,7 +323,7 @@ choose_wgt_server() {
 
 # The settings puck.sh and vps.sh read, as sh assignments (sent ahead of ids.sh and the script).
 vars() {
-    for s in PUCK_NAME TPK_LINK TPK_LINK_AVOID VPS_HOST PUCK_PORT TPK_ROUTING WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS \
+    for s in PUCK_NAME TPK_LINK TPK_LINK_AVOID VPS_HOST PUCK_PORT TPK_ROUTING TPK_DISABLED WG_IF JUMP_CODE JUMP_LAN_CODE CLIENT_IPS \
              CLIENT_IP6S WG_SUBNET SSH_CLOUDFLARE PUCK_PUBKEY VPS_PUBKEY CF_TOKEN WIFI_SSID WIFI_PSK WIFI_LIST; do
         eval "val=\${$s}"
         printf '%s=%s\n' "$s" "$(q "$val")"
@@ -856,6 +860,7 @@ cmd_client() {
     if [ "${2:-}" = lan ]; then code="$JUMP_LAN_CODE"; [ -n "$code" ] || die "no LAN jump: set JUMP_LAN=\"yes\" in $CONF, then tpk-ctl.sh $PUCK_NAME.$VPS_NAME exit"; fi
     confirm_vps "wgt client add $device --exit $code"
     wgt_vps client add "$device" --exit "$code" --warp off --no-qr --yes
+    [ "$TPK_DISABLED" != yes ] || log "note: $VPS_NAME is disabled, but this new config works now (disable again to turn it off too)"
     log "made $code.$device on $VPS_NAME; wgt-ctl put it in ~/wg-tunnels/devices/$device/config/ (or: bin/wgt-ctl $WGT_SERVER client show $code.$device --qr)"
 }
 
@@ -897,6 +902,8 @@ test_vps() {
     if [ -z "$LINK_NET" ]; then
         printf 'FAIL  no link to %s yet (tpk-ctl.sh %s.%s link)\n' "$VPS_NAME" "$PUCK_NAME" "$VPS_NAME"; return 1
     fi
+    [ "$TPK_DISABLED" != yes ] || printf 'INFO  %s is disabled: its clients of the puck are off%s (tpk-ctl.sh %s.%s enable)\n' \
+        "$VPS_NAME" "${TPK_DISABLED_CONFIGS:+ ($TPK_DISABLED_CONFIGS)}" "$PUCK_NAME" "$VPS_NAME"
     log "puck: the link to $VPS_NAME ($PK_IF)"
     run puck puck.sh test-link || rc_v=1
     log "VPS $VPS_NAME ($VPS_SSH)"
@@ -908,25 +915,145 @@ test_vps() {
     return "$rc_v"
 }
 
-# undo_vps: take the loaded VPS's part away: its jumps, its link on both ends.
-undo_vps() {
-    route_around "$VPS_NAME"
-    killswitch=""; [ "$TPK_ROUTING" != tpk ] || killswitch=" and its kill switch"
-    confirm_vps "remove the link $LINK_IF$killswitch"
-    if [ "$TPK_ROUTING" = wgt ] && [ -n "$LINK_NET" ]; then
-        log "$VPS_NAME: removing the wgt jump(s). wgt refuses while configs use them: remove those first (bin/wgt-ctl $WGT_SERVER client remove <code>.<device>)"
-        for pair in "$JUMP_CODE isolated" "$JUMP_LAN_CODE lan"; do
-            # shellcheck disable=SC2086
-            set -- $pair; [ $# -eq 2 ] || continue    # no LAN jump
-            case "$(jump_owner "$1" "$(jump_port "$2")")" in
-                none) continue ;;    # already gone
-                ours) wgt_vps jump remove "$1" --yes || die "wgt jump remove $1 failed; nothing else was removed" ;;
-                *) log "leaving jump '$1': it isn't this puck's" ;;
-            esac
-        done
+# jump_configs <code>...: the VPS's client configs whose exit is one of these jumps
+# (wgt client list --tsv: the config's name, then its exit).
+jump_configs() {
+    wgt_vps client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $* " 'index(codes, " " $2 " ") {print $1}'
+}
+# jump_configs_on <code>...: the same, without the ones disabled already (the 4th
+# column, last seen, says "disabled").
+jump_configs_on() {
+    wgt_vps client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $* " 'index(codes, " " $2 " ") && $4 != "disabled" {print $1}'
+}
+
+# The puck's configs on the loaded VPS that disable turned off are kept in
+# TPK_DISABLED_CONFIGS, so enable turns back on just those (not one you turned off
+# yourself with wgt). TPK_DISABLED=yes: disable without a device, the whole VPS.
+off_add() { TPK_DISABLED_CONFIGS=$(words "$(printf '%s\n' $TPK_DISABLED_CONFIGS "$@" | grep . | awk '!seen[$0]++')"); save TPK_DISABLED_CONFIGS "$TPK_DISABLED_CONFIGS"; }
+off_drop() { TPK_DISABLED_CONFIGS=$(words "$(printf '%s\n' $TPK_DISABLED_CONFIGS | grep -vxF -- "$1" || true)"); save TPK_DISABLED_CONFIGS "$TPK_DISABLED_CONFIGS"; }
+
+# of_device <device> <names...>: those that are the device's configs on the puck's jumps.
+of_device() {
+    d="$1"; shift
+    for n in "$@"; do
+        for code in $JUMP_CODE $JUMP_LAN_CODE; do [ "$n" != "$code.$d" ] || echo "$n"; done
+    done
+}
+
+# cmd_disable [<device>]: the loaded VPS's clients of the puck (or that device's
+# configs) off; the puck, its link and its rtun stay up (test still passes), and
+# nothing is deleted. wgt: wgt client disable (keys and address kept). tpk: the
+# whole VPS only: the link is rebuilt without CLIENT_IPS's routing, so the kill
+# switch blocks them.
+cmd_disable() {
+    device="${1:-}"
+    vps_config >/dev/null
+    need_link_here
+    if [ "$TPK_ROUTING" = tpk ]; then
+        [ -z "$device" ] || die "one device at a time needs TPK_ROUTING=wgt; with tpk, take its address out of CLIENT_IPS (in $CONF) and run link"
+        if [ "$TPK_DISABLED" = yes ]; then log "$VPS_NAME is disabled already"; return 0; fi
+        confirm_vps "disable: no routing to the puck for $CLIENT_IPS (the kill switch blocks them)"
+        if [ -n "$DRY" ]; then log "[dry-run] would save TPK_DISABLED=\"yes\" and rebuild the link"; return 0; fi
+        save TPK_DISABLED yes; TPK_DISABLED=yes
+        cmd_link
+        log "$VPS_NAME disabled: its puck-exit clients get no internet (tpk-ctl.sh $PUCK_NAME.$VPS_NAME enable)"
+        return 0
     fi
-    run vps vps.sh undo
-    if [ -n "$LINK_NET" ]; then run puck puck.sh undo-link; fi
+    if [ -z "$device" ] && [ "$TPK_DISABLED" = yes ]; then log "$VPS_NAME is disabled already${TPK_DISABLED_CONFIGS:+ ($TPK_DISABLED_CONFIGS)}"; return 0; fi
+    # shellcheck disable=SC2086
+    names=$(jump_configs_on $JUMP_CODE $JUMP_LAN_CODE)
+    # shellcheck disable=SC2086
+    [ -z "$device" ] || names=$(of_device "$device" $names)
+    names=$(words "$names")
+    if [ -n "$device" ] && [ -z "$names" ] && [ -z "$DRY" ]; then
+        log "$VPS_NAME: $device has no config on the puck's jump that's on (wgt client list)"; return 0
+    fi
+    confirm_vps "disable: wgt client disable ${names:-(no configs on the jump yet)}"
+    if [ -n "$DRY" ]; then log "[dry-run] would disable ${device:-the puck}'s configs on jump(s) $JUMP_CODE $JUMP_LAN_CODE"; return 0; fi
+    [ -n "$device" ] || save TPK_DISABLED yes
+    for c in $names; do
+        wgt_vps client disable "$c" --yes || die "wgt client disable $c failed; the ones before it are off and listed in TPK_DISABLED_CONFIGS"
+        off_add "$c"
+    done
+    log "$VPS_NAME: ${names:-nothing} off; the link and rtun stay up (tpk-ctl.sh $PUCK_NAME.$VPS_NAME enable${device:+ $device})"
+}
+
+# cmd_enable [<device>]: the reverse: what disable turned off (that device's, or all
+# of it) back on; tpk: the routing back.
+cmd_enable() {
+    device="${1:-}"
+    vps_config >/dev/null
+    need_link_here
+    if [ "$TPK_ROUTING" = tpk ]; then
+        [ -z "$device" ] || die "one device at a time needs TPK_ROUTING=wgt"
+        if [ "$TPK_DISABLED" != yes ]; then log "$VPS_NAME isn't disabled"; return 0; fi
+        confirm_vps "enable: routing to the puck for $CLIENT_IPS"
+        if [ -n "$DRY" ]; then log "[dry-run] would clear TPK_DISABLED and rebuild the link"; return 0; fi
+        save TPK_DISABLED ""; TPK_DISABLED=""
+        cmd_link
+        log "$VPS_NAME enabled"
+        return 0
+    fi
+    names="$TPK_DISABLED_CONFIGS"
+    # shellcheck disable=SC2086
+    [ -z "$device" ] || names=$(words "$(of_device "$device" $names)")
+    if [ -z "$names" ] && { [ -n "$device" ] || [ "$TPK_DISABLED" != yes ]; }; then
+        log "$VPS_NAME: nothing ${device:+of $device }that disable turned off"; return 0
+    fi
+    confirm_vps "enable: wgt client enable ${names:-(none were turned off)}"
+    if [ -n "$DRY" ]; then log "[dry-run] would enable $names"; return 0; fi
+    for c in $names; do
+        wgt_vps client enable "$c" --yes || die "wgt client enable $c failed; still off: $TPK_DISABLED_CONFIGS"
+        off_drop "$c"
+    done
+    [ -n "$device" ] || save TPK_DISABLED ""
+    log "$VPS_NAME: ${names:-nothing} back on"
+}
+
+# --- Status ----------------------------------------------------------------------
+
+# ago <seconds>: 45s, 12m, 3h.
+ago() {
+    case "$1" in
+        ''|*[!0-9]*) echo "$1" ;;
+        *) if [ "$1" -lt 120 ]; then echo "${1}s ago"; elif [ "$1" -lt 7200 ]; then echo "$(( $1 / 60 ))m ago"; else echo "$(( $1 / 3600 ))h ago"; fi ;;
+    esac
+}
+
+# cmd_status: at a glance, read-only and quick (no jump is brought up): the puck
+# (how it was reached, uplink, Wi-Fi, public IP), then per VPS whether it's
+# serving, the link's and rtun's last handshakes (from the puck), the jump's state
+# and the configs on it, with when each was last seen (from wgt). test says why.
+cmd_status() {
+    reset_vps
+    st=$(run puck puck.sh status 2>/dev/null || true)
+    get() { printf '%s\n' "$st" | sed -n "s/^$1=//p" | head -n 1; }
+    hs() { a=$(printf '%s\n' "$st" | awk -v i="$1" '$1 == "HS" && $2 == i {print $3}'); [ -n "$a" ] || a="missing"; ago "$a"; }
+    wifi=$(get WIFI)
+    printf '%s: via %s\n' "$PUCK_NAME" "$PUCK_VIA"
+    printf '  uplink %s, public IP %s, saved Wi-Fi: %s\n' "$(get UPLINK)" "$(get IP)" "${wifi:-none}"
+    names=$(the_vpses)
+    [ -n "$names" ] || { echo "  serves no VPS yet (tpk-ctl.sh $PUCK_NAME vps add <vps>)"; return 0; }
+    printf '%-10s %-9s %-20s %-21s %-26s %s\n' VPS STATE LINK RTUN JUMP CONFIGS
+    for v in $names; do
+        QUIET=1 load_vps "$v"
+        if [ -z "$LINK_NET" ]; then printf '%-10s %s\n' "$v" "no link yet (tpk-ctl.sh $PUCK_NAME.$v link)"; continue; fi
+        state=serving
+        if [ "$TPK_DISABLED" = yes ]; then state=disabled; elif [ -n "$TPK_DISABLED_CONFIGS" ]; then state=partly; fi
+        link="$PK_IF $(hs "$PK_IF")"
+        if [ "$TPK_ROUTING" = wgt ]; then
+            rtun="$RTUN_IF $(hs "$RTUN_IF")"
+            jump=$(wgt_vps jump list 2>/dev/null | awk -v c="$JUMP_CODE" '$1 == c' \
+                | grep -oE '(up, no WARP|partly up|idle|up)( \([0-9]+ active\))?' | head -n 1)
+            jump="$JUMP_CODE ${jump:-(not on $v)}"
+            # shellcheck disable=SC2086
+            configs=$(wgt_vps client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $JUMP_CODE $JUMP_LAN_CODE " \
+                'index(codes, " " $2 " ") {printf "%s%s (%s)", sep, $1, $4; sep = ", "}')
+        else
+            rtun="-" jump="-" configs="CLIENT_IPS: ${CLIENT_IPS:-none}"
+        fi
+        printf '%-10s %-9s %-20s %-21s %-26s %s\n' "$v" "$state" "$link" "$rtun" "$jump" "${configs:-none yet}"
+    done
 }
 
 
@@ -978,14 +1105,15 @@ cmd_vps_add() {
 cmd_vps_list() {
     names=$(vpses)
     if [ -z "$names" ]; then echo "$PUCK_NAME serves no VPS yet: tpk-ctl.sh $PUCK_NAME vps add <vps>"; return 0; fi
-    printf '%-12s %-8s %-24s %-15s %-26s %s\n' VPS ROUTING SERVER LINK "ON THE PUCK" JUMPS
+    printf '%-12s %-8s %-8s %-24s %-15s %-26s %s\n' VPS ROUTING STATE SERVER LINK "ON THE PUCK" JUMPS
     for v in $names; do
         ( QUIET=1; load_vps "$v" 2>/dev/null
           if [ "$TPK_ROUTING" = wgt ]; then server="$WGT_SERVER"; jumps=$(words "$JUMP_CODE $JUMP_LAN_CODE")
               ifs="$PK_IF $RTUN_IF"; [ -z "$JUMP_LAN_CODE" ] || ifs="$ifs $RTUN_LAN_IF"
           else server="$VPS_SSH"; jumps="-"; ifs="$PK_IF"; fi
           [ -n "$LINK_NET" ] || ifs="(no link yet)"
-          printf '%-12s %-8s %-24s %-15s %-26s %s\n' "$v" "$TPK_ROUTING" "$server" "${TPK_LINK:--}" "$ifs" "$jumps" ) \
+          state=serving; [ -z "$TPK_DISABLED_CONFIGS" ] || state=partly; [ "$TPK_DISABLED" != yes ] || state=disabled; [ -n "$LINK_NET" ] || state=-
+          printf '%-12s %-8s %-8s %-24s %-15s %-26s %s\n' "$v" "$TPK_ROUTING" "$state" "$server" "${TPK_LINK:--}" "$ifs" "$jumps" ) \
             || printf '%-12s (its settings file has a problem: tpk-ctl.sh %s.%s config)\n' "$v" "$PUCK_NAME" "$v"
     done
 }
@@ -997,6 +1125,7 @@ cmd_vps_remove() {
     load_vps "$1"
     pick_puck "$1"
     undo_vps
+    if [ -n "$DRY" ]; then log "[dry-run] would remove configs/$PUCK_NAME.$1.conf"; return 0; fi
     rm -f "$CONF"
     log "$PUCK_NAME no longer serves $1; removed configs/$PUCK_NAME.$1.conf"
 }
@@ -1014,6 +1143,14 @@ cmd_test() {
     elif [ "$rc" = 0 ]; then log "all tests passed"
     else log "some tests failed: see the README's Troubleshooting"; fi
     return "$rc"
+}
+
+# each_vps <function> [<args>]: run it for each VPS (or the one named), loaded in turn.
+each_vps() {
+    fn="$1"; shift
+    names=$(the_vpses)
+    [ -n "$names" ] || die "$PUCK_NAME serves no VPS yet: tpk-ctl.sh $PUCK_NAME vps add <vps>"
+    for v in $names; do load_vps "$v"; "$fn" "$@"; done
 }
 
 cmd_all() {
@@ -1067,6 +1204,8 @@ main() {
         exit) one_vps exit; pick_puck; cmd_exit ;;
         client) one_vps client; cmd_client "$@" ;;
         lan-mode) one_vps lan-mode; pick_puck; cmd_lan_mode "$@" ;;
+        disable|enable) pick_puck; each_vps "cmd_$cmd" "$@" ;;
+        status) pick_puck; cmd_status ;;
         wifi) pick_puck; cmd_wifi "$@" ;;
         test) pick_puck; cmd_test ;;
         ssh) pick_puck; cmd_ssh "$@" ;;

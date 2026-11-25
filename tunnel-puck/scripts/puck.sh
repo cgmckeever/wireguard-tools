@@ -21,6 +21,8 @@
 #   wifi-remove          remove the saved Wi-Fi network WIFI_SSID (all: every one)
 #   wifi-sync            make tunnel-puck's saved Wi-Fi match WIFI_LIST ("ssid::password"
 #                        lines, most preferred first): the first gets the highest priority
+#   status               the puck at a glance, as lines for tpk-ctl.sh status: UPLINK=, WIFI=,
+#                        IP=, then "HS <interface> <seconds since its handshake, or none>"
 #   test                 PASS/FAIL for the puck itself (cloudflared, uplink, Wi-Fi, public IP)
 #   test-link            PASS/FAIL for one link (TPK_LINK) and its rtuns
 #   undo-link            remove one link (TPK_LINK) and its rtuns
@@ -49,6 +51,7 @@ main() {
         wifi-add) do_wifi_add ;;
         wifi-sync) do_wifi_sync ;;
         wifi-remove) do_wifi_remove ;;
+        status) do_status ;;
         test) do_test ;;
         test-link) do_test_link ;;
         undo-link) do_undo_link ;;
@@ -431,6 +434,19 @@ do_test() {
     ip=$(curl -s -m 10 https://ifconfig.me || true)
     printf 'INFO  this network'"'"'s public IP: %s\n' "${ip:-unknown}"
     return "$FAILED"
+}
+
+# do_status: read-only, quick: no test traffic beyond one public-IP lookup.
+do_status() {
+    echo "UPLINK=$(uplink)"
+    if command -v nmcli >/dev/null; then echo "WIFI=$(wifi_conns | cut -d: -f1 | paste -sd, - | sed 's/,/, /g')"; fi
+    echo "IP=$(curl -4 -s -m 8 https://ifconfig.me || true)"
+    for f in "$WG"/wgpk*.conf "$WG"/wgrtun*.conf; do
+        [ -e "$f" ] || continue
+        ifc=$(basename "$f" .conf)
+        if ! ip link show "$ifc" >/dev/null 2>&1; then echo "HS $ifc down"
+        else age=$(handshake_age "$ifc"); if [ "$age" = 99999 ]; then echo "HS $ifc none"; else echo "HS $ifc $age"; fi; fi
+    done
 }
 
 # do_test_link: one link (TPK_LINK) and its rtuns.
