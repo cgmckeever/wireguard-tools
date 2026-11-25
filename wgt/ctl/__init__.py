@@ -92,8 +92,9 @@ def do_pull(s: Server, args: List[str]) -> int:
 
 def do_branch(s: Server, args: List[str]) -> int:
     """Switch its checkout to <branch>, then pull."""
-    if len(args) != 1 or not remote.BRANCH.match(args[0]):
+    if len(args) != 1:
         raise WgtError("usage: wgt-ctl <server> branch <branch>")
+    remote.check_branch(args[0])
     d = shlex.quote(s.dir)
     return remote.ssh(s.target, f"set -e; git -C {d} fetch -q; git -C {d} checkout -q {q(args[0])}; "
                          f"git -C {d} pull --ff-only -q; "
