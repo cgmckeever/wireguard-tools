@@ -6,11 +6,13 @@
 #   cat ids.sh vps.sh | TPK_CONF=/path/to/configs/<name>.conf PUCK_PUBKEY=<the puck's key> sh -s -- <step>
 #
 # Each puck on this VPS has its own link, wgpk-<name>, with its own subnet,
-# routing table and rules (ids.sh); a step touches only its own puck's. link picks
-# a free subnet (TPK_LINK) and UDP port (PUCK_PORT) when they're empty, and prints
-# them (LINK=, PORT=) for tpk-ctl.sh to save.
+# routing table and rules (ids.sh); a step touches only its own puck's.
 #
 # Steps (each is safe to run again):
+#   pick    choose the link's subnet (TPK_LINK) and UDP port (PUCK_PORT) where
+#           they're empty, and print them (LINK=, PORT=) for tpk-ctl.sh to save.
+#           The subnet is free here and isn't one in TPK_LINK_AVOID (the puck's
+#           links to other VPSes: on the puck they must differ too)
 #   link    the link to the puck (PUCK_PUBKEY needed). Prints PUBKEY=<the VPS's
 #           public key>. With TPK_ROUTING=tpk it also writes the routing for CLIENT_IPS
 #           and the kill switch
@@ -26,7 +28,7 @@ main() {
     umask 077
     [ "$(id -u)" = 0 ] || die "run as root"
     if [ -n "${TPK_CONF:-}" ]; then . "$TPK_CONF"; fi
-    : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf)}" "${TPK_LINK:=}" "${PUCK_PORT:=}"
+    : "${PUCK_NAME:=$(basename "${TPK_CONF:-puck}" .conf)}" "${TPK_LINK:=}" "${PUCK_PORT:=}" "${TPK_LINK_AVOID:=}"
     link_ids
     KILL="/usr/local/sbin/$KILL_NAME" KILL_UNIT="/etc/systemd/system/$KILL_NAME.service"
     : "${TPK_ROUTING:=tpk}" "${PUCK_PUBKEY:=}" "${CLIENT_IPS:=}" "${CLIENT_IP6S:=}" "${WG_SUBNET:=}"
@@ -34,6 +36,7 @@ main() {
     case "$WG_IF" in ''|*[!A-Za-z0-9_.-]*) die "WG_IF must be an interface name" ;; esac
     case "$TPK_ROUTING" in tpk|wgt) ;; *) die "TPK_ROUTING must be tpk or wgt" ;; esac
     case "${1:-}" in
+        pick) pick_link; pick_port ;;
         link) do_link ;;
         test) do_test ;;
         undo) do_undo ;;
@@ -94,7 +97,7 @@ link_users() {
 }
 
 # pick_link: TPK_LINK, if empty: this link's own (if it exists), else the first
-# /30 in 10.99.0.0/24 that nothing here uses.
+# /30 in 10.99.0.0/24 that nothing here uses and isn't in TPK_LINK_AVOID.
 pick_link() {
     [ -z "$TPK_LINK" ] || return 0
     own=$(sed -n 's|^Address *= *10\.99\.0\.\([0-9]*\)/30$|\1|p' "$WG/$LINK_IF.conf" 2>/dev/null | head -n 1)
@@ -102,10 +105,13 @@ pick_link() {
     else
         host=0
         while [ "$host" -le 252 ]; do
-            [ -n "$(link_users "10.99.0.$((host + 1))" "10.99.0.$((host + 2))")" ] || break
+            case " $TPK_LINK_AVOID " in
+                *" 10.99.0.$host/30 "*) ;;    # the puck's link to another VPS
+                *) [ -n "$(link_users "10.99.0.$((host + 1))" "10.99.0.$((host + 2))")" ] || break ;;
+            esac
             host=$((host + 4))
         done
-        [ "$host" -le 252 ] || die "every /30 in 10.99.0.0/24 is in use here"
+        [ "$host" -le 252 ] || die "every /30 in 10.99.0.0/24 is in use here (or by the puck's other links)"
         TPK_LINK="10.99.0.$host/30"
         log "picked TPK_LINK=$TPK_LINK"
     fi

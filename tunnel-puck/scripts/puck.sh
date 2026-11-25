@@ -8,20 +8,23 @@
 # Steps (each is safe to run again):
 #   init                 packages, automatic updates, watchdog; cloudflared too when
 #                        CF_TOKEN is set (tpk-ctl.sh sends it when SSH_CLOUDFLARE is set)
-#   link                 WireGuard and the wgpk link to the VPS. Prints PUBKEY=<the puck's
-#                        public key>; with VPS_PUBKEY set it also writes and starts wgpk
-#   jump isolated|lan    TPK_ROUTING=wgt: the reverse tunnel (wgrtun, or wgrtunlan for lan). Prints
-#                        JUMPFILE=<path> when it made a new jump file, else JUMP=exists
+#   link                 WireGuard and the link to one VPS, wgpk<n> (n from TPK_LINK: ids.sh).
+#                        Prints PUBKEY=<the puck's public key>; with VPS_PUBKEY set it also
+#                        writes and starts wgpk<n>
+#   jump isolated|lan    TPK_ROUTING=wgt: that link's reverse tunnel (wgrtun<n>, or wgrtunlan<n>
+#                        for lan). Prints JUMPFILE=<path> when it made a new jump file, else JUMP=exists
 #   jump-done isolated|lan   delete the jump file once the VPS has it
-#   dns                  TPK_ROUTING=tpk: the DNS resolver for puck-exit clients
+#   dns                  TPK_ROUTING=tpk: the DNS resolver for that link's puck-exit clients
 #   lan-mode <interface> isolated|lan   switch an exit interface's LAN mode (2.3)
 #   wifi-list            the saved Wi-Fi networks, and which one is in use
 #   wifi-add             save the Wi-Fi network WIFI_SSID (password WIFI_PSK; empty: open)
 #   wifi-remove          remove the saved Wi-Fi network WIFI_SSID (all: every one)
 #   wifi-sync            make tunnel-puck's saved Wi-Fi match WIFI_LIST ("ssid::password"
 #                        lines, most preferred first): the first gets the highest priority
-#   test                 PASS/FAIL for everything set up so far
-#   undo [all]           remove the WireGuard parts (all: cloudflared too)
+#   test                 PASS/FAIL for the puck itself (cloudflared, uplink, Wi-Fi, public IP)
+#   test-link            PASS/FAIL for one link (TPK_LINK) and its rtuns
+#   undo-link            remove one link (TPK_LINK) and its rtuns
+#   undo [all]           remove every link and the shared parts (all: cloudflared too)
 #
 # Logs go to stderr; only results meant for tpk-ctl.sh (PUBKEY=, JUMPFILE=) go to stdout.
 
@@ -47,6 +50,8 @@ main() {
         wifi-sync) do_wifi_sync ;;
         wifi-remove) do_wifi_remove ;;
         test) do_test ;;
+        test-link) do_test_link ;;
+        undo-link) do_undo_link ;;
         undo) do_undo "${1:-}" ;;
         *) die "unknown step '$step' (see the top of puck.sh)" ;;
     esac
@@ -171,28 +176,28 @@ EOF
     else
         log "no NetworkManager: after the puck changes networks, reboot it so the exit follows"
     fi
-    echo "PUBKEY=$(keypair wgpk)"
+    need_link
+    echo "PUBKEY=$(keypair "$PK_IF")"
     if [ -z "$VPS_PUBKEY" ]; then
-        log "keys ready; wgpk is written once VPS_PUBKEY is known (tpk-ctl.sh link does this)"
+        log "keys ready; $PK_IF is written once VPS_PUBKEY is known (tpk-ctl.sh link does this)"
         return 0
     fi
     need VPS_HOST PUCK_PORT
-    need_link
 
     exit_lines=""
     if [ "$TPK_ROUTING" = tpk ]; then
         [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpk-ctl.sh link installs it)"
-        mode=$(current_mode wgpk)
+        mode=$(current_mode "$PK_IF")
         exit_lines="PostUp = $EXIT_SCRIPT up %i $mode
 PostDown = $EXIT_SCRIPT down %i"
     fi
     CHANGED=0
-    put 600 "$WG/wgpk.conf" <<EOF
-# tunnel-puck: the link to the VPS (written by puck.sh link)
+    put 600 "$WG/$PK_IF.conf" <<EOF
+# tunnel-puck: the link to the VPS $VPS_HOST (written by puck.sh link)
 [Interface]
 Address = $PUCK_LINK/30
 MTU = 1420
-PostUp = wg set %i private-key $WG/wgpk.key
+PostUp = wg set %i private-key $WG/$PK_IF.key
 $exit_lines
 
 [Peer]
@@ -202,23 +207,23 @@ Endpoint = $VPS_HOST:$PUCK_PORT
 AllowedIPs = $VPS_LINK/32
 PersistentKeepalive = 25
 EOF
-    start_or_restart wg-quick@wgpk
-    log "wgpk up; the first handshake can take a few seconds"
+    start_or_restart "wg-quick@$PK_IF"
+    log "$PK_IF up; the first handshake can take a few seconds"
 }
 
 # jump_vars isolated|lan: the names and addresses of that reverse tunnel: a
-# WireGuard server on the puck that the VPS reaches in through, over wgpk (wgt
-# calls it a jump).
+# WireGuard server on the puck that the VPS reaches in through, over its link
+# (wgt calls it a jump).
 jump_vars() {
+    need_link
     case "$1" in
-        isolated) JIF=wgrtun    JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=51822 JFILE=jump-for-vps.conf ;;
-        lan)      JIF=wgrtunlan JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=51823 JFILE=jump-for-vps-lan.conf ;;
+        isolated) JIF=$RTUN_IF     JADDR=$JUMP_NET.1/30 JPEER=$JUMP_NET.2 JPORT=$RTUN_PORT     JFILE=jump-for-vps$LINK_N.conf ;;
+        lan)      JIF=$RTUN_LAN_IF JADDR=$JUMP_NET.5/30 JPEER=$JUMP_NET.6 JPORT=$RTUN_LAN_PORT JFILE=jump-for-vps$LINK_N-lan.conf ;;
         *) die "jump needs isolated or lan" ;;
     esac
 }
 
 do_jump() {
-    need_link
     jump_vars "$1"
     [ -x "$EXIT_SCRIPT" ] || die "$EXIT_SCRIPT is missing (tpk-ctl.sh link installs it)"
     if [ -f "$WG/$JIF.conf" ] && [ "${TPK_RENEW:-}" != 1 ]; then
@@ -235,7 +240,7 @@ do_jump() {
     vps_pub=$(printf '%s\n' "$vps_key" | wg pubkey)
     CHANGED=0
     put 600 "$WG/$JIF.conf" <<EOF
-# tunnel-puck: the reverse tunnel, the VPS's way in over wgpk; a wgt jump (written by puck.sh jump $1)
+# tunnel-puck: the reverse tunnel, the VPS's way in over $PK_IF; a wgt jump (written by puck.sh jump $1)
 [Interface]
 Address = $JADDR
 ListenPort = $JPORT
@@ -255,7 +260,7 @@ PrivateKey = $vps_key
 Address = $JPEER/32
 
 [Peer]
-# tunnel-puck ($JIF), reached over wgpk
+# tunnel-puck ($JIF), reached over the link
 PublicKey = $server_pub
 Endpoint = $PUCK_LINK:$JPORT
 EOF
@@ -264,17 +269,24 @@ EOF
     echo "JUMPFILE=$WG/$JFILE"
 }
 
+# unbound: tunnel-puck.conf for the puck itself, and tunnel-puck-<n>.conf for each
+# tpk link's clients (their VPS redirects their port 53 to the puck's end of it).
+UNBOUND=/etc/unbound/unbound.conf.d/tunnel-puck
 do_dns() {
     need_link
     apt-get -y -q install unbound >/dev/null
     CHANGED=0
-    put 644 /etc/unbound/unbound.conf.d/tunnel-puck.conf <<EOF
-# tunnel-puck: answers DNS for puck-exit clients (the VPS redirects their port 53 here)
+    put 644 "$UNBOUND.conf" <<EOF
+# tunnel-puck: answers DNS for puck-exit clients (each link's: $UNBOUND-<n>.conf)
 server:
     interface: 127.0.0.1
-    interface: $PUCK_LINK
     ip-freebind: yes
     access-control: 127.0.0.0/8 allow
+EOF
+    put 644 "$UNBOUND-$LINK_N.conf" <<EOF
+# tunnel-puck: DNS for the puck-exit clients of $PK_IF
+server:
+    interface: $PUCK_LINK
     access-control: $LINK_NET allow
 EOF
     unbound-checkconf >/dev/null
@@ -285,7 +297,7 @@ do_lan_mode() {
     ifc="$1" mode="$2"
     case "$mode" in isolated|lan) ;; *) die "lan-mode <interface> isolated|lan" ;; esac
     grep -q "^PostUp = $EXIT_SCRIPT up %i " "$WG/$ifc.conf" 2>/dev/null \
-        || die "$ifc has no exit (it's wgpk with TPK_ROUTING=tpk, or wgrtun / wgrtunlan)"
+        || die "$ifc has no exit (it's wgpk<n> with TPK_ROUTING=tpk, or wgrtun<n> / wgrtunlan<n>)"
     sed -i "s|^PostUp = $EXIT_SCRIPT up %i .*|PostUp = $EXIT_SCRIPT up %i $mode|" "$WG/$ifc.conf"
     systemctl restart "wg-quick@$ifc"
     journalctl -q -u "wg-quick@$ifc" -n 20 --no-pager | grep 'tunnel-puck-exit:' | tail -n 1 >&2 || true
@@ -403,29 +415,14 @@ do_test() {
     elif [ -n "$SSH_CLOUDFLARE" ]; then
         fail "cloudflared isn't set up, but SSH_CLOUDFLARE is (tpk-ctl.sh init)"
     else
-        printf 'INFO  no cloudflared (SSH_CLOUDFLARE is empty): no emergency door if the link goes down\n'
+        printf 'INFO  no cloudflared (SSH_CLOUDFLARE is empty): no emergency door if the links go down\n'
     fi
-    if [ -f "$WG/wgpk.conf" ] && [ -z "$LINK_NET" ]; then
-        fail "wgpk exists but TPK_LINK is empty in this puck's settings (tpk-ctl.sh link fills it in)"
-    elif [ -f "$WG/wgpk.conf" ]; then
+    links=$(for f in "$WG"/wgpk*.conf; do [ -e "$f" ] && basename "$f" .conf; done | paste -sd' ' - || true)
+    if [ -n "$links" ]; then
         check "IP forwarding is on" "[ \"\$(sysctl -n net.ipv4.ip_forward)\" = 1 ]"
-        check "wgpk is up" "ip link show wgpk"
-        age=$(handshake_age wgpk)
-        if [ "$age" -lt 180 ]; then pass "wgpk handshake ${age}s ago"; else fail "wgpk has no recent handshake (is PUCK_PORT/udp open on the VPS?)"; fi
-        check "the VPS answers on the link (ping $VPS_LINK)" "ping -c 2 -W 2 $VPS_LINK"
+        printf 'INFO  links: %s\n' "$links"
     else
-        fail "wgpk isn't set up (tpk-ctl.sh link)"
-    fi
-    for ifc in wgrtun wgrtunlan; do
-        [ -f "$WG/$ifc.conf" ] || continue
-        check "$ifc is up ($(current_mode "$ifc"))" "ip link show $ifc"
-        age=$(handshake_age "$ifc")
-        if [ "$age" -lt 180 ]; then pass "$ifc handshake ${age}s ago"
-        else printf 'INFO  %s: no recent handshake (normal while no device uses the jump: wgt brings it up on demand)\n' "$ifc"; fi
-    done
-    if [ "$TPK_ROUTING" = tpk ] && [ -f "$WG/wgpk.conf" ]; then
-        check "wgpk runs the exit rules ($(current_mode wgpk))" "grep -q '^PostUp = $EXIT_SCRIPT up' $WG/wgpk.conf"
-        check "unbound answers on $PUCK_LINK" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -qF $PUCK_LINK"
+        printf 'INFO  no links yet (tpk-ctl.sh <puck> vps add <vps>)\n'
     fi
     if command -v nmcli >/dev/null; then
         wifi=$(wifi_conns | cut -d: -f1 | paste -sd, - | sed 's/,/, /g')
@@ -436,12 +433,48 @@ do_test() {
     return "$FAILED"
 }
 
-do_undo() {
-    for ifc in wgrtunlan wgrtun wgpk; do
-        systemctl disable -q --now "wg-quick@$ifc" 2>/dev/null || true
+# do_test_link: one link (TPK_LINK) and its rtuns.
+do_test_link() {
+    need_link
+    if [ ! -f "$WG/$PK_IF.conf" ]; then fail "$PK_IF isn't set up (tpk-ctl.sh link)"; return "$FAILED"; fi
+    check "$PK_IF is up" "ip link show $PK_IF"
+    age=$(handshake_age "$PK_IF")
+    if [ "$age" -lt 180 ]; then pass "$PK_IF handshake ${age}s ago"; else fail "$PK_IF has no recent handshake (is PUCK_PORT/udp open on the VPS?)"; fi
+    check "the VPS answers on the link (ping $VPS_LINK)" "ping -c 2 -W 2 $VPS_LINK"
+    for ifc in "$RTUN_IF" "$RTUN_LAN_IF"; do
+        [ -f "$WG/$ifc.conf" ] || continue
+        check "$ifc is up ($(current_mode "$ifc"))" "ip link show $ifc"
+        age=$(handshake_age "$ifc")
+        if [ "$age" -lt 180 ]; then pass "$ifc handshake ${age}s ago"
+        else printf 'INFO  %s: no recent handshake (normal while no device uses the jump: wgt brings it up on demand)\n' "$ifc"; fi
     done
-    rm -f "$WG"/wgpk.* "$WG"/wgrtun* "$WG"/jump-for-vps*.conf "$EXIT_SCRIPT" \
-          /etc/unbound/unbound.conf.d/tunnel-puck.conf /etc/sysctl.d/99-tunnel-puck.conf \
+    if [ "$TPK_ROUTING" = tpk ]; then
+        check "$PK_IF runs the exit rules ($(current_mode "$PK_IF"))" "grep -q '^PostUp = $EXIT_SCRIPT up' $WG/$PK_IF.conf"
+        check "unbound answers on $PUCK_LINK" "unbound-host -C /etc/unbound/unbound.conf -t A example.com || ss -Hlun 'sport = :53' | grep -qF $PUCK_LINK"
+    fi
+    return "$FAILED"
+}
+
+# do_undo_link: one link (TPK_LINK), its rtuns and its DNS.
+do_undo_link() {
+    need_link
+    for ifc in "$RTUN_LAN_IF" "$RTUN_IF" "$PK_IF"; do
+        systemctl disable -q --now "wg-quick@$ifc" 2>/dev/null || true
+        rm -f "$WG/$ifc.conf" "$WG/$ifc.key" "$WG/$ifc.pub"
+    done
+    rm -f "$WG/jump-for-vps$LINK_N.conf" "$WG/jump-for-vps$LINK_N-lan.conf"
+    if [ -f "$UNBOUND-$LINK_N.conf" ]; then rm -f "$UNBOUND-$LINK_N.conf"; systemctl restart unbound 2>/dev/null || true; fi
+    log "$PK_IF removed"
+}
+
+# do_undo [all]: every link, and what they share.
+do_undo() {
+    for f in "$WG"/wgrtun*.conf "$WG"/wgpk*.conf; do
+        [ -e "$f" ] || continue
+        systemctl disable -q --now "wg-quick@$(basename "$f" .conf)" 2>/dev/null || true
+    done
+    rm -f "$WG"/wgpk* "$WG"/wgrtun* "$WG"/jump-for-vps*.conf "$EXIT_SCRIPT" \
+          "$UNBOUND".conf "$UNBOUND"-*.conf /etc/sysctl.d/99-tunnel-puck.conf \
           /etc/systemd/system/wg-quick@.service.d/tunnel-puck-retry.conf "$DISPATCHER"
     systemctl restart unbound 2>/dev/null || true
     if [ "${1:-}" = all ]; then

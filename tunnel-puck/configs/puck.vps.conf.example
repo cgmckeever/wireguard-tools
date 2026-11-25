@@ -1,0 +1,44 @@
+# tunnel-puck settings for one VPS a puck serves: configs/<puck>.<vps>.conf (git
+# ignores that name). scripts/tpk-ctl.sh <puck> vps add <vps> makes it: for a
+# wgt-ctl server of that name it fills in TPK_ROUTING="wgt" and WGT_SERVER and
+# carries on; for any other name it stops so you can fill in the tpk block. <vps>
+# is a-z, 0-9 and -, starting with a letter (not "wifi"). Shell syntax: NAME="value".
+# Commands for this VPS alone: tpk-ctl.sh <puck>.<vps> <command>.
+
+# What sends clients into the puck:
+#   tpk: tunnel-puck's own rules, on any WireGuard VPS. Fill in the tpk block.
+#   wgt: the VPS runs wgt (the wireguard-tools in this repository); the puck
+#        becomes a wgt jump, and the VPS is driven through wgt-ctl. Fill in the
+#        wgt block.
+TPK_ROUTING="tpk"
+
+PUCK_PORT=""                        # the link's UDP port on the VPS. Empty: link picks a free one (from 51821) and saves it here. 443, if free, is rarely filtered
+# The link's subnet, a /30 in 10.99.0.0/24. Leave it empty: link picks one that's
+# free on the VPS and among the puck's other links, and saves it here. The puck's
+# interfaces for this VPS are named from it (the n-th /30: wgpk<n>, wgrtun<n>).
+# Never change it once set.
+TPK_LINK=""
+
+# TPK_ROUTING="tpk" only
+VPS_SSH="root@vps.example.com"      # how ssh reaches the VPS: root, or a user with passwordless sudo
+VPS_HOST="vps.example.com"          # the VPS's public name or IP, as the puck dials it
+CLIENT_IPS=""                       # the clients that exit via the puck: space-separated IPv4 addresses, as in each client's config
+CLIENT_IP6S=""                      # their IPv6 addresses, if any (blocked: the link is IPv4 only)
+WG_IF="wg0"                         # the WireGuard interface those clients connect to on the VPS
+WG_SUBNET=""                        # leave empty (it means every subnet WG_IF is on)
+
+# TPK_ROUTING="wgt" only
+# The VPS's name in wgt-ctl's list (`bin/wgt-ctl list`). Its ssh target and
+# address come from that list. Empty: this file's <vps>, if wgt-ctl lists it,
+# else tpk-ctl.sh asks, offering the listed servers or a new one (bin/wgt-ctl
+# init), and saves the answer here.
+WGT_SERVER=""
+# Jump codes are wgt's: 2-6 of a-z 0-9 -. Empty, they're made from the puck's
+# name, shortened to fit (grandma: grandm, LAN gran-l); tpk-ctl.sh config shows
+# them. A code the VPS already uses for something else is refused. Codes are per
+# VPS, so the same puck has the same code on each.
+JUMP_CODE=""                        # the puck's jump on the VPS; empty: the puck's name (6 at most)
+JUMP_LABEL=""                       # a label for it, e.g. "Friend's house"; empty: the puck's name
+JUMP_LAN=""                         # yes: a second jump in LAN mode (2.3), its code the jump's with -l (mom: mom-l)
+JUMP_LAN_CODE=""                    # or name the LAN jump yourself (this also turns it on)
+JUMP_LAN_LABEL=""                   # empty: the jump's label with " (LAN)"

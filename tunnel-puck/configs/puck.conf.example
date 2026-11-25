@@ -1,57 +1,25 @@
-# tunnel-puck settings for one puck. Make yours with scripts/tpk-ctl.sh new (or copy
-# this file to configs/<name>.conf; git ignores that name) and fill it in. The
-# name is the puck's: up to 10 of a-z, 0-9 and -, starting with a letter, e.g.
-# configs/home.conf. Shell syntax: NAME="value". scripts/tpk-ctl.sh reads it on
-# your computer: tpk-ctl.sh <name> <command> (the name can be left out while
-# there's only one). No secrets go in here: the Cloudflare token stays in its own
-# file.
+# tunnel-puck settings for one puck: the puck itself. Make yours with
+# scripts/tpk-ctl.sh new (or copy this file to configs/<name>.conf; git ignores that
+# name) and fill it in. The name is the puck's: up to 10 of a-z, 0-9 and -,
+# starting with a letter, e.g. configs/home.conf. Shell syntax: NAME="value".
+# scripts/tpk-ctl.sh reads it on your computer: tpk-ctl.sh <name> <command> (the name
+# can be left out while there's only one). No secrets go in here: the Cloudflare
+# token stays in its own file.
+#
+# Each VPS the puck serves has its own file, configs/<name>.<vps>.conf
+# (puck.vps.conf.example): tpk-ctl.sh <name> vps add <vps> makes it. The Wi-Fi
+# list, if any, is configs/<name>.wifi.conf (puck.wifi.conf.example).
 
-# --- The puck ------------------------------------------------------------------
 # tpk-ctl.sh reaches the puck the first way that answers, and says which it used:
 #   1. SSH_LAN, on your home network while you build it
-#   2. through the VPS over the WireGuard link, the everyday way after drop-off
-#   3. SSH_CLOUDFLARE, the emergency door (below), when the link is down
+#   2. through each VPS over its WireGuard link, the everyday way after drop-off
+#   3. SSH_CLOUDFLARE, the emergency door (below), when the links are down
 SSH_LAN="pi@tunnel-puck.local"      # user@name of the puck on your home network (the user and hostname set when flashing it)
 
 # Optional: the emergency door. SSH through a Cloudflare Tunnel, which doesn't
-# depend on the WireGuard link, so you can still get in and fix the puck when the
-# link is down (a blocked port, a changed VPS IP, a bad change). Costs a domain
-# on Cloudflare and step 1.3. Empty: no Cloudflare; if the link is down after
+# depend on the WireGuard links, so you can still get in and fix the puck when
+# they're down (a blocked port, a changed VPS IP, a bad change). Costs a domain on
+# Cloudflare and step 1.3. Empty: no Cloudflare; if the links are down after
 # drop-off, the puck must be power-cycled, or brought home.
 SSH_CLOUDFLARE=""                   # e.g. ssh.puck.example.com, a hostname on your Cloudflare domain
 CF_TOKEN_FILE="$HOME/.config/tunnel-puck/cloudflared.token"    # with SSH_CLOUDFLARE: the tunnel token alone, mode 600
-
-# --- The VPS and routing -------------------------------------------------------
-# What sends clients into the puck:
-#   tpk: tunnel-puck's own rules, on any WireGuard VPS. Fill in the tpk block.
-#   wgt: the VPS runs wgt (the wireguard-tools in this repository); the puck
-#        becomes a wgt jump, and the VPS is driven through wgt-ctl. Fill in the
-#        wgt block.
-TPK_ROUTING="tpk"
-
-PUCK_PORT=""                        # the link's UDP port on the VPS. Empty: link picks a free one (from 51821) and saves it here. 443, if free, is rarely filtered
-# The link's subnet on the VPS, a /30 in 10.99.0.0/24. Leave it empty: link picks
-# one nothing on the VPS uses and saves it here. Never change it once set.
-TPK_LINK=""
-
-# TPK_ROUTING="tpk" only
-VPS_SSH="root@vps.example.com"      # how ssh reaches the VPS: root, or a user with passwordless sudo
-VPS_HOST="vps.example.com"          # the VPS's public name or IP, as the puck dials it
-CLIENT_IPS=""                       # the clients that exit via the puck: space-separated IPv4 addresses, as in each client's config
-CLIENT_IP6S=""                      # their IPv6 addresses, if any (blocked: the link is IPv4 only)
-WG_IF="wg0"                         # the WireGuard interface those clients connect to on the VPS
-WG_SUBNET=""                        # leave empty (it means every subnet WG_IF is on)
-
-# TPK_ROUTING="wgt" only
-# The VPS's name in wgt-ctl's list (`bin/wgt-ctl list`). Its ssh target and
-# address come from that list. Empty: tpk-ctl.sh asks, offering the listed
-# servers or a new one (bin/wgt-ctl init), and saves the answer here.
-WGT_SERVER=""
-# Jump codes are wgt's: 2-6 of a-z 0-9 -. Empty, they're made from the puck's
-# name, shortened to fit (grandma: grandm, LAN gran-l); tpk-ctl.sh config shows
-# them. A code the VPS already uses for something else is refused.
-JUMP_CODE=""                        # the puck's jump on the VPS; empty: the puck's name (6 at most)
-JUMP_LABEL=""                       # a label for it, e.g. "Friend's house"; empty: the puck's name
-JUMP_LAN=""                         # yes: a second jump in LAN mode (2.3), its code the jump's with -l (mom: mom-l)
-JUMP_LAN_CODE=""                    # or name the LAN jump yourself (this also turns it on)
-JUMP_LAN_LABEL=""                   # empty: the jump's label with " (LAN)"
