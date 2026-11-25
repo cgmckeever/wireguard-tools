@@ -480,7 +480,7 @@ do_undo_link() {
         systemctl disable -q --now "wg-quick@$ifc" 2>/dev/null || true
         rm -f "$WG/$ifc.conf" "$WG/$ifc.key" "$WG/$ifc.pub"
     done
-    rm -f "$WG/jump-for-vps$LINK_N.conf" "$WG/jump-for-vps$LINK_N-lan.conf"
+    for m in isolated lan; do jump_vars "$m"; rm -f "$WG/$JFILE"; done
     if [ -f "$UNBOUND-$LINK_N.conf" ]; then rm -f "$UNBOUND-$LINK_N.conf"; systemctl restart unbound 2>/dev/null || true; fi
     log "$PK_IF removed"
 }
