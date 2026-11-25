@@ -1,4 +1,4 @@
-# tunnel-puck: a small computer as a residential exit
+# tunnel-puck: A Small Computer as a Residential Exit
 
 Put a **puck**, a small single-board computer (SBC) like a Raspberry Pi, on a
 friend's home network, and chosen clients of your WireGuard gateway get, through
@@ -27,7 +27,7 @@ and a network (Wi-Fi or ethernet).
 One puck can serve several gateways, each over its own link
 ([One puck, several gateways](#one-puck-several-gateways)).
 
-## How it works
+## How It Works
 
 Your clients still connect to your gateway. The ones you choose get a config of
 their own for it (with `tpk` routing, their address is listed instead), and the
@@ -77,7 +77,7 @@ iPhone went through both. Still untested: the rest of phase 3 (fail closed, a
 DNS leak test), `tpk` routing and the Cloudflare door.
 Run it first on a gateway nobody else depends on.
 
-## Installation success
+## Installation Success
 
 1. A chosen client's public IP (`curl https://ifconfig.me`) is the residential
    (or other) IP of the network where the tunnel-puck sits.
@@ -95,7 +95,7 @@ Run it first on a gateway nobody else depends on.
 test 2, 2 is test 3, 3 is tests 5–8, 4 is test 9, 5 is test 10, and 6 is
 tests 1 and 6.
 
-## Two choices along the way
+## Two Choices Along the Way
 
 - **Routing, for each gateway:** how the gateway sends clients into the puck,
   tunnel-puck's own rules (`tpk`) or a wgt jump (`wgt`). Chosen when you add
@@ -103,7 +103,7 @@ tests 1 and 6.
 - **An emergency door (optional, recommended):** SSH to the puck through
   Cloudflare when its links are down ([1.2b](#12b-optional-the-emergency-door-cloudflare-browser)).
 
-## What you need
+## What You Need
 
 - **A puck:** a small single-board computer with wired ethernet, its storage
   (an SSD, or an SD card) and a power supply. What tunnel-puck needs from it:
@@ -143,7 +143,7 @@ tests 1 and 6.
   Zero Trust account (free; signing up may ask for a card), and `cloudflared`
   on your computer (macOS: `brew install cloudflared`).
 
-## How to read this
+## How to Read This
 
 - **One command does the work:** `scripts/tpk-ctl.sh`, run on your computer in
   this folder. It ssh-es to the puck and the gateway and runs `puck.sh` and `gateway.sh`
@@ -177,7 +177,7 @@ tests 1 and 6.
 | **[Browser]** | the Cloudflare dashboard |
 | **[Hands]** | something physical: flashing, plugging in, a phone hotspot |
 
-### For an AI agent following this
+### For an AI Agent Following This
 
 - **Ask before touching the gateway.** `gateway add`, `gateway remove`, `link`, `all`,
   `client`, `disable`, `enable`, `undo`, and `exit` with `TPK_ROUTING=wgt`
@@ -205,9 +205,9 @@ tests 1 and 6.
 
 ---
 
-# Phase 1: puck config
+# Phase 1: Puck Config
 
-## 1.1 Flash the puck **[Hands]**
+## 1.1 Flash the Puck **[Hands]**
 
 On a Raspberry Pi: with Raspberry Pi Imager, write the OS from
 [What you need](#what-you-need). (Another board: its Debian image, set up the
@@ -219,12 +219,12 @@ home, on ethernet.
 
 **Check [Computer]:** `ssh pi@tunnel-puck.local true` (your user and hostname) works with no password prompt.
 
-## 1.2 Set up the puck **[Computer]**
+## 1.2 Set Up the Puck **[Computer]**
 
 Three parts, in this order: the settings, the emergency door if you want one
 (its token is a setting, and `init` installs it), then the check and `init`.
 
-### 1.2a Fill in the settings
+### 1.2a Fill in the Settings
 
 Each puck gets a settings file named for it, in `configs/` (git ignores them).
 The name is up to 10 characters of `a-z`, `0-9` and `-`, starting with a
@@ -245,7 +245,7 @@ Fill it in (each line has a comment):
 | `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.2b](#12b-optional-the-emergency-door-cloudflare-browser) |
 | `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.2b](#12b-optional-the-emergency-door-cloudflare-browser) (the default is fine) |
 
-### 1.2b [Optional] The emergency door: Cloudflare **[Browser]**
+### 1.2b [Optional] The Emergency Door: Cloudflare **[Browser]**
 
 **Recommended.** Normally you reach the puck through a gateway, over its link
 (with several gateways, any of them). That fails exactly when the links are down
@@ -274,7 +274,7 @@ menus now and then; follow the nearest match.
 3. **Access → Applications → Add an application → Self-hosted**, for
    `SSH_CLOUDFLARE`, with one **Allow** policy: *Emails* = your email.
 
-### 1.2c Check and init
+### 1.2c Check and Init
 
 ```sh
 scripts/tpk-ctl.sh config        # the settings: ends with "settings look complete"
@@ -296,11 +296,11 @@ then a shell.
 
 ---
 
-# Phase 2: tunnel config
+# Phase 2: Tunnel Config
 
 The puck stays at home for this phase.
 
-## 2.1 Serve a gateway **[Computer]**
+## 2.1 Serve a Gateway **[Computer]**
 
 **Choose the routing:** how this gateway sends clients into the puck. Pick the
 row that matches it:
@@ -384,12 +384,12 @@ the jump up and traces through it without WARP, and the IP it sees must be the
 puck's own (`PASS  clients exit from the puck's network: <IP>`).
 
 
-## 2.2 Device configs
+## 2.2 Device Configs
 
 Each device that should reach the puck needs a WireGuard config. How you
 make it depends on your routing.
 
-### With `TPK_ROUTING=tpk`: by hand **[Gateway]**, then **[Computer]**
+### With `TPK_ROUTING=tpk`: By Hand **[Gateway]**, then **[Computer]**
 
 tunnel-puck makes no client configs: you do, on your gateway, however you normally
 make them. Then send them through the puck:
@@ -402,7 +402,7 @@ make them. Then send them through the puck:
 
 To add or remove a device later, edit `CLIENT_IPS` and run `link` again.
 
-### With `TPK_ROUTING=wgt`: tpk-ctl.sh makes them **[Computer]**
+### With `TPK_ROUTING=wgt`: tpk-ctl.sh Makes Them **[Computer]**
 
 The puck is a wgt jump on the gateway, coded `JUMP_CODE` (`<code>` below), which is
 the puck's name unless you set it. Each device gets a config named
@@ -515,12 +515,12 @@ when it moves (the LAN-only jump's routes once `exit` runs, above). It must not 
 LAN), with `, no internet` for `wgrtunlo<n>`. With `JUMP_LANONLY`, `scripts/tpk-ctl.sh test`
 shows `PASS  the LAN-only jump <code> sends the puck's LAN into it: 192.168.1.0/24`.
 
-## 2.4 [Optional] More pucks, more gateways
+## 2.4 [Optional] More Pucks, More Gateways
 
 Skip this with one puck and one gateway. Both directions combine: any number of
 pucks, each serving any of your gateways.
 
-### More than one tunnel-puck endpoint
+### More Than One tunnel-puck Endpoint
 
 One gateway can serve several pucks, say one at a friend's and one at your mom's.
 Each puck gets its own settings files, and `gateway add` leaves `TPK_LINK` and
@@ -558,7 +558,7 @@ routing:
   that puck's `CLIENT_IPS` only. A device that should switch between pucks needs a
   client config per puck on the gateway, each with its own address.
 
-### One puck, several gateways
+### One Puck, Several Gateways
 
 One puck can also serve several gateways: the clients of each come out at the
 friend's. Add them one at a time; each is a gateway settings file of its own, its
@@ -608,7 +608,7 @@ ig88         wgt      serving  ig88                     10.99.0.4/30    wgpk1 wg
   turn it off first. If you use it, turn it on last, just before drop-off.
 - **Updates:** `init` turned on automatic security updates.
 
-## 3.2 The away-from-home test **[Hands]**, then **[Computer]** and **[client]**
+## 3.2 The Away-from-Home Test **[Hands]**, then **[Computer]** and **[client]**
 
 Put the puck on a **phone hotspot**: like the friend's network, a NAT you don't
 control. Use a travel router on the hotspot with the puck's ethernet in it, a
@@ -636,7 +636,7 @@ is the hotspot's, which `tpk-ctl.sh test` prints.
 
 With several gateways, test 2 is worth running on a config of each.
 
-## 3.3 Survive a power cut **[Hands]**
+## 3.3 Survive a Power Cut **[Hands]**
 
 Unplug the puck and plug it back in.
 
@@ -648,7 +648,7 @@ network.
 
 # Phase 4: Final Preparation and Drop-off
 
-## 4.1 Network connectivity **[Computer]**
+## 4.1 Network Connectivity **[Computer]**
 
 By default the puck needs nothing here: plugged into the friend's router by
 ethernet, it gets its address by DHCP and works. That's the most reliable, and
@@ -708,7 +708,7 @@ in at all, bring the puck home to change it.
 
 ---
 
-# Day to day
+# Day to Day
 
 - **Add or remove a `tpk` client:** edit `CLIENT_IPS` (and `CLIENT_IP6S`) in
   that gateway's settings file, then `scripts/tpk-ctl.sh link`. A removed client's
@@ -755,7 +755,7 @@ in at all, bring the puck home to change it.
     mom.iphone                   1m ago         330K    75K
   ```
 
-## Turning clients off and on
+## Turning Clients Off and On
 
 Without deleting anything: keys, configs and addresses stay, and the puck, its
 links and rtuns stay up (`test` still passes). A device that's off gets no
@@ -882,7 +882,7 @@ Environment variables:
 | `TPK_PUCK=<name>` | the puck to offer as the default when it asks; with no terminal to ask on, the puck it uses |
 | `TPK_GATEWAY=<gateway>` | the same for which gateway, for a command about one gateway |
 
-## How tpk-ctl.sh reaches the machines
+## How tpk-ctl.sh Reaches the Machines
 
 **The puck:** every command, and `scripts/tpk-ctl.sh <puck> ssh` for a shell
 (or `ssh <command>` for one command), takes the first way that answers, and
@@ -917,7 +917,7 @@ WireGuard's keys.
 travel inside ssh into root-only files, and the jump file goes from the puck to
 the gateway through a pipe.
 
-## What the scripts change
+## What the Scripts Change
 
 **On the puck:**
 
@@ -951,7 +951,7 @@ tunnel-puck never edits `WG_IF`'s configuration or wgt's files itself. With
 the configs `client` makes, `disable`/`enable`, and their removal by
 `gateway remove` and `undo`.
 
-## Fixed values
+## Fixed Values
 
 Names on the gateway come from the puck's name. Everything else comes from the
 link's subnet, `TPK_LINK`: the n-th /30 in `10.99.0.0/24` (n from 0 to 63),
@@ -970,14 +970,14 @@ links. They're chosen to avoid wgt's numbers (tables `100`, `200`–`250`, rules
 | rule priorities | `900 + 2n`, `901 + 2n` | `904`, `905` | `tpk`: the rule sending a listed client to the table, and the kill switch that drops its traffic when the first can't apply |
 | kill switch | `tunnel-puck-killswitch-<puck>` | `tunnel-puck-killswitch-home` | `tpk`: its script and service on the gateway |
 
-## Why not carry WireGuard over Cloudflare?
+## Why Not Carry WireGuard over Cloudflare?
 
 WireGuard is UDP only, and a Cloudflare Tunnel carries HTTP, WebSocket and
 TCP. Wrapping one in the other needs a helper on every client, which phones
 can't run. So client traffic takes the link through your gateway, and Cloudflare
 carries only your SSH, well inside its free plan and rules.
 
-## Limits and care
+## Limits and Care
 
 - **Speed:** your downloads are the friend's uploads, so their upload speed
   caps yours, and every request takes the longer path client → gateway → puck.
