@@ -302,8 +302,10 @@ EOF
     systemctl restart "$KILL_NAME.service"
 }
 
+ufw_active() { command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; }
+
 open_port() {
-    if command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
+    if ufw_active; then
         ufw allow "$PUCK_PORT/udp" >/dev/null
         log "ufw: allowed $PUCK_PORT/udp"
     else
@@ -356,7 +358,7 @@ do_undo() {
     fi
     port=$(sed -n 's/^ListenPort = //p' "$WG/$LINK_IF.conf" 2>/dev/null || true)
     rm -f "$WG/$LINK_IF.conf" "$WG/$LINK_IF.key" "$WG/$LINK_IF.pub"
-    if [ -n "$port" ] && command -v ufw >/dev/null && ufw status | grep -q '^Status: active'; then
+    if [ -n "$port" ] && ufw_active; then
         ufw delete allow "$port/udp" >/dev/null || true
     fi
     log "$LINK_IF removed"
