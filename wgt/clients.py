@@ -367,6 +367,14 @@ def add_one(ctx: Ctx, name: str, planned: List[str], endpoint: str) -> None:
                      f"{len(tunnel)}, so shorten it when importing there")
 
 
+def existing(ctx: Ctx, name: str) -> store.Client:
+    """Config <name>'s entry; refused if there's none."""
+    c = ctx.snap.client(name)
+    if c is None:
+        raise WgtError(f"no config '{name}' (see: wgt client list)")
+    return c
+
+
 def get_name(ctx: Ctx, words: List[str], verb: str) -> str:
     """The one client name a command takes, or the picker if none was given."""
     ops.no_more_words(words[1:], f"wgt client {verb} <config>")
@@ -380,9 +388,7 @@ def cmd_rotate(ctx: Ctx, words: List[str]) -> None:
     name = get_name(ctx, words, "rotate")
     ops.lock_unless_asking(ctx)
     ops.require_server(ctx)
-    c = ctx.snap.client(name)
-    if c is None:
-        raise WgtError(f"no config '{name}' (see: wgt client list)")
+    c = existing(ctx, name)
     # Keep the client's own AllowedIPs unless --allowed-ips was given.
     allowed = allowed_list(ctx.cfg.CLIENT_ALLOWED_IPS)
     if ctx.cfg.sources.get("CLIENT_ALLOWED_IPS") not in ("flag", "env") and c.allowed:
@@ -566,9 +572,7 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     name = get_name(ctx, words, verb)
     ops.lock_unless_asking(ctx)
     ops.require_server(ctx)
-    c = ctx.snap.client(name)
-    if c is None:
-        raise WgtError(f"no config '{name}' (see: wgt client list)")
+    c = existing(ctx, name)
     already = ctx.snap.is_disabled(name) == disable
     if already:
         ctx.out.info(f"'{name}' is already {verb}d")   # still applied below: an earlier one may have stopped
@@ -584,12 +588,12 @@ def _set_disabled(ctx: Ctx, words: List[str], disable: bool) -> None:
     ops.write_wg_conf(ctx)
     if not ops.wg_up(ctx):
         ctx.out.info(f"{ctx.cfg.WG_IF} is down; applies when it starts")
-    elif disable:
-        ops.remove_live_peer(ctx, c.pub)
-        ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other configs unaffected)")
-        devices.apply_now(ctx)
     else:
-        ops.add_live_peer(ctx, name, c.pub, c.ip)
+        if disable:
+            ops.remove_live_peer(ctx, c.pub)
+            ctx.out.info(f"peer removed from {ctx.cfg.WG_IF} (other configs unaffected)")
+        else:
+            ops.add_live_peer(ctx, name, c.pub, c.ip)
         devices.apply_now(ctx)
 
 
