@@ -17,14 +17,14 @@
 #           public key>. With TPK_ROUTING=tpk it also writes the routing for CLIENT_IPS
 #           and the kill switch
 #   test    PASS/FAIL for the link and, by TPK_ROUTING, the routing or the wgt jump(s)
-#
-# TPK_DISABLED=yes (tpk-ctl.sh disable, TPK_ROUTING=tpk): link writes no routing for
-# CLIENT_IPS, so only the kill switch applies to them: no internet, never this VPS's IP.
 #   undo    remove the link (and TPK_ROUTING=tpk's kill switch). wgt jumps are removed
 #           with wgt itself first (see the README's Undo)
 #
-# It never changes WG_IF (the clients' interface) or wgt's files. Logs go to stderr; only PUBKEY= goes
-# to stdout.
+# TPK_DISABLED=yes (tpk-ctl.sh disable, TPK_ROUTING=tpk): link writes no routing for
+# CLIENT_IPS, so only the kill switch applies to them: no internet, never this VPS's IP.
+#
+# It never changes WG_IF (the clients' interface) or wgt's files. Logs go to stderr;
+# stdout is a step's result: LINK=, PORT=, PUBKEY= for tpk-ctl.sh, test's PASS/FAIL.
 
 main() {
     set -eu
