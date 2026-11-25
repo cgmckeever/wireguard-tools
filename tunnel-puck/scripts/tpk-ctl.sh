@@ -20,7 +20,9 @@
 #   tpk-ctl.sh [<puck>] gateway remove <gateway>  stop serving one: its configs and jumps (wgt), its link, its settings file
 #   tpk-ctl.sh [<puck>[.<gateway>]] link          the link to the gateway (puck and gateway), keys exchanged for you
 #   tpk-ctl.sh [<puck>[.<gateway>]] exit          by TPK_ROUTING: tpk's DNS resolver, or the wgt jump(s)
-#   tpk-ctl.sh [<puck>[.<gateway>]] client <device> [lan]   2.2, TPK_ROUTING=wgt: a config for <device> through the puck (lan: the LAN jump)
+#   tpk-ctl.sh [<puck>[.<gateway>]] client <device> [--egress] [--lan]   2.2, TPK_ROUTING=wgt: a config for <device> through
+#                                                 the puck: the internet (no flags, or --egress), the internet and the
+#                                                 friend's LAN (--egress --lan: JUMP_LAN), or the LAN only (--lan: JUMP_LANONLY)
 #   tpk-ctl.sh [<puck>[.<gateway>]] mode [--egress [--lan]] [<interface>]   2.3: the internet only, or the friend's LAN too
 #                                                 (default: wgpk<n> or wgrtun<n>); no flags: show it
 #   tpk-ctl.sh [<puck>[.<gateway>]] disable [<device>]   the puck's clients (or one device's) on each gateway, or that one, off;
@@ -915,12 +917,29 @@ cmd_exit() {
 cmd_client() {
     [ "$TPK_ROUTING" = wgt ] \
         || die "tpk-ctl.sh client is for TPK_ROUTING=wgt; with tpk, list the config's address in CLIENT_IPS and run tpk-ctl.sh link"
-    device="${1:-}"; [ -n "$device" ] || die "tpk-ctl.sh client <device> [lan]"
-    code="$JUMP_CODE"
-    if [ "${2:-}" = lan ]; then code="$JUMP_LAN_CODE"; [ -n "$code" ] || die "no LAN jump: set JUMP_LAN=\"yes\" in $CONF, then tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME exit"; fi
+    device="" egress="" lan="" use="tpk-ctl.sh client <device> [--egress] [--lan]"
+    for a in "$@"; do
+        case "$a" in
+            --egress) egress=1 ;;
+            --lan) lan=1 ;;
+            -*) die "$use" ;;
+            *) [ -z "$device" ] || die "$use (one device)"; device="$a" ;;
+        esac
+    done
+    [ -n "$device" ] || die "$use"
+    exit_cmd="tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME exit"
+    if [ -z "$lan" ]; then code="$JUMP_CODE"
+    elif [ -n "$egress" ]; then
+        code="$JUMP_LAN_CODE"
+        [ -n "$code" ] || die "no LAN jump for --egress --lan: set JUMP_LAN=\"yes\" in $CONF, then $exit_cmd"
+    else
+        code="$JUMP_LANONLY_CODE"
+        [ -n "$code" ] || die "no LAN-only jump for --lan: set JUMP_LANONLY=\"yes\" in $CONF, then $exit_cmd (--egress --lan: the internet too)"
+    fi
     confirm_gateway "wgt client add $device --exit $code"
     wgt_gateway client add "$device" --exit "$code" --warp off --no-qr --yes
     [ "$TPK_DISABLED" != yes ] || log "note: $GATEWAY_NAME is disabled, but this new config works now (disable again to turn it off too)"
+    [ "$code" != "$JUMP_LANONLY_CODE" ] || log "$code.$device: the friend's LAN through the puck, the internet from $GATEWAY_NAME"
     log "made $code.$device on $GATEWAY_NAME; wgt-ctl put it in ~/wg-tunnels/devices/$device/config/ (or: bin/wgt-ctl $WGT_SERVER client show $code.$device --qr)"
 }
 
@@ -944,7 +963,7 @@ cmd_mode() {
         printf '%s %s: %s\n' "$GATEWAY_NAME" "$ifc" "$(result MODE "$(run puck puck.sh mode "$ifc")")"
         return 0
     fi
-    [ -n "$egress" ] || die "--lan alone (the friend's LAN, with the internet from the gateway) is per device: JUMP_LANONLY=\"yes\" in $CONF, tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME exit, then bin/wgt-ctl $WGT_SERVER client add <device> --exit $JUMP_LANONLY_CODE (--egress --lan here gives both to every client)"
+    [ -n "$egress" ] || die "--lan alone (the friend's LAN, with the internet from the gateway) is per device: JUMP_LANONLY=\"yes\" in $CONF, tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME exit, then tpk-ctl.sh $PUCK_NAME.$GATEWAY_NAME client <device> --lan (--egress --lan here gives both to every client)"
     run puck puck.sh mode "$ifc" "egress${lan:++lan}"
 }
 
