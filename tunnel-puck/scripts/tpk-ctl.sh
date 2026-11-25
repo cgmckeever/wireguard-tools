@@ -1138,13 +1138,20 @@ ago() {
     esac
 }
 
+# config_rows <CONFIG|CLIENT> <rows> <none>: status's rows under a gateway, with
+# the same columns as wgt client list (LAST HANDSHAKE, RX, TX); <none> when empty.
+config_rows() {
+    if [ -z "$2" ]; then echo "$3"; return 0; fi
+    printf '  %-28s %-14s %-7s %s\n%s\n' "$1" "LAST HANDSHAKE" RX TX "$2"
+}
+
 # client_lines: gateway.sh clients' "CLIENT <ip> <age>" lines as status shows them.
 client_lines() {
     while read -r tag ip age rx tx; do
         [ "$tag" = CLIENT ] || continue
         if [ "$age" = missing ]; then printf '  %-28s no peer on %s with this address\n' "$ip" "$WG_IF"
-        elif [ "$TPK_DISABLED" = yes ]; then printf '  %-28s disabled\n' "$ip"
-        else printf '  %-28s last handshake: %-9s rx: %s / tx: %s\n' "$ip" "$(ago "$age")" "$(size "$rx")" "$(size "$tx")"; fi
+        elif [ "$TPK_DISABLED" = yes ]; then printf '  %-28s %-14s %-7s %s\n' "$ip" disabled "$(size "$rx")" "$(size "$tx")"
+        else printf '  %-28s %-14s %-7s %s\n' "$ip" "$(ago "$age")" "$(size "$rx")" "$(size "$tx")"; fi
     done
 }
 
@@ -1183,13 +1190,12 @@ cmd_status() {
                 | grep -oE '(up, no WARP|partly up|idle|up)( \([0-9]+ active\))?' | head -n 1)
             jump="$JUMP_CODE ${jump:-(not on $v)}"
             configs=$(wgt_gateway client list --tsv 2>/dev/null | awk -F '\t' -v codes=" $(jump_codes) " \
-                'index(codes, " " $2 " ") {if ($4 == "disabled") printf "  %-28s disabled\n", $1
-                    else {split($5, t, "/"); printf "  %-28s last handshake: %-9s rx: %s / tx: %s\n", $1, $4, t[1], t[2]}}')
-            [ -n "$configs" ] || configs="  no configs on the jump yet (tpk-ctl.sh $PUCK_NAME.$v client <device>)"
+                'index(codes, " " $2 " ") {split($5, t, "/"); printf "  %-28s %-14s %-7s %s\n", $1, $4, t[1], t[2]}')
+            configs=$(config_rows CONFIG "$configs" "  no configs on the jump yet (tpk-ctl.sh $PUCK_NAME.$v client <device>)")
         else
             rtun="-" jump="-"
-            configs=$(run gateway gateway.sh clients 2>/dev/null | client_lines)
-            [ -n "$configs" ] || configs="  clients (CLIENT_IPS): ${CLIENT_IPS:-none}"
+            configs=$(config_rows CLIENT "$(run gateway gateway.sh clients 2>/dev/null | client_lines)" \
+                "  clients (CLIENT_IPS): ${CLIENT_IPS:-none}")
         fi
         printf '%-10s %-9s %-20s %-21s %s\n' "$v" "$state" "$link" "$rtun" "$jump"
         printf '%s\n' "$configs"

@@ -710,8 +710,8 @@ in at all, bring the puck home to change it.
 - **At a glance:** `scripts/tpk-ctl.sh status`, read-only and quick: how the
   puck was reached, its uplink and LAN, public IP and Wi-Fi, then per gateway whether it's
   serving, the link's and rtun's last handshakes and the jump's state, and
-  under it each config on the jump with its last handshake and traffic (rx and tx,
-  as the gateway counts it), or `disabled`; with `tpk`, each of `CLIENT_IPS`,
+  under it each config on the jump with its last handshake and traffic (RX and TX,
+  as the gateway counts it, the same columns as `wgt client list`), or `disabled`; with `tpk`, each of `CLIENT_IPS`,
   from the gateway's WireGuard. `test` says why
   something's off. `status --watch [seconds]` keeps it on screen, redrawn every
   5s (each round takes a few seconds of ssh), until Ctrl-C. `status --alert`
@@ -726,10 +726,12 @@ in at all, bring the puck home to change it.
     uplink eth0 (LAN 192.168.1.0/24), public IP 203.0.113.7, saved Wi-Fi: none
   GATEWAY    STATE     LINK                 RTUN                  JUMP
   dengar     partly    wgpk0 19s ago        wgrtun0 8m ago        mom idle
-    mom.iphone                   last handshake: 3h ago    rx: 2.2M / tx: 12M
-    mom.laptop                   disabled
+    CONFIG                       LAST HANDSHAKE RX      TX
+    mom.iphone                   3h ago         2.2M    12M
+    mom.laptop                   disabled       0       0
   ig88       serving   wgpk1 78s ago        wgrtun1 5m ago        mom up, no WARP (1 active)
-    mom.iphone                   last handshake: 1m ago    rx: 330K / tx: 75K
+    CONFIG                       LAST HANDSHAKE RX      TX
+    mom.iphone                   1m ago         330K    75K
   ```
 
 ## Turning clients off and on
