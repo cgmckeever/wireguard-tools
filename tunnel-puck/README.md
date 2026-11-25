@@ -1,12 +1,21 @@
 # tunnel-puck: a small computer as a residential exit
 
 Put a **puck**, a small single-board computer (SBC) like a Raspberry Pi, on a
-friend's home network, and chosen clients of your WireGuard gateway reach the
-internet **from the friend's home IP**. The friend only plugs in power and an
-ethernet cable: no router settings, no open ports.
+friend's home network, and chosen clients of your WireGuard gateway get, through
+it:
+
+- **a residential exit:** the internet **from the friend's home IP**
+  ([2.2](#22-device-configs));
+- **remote access to the friend's home network:** their NAS, printer or
+  router's page, while the client's internet stays on your gateway
+  ([2.3](#23-optional-mode-egress-and-lan));
+- **or both:** the friend's IP and their home network ([2.3](#23-optional-mode-egress-and-lan)).
+
+The friend only plugs in power and an ethernet cable: no router settings, no
+open ports.
 
 ```
-client ──WireGuard──▶ your gateway ──WireGuard link──▶ puck at the friend's ──▶ internet
+client ──WireGuard──▶ your gateway ──WireGuard link──▶ puck at the friend's ──▶ internet, and/or their home network
                                       ▲ the puck dials out and keeps it open, so the friend's NAT doesn't matter
 ```
 
@@ -25,6 +34,10 @@ client ══[1]══▶ gateway wg0 ─ plain ─▶ gateway ══[2 inside 3
   [2] the jump (rtun): gateway px-<code> ↔ puck wgrtun<n>
   [3] the link: gateway wgpk-<puck> ↔ puck wgpk<n>, dialled by the puck
 ```
+
+For remote access alone, [2] ends at the puck's `wgrtunlo<n>`, and the puck
+sends the traffic to the friend's home network, never the internet; the
+client's internet leaves from the gateway, as without the puck.
 
 | Where | Sees the traffic in the clear? |
 |---|---|
@@ -62,7 +75,7 @@ Run it first on a gateway nobody else depends on.
 3. When the link is down, that client gets no connection at all. It never
    falls back to the gateway's IP.
 4. Nothing from the tunnel reaches devices on the friend's LAN, unless you
-   add `--lan` ([Mode (2.3)](#23-optional-mode-egress-and-lan)).
+   turn that on ([Mode (2.3)](#23-optional-mode-egress-and-lan)).
 5. The gateway's other clients, the ones not sent to the puck, still go out through
    the gateway as before.
 6. You can reach the puck remotely.
@@ -338,8 +351,10 @@ The gateway's settings (each line of the file has a comment):
 | `WG_SUBNET` | `tpk` | leave empty (it means every subnet `WG_IF` is on) |
 | `WGT_SERVER` | `wgt` | the gateway's name in `../bin/wgt-ctl list`; its ssh target and address come from there. Empty: the file's `<gateway>` if wgt-ctl lists it, else `tpk-ctl.sh` asks (or adds a new server) and saves it |
 | `JUMP_CODE`, `JUMP_LABEL` | `wgt`, optional | the puck's jump on the gateway (wgt's codes are 2–6 of `a-z`, `0-9`, `-`) and a label for it. Empty: the puck's name, the code shortened to 6 (`grandma`: `grandm`); `config` shows it. A code the gateway already uses for something else is refused |
-| `JUMP_LAN` | `wgt`, optional | `yes`: a second jump with `--egress --lan` ([2.3](#23-optional-mode-egress-and-lan)), coded as the jump's with `-l` (`mom`: `mom-l`; `grandma`: `gran-l`) |
-| `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | name the LAN jump yourself (this also turns it on); the label defaults to the jump's with " (LAN)" |
+| `JUMP_LAN` | `wgt`, optional | `yes`: a jump with the internet and the friend's LAN, for `client <device> --egress --lan` ([2.3](#23-optional-mode-egress-and-lan)), coded as the jump's with `-a` (`mom`: `mom-a`; `grandma`: `gran-a`) |
+| `JUMP_LAN_CODE`, `JUMP_LAN_LABEL` | `wgt`, optional | name that jump yourself (this also turns it on); the label defaults to the jump's with " (egress + LAN)" |
+| `JUMP_LANONLY` | `wgt`, optional | `yes`: a jump with the friend's LAN only, the internet from the gateway, for `client <device> --lan` ([2.3](#23-optional-mode-egress-and-lan)), coded as the jump's with `-l` (`mom`: `mom-l`; `grandma`: `gran-l`) |
+| `JUMP_LANONLY_CODE`, `JUMP_LANONLY_LABEL` | `wgt`, optional | name that jump yourself (this also turns it on); the label defaults to the jump's with " (LAN only)" |
 
 Among `gateway add`'s output with `wgt`, `wgt jump add` also tests the new jump and prints
 `jump '<code>' works: ip=... warp=on`. That IP is **Cloudflare's, not your
@@ -379,12 +394,23 @@ To add or remove a device later, edit `CLIENT_IPS` and run `link` again.
 The puck is a wgt jump on the gateway, coded `JUMP_CODE` (`<code>` below), which is
 the puck's name unless you set it. Each device gets a config named
 `<code>.<device>` on the gateway, delivered to your computer as
-`<server>.<code>.<device>.conf` (`<server>` is `WGT_SERVER`). For a puck
-called `mom` on the server `dengar`:
+`<server>.<code>.<device>.conf` (`<server>` is `WGT_SERVER`).
+
+**The mode is the config's.** Each mode is a jump of its own, so a device picks
+by config, and can have one of each. For a puck called `mom`:
+
+| Mode | The device gets | Needs | `scripts/tpk-ctl.sh mom ...` | Config |
+|---|---|---|---|---|
+| egress (the default) | the friend's internet: sites see their IP | nothing | `client laptop` (or `--egress`) | `mom.laptop` |
+| egress + LAN | the friend's internet and their LAN | `JUMP_LAN="yes"`, then `exit` | `client laptop --egress --lan` | `mom-a.laptop` |
+| LAN only | the friend's LAN; its internet stays on the gateway | `JUMP_LANONLY="yes"`, then `exit` | `client laptop --lan` | `mom-l.laptop` |
+
+The settings go in `configs/<puck>.<gateway>.conf`; [2.3](#23-optional-mode-egress-and-lan) has
+the details, and what "the LAN" is. On the server `dengar`:
 
 ```sh
 scripts/tpk-ctl.sh mom client iphone          # mom.iphone on dengar
-scripts/tpk-ctl.sh mom client laptop lan      # with JUMP_LAN=yes: mom-l.laptop, egress and the LAN (2.3)
+scripts/tpk-ctl.sh mom client laptop --lan    # with JUMP_LANONLY=yes: mom-l.laptop, the LAN only (2.3)
 scripts/tpk-ctl.sh mom.ig88 client iphone     # when mom serves several gateways: on that one
 ```
 
@@ -402,7 +428,8 @@ the friend's.
 **Groups still apply.** A device keeps its static address and its wgt
 [groups](../README.md#groups-who-can-reach-what) whichever config it uses, so
 `mom.iphone` reaches the same devices as `iphone`'s other configs. Only its
-internet traffic goes through the puck: traffic to other devices and the server
+internet traffic goes through the puck (LAN only: its traffic to the friend's
+LAN): traffic to other devices and the server
 stays on the gateway, under wgt's group rules. Groups are per server, so set them on
 the gateway the puck's jump is on (`../bin/wgt-ctl dengar device group iphone home`).
 
@@ -412,17 +439,44 @@ or the ifconfig.me page shows your home IP: the puck's network, for now, which
 `tpk-ctl.sh test` prints as `this network's public IP`. With `wgt`, the
 jump comes up only once a device connects through it, so this is its first
 test from a real device (`tpk-ctl.sh test`'s end-to-end row tests the same path
-from the gateway).
+from the gateway). A LAN-only config shows the gateway's IP instead, and
+reaches the friend's LAN.
 
 ## 2.3 [Optional] Mode: egress and LAN
 
 By default the puck gives clients **egress** only: the friend's internet and
-nothing else. With **`--lan`** they can also reach devices on the friend's LAN
-by IP: a NAS, a printer, the router's page. **Ask the friend first.**
+nothing else. With **the LAN** they can also reach devices on the friend's LAN
+by IP: a NAS, a printer, the router's page, with the friend's internet or
+without it. **Ask the friend first.**
 
 It's one way (LAN devices can't reach your clients, and see every connection
 as from the puck), by IP only (no AirPlay or network discovery, and names like
 `nas.lan` don't resolve), and clients don't get an address on that LAN.
+
+**Per device, with `wgt`** ([2.2](#22-device-configs)'s table): set these in
+`configs/<puck>.<gateway>.conf` and run `scripts/tpk-ctl.sh exit`
+(`<puck>.<gateway> exit` with several gateways). Each adds a jump, a reverse
+tunnel of its own on the puck:
+
+- `JUMP_LAN="yes"`: **egress + LAN**, `wgrtunlan<n>`, for
+  `client <device> --egress --lan`. Code: the jump's with `-a` (`mom-a`), or
+  `JUMP_LAN_CODE`.
+- `JUMP_LANONLY="yes"`: **LAN only**, `wgrtunlo<n>`, for `client <device> --lan`.
+  Code: the jump's with `-l` (`mom-l`), or `JUMP_LANONLY_CODE`. The gateway
+  sends only the friend's LAN subnet into it (a wgt routes-only jump,
+  `wgt jump add --routes`), so the device's internet leaves from the gateway as
+  it would without the puck, and the puck lets it reach nothing but the LAN: a
+  remote-access VPN into the friend's home.
+
+Codes are shortened to fit wgt's six characters (`grandma`: `gran-a`, `gran-l`).
+
+The LAN-only jump's routes are the puck's LAN when `exit` last ran. After the
+puck moves (built at home, dropped off at the friend's), run `exit` again: it
+sets them to the new LAN (`wgt jump routes`). Until then `test` FAILs with
+`the LAN-only jump ... sends <old> into the puck, but its LAN is <new>`;
+`status` shows the puck's LAN.
+
+**For every client of a gateway:**
 
 ```sh
 scripts/tpk-ctl.sh mode --egress --lan          # the internet and the LAN
@@ -431,28 +485,22 @@ scripts/tpk-ctl.sh mode                         # show it
 scripts/tpk-ctl.sh mom.ig88 mode --egress --lan # with several gateways: for that one's clients
 ```
 
-`--lan` alone (the LAN, with the internet from the gateway as usual) isn't
-built yet: tpk-ctl.sh refuses it.
-
-The mode is set per gateway: it switches the puck's interface for that gateway,
-`wgpk<n>` (with `tpk`) or `wgrtun<n>` (with `wgt`); an interface name after the
-flags picks another (`scripts/tpk-ctl.sh mode --egress --lan wgrtunlan1`).
-Every client of that interface gets the same mode, and the other gateways'
-clients keep theirs. To choose per device with `wgt`, keep `wgrtun<n>` at
-`--egress`, set `JUMP_LAN="yes"` in `configs/<puck>.<gateway>.conf`, and run
-`scripts/tpk-ctl.sh exit` (`<puck>.<gateway> exit` with several gateways): it
-adds a second jump, `wgrtunlan<n>`, with `--egress --lan`, and each device
-picks by config (`mom.phone` egress only, `mom-l.laptop` the LAN too). The LAN
-jump's code is the jump's with `-l`, shortened to fit wgt's six characters; set
-`JUMP_LAN_CODE` to name it yourself.
+`mode` switches the puck's interface for that gateway, `wgpk<n>` (with `tpk`)
+or `wgrtun<n>` (with `wgt`); an interface name after the flags picks another
+(`scripts/tpk-ctl.sh mode --egress wgrtunlan1`). Every client of that
+interface gets the same mode, and the other gateways' clients keep theirs.
+`--lan` alone is per device only: `mode` refuses it and points to
+`JUMP_LANONLY`. The LAN-only jump's `wgrtunlo<n>` stays LAN only.
 
 "The LAN" is the subnet the puck is on, so at home it's yours; the puck follows
-when it moves. It must not overlap the client's own network (see
+when it moves (the LAN-only jump's routes once `exit` runs, above). It must not overlap the client's own network (see
 [Troubleshooting](#troubleshooting)).
 
-**Check [Puck]:** `journalctl -u wg-quick@wgpk<n> -n 20` (or `@wgrtun<n>`; the ON THE PUCK column of `scripts/tpk-ctl.sh gateway` names them) shows
+**Check [Puck]:** `journalctl -u wg-quick@wgpk<n> -n 20` (or `@wgrtun<n>`,
+`@wgrtunlan<n>`, `@wgrtunlo<n>`; the ON THE PUCK column of `scripts/tpk-ctl.sh gateway` names them) shows
 `tunnel-puck-exit: ... LAN 192.168.1.50/24 reachable` (the puck's address on that
-LAN).
+LAN), with `, no internet` for `wgrtunlo<n>`. With `JUMP_LANONLY`, `scripts/tpk-ctl.sh test`
+shows `PASS  the LAN-only jump <code> sends the puck's LAN into it: 192.168.1.0/24`.
 
 ## 2.4 [Optional] More pucks, more gateways
 
@@ -605,7 +653,7 @@ is the hotspot's, which `tpk-ctl.sh test` prints.
 | 6 | the link still down: **[Computer]** `scripts/tpk-ctl.sh test` | its `puck: ... via` line says `via the link to <another gateway>` or `via SSH_CLOUDFLARE`; with neither, it can't reach the puck. That gateway's rows FAIL |
 | 7 | **[Computer]** `scripts/tpk-ctl.sh ssh sudo systemctl start wg-quick@wgpk0` (the interface from test 5; with no other way in: power-cycle the puck) | `tpk-ctl.sh test` passes again |
 | 8 | `tpk` only: **[Gateway]** `systemctl stop wg-quick@wgpk-mom` (`wgpk-<puck>`), **[client]** `curl -m 10 https://ifconfig.me`, **[Gateway]** `systemctl start wg-quick@wgpk-mom` | times out (the kill switch). Never the gateway's IP |
-| 9 | **[Puck]** `ip route` names the router after `default via`; **[client]** `ping -c2` it | egress only: no reply. With `--lan`: replies |
+| 9 | **[Puck]** `ip route` names the router after `default via`; **[client]** `ping -c2` it | egress only: no reply. On an egress + LAN or LAN-only config: replies |
 | 10 | **[client]** a config that is **not** a puck exit: `curl https://ifconfig.me` | the same IP as before tunnel-puck |
 
 With several gateways, test 2 is worth running on a config of each.
@@ -660,7 +708,7 @@ in at all, bring the puck home to change it.
 - **Look around on the puck:** `scripts/tpk-ctl.sh ssh`, the first way that
   answers.
 - **At a glance:** `scripts/tpk-ctl.sh status`, read-only and quick: how the
-  puck was reached, its uplink, public IP and Wi-Fi, then per gateway whether it's
+  puck was reached, its uplink and LAN, public IP and Wi-Fi, then per gateway whether it's
   serving, the link's and rtun's last handshakes and the jump's state, and
   under it each config on the jump with its last handshake (or `disabled`;
   with `tpk`, each of `CLIENT_IPS`, from the gateway's WireGuard). `test` says why
@@ -673,7 +721,7 @@ in at all, bring the puck home to change it.
 
   ```
   mom: via the link to dengar, through root@dengar.example.com
-    uplink eth0, public IP 203.0.113.7, saved Wi-Fi: none
+    uplink eth0 (LAN 192.168.1.0/24), public IP 203.0.113.7, saved Wi-Fi: none
   GATEWAY    STATE     LINK                 RTUN                  JUMP
   dengar     partly    wgpk0 19s ago        wgrtun0 8m ago        mom idle
     mom.iphone                   last handshake: 3h ago
@@ -757,8 +805,11 @@ removed gateway.
 | `tpk`: sites load, names don't resolve | **[Puck]** `systemctl status unbound`; **[Gateway]** `iptables -t nat -L PREROUTING -v` |
 | large pages hang | MTU: a client config's `MTU` above 1280 needs lowering. The jump runs inside the link, so a packet much bigger than a client's 1280 gets split in two on the way, and behind a busy NAT that can cut the speed to a few Mbit/s |
 | a client shows the gateway's IP | `tpk`: is it in `CLIENT_IPS`? `systemctl status tunnel-puck-killswitch-<puck>`. `wgt`: is the config named `<code>.<device>`? |
+| FAIL `the LAN-only jump ... sends ... into the puck, but its LAN is ...` | the puck is on another network since `exit`: `scripts/tpk-ctl.sh <puck>.<gateway> exit` sets the jump's routes to its LAN |
+| FAIL `the puck reports no LAN for the LAN-only jump` | the puck's `tunnel-puck-exit` predates it (`scripts/tpk-ctl.sh <puck>.<gateway> exit` installs the current one), or its uplink has no IPv4 address (`test`'s `uplink:` line) |
+| FAIL `wgt jump routes <code> gave nothing` | the LAN-only jump isn't on the gateway (`exit` adds it), or wgt there is older than routes-only jumps: `../bin/wgt-ctl <gateway> pull` |
 | traffic stops after the puck changes networks | **[Puck]** `journalctl -t tunnel-puck-exit -n 20` shows each move; if none, reboot the puck |
-| with `--lan`: some LAN addresses don't answer | the friend's LAN overlaps the client's own network (a café on `192.168.1.0/24` too), a subnet of `WG_IF`, or the link's addresses ([Fixed values](#fixed-values)). Try the client from another network |
+| with the LAN: some LAN addresses don't answer | the friend's LAN overlaps the client's own network (a café on `192.168.1.0/24` too), a subnet of `WG_IF`, or the link's addresses ([Fixed values](#fixed-values)). Try the client from another network |
 
 ---
 
@@ -781,15 +832,15 @@ asks):
 | `gateway [list]` | the gateways the puck serves, from their settings files: routing, state (`serving`, `partly`, `disabled`, or `-` before `link`), server, link subnet, the puck's interfaces, jumps (`status` checks them live) |
 | `gateway remove <gateway>` | with `wgt`, the device configs on the puck's jumps there and the jumps; its link on both ends; then its settings file (asks first) |
 | `link` | one gateway. The gateway picks a free subnet (apart from the puck's other links) and port the first time. The puck: WireGuard, IP forwarding, a retry at boot, its key, and a hook that moves the exit rules when the network changes. The gateway: its key, its end of the link (`wgpk-<puck>`), `PUCK_PORT/udp` in ufw if active, and with `tpk` the routing and kill switch for `CLIENT_IPS`. Then the puck's end (`wgpk<n>`) |
-| `exit` | one gateway. `tpk`: the DNS resolver (unbound) on the puck. `wgt`: the reverse tunnel(s) on the puck (`wgrtun<n>`), piped into `wgt jump add` on the gateway |
+| `exit` | one gateway. `tpk`: the DNS resolver (unbound) on the puck. `wgt`: the reverse tunnel(s) on the puck (`wgrtun<n>`, and `wgrtunlan<n>`, `wgrtunlo<n>` when on), piped into `wgt jump add` on the gateway; the LAN-only jump's routes set to the puck's LAN |
 | `all` | `link` and `exit` for each gateway (or the one named), then `wifi sync` (only with a `<puck>.wifi.conf`), `test` |
-| `client <device> [lan]` | `wgt`, one gateway: a config for the device (`lan`: through the LAN-mode jump) |
-| `mode [--egress [--lan]] [<interface>]` | one gateway: the internet only, or the friend's LAN too (default `wgpk<n>` or `wgrtun<n>`); no flags: show it |
+| `client <device> [--egress] [--lan]` | `wgt`, one gateway: a config for the device: the internet (no flags, `--egress`), the internet and the LAN (`--egress --lan`: `JUMP_LAN`), or the LAN only (`--lan`: `JUMP_LANONLY`) ([2.2](#22-device-configs)) |
+| `mode [--egress [--lan]] [<interface>]` | one gateway, every client: the internet only, or the friend's LAN too (default `wgpk<n>` or `wgrtun<n>`); no flags: show it. `--lan` alone is per device (`client --lan`) |
 | `disable [<device>]`, `enable [<device>]` | the puck's clients (or one device's) off and back on, on every gateway or the one named; nothing deleted ([Turning clients off and on](#turning-clients-off-and-on)) |
 | `status` | at a glance, read-only: the puck, then per gateway (or the one named) its state, handshakes, jump and configs |
 | `wifi`, `wifi add <name>`, `wifi remove <name>\|all` | the puck's saved Wi-Fi, one network at a time |
 | `wifi sync` | the puck's saved Wi-Fi becomes `configs/<puck>.wifi.conf`, in its order |
-| `test` | PASS/FAIL: the puck, then each gateway (or the one named) on both ends; with `wgt`, then a client's way out end to end (`wgt jump test`: the IP must be the puck's) |
+| `test` | PASS/FAIL: the puck, then each gateway (or the one named) on both ends; with `wgt`, the LAN-only jump's routes against the puck's LAN, then a client's way out end to end (`wgt jump test`: the IP must be the puck's) |
 | `ssh [<command>]` | a shell (or one command) on the puck, the first way that answers |
 | `reboot` | restart the puck, and wait until it answers again |
 | `shutdown` | power the puck off cleanly, safe to unplug (asks first: away from home, someone must replug it) |
@@ -853,7 +904,7 @@ the gateway through a pipe.
 | `/etc/systemd/system/wg-quick@.service.d/tunnel-puck-retry.conf` | `tpk` or `wgt` | `link` | `wg-quick` keeps retrying at boot |
 | `/etc/NetworkManager/dispatcher.d/90-tunnel-puck` | `tpk` or `wgt` | `link` | moves the exit rules when the network changes |
 | `/etc/unbound/unbound.conf.d/tunnel-puck.conf`, `tunnel-puck-<n>.conf` | `tpk` | `exit` | the DNS resolver for puck-exit clients, and each link's address for it |
-| `/etc/wireguard/wgrtun<n>.*`, `wgrtunlan<n>.*` | `wgt` | `exit` | the reverse tunnel(s) one gateway reaches in through (wgt's jump): config, keys and exit rules |
+| `/etc/wireguard/wgrtun<n>.*`, `wgrtunlan<n>.*`, `wgrtunlo<n>.*` | `wgt` | `exit` | the reverse tunnel(s) one gateway reaches in through (wgt's jump): config, keys and exit rules |
 | `/etc/wireguard/jump-for-gateway<n>*.conf` | `wgt` | `exit`, briefly | the jump file for the gateway, deleted once wgt has it |
 | `RuntimeWatchdogSec=15` in `/etc/systemd/system.conf` | `tpk` or `wgt` | `init` | the hardware watchdog |
 | `unattended-upgrades` | `tpk` or `wgt` | `init` | automatic security updates |
