@@ -472,9 +472,8 @@ def test_a_setup_or_restore_that_stopped_delivers_nothing(store, monkeypatch):
 
 def test_configs_naming_another_listed_server_are_not_delivered(store, tmp_path, monkeypatch):
     # dengar given boba's name (setup --name boba): boba's copies would retire here
-    listed = tmp_path / "servers"
-    listed.write_text("dengar root@1.2.3.4\nboba root@5.6.7.8\nalias root@1.2.3.4\n")
-    monkeypatch.setattr(remote, "LIST", str(listed))
+    for name, target in (("dengar", "root@1.2.3.4"), ("boba", "root@5.6.7.8"), ("alias", "root@1.2.3.4")):
+        remote.write_login(name, target)
     theirs = put(store, "iphone", "boba.iphone.conf", conf("iphone", "KB", server="boba"))
     out = f"SERVER_NAME=boba\n{tunnels.MARK}boba.phone.conf\n{conf('phone', 'KD', server='boba')}"
     monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, out))
@@ -501,10 +500,9 @@ def test_a_servers_anchor_is_made_by_sync_even_with_nothing_to_stage(store, monk
 
 def test_init_records_a_server_with_its_anchor(store, tmp_path, monkeypatch):
     from wgt.ctl import newserver
-    monkeypatch.setattr(remote, "LOCAL", str(tmp_path / "local"))
-    monkeypatch.setattr(remote, "LIST", str(tmp_path / "local" / "servers"))
     newserver.record("lando", "root@1.2.3.4")
     assert (store / "servers" / "lando" / "carriers").is_dir()
+    assert (store / "servers" / "lando" / "login").read_text() == "root@1.2.3.4\n"
 
 
 def test_an_empty_anchor_goes_and_one_with_jump_files_stays(store):

@@ -751,22 +751,31 @@ servers over SSH. Clone this repository there too
 (`git clone https://github.com/cgmckeever/wireguard-tools.git ~/wireguard-tools`),
 then put its `bin/` on your PATH, or `alias wgt-ctl=~/wireguard-tools/bin/wgt-ctl`.
 It needs SSH as root to each server, with your key (`init` can set that up).
-The servers it knows are listed in `local/servers`, in your clone, one per line:
-name, SSH login, and optionally the checkout directory (default
-`/opt/wireguard-tools`). `wgt-ctl init` adds to it, also for a server that's
-already set up. Like everything under `local/`, it is git-ignored:
+
+Everything it keeps lives in `~/wg-tunnels` (or `$WG_TUNNELS`, an absolute path),
+the folder it shares with [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels),
+and nothing in your clone:
 
 ```
-dengar  root@203.0.113.10
-boba    root@198.51.100.20
+~/wg-tunnels/
+  servers/dengar/
+    login          root@203.0.113.10   (the SSH login, then the checkout if not /opt/wireguard-tools)
+    backups/       archives fetched by backup and move
+    carriers/      jump files waiting to be pushed
+  fleet/devices    each device's static number, across servers
+  devices/<device>/config/   every config, as the servers issued it
+  pucks/<puck>/    tunnel-puck's settings
 ```
+
+A server is listed when its folder has a `login` file, in name order; `wgt-ctl
+init` writes it, also for a server that's already set up.
 
 `wgt-ctl` only talks to hosts already in `known_hosts`; only `init` and `move --to`
 ask about a new key. For a line you add by hand, or a rebuilt machine at the same
 address, run `ssh root@<address>` once first (`ssh-keygen -R <address>` if the key
 changed). Root login must be allowed, which many cloud images don't do by default,
-and `--user` must name a root login. Archives fetched to `local/backups/` hold
-private keys.
+and `--user` must name a root login. The archives in `backups/` hold private
+keys, like the configs.
 
 ### Adding a server
 
@@ -787,7 +796,7 @@ one, so your servers' subnets don't overlap as long as all of them are reachable
 ### Commands
 
 Most commands have the shape **`wgt-ctl SERVER COMMAND [arguments]`**.
-`SERVER` is a name from `local/servers`, its number in the list, or `all`.
+`SERVER` is a server's name, its number in the list, or `all`.
 A few commands aren't about one server and take no `SERVER` (last group below).
 
 **One server: `wgt-ctl SERVER COMMAND`.** Any `wgt` command runs on that server,
@@ -804,12 +813,12 @@ and these run from your machine, against that server:
 
 ```bash
 wgt-ctl boba pull                      # git pull its checkout (fast-forward only)
-wgt-ctl boba backup                    # wgt backup there, fetched to local/backups/boba/
+wgt-ctl boba backup                    # wgt backup there, fetched to ~/wg-tunnels/servers/boba/backups/
 wgt-ctl boba jump-add                  # push a jump file from ~/wg-tunnels/servers/boba/carriers/ as a jump
 wgt-ctl boba sync                      # copy its client configs to ~/wg-tunnels/devices/<device>/config/
 wgt-ctl boba ssh                       # log in (or: ssh <command>)
 wgt-ctl boba branch some-branch        # switch its checkout
-wgt-ctl boba forget                    # drop it from local/servers; the server is untouched
+wgt-ctl boba forget                    # drop it from the list (its login file); the server is untouched
 wgt-ctl boba remove                    # tear it down: rollback --purge, delete its checkout,
                                        #   wgcf and backup archives, then forget it (asks for its name)
 wgt-ctl boba move [--to <address>]     # rebuild it from its backup, elsewhere or in place (also --user, --branch; below)
@@ -858,7 +867,7 @@ with a letter.
 
 `wgt-ctl SERVER client add <device>` (or `all`) checks the other servers first,
 so a device gets the same [static address](#static-device-addresses) everywhere.
-`wgt-ctl` keeps the numbers in `local/devices`, refreshed whenever it reads the
+`wgt-ctl` keeps the numbers in `~/wg-tunnels/fleet/devices`, refreshed whenever it reads the
 servers, so a device still gets the right one when a server is unreachable.
 
 `wgt-ctl devices` warns about:
@@ -867,7 +876,7 @@ servers, so a device still gets the right one when a server is unreachable.
 |---|---|
 | two devices claim the same number | `wgt-ctl devices fix <device> <another number>` |
 | a device has no number on a server | `wgt-ctl devices sync` |
-| a server's number differs from `local/devices`, such as after `wgt device set` there | `wgt-ctl devices fix <device> <number>` |
+| a server's number differs from `fleet/devices`, such as after `wgt device set` there | `wgt-ctl devices fix <device> <number>` |
 
 A device that's gone from every server keeps its line, marked `removed <date>`,
 and `wgt-ctl` doesn't hand its number out again, so an old SSH config can't reach
@@ -944,11 +953,6 @@ jump. Pushing one whose code the server already has from another file (or from a
 tunnel. `wgt-ctl boba client add` also offers to push staged jump files that
 aren't on the server yet, so they show up in its exit menu.
 
-From an older version: move your files from `local/exits/<server>/` into
-`~/wg-tunnels/servers/<server>/carriers/` (they're named again on their next push;
-`local/exits/` isn't read any more), and run `wgt-ctl all sync` once so every
-server has its folder.
-
 ### Moving or rebuilding a server
 
 `move` rebuilds a server from its own backup, on a new machine, or on the same
@@ -968,7 +972,7 @@ wgt-ctl dengar move --to 203.0.113.50 -- --endpoint vpn.example.com
 wgt-ctl dengar move                                                # a fresh copy, on the same machine
 ```
 
-1. Back up the server and fetch the archive to `local/backups/<server>/`.
+1. Back up the server and fetch the archive to `~/wg-tunnels/servers/<server>/backups/`.
 2. Prepare the new machine: log in, install, clone; no setup yet.
 3. Bring the old server down: `wgt rollback`, keys kept. Its devices are cut off
    from here until step 4 finishes; both can't run at once, as they'd share the
@@ -976,7 +980,7 @@ wgt-ctl dengar move                                                # a fresh cop
 4. Restore the backup on the new machine (`wgt restore`), which runs setup with
    your flags: same keys, configs, jumps and WARP account.
 5. Run `wgt test` and `wgt tunnel test`.
-6. Point the server's line in `local/servers` at the new machine. It then asks
+6. Point the server's `login` at the new machine. It then asks
    whether to tear wireguard-tools off the old machine, including its backup
    archives (`--yes` tears it down without asking).
 
@@ -1004,10 +1008,10 @@ to `/opt/wireguard-tools` if they're gone, copy the archive there, run
 `/opt/wireguard-tools/bin/wgt restore` it. `move` checks the branch can be cloned
 before it purges anything.
 
-**If your own machine dies part-way,** nothing resumes the move, and `local/servers`
-still names the old machine. Check the new one (`ssh root@<new>
+**If your own machine dies part-way,** nothing resumes the move, and the server's
+`login` still names the old machine. Check the new one (`ssh root@<new>
 /opt/wireguard-tools/bin/wgt summary`). If it isn't healthy, follow the step above. If
-it is, point the server's line in `local/servers` at it, delete the uploaded archive
+it is, point the server's `login` at it, delete the uploaded archive
 from its `/root`, and run `wgt rollback --purge` on the old machine.
 
 ## Updating servers

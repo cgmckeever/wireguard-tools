@@ -8,8 +8,11 @@ promises to things outside it, and how to change it without breaking them.
 ## Contracts
 
 **The shared store with wireguard-tunnels**: `$WG_TUNNELS` as written (no `~`
-expansion, as there; absolute, or refused), else `~/wg-tunnels` (`wgt/ctl/tunnels.py`, `jumpfiles.py`; pinned by `tests/test_tunnels_store.py`).
-The other side's rules are in that repo's `wgtun/store.py` (`sweep_owned`).
+expansion, as there; absolute, or refused), else `~/wg-tunnels` (`wgt/ctl/home.py` has the
+layout; `tunnels.py`, `jumpfiles.py`; pinned by `tests/test_tunnels_store.py`). It holds
+everything private this machine keeps, and the checkout holds none of it (no
+`.gitignore` hides any). The other side's rules are in that repo's `wgtun/store.py`
+(`sweep_owned`).
 
 - **Writes** `devices/<device>/config/<server>.<config>.conf`, the server's file
   as is, starting `# wireguard-tools client: <config> on <server>` (`<server>`
@@ -18,9 +21,15 @@ The other side's rules are in that repo's `wgtun/store.py` (`sweep_owned`).
   `<file>.<YYYYmmdd-HHMMSS>.bak` (`<file>.<YYYYmmdd-HHMMSS>.<n>.bak` for the
   nth more within that second). A file of that name that isn't a copy is
   refused, never overwritten.
+- **Its own, beside them:** `servers/<server>/login` (the server list: one
+  `user@host [/checkout]` line; listed when present, in name order),
+  `servers/<server>/backups/` (fetched archives), `fleet/devices` (static
+  numbers) and `pucks/<puck>/` (tpk-ctl.sh: `puck.conf`, `wifi.conf`,
+  `gateways/<gateway>.conf`). wireguard-tunnels reads none of them.
 - **Reads** `servers/<server>/carriers/*.conf` (jump-add). It also makes that
   folder (init, sync: how wireguard-tunnels knows the server exists), deletes
-  it when empty (remove), and writes a `# jump: <code> <label>` line into a
+  `servers/<server>/` when nothing is left in it (remove: forget drops the
+  login, and backups or jump files keep it), and writes a `# jump: <code> <label>` line into a
   file on its first push. nord.sh writes the same line, with the same code rule
   (`store.valid_exit_code`; a new code also isn't `all`, `store.new_exit_code`,
   which nord.sh's `xxx-cc`/`nd-cc` never are). Each push also makes the folder 0700 and the file
@@ -47,7 +56,7 @@ The other side's rules are in that repo's `wgtun/store.py` (`sweep_owned`).
   `# wireguard-tools client:` (tunnel.sh extract leaves those files alone) and
   `# device-network:` (the sweep routes it through a carrier).
 
-**The servers** (`local/servers`, untracked). dengar, ig88 and boba are live:
+**The servers** (`~/wg-tunnels/servers/<server>/login`). dengar, ig88 and boba are live:
 people's traffic runs through them. bossk is the throwaway for anything
 destructive (`tools/trial.sh`, setup/rollback, restore, `--new-server-keys`).
 Live servers are never used for those. `wgt-ctl all` means every listed

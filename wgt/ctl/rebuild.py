@@ -6,15 +6,15 @@ import os
 import shlex
 from typing import Dict, List, Tuple
 
-from .. import store, ui
+from .. import ui
 from ..const import archive_name
 from ..errors import WgtError
-from . import newserver, remote, tunnels
+from . import home, newserver, remote, tunnels
 from .remote import Server, out, q
 
 
 def do_backup(s: Server, args: List[str]) -> int:
-    """wgt backup there, then fetch the archive into local/backups/<server>/."""
+    """wgt backup there, then fetch the archive into ~/wg-tunnels/servers/<server>/backups/."""
     remote.no_args("backup", args)
     local = fetch_backup(s)
     out.info(f"{s.name}: {local} (private keys inside; restore with wgt restore)")
@@ -22,15 +22,16 @@ def do_backup(s: Server, args: List[str]) -> int:
 
 
 def fetch_backup(s: Server) -> str:
-    """wgt backup there; the archive fetched into local/backups/<server>/ (its path here)."""
+    """wgt backup there; the archive fetched into servers/<server>/backups/ (its path here)."""
     rc, o = remote.ssh(s.target, f"{s.wgt} backup --yes >/dev/null || exit 1; "
                           f"ls -t {remote.REMOTE.backup_dir}/{archive_name('*', '*')} 2>/dev/null | head -n 1",
                 capture=True)
     archive = o.strip()
     if rc != 0 or not archive:
         raise WgtError(f"{s.name}: backup failed")
-    remote.ensure_local()
-    d = remote.private_dir(os.path.join(remote.LOCAL, "backups", s.name))
+    remote.ensure_home()
+    remote.private_dir(home.server_dir(s.name))
+    d = remote.private_dir(home.backups_dir(s.name))
     if not remote.scp(f"{s.target}:{archive}", d + "/"):
         raise WgtError(f"{s.name}: fetching {archive} failed")
     local = os.path.join(d, os.path.basename(archive))
@@ -60,11 +61,11 @@ def do_remove(s: Server, args: List[str]) -> int:
             out.info("kept")
             return 0
     if teardown(s.target, s.dir) != 0:
-        raise WgtError(f"teardown failed on {s.name}; it stays in {remote.LIST} - fix the cause and re-run")
+        raise WgtError(f"teardown failed on {s.name}; it stays listed - fix the cause and re-run")
     rc = do_forget(s, ["--yes"])
     left = tunnels.drop_anchor(s.name)
     if left:
-        out.info(f"{left} still has jump files: kept (delete it by hand if they're done with)")
+        out.info(f"{left} still has jump files or backups: kept (delete it by hand when they're done with)")
     return rc
 
 
@@ -85,16 +86,14 @@ def teardown(target: str, checkout: str) -> int:
 
 
 def do_forget(s: Server, args: List[str]) -> int:
-    """Drop it from local/servers; nothing on the server changes."""
+    """Drop it from the list (its login file); nothing on the server changes."""
     if not remote.only_yes("forget", args):
         remote.needs_terminal("forget")
-        if not ui.yes(f"Remove '{s.name}' from {remote.LIST}? (nothing on the server changes)", default=False):
+        if not ui.yes(f"Remove '{s.name}' from the server list? (nothing on the server changes)", default=False):
             out.info("kept")
             return 0
-    lines = [line for line in (store.read_text(remote.LIST) or "").splitlines() if (line.split() or [""])[0] != s.name]
-    remote.write_local(remote.LIST, "\n".join(lines) + "\n")
-    staged = tunnels.shown(tunnels.carriers_dir(s.name))
-    out.info(f"forgot '{s.name}'; its staged jumps ({staged}) and local/backups/{s.name} stay")
+    os.remove(home.login_file(s.name))
+    out.info(f"forgot '{s.name}'; its staged jumps and backups ({home.shown(home.server_dir(s.name))}) stay")
     return 0
 
 
@@ -187,7 +186,7 @@ def do_move(s: Server, args: List[str]) -> int:
         out.log(f"{s.name} rebuilt")
     else:
         remote.set_target(s.name, new)
-        out.log(f"6. {s.name} is now {new} in {remote.LIST}")
+        out.log(f"6. {s.name} is now {new} in {home.shown(home.login_file(s.name))}")
         out.info(f"the old machine ({s.target}) is down, its keys kept")
         # No by default: Enter, or a lost terminal, must not destroy the way back.
         # Its tests can't see a provider's firewall blocking the new machine's UDP port.

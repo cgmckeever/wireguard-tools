@@ -1,5 +1,5 @@
 """wgt-ctl's view across servers: every config, and each device's static number
-(local/devices; the decisions are in fleet.py)."""
+(fleet/devices; the decisions are in fleet.py)."""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ from typing import Dict, List, Optional, Tuple
 from .. import store, ui
 from ..const import DEVICE_CTL_FIRST, DEVICE_DIRECT_LAST, device_ip
 from ..errors import WgtError
-from . import fleet, remote, tunnels
+from . import fleet, home, remote, tunnels
 from .remote import out
 
 
 def cmd_clients() -> None:
     """Every client on every server in one table, then what doesn't line up
-    about their static addresses (what it read also updates local/devices)."""
+    about their static addresses (what it read also updates fleet/devices)."""
     seen: Dict[str, Dict[str, Optional[int]]] = {}
     fmt = "  {:<10} " + ui.CLIENT_FMT
     print("")
@@ -37,21 +37,21 @@ def cmd_clients() -> None:
         for row in rows:
             print(fmt.format(s.name, *row.cells()))
     print("")
-    remote.ensure_local()
+    remote.ensure_home()
     entries = refresh_entries(seen, len(seen) == len(remote.servers()))
     print_problems(entries, seen)
 
 
 def read_entries() -> Dict[str, fleet.Entry]:
-    return fleet.parse(store.read_text(remote.DEVICES))
+    return fleet.parse(store.read_text(home.devices_file()))
 
 
 def write_entries(entries: Dict[str, fleet.Entry]) -> None:
-    remote.write_local(remote.DEVICES, fleet.format_entries(entries))
+    remote.write_local(home.devices_file(), fleet.format_entries(entries))
 
 
 def refresh_entries(seen: fleet.Seen, complete: bool) -> Dict[str, fleet.Entry]:
-    """local/devices updated with what the servers answered."""
+    """fleet/devices updated with what the servers answered."""
     before = read_entries()
     entries = fleet.merge(before, seen, complete, time.strftime("%Y-%m-%d"))
     if entries != before:
@@ -77,7 +77,7 @@ def sweep() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str]]:
 
 
 def read_fleet() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str], Dict[str, fleet.Entry]]:
-    """sweep(), and local/devices refreshed from it (complete only if every server answered)."""
+    """sweep(), and fleet/devices refreshed from it (complete only if every server answered)."""
     seen, missed = sweep()
     return seen, missed, refresh_entries(seen, not missed)
 
@@ -90,14 +90,14 @@ def print_problems(entries: Dict[str, fleet.Entry], seen: fleet.Seen) -> None:
 def numbered_add(args: List[str]) -> Tuple[List[str], str]:
     """`client add` words with the device's fleet-wide number, and the device if
     this just gave it a new number (forget_number: a failed add gives it back). A
-    server that can't be reached is covered by local/devices."""
+    server that can't be reached is covered by fleet/devices."""
     device = store.device_of(client_name(args))
     if not device or remote.flag_given(args, "--device-number"):
         return args, ""
-    remote.ensure_local()
+    remote.ensure_home()
     seen, missed, entries = read_fleet()
     if missed:
-        out.info(f"not read for the static number (local/devices covers them): {', '.join(missed)}")
+        out.info(f"not read for the static number (fleet/devices covers them): {', '.join(missed)}")
     known = entries.get(device)
     number = known.number if known else fleet.next_low(entries)
     taken = not known and not remote.dry_run(args)   # a dry run adds nothing: it mustn't use up a number
@@ -160,7 +160,7 @@ def rename_everywhere(args: List[str]) -> int:
         if one == 0:
             tunnels.after(s, "device", words)
         rc = one or rc
-    remote.ensure_local()
+    remote.ensure_home()
     entries = read_entries()
     if old in entries and rc == 0 and not remote.dry_run(passed):
         # <old>'s number goes with it, whatever <new>'s line said (no server that answered
@@ -182,7 +182,7 @@ def rename_everywhere(args: List[str]) -> int:
 
 def cmd_devices(args: List[str]) -> int:
     """wgt-ctl devices [sync | fix <device> <n> | forget <device>]."""
-    remote.ensure_local()
+    remote.ensure_home()
     verb = args[0] if args else "list"
     if verb == "forget" and len(args) == 2:
         return _devices_forget(args[1])
@@ -244,7 +244,7 @@ def _devices_fix(device: str, number: int) -> int:
 def _devices_forget(device: str) -> int:
     seen, missed, entries = read_fleet()
     if device not in entries:
-        raise WgtError(f"no device '{device}' in {remote.DEVICES}")
+        raise WgtError(f"no device '{device}' in {home.shown(home.devices_file())}")
     if any(device in devices for devices in seen.values()):
         raise WgtError(f"'{device}' is still on a server (wgt-ctl <server> client remove <config>)")
     if missed:

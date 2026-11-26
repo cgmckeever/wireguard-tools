@@ -1,9 +1,4 @@
 
-# This machine's private files: server list, device numbers, backup
-# archives (private keys). Never commit; see wgt-ctl in README.md.
-local/*
-!local/.gitkeep
-
 # Python dev environment (pytest) on the dev machine
 .venv/
 __pycache__/

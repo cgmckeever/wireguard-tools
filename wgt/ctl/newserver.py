@@ -10,12 +10,12 @@ from .. import store, ui
 from ..config import FLEET_SUBNETS_ENV
 from ..const import SET_UP_KEYS
 from ..errors import WgtError
-from . import remote, tunnels
+from . import home, remote, tunnels
 from .remote import out, q
 
 
 def fleet_subnets() -> List[str]:
-    """The client subnets of the servers already in local/servers, so a new
+    """The client subnets of the servers already listed, so a new
     one is offered the next free subnet instead of a random one (unreachable
     servers are skipped)."""
     used = []
@@ -30,7 +30,7 @@ def fleet_subnets() -> List[str]:
 def cmd_init(argv: List[str]) -> None:
     """Set up a new server (or adopt one already running these tools) and add it to the list."""
     opts, setup_args = _parse_init(argv)
-    remote.ensure_local()
+    remote.ensure_home()
     address, name, target = _ask_identity(opts)
     out.log(f"Connecting to {target}")
     login(target)
@@ -89,11 +89,11 @@ def _ask_identity(opts: Dict[str, str]) -> Tuple[str, str, str]:
 
 
 def _refuse_listed(name: str) -> None:
-    """A name already in local/servers, in any case: on a Mac's file system Boba's
+    """A name already listed, in any case: on a Mac's file system Boba's
     folders and copies are boba's, and delivery refuses both (tunnels.deliver)."""
     taken = next((s.name for s in remote.servers() if tunnels.same_name(s.name, name)), "")
     if taken:
-        raise WgtError(f"'{name}' is already in {remote.LIST}" + (f" (as '{taken}')" if taken != name else ""))
+        raise WgtError(f"'{name}' is already listed" + (f" (as '{taken}')" if taken != name else ""))
 
 
 def login(target: str) -> None:
@@ -185,13 +185,8 @@ def require_branch(target: str, branch: str) -> None:
 
 
 def record(name: str, target: str, checkout: str = remote.DEF_DIR) -> None:
-    """Add a server to local/servers (its checkout too, when not the default), and its
-    (empty) folder for jump files in ~/wg-tunnels, so wireguard-tunnels knows it exists."""
-    remote.ensure_local()
-    text = store.read_text(remote.LIST) or ""
-    sep = "\n" if text and not text.endswith("\n") else ""   # a hand-edited last line must stay its own
-    where = f" {checkout}" if checkout != remote.DEF_DIR else ""
-    with open(remote.LIST, "a") as f:
-        f.write(f"{sep}{name:<10} {target}{where}\n")
+    """List a server (its login file, with its checkout when not the default), and
+    make its (empty) folder for jump files, so wireguard-tunnels knows it exists."""
+    remote.write_login(name, target, checkout)
     tunnels.anchor(name)
-    out.log(f"Added '{name}' ({target}) to {remote.LIST}")
+    out.log(f"Added '{name}' ({target}): {home.shown(home.login_file(name))}")

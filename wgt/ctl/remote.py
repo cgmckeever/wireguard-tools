@@ -1,5 +1,5 @@
-"""wgt-ctl's foundations: where things are here and on a server, the server list
-(local/servers), and reaching a server over ssh."""
+"""wgt-ctl's foundations: where things are on a server, the server list
+(~/wg-tunnels/servers/<server>/login, home.py), and reaching a server over ssh."""
 
 from __future__ import annotations
 
@@ -16,10 +16,7 @@ from ..const import REPO_DIR, Paths
 from ..ctx import BOOL_FLAGS, VALUE_FLAGS
 from ..errors import WgtError
 from ..system import Out, atomic_write
-
-LOCAL = os.path.join(REPO_DIR, "local")
-LIST = os.path.join(LOCAL, "servers")
-DEVICES = os.path.join(LOCAL, "devices")               # each device's static number (fleet.py)
+from . import home
 
 DEF_DIR = "/opt/wireguard-tools"
 DEF_WGT = f"{DEF_DIR}/bin/wgt"
@@ -50,7 +47,7 @@ out = Out()
 
 @dataclass
 class Server:
-    """One line of local/servers."""
+    """One server in the list: its folder's name, and its login file."""
 
     name: str
     target: str
@@ -61,31 +58,38 @@ class Server:
         return shlex.quote(f"{self.dir}/bin/wgt")
 
 
-def ensure_local() -> None:
-    """local/ and its private dirs (700), and an empty servers list (600)."""
-    for d in (LOCAL, os.path.join(LOCAL, "backups")):
+def ensure_home() -> None:
+    """~/wg-tunnels and the folders wgt-ctl keeps there, private (700)."""
+    for d in (home.root(), home.servers_dir(), os.path.dirname(home.devices_file())):
         private_dir(d)
-    if not os.path.exists(LIST):
-        with open(LIST, "w") as f:
-            f.write("# Servers this machine manages (untracked): name  ssh-target  [checkout]\n")
-    os.chmod(LIST, 0o600)
 
 
 def servers() -> List[Server]:
-    """local/servers, checked: its names become local paths and its targets and
-    directories go into ssh and remote commands."""
+    """Every folder in servers/ with a login file, by name. Checked: names become
+    local paths, and targets and directories go into ssh and remote commands."""
     found: List[Server] = []
-    for n, line in enumerate((store.read_text(LIST) or "").splitlines(), 1):
-        fields = line.split()
-        if not fields or fields[0].startswith("#"):
-            continue
-        name, target = fields[0], fields[1] if len(fields) > 1 else ""
-        checkout = fields[2] if len(fields) > 2 else DEF_DIR
-        if len(fields) < 2 or not valid_server(name) or not TARGET.match(target) or not CHECKOUT_DIR.match(checkout):
-            raise WgtError(f"{LIST} line {n}: want 'name user@host [/checkout/dir]' "
-                           f"(name: {SERVER_NAME_RULE}): {line.strip()}")
+    top = home.servers_dir()
+    for name in sorted(os.listdir(top)) if os.path.isdir(top) else []:
+        path = home.login_file(name)
+        if not os.path.isfile(path):
+            continue                       # wireguard-tunnels' alone (nord.sh), or forgotten
+        fields = next((line.split() for line in (store.read_text(path) or "").splitlines()
+                       if line.split() and not line.lstrip().startswith("#")), [])
+        target = fields[0] if fields else ""
+        checkout = fields[1] if len(fields) > 1 else DEF_DIR
+        if not valid_server(name) or not TARGET.match(target) or not CHECKOUT_DIR.match(checkout):
+            raise WgtError(f"{home.shown(path)}: want 'user@host [/checkout/dir]' "
+                           f"in a folder named for the server ({SERVER_NAME_RULE})")
         found.append(Server(name, target, checkout))
     return found
+
+
+def write_login(name: str, target: str, checkout: str = DEF_DIR) -> None:
+    """A server's login file: it's listed from then on."""
+    ensure_home()
+    private_dir(home.server_dir(name))
+    where = f" {checkout}" if checkout != DEF_DIR else ""
+    write_local(home.login_file(name), f"{target}{where}\n")
 
 
 NO_SERVERS = "no servers yet (add one: wgt-ctl init)"
@@ -104,7 +108,7 @@ def find(sel: str) -> Server:
     for i, s in enumerate(servers(), 1):
         if sel in (s.name, str(i)):
             return s
-    raise WgtError(f"no server '{sel}' in {LIST}")
+    raise WgtError(f"no server '{sel}' (wgt-ctl list shows them)")
 
 
 def pick() -> Server:
@@ -268,7 +272,7 @@ def flag_given(args: Sequence[str], flag: str) -> bool:
 
 def dry_run(args: Sequence[str]) -> bool:
     """A wgt command run with --dry-run: wgt-ctl takes no number, offers no push and
-    delivers nothing for it either (what a sweep reads still refreshes local/devices)."""
+    delivers nothing for it either (what a sweep reads still refreshes fleet/devices)."""
     return "--dry-run" in wgt_words(args)
 
 
@@ -309,18 +313,12 @@ def needs_terminal(cmd: str) -> None:
 
 
 def write_local(path: str, text: str, mode: int = 0o600) -> None:
-    """A file under local/ (or ~/wg-tunnels), whole or not at all: the server list and
-    numbers aren't recoverable from anywhere else. system.atomic_write: synced, and no
-    temp file left behind if it fails."""
+    """A file under ~/wg-tunnels, whole or not at all: the server list and numbers
+    aren't recoverable from anywhere else. system.atomic_write: synced, and no temp
+    file left behind if it fails."""
     atomic_write(path, text, mode)
 
 
 def set_target(name: str, target: str) -> None:
-    """Point a server's line in local/servers at a new login (its checkout dir stays)."""
-    lines = []
-    for line in (store.read_text(LIST) or "").splitlines():
-        f = line.split()
-        if f and f[0] == name:
-            line = f"{name:<10} {target}" + (f" {f[2]}" if len(f) > 2 else "")
-        lines.append(line)
-    write_local(LIST, "\n".join(lines) + "\n")
+    """Point a server's login at a new machine (its checkout dir stays)."""
+    write_login(name, target, find(name).dir)

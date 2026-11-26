@@ -395,7 +395,7 @@ def test_fleet_file_round_trip_sorted_by_number():
 
 @pytest.mark.parametrize("line", ["a", "a x", "a 2 removed", "a 2 gone 2026-01-01"])
 def test_fleet_bad_lines_refused(line):
-    with pytest.raises(WgtError, match="local/devices"):
+    with pytest.raises(WgtError, match="fleet/devices"):
         fleet.parse(line)
 
 

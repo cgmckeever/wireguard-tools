@@ -1,14 +1,14 @@
-"""`wgt-ctl`: drives the servers listed in local/servers from your own machine
+"""`wgt-ctl`: drives the servers listed in ~/wg-tunnels/servers/ from your own machine
 (macOS or Linux). Most commands are  wgt-ctl SERVER COMMAND  where SERVER is
 a name, a list number, or all; a few take no server (below).
 
 One server:
   wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
-  wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to local/backups/SERVER/
+  wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to servers/SERVER/backups/
   wgt-ctl SERVER jump-add [n|all]       push a jump file from ~/wg-tunnels/servers/SERVER/carriers/
   wgt-ctl SERVER sync                   copy its client configs to ~/wg-tunnels/devices/<device>/config/
   wgt-ctl SERVER ssh [command] | branch <b>
-  wgt-ctl SERVER forget [--yes]         drop it from local/servers (the server is untouched)
+  wgt-ctl SERVER forget [--yes]         drop it from the list: its login file (the server is untouched)
   wgt-ctl SERVER remove [--yes]         tear wireguard-tools off it (rollback --purge, delete its
                                         checkout, wgcf and archives), then forget it
   wgt-ctl SERVER move [--to ADDRESS] [--user U] [--branch B] [--yes] [-- setup flags]
@@ -30,14 +30,15 @@ No server:
   wgt-ctl init [--address A] [--name N] [--user U] [--branch B] [-- setup flags]
                                         set up a new server (or adopt one already running these tools)
 
-Leave SERVER out of a server command to pick one from the list. Private
-files stay under local/ (untracked): servers, devices (each device's static
-number), backups/. WireGuard configs live in ~/wg-tunnels ($WG_TUNNELS, shared
-with wireguard-tunnels): servers/<server>/carriers/*.conf are jump files (any
-name; a "# jump: <code> <label>" line names each), and devices/<device>/config/
-gets each server's client configs after client add, rotate, rename and remove,
-setup, restore, move and init (the server's copy wins; a file that isn't a copy
-is never overwritten).
+Leave SERVER out of a server command to pick one from the list. Everything
+private lives in ~/wg-tunnels ($WG_TUNNELS, shared with wireguard-tunnels), none
+of it in this checkout: servers/<server>/login is the list ("user@host
+[/checkout/dir]"), servers/<server>/backups/ the fetched archives,
+servers/<server>/carriers/*.conf the jump files (any name; a "# jump: <code>
+<label>" line names each), and fleet/devices each device's static number.
+devices/<device>/config/ gets each server's client configs after client add,
+rotate, rename and remove, setup, restore, move and init (the server's copy
+wins; a file that isn't a copy is never overwritten).
 
 `wgt-ctl SERVER client add` gives a device its fleet-wide number, and
 `wgt-ctl all device rename <device> <new> [--force]` renames a whole device on

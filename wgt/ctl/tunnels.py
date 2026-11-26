@@ -1,11 +1,10 @@
-"""~/wg-tunnels ($WG_TUNNELS): where this machine keeps WireGuard configs, shared
-with wireguard-tunnels. wgt-ctl uses two kinds of folder there, made on demand
-(0700, like the root):
+"""Client configs in ~/wg-tunnels (home.py: the whole layout), and the jump
+files staged there. wgt-ctl's folders are made on demand (0700, like the root):
 
   servers/<server>/carriers/   jump configs staged for a server (jumpfiles.py)
   devices/<device>/config/     client configs as the servers issued them (below)
 
-Everything else under it belongs to wireguard-tunnels.
+Besides those and home.py's, everything under it belongs to wireguard-tunnels.
 
 Delivery: a server's client configs are copied to devices/<device>/config/.
 The server's copy is the live one, so it wins over a local copy of the same
@@ -34,7 +33,8 @@ from .. import store, system
 from ..const import client_conf_name
 from ..ctx import SETTINGS_COMMANDS
 from ..errors import WgtError
-from . import remote
+from . import home, remote
+from .home import root, shown
 from .remote import Server, out
 
 HEADER = re.compile(r"(?m)^# wireguard-tools client: (\S+) on (\S+)[ \t]*$")
@@ -42,19 +42,9 @@ PRIVATE_KEY = re.compile(r"(?mi)^[ \t]*PrivateKey[ \t]*=[ \t]*(\S+)")
 MARK = "\x1e"   # starts each file's name line in a fetch (never in a config)
 
 
-def root() -> str:
-    """$WG_TUNNELS as written (as wireguard-tunnels reads it), else ~/wg-tunnels. An
-    absolute path only: a relative one (or a "~" the shell didn't expand) would put
-    configs, private keys and all, under wherever wgt-ctl runs, a checkout say."""
-    path = os.environ.get("WG_TUNNELS") or os.path.expanduser("~/wg-tunnels")
-    if not os.path.isabs(path):
-        raise WgtError(f"WG_TUNNELS must be an absolute path, not '{path}'")
-    return path
-
-
 def carriers_dir(server: str) -> str:
     """Where <server>'s jump configs wait to be pushed."""
-    return os.path.join(root(), "servers", server, "carriers")
+    return os.path.join(home.server_dir(server), "carriers")
 
 
 def anchor(server: str) -> str:
@@ -290,11 +280,6 @@ def apply(actions: List[Action]) -> None:
             os.replace(a.path, bak_path(a.path))
 
 
-def shown(path: str) -> str:
-    home = os.path.expanduser("~")
-    return "~" + path[len(home):] if path.startswith(home + os.sep) else path
-
-
 def report(server: str, actions: List[Action]) -> None:
     words = {"new": "added", "update": "updated (old copy kept as .bak)",
              "retire": "retired to .bak (the server no longer has it)"}
@@ -357,7 +342,7 @@ def deliver(s: Server) -> int:
     other = next((x for x in remote.servers() if x.name != s.name and x.target != s.target
                   and same_name(x.name, name)), None)
     if other:
-        raise WgtError(f"{s.name}'s configs name the server '{name}', which is {other.name} in {remote.LIST}: "
+        raise WgtError(f"{s.name}'s configs name the server '{name}', which is {other.name} here: "
                        f"nothing delivered (give {s.name} its own: wgt-ctl {s.name} setup --name <name>; "
                        f"or, if they're one machine, list it once)")
     for config in sorted(c for c, text in issued.items() if not store.is_utf8(text)):
