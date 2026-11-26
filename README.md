@@ -61,6 +61,11 @@ warp.par-fr.laptop: laptop -> server -> par-fr jump -> WARP (Cloudflare, Paris) 
 
 ## Quick start
 
+Two ways in. The steps below set up **a single server**, working on it directly.
+For **one server or more, managed from one place**, the better way is
+[`wgt-ctl` from your own machine](#or-from-your-own-machine): the same setup over
+SSH, then every server driven from there ([Fleet management](#fleet-management)).
+
 On a fresh server, as root (`sudo -i`):
 
 ```bash
@@ -83,8 +88,10 @@ questions; Enter takes the default. The tools themselves need Python 3.8+.
    between them there.
 3. **Check it:** `wgt summary` (or `wgt test`).
 
-**Or from your own machine**, for one server or a fleet: clone this repository
-there too ([Your servers](#your-servers)), then
+### Or from your own machine
+
+For one server or a fleet: clone this repository there too
+([Your servers](#your-servers)), then
 
 ```bash
 wgt-ctl init --address 203.0.113.10 --name dengar   # installs and runs setup over SSH
