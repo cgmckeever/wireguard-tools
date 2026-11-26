@@ -627,7 +627,7 @@ network.
 
 ---
 
-# Phase 4: Final Preparation and Drop-off
+# Phase 4: Preparation for Drop-off
 
 ## 4.1 Network Connectivity **[Computer]**
 
