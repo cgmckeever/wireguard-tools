@@ -1,19 +1,28 @@
 # wireguard-tools
 
-*Cloudflare exit IPs, tunneled through your WireGuard region*
+*WireGuard fleet management, with secondary exits through jump servers and Cloudflare WARP*
 
 ## Overview
 
-wireguard-tools turns a bare Debian 11+ / Ubuntu 20.04+ server (amd64 or
-arm64) into a WireGuard VPN server and manages the devices that connect to it,
-on the server itself or, for several servers, from your own machine.
+wireguard-tools sets up and runs WireGuard VPN servers: one, or a fleet of them
+driven from your own machine. `wgt` turns a bare Debian 11+ / Ubuntu 20.04+
+server (amd64 or arm64) into a WireGuard server and manages it; `wgt-ctl` runs
+the same commands on every server over SSH, and adds new servers, updates,
+backups, and moving a server to a new machine.
 
-A plain WireGuard server sends traffic out through its own IP. This one can
-also send it through [Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free VPN
-service; the server registers its own free WARP account), and through a
-**jump**: another server elsewhere, such as a Proton VPN server in Paris
-or a second server of your own, that the WireGuard Server connects to as a client, so
-traffic leaves from there.
+- **Servers:** setup that's safe to re-run (and `wgt rollback`), backups and
+  restore, a [history](#history-what-changed-when-and-who-did-it) of every
+  change, and [updates](#updating-servers) across the fleet.
+- **Devices:** configs with QR codes, each device isolated until you put it in a
+  [group](#groups-who-can-reach-what), [static addresses](#static-device-addresses)
+  that match across servers, and [copies on your machine](#configs-on-your-machine).
+- **Exits:** a plain WireGuard server sends traffic out through its own IP.
+  A config can instead leave through a **jump**: another server elsewhere, such
+  as a Proton VPN server in Paris or one of your own, that the WireGuard Server
+  connects to as a client. It can also go through
+  [Cloudflare WARP](https://1.1.1.1/) (Cloudflare's free VPN service; the server
+  registers its own free account), on its own or inside a jump.
+  [Why route through Cloudflare?](#why-route-through-cloudflare)
 
 A WireGuard network is a private network, like your home LAN: each config is a
 key to it, so give configs only to your own devices and to people you'd let onto
@@ -43,30 +52,12 @@ device called `laptop` and a jump called `par-fr` (Paris):
 | `par-fr.laptop` | the `par-fr` jump | the jump's IP |
 | `warp.par-fr.laptop` | the `par-fr` jump, through WARP | a Cloudflare IP near the jump (such as Paris) |
 
-### Why route through Cloudflare?
-
-A VPS's public IP is a datacenter address, and sites treat those with
-suspicion: more CAPTCHAs, "unusual traffic" pages and outright blocks, as
-they do with commercial VPN ranges. Through WARP, traffic leaves from
-Cloudflare's network instead:
-
-- **Sites see a Cloudflare IP, not your VPS.** WARP addresses are shared by
-  millions of ordinary WARP users, so they're rarely blocked, and your server's
-  own IP (tied to your hosting account) never shows up in their logs.
-- **Your provider sees one encrypted tunnel to Cloudflare** (or, through a
-  jump, to the jump), not which sites your devices visit.
-- **IPv6 for devices even on an IPv4-only VPS**, through WARP's own IPv6.
-- **You pick the location.** WARP exits near where it's entered: the WireGuard Server,
-  or a [jump](#jumps) in another city (sites see somewhere such as Paris),
-  still looking like an ordinary Cloudflare user rather than a VPN.
-- **Fail closed:** if WARP or a jump goes down, its configs are blocked rather
-  than quietly falling back to the VPS's IP.
-
-The trade-offs: an extra hop (a few milliseconds for WARP, as Cloudflare is
-close to most datacenters; more for a distant jump), Cloudflare sees where
-traffic goes instead of your provider, and a few sites block WARP too (switch
-the device to its plain config for those). It hides your server, not you: it
-isn't an anonymity tool.
+```
+laptop:             laptop -> server -> sites
+warp.laptop:        laptop -> server -> WARP -> sites
+par-fr.laptop:      laptop -> server -> par-fr jump -> sites
+warp.par-fr.laptop: laptop -> server -> par-fr jump -> WARP (Cloudflare, Paris) -> sites
+```
 
 ## Quick start
 
@@ -92,6 +83,17 @@ questions; Enter takes the default. The tools themselves need Python 3.8+.
    between them there.
 3. **Check it:** `wgt summary` (or `wgt test`).
 
+**Or from your own machine**, for one server or a fleet: clone this repository
+there too ([Your servers](#your-servers)), then
+
+```bash
+wgt-ctl init --address 203.0.113.10 --name dengar   # installs and runs setup over SSH
+wgt-ctl dengar client add phone                     # any wgt command, on that server
+```
+
+`init` asks for anything you leave out and adds the server to your list
+([Adding a server](#adding-a-server)); step 1, the provider's firewall, still applies.
+
 ### Conventions
 
 - **`wgt`** runs as root on the server (`wgt help` lists everything).
@@ -102,9 +104,22 @@ questions; Enter takes the default. The tools themselves need Python 3.8+.
   `wg-tools.state`). `wgt` commands that change a server take **`--dry-run`**
   (show what would change, change nothing) and **`--yes`** (`-y`, skip the step-by-step prompts).
   `wgt-ctl`'s own commands, such as `move` and `remove`, have no dry run.
+- **Scripts and AI agents (no terminal):** nothing waits on a prompt. With no
+  terminal, `wgt setup` needs `--yes` and doesn't ask; run it with `--dry-run`
+  first to see what it would change.
 - Private keys are never printed except inside a config's QR code.
 - In this README, `dengar` and `boba` are example server names, and `<server>`
   stands for yours.
+
+## Contents
+
+- [Server management](#server-management): setup and its settings, [devices and configs](#devices-and-configs), [groups](#groups-who-can-reach-what), [jumps](#jumps)
+- [Backups and restore](#check-back-up-restore-clean-up), [history](#history-what-changed-when-and-who-did-it), [rotating WARP accounts](#rotate-warp-accounts)
+- [Fleet management](#fleet-management): `wgt-ctl`, your servers from your own machine, [moving or rebuilding one](#moving-or-rebuilding-a-server)
+- [Updating servers](#updating-servers)
+- [Troubleshooting](#troubleshooting)
+- [How it works](#how-it-works): interfaces, routing, [files](#files)
+- [Development](#development)
 
 ## Server management
 
@@ -141,8 +156,8 @@ All optional. They're saved in `/etc/wireguard/wg-tools.state`, so re-runs and
 | `--warp-mtu <bytes>` | `WARP_MTU` | `1280` | MTU of the WARP tunnel |
 | `--wg-if` / `--warp-if` | `WG_IF` / `WARP_IF` | `wg0` / `warp` | interface names |
 | `--table <n>` | `RT_TABLE` | `100` | routing table used for WARP |
-| | `WGCF_VERSION` | `latest` | wgcf release to install, e.g. `v2.2.22` |
-| | `WGCF_SHA256` | | pin the wgcf binary's checksum |
+| *(env only)* | `WGCF_VERSION` | `latest` | wgcf release to install, e.g. `v2.2.22` |
+| *(env only)* | `WGCF_SHA256` | | pin the wgcf binary's checksum |
 
 A subnet this host already routes is refused, since it could cut off the way to
 the host, and `--wg-if` or `--warp-if` can't rename a running interface (`wgt
@@ -453,6 +468,31 @@ Such a device needs only plain configs, so add it with `--warp off`
 (`wgt client add mac --warp off`). On a Mac,
 [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels) sets this
 up as its "warped" tunnels: WireGuard tunnels where WARP starts locally on the Mac.
+
+### Why route through Cloudflare?
+
+A VPS's public IP is a datacenter address, and sites treat those with
+suspicion: more CAPTCHAs, "unusual traffic" pages and outright blocks, as
+they do with commercial VPN ranges. Through WARP, traffic leaves from
+Cloudflare's network instead:
+
+- **Sites see a Cloudflare IP, not your VPS.** WARP addresses are shared by
+  millions of ordinary WARP users, so they're rarely blocked, and your server's
+  own IP (tied to your hosting account) never shows up in their logs.
+- **Your provider sees one encrypted tunnel to Cloudflare** (or, through a
+  jump, to the jump), not which sites your devices visit.
+- **IPv6 for devices even on an IPv4-only VPS**, through WARP's own IPv6.
+- **You pick the location.** WARP exits near where it's entered: the WireGuard Server,
+  or a [jump](#jumps) in another city (sites see somewhere such as Paris),
+  still looking like an ordinary Cloudflare user rather than a VPN.
+- **Fail closed:** if WARP or a jump goes down, its configs are blocked rather
+  than quietly falling back to the VPS's IP.
+
+The trade-offs: an extra hop (a few milliseconds for WARP, as Cloudflare is
+close to most datacenters; more for a distant jump), Cloudflare sees where
+traffic goes instead of your provider, and a few sites block WARP too (switch
+the device to its plain config for those). It hides your server, not you: it
+isn't an anonymity tool.
 
 ### Jumps
 
