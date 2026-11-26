@@ -1,7 +1,7 @@
 #!/bin/sh
 # tpk-ctl.sh: set up and run tunnel-puck from your computer (macOS or Linux). A
-# puck's settings are ../configs/<puck>.conf, plus one ../configs/<puck>.<gateway>.conf
-# for each gateway it serves (a WireGuard gateway: the server your clients connect
+# puck's settings are ~/wg-tunnels/pucks/<puck>/puck.conf ($WG_TUNNELS, as wgt-ctl),
+# plus one pucks/<puck>/gateways/<gateway>.conf for each gateway it serves (a WireGuard gateway: the server your clients connect
 # to, which sends them on to the puck; the file holds the link, routing and jumps
 # there). It runs puck.sh on the puck and gateway.sh on the gateways over ssh.
 # <puck> can be left out while there's only one (else it asks; TPK_PUCK=<puck> is
@@ -15,7 +15,7 @@
 #   tpk-ctl.sh [<puck>] ssh-config                print the ~/.ssh/config entry for SSH_CLOUDFLARE
 #   tpk-ctl.sh ssh-config install                 add every puck's entry to your ssh config (its own file, one Include)
 #   tpk-ctl.sh [<puck>] init                      1.2c, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
-#   tpk-ctl.sh [<puck>] gateway add <gateway>     2.1: serve a gateway: configs/<puck>.<gateway>.conf, then link, exit and test
+#   tpk-ctl.sh [<puck>] gateway add <gateway>     2.1: serve a gateway: pucks/<puck>/gateways/<gateway>.conf, then link, exit and test
 #   tpk-ctl.sh [<puck>] gateway [list]            the gateways the puck serves: routing, link, interfaces, jumps
 #   tpk-ctl.sh [<puck>] gateway remove <gateway>  stop serving one: its configs and jumps (wgt), its link, its settings file
 #   tpk-ctl.sh [<puck>[.<gateway>]] link          the link to the gateway (puck and gateway), keys exchanged for you
@@ -34,12 +34,12 @@
 #   tpk-ctl.sh [<puck>] wifi [list]               the puck's saved Wi-Fi networks, and its uplink now
 #   tpk-ctl.sh [<puck>] wifi add <name>           save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all    remove saved Wi-Fi (all: ethernet only)
-#   tpk-ctl.sh [<puck>] wifi sync                 the puck's Wi-Fi becomes configs/<puck>.wifi.conf, in its order
+#   tpk-ctl.sh [<puck>] wifi sync                 the puck's Wi-Fi becomes pucks/<puck>/wifi.conf, in its order
 #   tpk-ctl.sh [<puck>[.<gateway>]] test          PASS/FAIL: the puck, then each gateway (wgt: and a client's way out)
 #   tpk-ctl.sh [<puck>] ssh [<command>]           a shell (or a command) on the puck, the first way that answers
 #   tpk-ctl.sh [<puck>] reboot                    restart the puck, and wait until it answers again
 #   tpk-ctl.sh [<puck>] shutdown                  power the puck off, safe to unplug (asks first)
-#   tpk-ctl.sh [<puck>[.<gateway>]] all           each gateway (or that one): link, exit; then wifi sync (with a <puck>.wifi.conf), test
+#   tpk-ctl.sh [<puck>[.<gateway>]] all           each gateway (or that one): link, exit; then wifi sync (with a wifi.conf), test
 #   tpk-ctl.sh [<puck>] undo [all]                take it off every gateway and the puck (all: cloudflared too); the settings stay
 #
 # The puck is reached the first way that answers: SSH_LAN (at home), then through
@@ -50,7 +50,10 @@
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-CONFIGS=$(cd "$HERE/../configs" && pwd)
+EXAMPLES=$(cd "$HERE/../configs" && pwd)    # the templates; settings live in PUCKS
+STORE="${WG_TUNNELS:-$HOME/wg-tunnels}"
+case "$STORE" in /*) ;; *) echo "tpk-ctl.sh: WG_TUNNELS must be an absolute path, not '$STORE'" >&2; exit 1 ;; esac
+PUCKS="$STORE/pucks"
 REPO=$(cd "$HERE/../.." && pwd)
 WGT_CTL="$REPO/bin/wgt-ctl"
 COMMANDS="new config ssh-config init gateway link exit client mode disable enable status wifi test ssh reboot shutdown all undo"
@@ -58,7 +61,7 @@ COMMANDS="new config ssh-config init gateway link exit client mode disable enabl
 TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 # The remote prefix that runs a command as root (sudo unless already root).
 AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
-# The settings in a configs/<puck>.<gateway>.conf.
+# The settings in a pucks/<puck>/gateways/<gateway>.conf.
 GATEWAY_VARS="TPK_ROUTING PUCK_PORT TPK_LINK GATEWAY_SSH GATEWAY_HOST CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET
           WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL JUMP_LANONLY JUMP_LANONLY_CODE
           JUMP_LANONLY_LABEL TPK_DISABLED TPK_DISABLED_CONFIGS"
@@ -107,7 +110,7 @@ save() {
     awk -v k="$1" -v line="$1=\"$2\"" 'index($0, k "=") == 1 && !done {print line; done = 1; next} {print}
         END {if (!done) print line}' "$CONF" > "$tmp"
     cat "$tmp" > "$CONF"; rm -f "$tmp"
-    log "saved $1=\"$2\" in $CONF"
+    log "saved $1=\"$2\" in $(shown "$CONF")"
 }
 
 # choose <what> <names, one per line> <default> <hint>: PICK. One name: that one.
@@ -144,23 +147,30 @@ choose() {
 
 # --- Which puck, which gateway -----------------------------------------------------
 
-# pucks: the configured pucks, one name per line: configs/<puck>.conf. A name with
-# a dot is one of a puck's other files (<puck>.wifi.conf, <puck>.<gateway>.conf).
+# Each puck's settings: pucks/<puck>/puck.conf, its Wi-Fi list wifi.conf, and one
+# gateways/<gateway>.conf per gateway it serves. Folders 700, files 600.
+puck_file() { echo "$PUCKS/$1/puck.conf"; }
+wifi_file() { echo "$PUCKS/$1/wifi.conf"; }
+gateway_file() { echo "$PUCKS/$1/gateways/$2.conf"; }
+# shown <path>: under ~ when it is, for messages.
+shown() { case "$1" in "$HOME"/*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
+# private_dir <dir>: made, mode 700 (with its parents up to the store).
+private_dir() { (umask 077; mkdir -p "$1"); chmod 700 "$1"; }
+
+# pucks: the configured pucks, one name per line: those with a pucks/<puck>/puck.conf.
 pucks() {
-    for f in "$CONFIGS"/*.conf; do
+    for f in "$PUCKS"/*/puck.conf; do
         [ -e "$f" ] || continue
-        n=$(basename "$f" .conf)
-        case "$n" in *.*) ;; *) echo "$n" ;; esac
+        f=${f%/puck.conf}; echo "${f##*/}"
     done
     return 0
 }
 
-# gateways_of <puck>: the gateways it serves, one per line: configs/<puck>.<gateway>.conf.
+# gateways_of <puck>: the gateways it serves, one per line: pucks/<puck>/gateways/<gateway>.conf.
 gateways_of() {
-    for f in "$CONFIGS/$1".*.conf; do
+    for f in "$PUCKS/$1"/gateways/*.conf; do
         [ -e "$f" ] || continue
-        v=$(basename "$f" .conf); v="${v#"$1".}"
-        case "$v" in wifi|*.*) ;; *) echo "$v" ;; esac
+        basename "$f" .conf
     done
     return 0
 }
@@ -198,16 +208,18 @@ cmd_new() {
     fi
     puck_name_ok "$name"
     ! is_command "$name" || die "'$name' is a command word: pick another name"
-    [ ! -e "$CONFIGS/$name.conf" ] || die "configs/$name.conf already exists"
-    cp "$CONFIGS/puck.conf.example" "$CONFIGS/$name.conf"
-    log "made configs/$name.conf: fill it in, then scripts/tpk-ctl.sh $name config"
-    if [ -z "$wifi" ] && have_tty && [ ! -e "$CONFIGS/$name.wifi.conf" ]; then
-        ! ask_yes "A Wi-Fi list for it too (configs/$name.wifi.conf)?" || wifi=1
+    f=$(puck_file "$name") w=$(wifi_file "$name")
+    [ ! -e "$f" ] || die "$(shown "$f") already exists"
+    private_dir "$PUCKS"; private_dir "$PUCKS/$name"
+    (umask 077; cp "$EXAMPLES/puck.conf.example" "$f")
+    log "made $(shown "$f"): fill it in, then scripts/tpk-ctl.sh $name config"
+    if [ -z "$wifi" ] && have_tty && [ ! -e "$w" ]; then
+        ! ask_yes "A Wi-Fi list for it too ($(shown "$w"))?" || wifi=1
     fi
     if [ -n "$wifi" ]; then
-        [ ! -e "$CONFIGS/$name.wifi.conf" ] || die "configs/$name.wifi.conf already exists"
-        (umask 077; cp "$CONFIGS/puck.wifi.conf.example" "$CONFIGS/$name.wifi.conf")
-        log "made configs/$name.wifi.conf: one name::password per line, most preferred first"
+        [ ! -e "$w" ] || die "$(shown "$w") already exists"
+        (umask 077; cp "$EXAMPLES/puck.wifi.conf.example" "$w")
+        log "made $(shown "$w"): one name::password per line, most preferred first"
     fi
     log "then: tpk-ctl.sh $name init (1.2c), and tpk-ctl.sh $name gateway add <gateway> for each gateway it serves (2.1)"
 }
@@ -215,12 +227,12 @@ cmd_new() {
 
 # --- Settings ------------------------------------------------------------------
 
-# load_puck: read configs/<PUCK_NAME>.conf, the puck's own settings.
+# load_puck: read pucks/<PUCK_NAME>/puck.conf, the puck's own settings.
 load_puck() {
     puck_name_ok "$PUCK_NAME"
-    PUCK_CONF="$CONFIGS/$PUCK_NAME.conf"
-    [ -r "$PUCK_CONF" ] || die "no puck '$PUCK_NAME': configs/$PUCK_NAME.conf doesn't exist (configured: $(words "$(pucks)"))"
-    log "puck: $PUCK_NAME (configs/$PUCK_NAME.conf)"
+    PUCK_CONF=$(puck_file "$PUCK_NAME")
+    [ -r "$PUCK_CONF" ] || die "no puck '$PUCK_NAME': $(shown "$PUCK_CONF") doesn't exist (configured: $(words "$(pucks)"))"
+    log "puck: $PUCK_NAME ($(shown "$PUCK_CONF"))"
     SSH_LAN="" SSH_CLOUDFLARE="" CF_TOKEN_FILE=""
     # shellcheck disable=SC1090
     . "$PUCK_CONF"
@@ -237,14 +249,14 @@ reset_gateway() {
     link_ids
 }
 
-# load_gateway <gateway>: read configs/<puck>.<gateway>.conf and fill in what follows from it.
+# load_gateway <gateway>: read pucks/<puck>/gateways/<gateway>.conf and fill in what follows from it.
 # QUIET=1: no log line, and no questions (stops instead).
 load_gateway() {
     gateway_name_ok "$1"
     reset_gateway
-    GATEWAY_NAME="$1" CONF="$CONFIGS/$PUCK_NAME.$1.conf"
-    [ -r "$CONF" ] || die "$PUCK_NAME serves no gateway '$1': configs/$PUCK_NAME.$1.conf doesn't exist (its gateways: $(words "$(gateways)"); add one: tpk-ctl.sh $PUCK_NAME gateway add $1)"
-    [ -n "${QUIET:-}" ] || log "gateway: $1 (configs/$PUCK_NAME.$1.conf)"
+    GATEWAY_NAME="$1" CONF=$(gateway_file "$PUCK_NAME" "$1")
+    [ -r "$CONF" ] || die "$PUCK_NAME serves no gateway '$1': $(shown "$CONF") doesn't exist (its gateways: $(words "$(gateways)"); add one: tpk-ctl.sh $PUCK_NAME gateway add $1)"
+    [ -n "${QUIET:-}" ] || log "gateway: $1 ($(shown "$CONF"))"
     # shellcheck disable=SC1090
     . "$CONF"
     : "${TPK_ROUTING:=tpk}" "${WG_IF:=wg0}"
@@ -556,7 +568,7 @@ server_of() { if [ "$1" = wgt ]; then echo "wgt:$2"; else echo "ssh:$3"; fi; }
 # from it). Another puck on the same gateway: not its TPK_LINK, PUCK_PORT, and by
 # routing a jump code (wgt) or a client address (tpk). The gateway checks the link's
 # subnet and port again when link runs.
-# theirs <SETTING>: its value in the other gateway file check_others is at, configs/<p>.<o>.conf
+# theirs <SETTING>: its value in the other gateway file check_others is at, pucks/<p>/gateways/<o>.conf
 # ($f), read in a subshell so that file's settings don't leak into these.
 theirs() {
     # shellcheck disable=SC1090
@@ -568,11 +580,11 @@ check_others() {
     me=$(server_of "$TPK_ROUTING" "$WGT_SERVER" "$GATEWAY_SSH")
     for p in $(pucks); do
         for o in $(gateways_of "$p"); do
-            f="$CONFIGS/$p.$o.conf"
+            f=$(gateway_file "$p" "$o")
             [ "$f" != "$CONF" ] || continue
             them=$(server_of "$(theirs TPK_ROUTING)" "$(theirs WGT_SERVER)" "$(theirs GATEWAY_SSH)")
             if [ "$p" = "$PUCK_NAME" ]; then
-                [ "$them" != "$me" ] || die "configs/$p.$o.conf is the same gateway as $CONF: one settings file per gateway"
+                [ "$them" != "$me" ] || die "$(shown "$f") is the same gateway as $(shown "$CONF"): one settings file per gateway"
                 [ -z "$TPK_LINK" ] || [ "$(theirs TPK_LINK)" != "$TPK_LINK" ] \
                     || die "$p's link to $o also has TPK_LINK $TPK_LINK, and on the puck they must differ: empty it in $CONF, and link picks another"
                 continue
@@ -602,7 +614,7 @@ link_avoid() {
     for o in $(gateways); do
         [ "$o" != "$GATEWAY_NAME" ] || continue
         # shellcheck disable=SC1090
-        ( TPK_LINK=""; . "$CONFIGS/$PUCK_NAME.$o.conf"; [ -z "$TPK_LINK" ] || echo "$TPK_LINK" )
+        ( TPK_LINK=""; . "$(gateway_file "$PUCK_NAME" "$o")"; [ -z "$TPK_LINK" ] || echo "$TPK_LINK" )
     done | tr '\n' ' ' | sed 's/ *$//'
 }
 
@@ -634,10 +646,10 @@ cmd_ssh_install() {
     for o in $(pucks); do
         # Each read on its own, in a subshell, so one puck's settings don't leak into the next.
         # shellcheck disable=SC1090
-        door=$( (SSH_CLOUDFLARE=""; . "$CONFIGS/$o.conf"; printf '%s' "$SSH_CLOUDFLARE") )
+        door=$( (SSH_CLOUDFLARE=""; . "$(puck_file "$o")"; printf '%s' "$SSH_CLOUDFLARE") )
         [ -n "$door" ] || continue    # no emergency door for this puck
         # shellcheck disable=SC1090
-        user=$( (SSH_LAN=""; . "$CONFIGS/$o.conf"; user_of "$SSH_LAN") )
+        user=$( (SSH_LAN=""; . "$(puck_file "$o")"; user_of "$SSH_LAN") )
         printf '\n# %s\n' "$o" >> "$tmp"
         ssh_entry "$door" "$user" >> "$tmp"
         n=$((n + 1))
@@ -687,12 +699,12 @@ read_password() {
 
 valid_psk() { case "${#1}" in 0|[89]|[1-5][0-9]|6[0-3]) return 0 ;; esac; return 1; }    # empty: open
 
-# wifi_list: this puck's Wi-Fi list, configs/<puck>.wifi.conf, checked: "name::password"
+# wifi_list: this puck's Wi-Fi list, pucks/<puck>/wifi.conf, checked: "name::password"
 # lines (password empty: an open network), most preferred first; # starts a comment.
 # Kept mode 600: it holds passwords.
 wifi_list() {
-    file="$CONFIGS/$PUCK_NAME.wifi.conf" where="$PUCK_NAME.wifi.conf"
-    [ -r "$file" ] || die "no Wi-Fi list for $PUCK_NAME: cp configs/puck.wifi.conf.example configs/$where (or tpk-ctl.sh new makes it), and fill it in"
+    file=$(wifi_file "$PUCK_NAME")
+    [ -r "$file" ] || die "no Wi-Fi list for $PUCK_NAME: cp configs/puck.wifi.conf.example $(shown "$file") (or tpk-ctl.sh new makes it), and fill it in"
     chmod 600 "$file"
     n=0
     while IFS= read -r line || [ -n "$line" ]; do
@@ -735,8 +747,9 @@ cmd_wifi() {
 # auto_wifi: in all, the puck's Wi-Fi follows its list when there is one; with
 # none, the puck's Wi-Fi stays as it is.
 auto_wifi() {
-    if [ -e "$CONFIGS/$PUCK_NAME.wifi.conf" ]; then log "puck: Wi-Fi from configs/$PUCK_NAME.wifi.conf"; cmd_wifi sync
-    else log "no configs/$PUCK_NAME.wifi.conf: the puck's Wi-Fi is left as it is"; fi
+    w=$(wifi_file "$PUCK_NAME")
+    if [ -e "$w" ]; then log "puck: Wi-Fi from $(shown "$w")"; cmd_wifi sync
+    else log "no $(shown "$w"): the puck's Wi-Fi is left as it is"; fi
 }
 
 # cmd_ssh [<command>]: a shell on the puck (or one command), the way pick_puck found.
@@ -1321,17 +1334,19 @@ cmd_gateway_add() {
     name="$1"
     [ -n "$name" ] || die "tpk-ctl.sh $PUCK_NAME gateway add <gateway>: a wgt-ctl server's name (bin/wgt-ctl list), or a name of your own for a TPK_ROUTING=tpk gateway"
     gateway_name_ok "$name"
-    f="$CONFIGS/$PUCK_NAME.$name.conf" example="$CONFIGS/puck.gateway.conf.example"
+    f=$(gateway_file "$PUCK_NAME" "$name") example="$EXAMPLES/puck.gateway.conf.example"
     if [ -e "$f" ]; then
-        log "configs/$PUCK_NAME.$name.conf exists: using it"
+        log "$(shown "$f") exists: using it"
     elif [ -n "$DRY" ]; then
-        die "a dry run doesn't make settings files: make configs/$PUCK_NAME.$name.conf first (from configs/puck.gateway.conf.example)"
+        die "a dry run doesn't make settings files: make $(shown "$f") first (from configs/puck.gateway.conf.example)"
     elif wgt_servers 2>/dev/null | grep -qxF -- "$name"; then
-        sed -e 's/^TPK_ROUTING="tpk"/TPK_ROUTING="wgt"/' -e "s/^WGT_SERVER=\"\"/WGT_SERVER=\"$name\"/" "$example" > "$f"
-        log "made configs/$PUCK_NAME.$name.conf: TPK_ROUTING=wgt, WGT_SERVER=$name (wgt-ctl's server)"
+        private_dir "${f%/*}"
+        (umask 077; sed -e 's/^TPK_ROUTING="tpk"/TPK_ROUTING="wgt"/' -e "s/^WGT_SERVER=\"\"/WGT_SERVER=\"$name\"/" "$example" > "$f")
+        log "made $(shown "$f"): TPK_ROUTING=wgt, WGT_SERVER=$name (wgt-ctl's server)"
     else
-        cp "$example" "$f"
-        log "made configs/$PUCK_NAME.$name.conf. $name isn't in wgt-ctl's list (bin/wgt-ctl list), so it starts as TPK_ROUTING=tpk:"
+        private_dir "${f%/*}"
+        (umask 077; cp "$example" "$f")
+        log "made $(shown "$f"). $name isn't in wgt-ctl's list (bin/wgt-ctl list), so it starts as TPK_ROUTING=tpk:"
         log "fill in GATEWAY_SSH, GATEWAY_HOST and CLIENT_IPS (or TPK_ROUTING=\"wgt\" and WGT_SERVER), then run this again"
         return 0
     fi
@@ -1369,9 +1384,9 @@ cmd_gateway_remove() {
     load_gateway "$1"
     pick_puck "$1"
     undo_gateway
-    if [ -n "$DRY" ]; then log "[dry-run] would remove configs/$PUCK_NAME.$1.conf"; return 0; fi
+    if [ -n "$DRY" ]; then log "[dry-run] would remove $(shown "$CONF")"; return 0; fi
     rm -f "$CONF"
-    log "$PUCK_NAME no longer serves $1; removed configs/$PUCK_NAME.$1.conf"
+    log "$PUCK_NAME no longer serves $1; removed $(shown "$CONF")"
 }
 
 

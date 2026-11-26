@@ -3,7 +3,7 @@
 #
 # scripts/tpk-ctl.sh on your computer streams this file to the gateway over ssh, after the
 # settings it needs and ids.sh. To run it on the gateway yourself instead:
-#   cat ids.sh gateway.sh | TPK_CONF=/path/to/configs/<puck>.<gateway>.conf PUCK_PUBKEY=<the puck's key> sh -s -- <step>
+#   cat ids.sh gateway.sh | TPK_CONF=/path/to/pucks/<puck>/gateways/<gateway>.conf PUCK_PUBKEY=<the puck's key> sh -s -- <step>
 #
 # Each puck on this gateway has its own link, wgpk-<name>, with its own subnet,
 # routing table and rules (ids.sh); a step touches only its own puck's.

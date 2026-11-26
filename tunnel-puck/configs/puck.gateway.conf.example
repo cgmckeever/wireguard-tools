@@ -1,6 +1,6 @@
 # tunnel-puck settings for one gateway a puck serves (a WireGuard gateway: the
 # server your clients connect to, on a VPS or other machine you control):
-# configs/<puck>.<gateway>.conf (git ignores that name). scripts/tpk-ctl.sh <puck>
+# ~/wg-tunnels/pucks/<puck>/gateways/<gateway>.conf. scripts/tpk-ctl.sh <puck>
 # gateway add <gateway> makes it: for a wgt-ctl server of that name it fills in
 # TPK_ROUTING="wgt" and WGT_SERVER and carries on; for any other name it stops so
 # you can fill in the tpk block. <gateway> is a-z, 0-9 and -, starting with a

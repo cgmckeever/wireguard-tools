@@ -1,5 +1,5 @@
-# A puck's Wi-Fi list. Copy to configs/<puck>.wifi.conf (or tpk-ctl.sh new makes
-# it; git ignores it, and tpk-ctl.sh keeps it mode 600: it holds passwords), then:
+# A puck's Wi-Fi list. Copy to ~/wg-tunnels/pucks/<puck>/wifi.conf (or tpk-ctl.sh
+# new makes it; tpk-ctl.sh keeps it mode 600: it holds passwords), then:
 #   scripts/tpk-ctl.sh <puck> wifi sync          (tpk-ctl.sh <puck> all syncs it too)
 #
 # One network per line, name::password, most preferred first. Only the first ::

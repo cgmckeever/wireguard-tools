@@ -1,15 +1,15 @@
 # tunnel-puck settings for one puck: the puck itself. Make yours with
-# scripts/tpk-ctl.sh new (or copy this file to configs/<name>.conf; git ignores that
-# name) and fill it in. The name is the puck's: up to 10 of a-z, 0-9 and -,
-# starting with a letter, e.g. configs/home.conf. Shell syntax: NAME="value".
+# scripts/tpk-ctl.sh new (or copy this file to ~/wg-tunnels/pucks/<name>/puck.conf)
+# and fill it in. The name is the puck's: up to 10 of a-z, 0-9 and -, starting
+# with a letter, e.g. pucks/home/puck.conf. Shell syntax: NAME="value".
 # scripts/tpk-ctl.sh reads it on your computer: tpk-ctl.sh <name> <command> (the name
 # can be left out while there's only one). No secrets go in here: the Cloudflare
 # token stays in its own file.
 #
 # Each gateway the puck serves (the WireGuard server your clients connect to) has
-# its own file, configs/<name>.<gateway>.conf (puck.gateway.conf.example):
+# its own file, pucks/<name>/gateways/<gateway>.conf (puck.gateway.conf.example):
 # tpk-ctl.sh <name> gateway add <gateway> makes it. The Wi-Fi list, if any, is
-# configs/<name>.wifi.conf (puck.wifi.conf.example).
+# pucks/<name>/wifi.conf (puck.wifi.conf.example).
 
 # tpk-ctl.sh reaches the puck the first way that answers, and says which it used:
 #   1. SSH_LAN, on your home network while you build it

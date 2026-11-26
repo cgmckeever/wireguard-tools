@@ -148,9 +148,10 @@ tests 1 and 6.
 - **One command does the work:** `scripts/tpk-ctl.sh`, run on your computer in
   this folder. It ssh-es to the puck and the gateway and runs `puck.sh` and `gateway.sh`
   there. `scripts/tpk-ctl.sh` with no arguments lists its commands.
-- **Each puck has a name, `<puck>`:** its settings file is
-  `configs/<puck>.conf`, and each gateway it serves (`<gateway>`) has one more,
-  `configs/<puck>.<gateway>.conf`. Commands take the name first,
+- **Each puck has a name, `<puck>`:** its settings live outside this repo, in
+  `~/wg-tunnels/pucks/<puck>/` (`$WG_TUNNELS`, the folder wireguard-tools and
+  wireguard-tunnels share): `puck.conf`, and one `gateways/<gateway>.conf` for
+  each gateway it serves (`<gateway>`). Commands take the name first,
   `scripts/tpk-ctl.sh mom test`, or `mom.dengar` for one gateway. Leave it out, as
   the steps below do, and `tpk-ctl.sh` uses the only puck (and gateway) there is,
   or with several asks which (`TPK_PUCK=<puck>` and `TPK_GATEWAY=<gateway>` set the
@@ -202,7 +203,8 @@ Three parts, in this order: the settings, the emergency door if you want one
 
 ### 1.2a Fill in the Settings
 
-Each puck gets a settings file named for it, in `configs/` (git ignores them).
+Each puck gets a folder named for it, `~/wg-tunnels/pucks/<puck>/`, with its
+settings file `puck.conf` (folders 700, files 600; nothing goes in this repo).
 The name is up to 10 characters of `a-z`, `0-9` and `-`, starting with a
 letter. `new` asks for it and makes the file from the template, and offers a
 Wi-Fi list too ([4.1](#41-network-connectivity-computer)). This
@@ -297,7 +299,7 @@ With `wgt`, `gateway add` below fills these in for you.
 scripts/tpk-ctl.sh gateway add dengar      # asks before it changes the gateway
 ```
 
-`gateway add` makes the gateway's settings file, `configs/<puck>.<gateway>.conf`, from
+`gateway add` makes the gateway's settings file, `~/wg-tunnels/pucks/<puck>/gateways/<gateway>.conf`, from
 `configs/puck.gateway.conf.example`:
 
 - **A server in `../bin/wgt-ctl list`** (here `dengar`) gets `TPK_ROUTING="wgt"`
@@ -377,7 +379,7 @@ make them. Then send them through the puck:
 
 1. Make a client config for each device on the gateway (or pick existing ones).
 2. Put each config's IPv4 `Address` in `CLIENT_IPS` (and any IPv6 address in
-   `CLIENT_IP6S`) in that gateway's settings file, `configs/<puck>.<gateway>.conf`.
+   `CLIENT_IP6S`) in that gateway's settings file, `~/wg-tunnels/pucks/<puck>/gateways/<gateway>.conf`.
 3. Run `scripts/tpk-ctl.sh link` again (`<puck>.<gateway> link` with several
    gateways): it adds the routing and the kill switch for them.
 
@@ -399,7 +401,7 @@ by config, and can have one of each. For a puck called `mom`:
 | egress + LAN | the friend's internet and their LAN | `JUMP_LAN="yes"`, then `exit` | `client laptop --egress --lan` | `mom-a.laptop` |
 | LAN only | the friend's LAN; its internet stays on the gateway | `JUMP_LANONLY="yes"`, then `exit` | `client laptop --lan` | `mom-l.laptop` |
 
-The settings go in `configs/<puck>.<gateway>.conf`; [2.3](#23-optional-access-mode) has
+The settings go in `~/wg-tunnels/pucks/<puck>/gateways/<gateway>.conf`; [2.3](#23-optional-access-mode) has
 the details, and what "the LAN" is. On the server `dengar`:
 
 ```sh
@@ -448,7 +450,7 @@ as from the puck), by IP only (no AirPlay or network discovery, and names like
 `nas.lan` don't resolve), and clients don't get an address on that LAN.
 
 **Per device, with `wgt`** ([2.2](#22-device-configs)'s table): set these in
-`configs/<puck>.<gateway>.conf` and run `scripts/tpk-ctl.sh exit`
+`~/wg-tunnels/pucks/<puck>/gateways/<gateway>.conf` and run `scripts/tpk-ctl.sh exit`
 (`<puck>.<gateway> exit` with several gateways). Each adds a jump, a reverse
 tunnel of its own on the puck:
 
@@ -509,7 +511,7 @@ Each puck gets its own settings files, and `gateway add` leaves `TPK_LINK` and
 gateway uses, and saves them in that file.
 
 ```sh
-scripts/tpk-ctl.sh new home                    # then fill in configs/home.conf: SSH_LAN ...
+scripts/tpk-ctl.sh new home                    # then fill in ~/wg-tunnels/pucks/home/puck.conf: SSH_LAN ...
 scripts/tpk-ctl.sh home config
 scripts/tpk-ctl.sh home init                   # and so on through the steps, naming the puck each time
 scripts/tpk-ctl.sh home gateway add dengar
@@ -552,7 +554,7 @@ scripts/tpk-ctl.sh mom gateway add ig88     # another: dengar is untouched
 scripts/tpk-ctl.sh mom gateway              # what it serves
 scripts/tpk-ctl.sh mom.ig88 client iphone   # a config on ig88 (mom.iphone there)
 scripts/tpk-ctl.sh mom test                 # the puck, then every gateway
-scripts/tpk-ctl.sh mom gateway remove ig88  # ig88's configs, jump and link, and configs/mom.ig88.conf
+scripts/tpk-ctl.sh mom gateway remove ig88  # ig88's configs, jump and link, and pucks/mom/gateways/ig88.conf
 ```
 
 ```
@@ -650,12 +652,12 @@ scripts/tpk-ctl.sh wifi remove all                   # back to ethernet only
 ethernet first.
 
 **Or keep a list:** several networks, most preferred first,
-in `configs/<puck>.wifi.conf` next to the puck's settings (git ignores it, and
-`tpk-ctl.sh` keeps it mode 600). One `name::password` per line, an empty
+in `~/wg-tunnels/pucks/<puck>/wifi.conf` next to the puck's settings
+(`tpk-ctl.sh` keeps it mode 600). One `name::password` per line, an empty
 password for an open network:
 
 ```sh
-cp configs/puck.wifi.conf.example configs/<puck>.wifi.conf   # or tpk-ctl.sh new made it; fill it in
+cp configs/puck.wifi.conf.example ~/wg-tunnels/pucks/<puck>/wifi.conf   # or tpk-ctl.sh new made it
 scripts/tpk-ctl.sh wifi sync                                 # the puck's Wi-Fi becomes this list
 ```
 
@@ -664,7 +666,7 @@ to the next if one fails to connect; ethernet still wins when plugged in.
 `sync` removes the networks tunnel-puck saved earlier that aren't on the list
 (not the one in use right now) and leaves others, like Raspberry Pi Imager's,
 alone. Edit the file and sync again to change it; `tpk-ctl.sh all` syncs it
-too. With no `<puck>.wifi.conf`, the puck's Wi-Fi is left as it is.
+too. With no `wifi.conf`, the puck's Wi-Fi is left as it is.
 
 **Check:** `scripts/tpk-ctl.sh test` shows `INFO  uplink: eth0. Saved Wi-Fi: ...`
 as you expect.
@@ -822,7 +824,7 @@ asks):
 | `disable [<device>]`, `enable [<device>]` | the puck's clients (or one device's) off and back on, on every gateway or the one named; nothing deleted ([Turning clients off and on](#turning-clients-off-and-on)) |
 | `status` | at a glance, read-only: the puck, then per gateway (or the one named) its state, handshakes, jump and configs |
 | `wifi`, `wifi add <name>`, `wifi remove <name>\|all` | the puck's saved Wi-Fi, one network at a time |
-| `wifi sync` | the puck's saved Wi-Fi becomes `configs/<puck>.wifi.conf`, in its order |
+| `wifi sync` | the puck's saved Wi-Fi becomes `pucks/<puck>/wifi.conf`, in its order |
 | `test` | PASS/FAIL: the puck, then each gateway (or the one named) on both ends; with `wgt`, the LAN-only jump's routes against the puck's LAN, then a client's way out end to end (`wgt jump test`: the IP must be the puck's) |
 | `ssh [<command>]` | a shell (or one command) on the puck, the first way that answers |
 | `reboot` | restart the puck, and wait until it answers again |
