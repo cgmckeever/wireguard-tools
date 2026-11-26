@@ -2,6 +2,18 @@
 
 *WireGuard fleet management, with secondary exits through jump servers and Cloudflare WARP*
 
+## Contents
+
+- [Overview](#overview): [terms](#terms), [why route through Cloudflare?](#why-route-through-cloudflare)
+- [Quick start](#quick-start): a single server, or [from your own machine](#or-from-your-own-machine); [conventions](#conventions)
+- [Server management](#server-management): setup and its settings, [devices and configs](#devices-and-configs), [groups](#groups-who-can-reach-what), [jumps](#jumps)
+- [Backups and restore](#check-back-up-restore-clean-up), [history](#history-what-changed-when-and-who-did-it), [rotating WARP accounts](#rotate-warp-accounts)
+- [Fleet management](#fleet-management): `wgt-ctl`, your servers from your own machine, [moving or rebuilding one](#moving-or-rebuilding-a-server)
+- [Updating servers](#updating-servers)
+- [Troubleshooting](#troubleshooting)
+- [How it works](#how-it-works): interfaces, routing, [files](#files)
+- [Development](#development)
+
 ## Overview
 
 wireguard-tools sets up and runs WireGuard VPN servers: one, or a fleet of them
@@ -117,16 +129,6 @@ wgt-ctl dengar client add phone                     # any wgt command, on that s
 - Private keys are never printed except inside a config's QR code.
 - In this README, `dengar` and `boba` are example server names, and `<server>`
   stands for yours.
-
-## Contents
-
-- [Server management](#server-management): setup and its settings, [devices and configs](#devices-and-configs), [groups](#groups-who-can-reach-what), [jumps](#jumps)
-- [Backups and restore](#check-back-up-restore-clean-up), [history](#history-what-changed-when-and-who-did-it), [rotating WARP accounts](#rotate-warp-accounts)
-- [Fleet management](#fleet-management): `wgt-ctl`, your servers from your own machine, [moving or rebuilding one](#moving-or-rebuilding-a-server)
-- [Updating servers](#updating-servers)
-- [Troubleshooting](#troubleshooting)
-- [How it works](#how-it-works): interfaces, routing, [files](#files)
-- [Development](#development)
 
 ## Server management
 
