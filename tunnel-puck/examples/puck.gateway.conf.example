@@ -4,7 +4,7 @@
 # gateway add <gateway> makes it: for a wgt-ctl server of that name it fills in
 # TPK_ROUTING="wgt" and WGT_SERVER and carries on; for any other name it stops so
 # you can fill in the tpk block. <gateway> is a-z, 0-9 and -, starting with a
-# letter (not "wifi"). Shell syntax: NAME="value".
+# letter. Shell syntax: NAME="value".
 # Commands for this gateway alone: tpk-ctl.sh <puck>.<gateway> <command>.
 
 # What sends clients into the puck:
@@ -30,7 +30,7 @@ WG_IF="wg0"                         # the WireGuard interface those clients conn
 WG_SUBNET=""                        # leave empty (it means every subnet WG_IF is on)
 
 # TPK_ROUTING="wgt" only
-# The gateway's name in wgt-ctl's list (`bin/wgt-ctl list`). Its ssh target and
+# The gateway's name in wgt-ctl's list (`bin/wgt-ctl list`, from the repository's root). Its ssh target and
 # address come from that list. Empty: this file's <gateway>, if wgt-ctl lists it,
 # else tpk-ctl.sh asks, offering the listed servers or a new one (bin/wgt-ctl
 # init), and saves the answer here.

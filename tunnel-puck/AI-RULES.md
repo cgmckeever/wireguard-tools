@@ -7,12 +7,15 @@ before running anything.
   `client`, `disable`, `enable`, `undo`, and `exit` with `TPK_ROUTING=wgt`
   change it (`status` only reads it), and `test`
   with `wgt` brings its jump up for a moment. Other people's traffic may run
-  through it. Get the person's go-ahead for that server first, read-only
-  commands included, and suggest a test server. `tpk-ctl.sh` also asks on
+  through it. Get the person's go-ahead for each gateway before any command
+  that talks to it, `status` and `test` included, and suggest a test server. `tpk-ctl.sh` also asks on
   the terminal; once the person has agreed for this gateway, `TPK_YES=1` answers
   for you. Reaching the puck through the gateway changes nothing there, but tell the
   person it connects. Follow any rules the person has about which servers you
-  may use.
+  may use. `gateway add` (or any command, for a `wgt` file with an empty
+  `WGT_SERVER`) can offer `wgt-ctl init` on a new server: never take that
+  choice without the person. Ask before `shutdown`, and before `reboot` or
+  `undo` once the puck has been dropped off: only the friend can power it back.
 - **Some steps need a person:** everything marked **[Browser]** or
   **[Hands]**, the browser login on the first `ssh SSH_CLOUDFLARE`, making
   client configs with `TPK_ROUTING=tpk`, filling in a `tpk` gateway's settings

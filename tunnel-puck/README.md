@@ -30,9 +30,9 @@ One puck can serve several gateways, each over its own link
 ## How It Works
 
 Your clients still connect to your gateway. The ones you choose get a config of
-their own for it (with `tpk` routing, their address is listed instead), and the
-gateway sends their traffic down a link the puck keeps open; the puck sends it
-out under the friend's IP, or to their home network.
+their own (with `wgt`), or have their address listed in `CLIENT_IPS` (with
+`tpk`). The gateway sends their traffic down a link the puck keeps open, and the
+puck sends it out under the friend's IP, or into their home network.
 
 **Where each tunnel starts and ends, and who sees the traffic.** With `wgt` routing:
 
@@ -92,8 +92,8 @@ Run it first on a gateway nobody else depends on.
 
 [Phase 3](#phase-3-finalize-and-validate-connectivity) tests each of these, in the table of
 [3.2](#32-the-away-from-home-test-hands-then-computer-and-client): 1 is its
-test 2, 2 is test 3, 3 is tests 5–8, 4 is test 9, 5 is test 10, and 6 is
-tests 1 and 6.
+test 2 (test 4 also keeps IPv6 from leaking past it), 2 is test 3, 3 is tests
+5–8, 4 is test 9, 5 is test 10, and 6 is tests 1 and 6.
 
 ## Two Choices Along the Way
 
@@ -138,7 +138,9 @@ tests 1 and 6.
   public IP (with `TPK_ROUTING=wgt`, one running wgt from this repo). Linux,
   with `wg-quick`, `iptables` and systemd (Debian and Ubuntu have all three),
   and root ssh (or passwordless `sudo`).
-- **Your computer** (macOS or Linux) with `ssh`, and this folder.
+- **Your computer** (macOS or Linux) with `ssh` and `python3`, and this whole
+  repository: `tpk-ctl.sh` finds `~/wg-tunnels` with wireguard-tools' own code,
+  whatever the routing.
 - **For the emergency door:** a domain whose DNS is on Cloudflare, a Cloudflare
   Zero Trust account (free; signing up may ask for a card), and `cloudflared`
   on your computer (macOS: `brew install cloudflared`).
@@ -220,7 +222,7 @@ Fill it in (each line has a comment):
 | Setting | When | What to put |
 |---|---|---|
 | `SSH_LAN` | always | `user@hostname` for the puck on your home network: the ones you chose in [1.1](#11-flash-the-puck-hands) (`pi@tunnel-puck.local`) |
-| `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.pi.example.com`). Empty: no door, skip [1.2b](#12b-optional-the-emergency-door-cloudflare-browser) |
+| `SSH_CLOUDFLARE` | emergency door | an SSH hostname on your Cloudflare domain (`ssh.puck.example.com`). Empty: no door, skip [1.2b](#12b-optional-the-emergency-door-cloudflare-browser) |
 | `CF_TOKEN_FILE` | emergency door | where you'll save the tunnel token in [1.2b](#12b-optional-the-emergency-door-cloudflare-browser) (the default is fine) |
 
 ### 1.2b [Optional] The Emergency Door: Cloudflare **[Browser]**
@@ -230,9 +232,9 @@ Fill it in (each line has a comment):
 (a blocked port, a changed gateway IP, a bad change). A Cloudflare Tunnel gives
 SSH to the puck that doesn't need the link. It costs a domain on Cloudflare
 (about $10–15 a year; the rest is free), and this step. Without it, a dead link
-means the friend power-cycles the puck, or you take it home. If you skip it, set
-`PUCK_PORT="443"` in each gateway's settings file when you reach 2.1: networks
-rarely block it.
+means the friend power-cycles the puck, or you take it home. If you skip it, put
+the link on UDP 443, which networks rarely block: after `gateway add` in 2.1, set
+`PUCK_PORT="443"` in that gateway's file and run `scripts/tpk-ctl.sh link` again.
 
 In Cloudflare Zero Trust (`one.dash.cloudflare.com`). Cloudflare renames these
 menus now and then; follow the nearest match.
@@ -291,9 +293,9 @@ row that matches it:
 | Your gateway | Set | What you get |
 |---|---|---|
 | any WireGuard server | `TPK_ROUTING="tpk"`, with `GATEWAY_SSH` and `GATEWAY_HOST` | tunnel-puck's own rules on the gateway. You make the clients' configs yourself on the gateway and list their addresses in `CLIENT_IPS` ([2.2](#22-device-configs)) |
-| runs **wgt** (the wireguard-tools in this repository) | `TPK_ROUTING="wgt"`, with `WGT_SERVER` (its name in `bin/wgt-ctl list`) | the puck becomes a wgt **jump**: an extra way out on a wgt server, which a client config named `<code>.<device>` uses instead of the gateway's own. Everything on the gateway goes through `wgt-ctl`, and `tpk-ctl.sh client` makes each device its config, delivered to `~/wg-tunnels` |
+| runs **wgt** (the wireguard-tools in this repository) | `TPK_ROUTING="wgt"`, with `WGT_SERVER` (its name in `../bin/wgt-ctl list`) | the puck becomes a wgt **jump**: an extra way out on a wgt server, which a client config named `<code>.<device>` uses instead of the gateway's own. Everything on the gateway goes through `wgt-ctl`, and `tpk-ctl.sh client` makes each device its config, delivered to `~/wg-tunnels` |
 
-With `wgt`, `gateway add` below fills these in for you.
+For a gateway named as in `../bin/wgt-ctl list`, `gateway add` below fills these in for you.
 
 ```sh
 scripts/tpk-ctl.sh gateway add dengar      # asks before it changes the gateway
@@ -588,7 +590,7 @@ ig88         wgt      serving  ig88                     10.99.0.4/30    wgpk1 wg
 - **Storage:** power cuts wear out SD cards. Use an SSD (USB boot) if you can.
   The SD-card alternative, raspi-config's overlay file system, also throws away
   every later change, `tpk-ctl.sh` commands and updates included, unless you
-  turn it off first. If you use it, turn it on last, just before drop-off.
+  turn it off first. If you use it, turn it on in 4.2, after 4.1.
 - **Updates:** `init` turned on automatic security updates.
 
 ## 3.2 The Away-from-Home Test **[Hands]**, then **[Computer]** and **[client]**
@@ -596,7 +598,8 @@ ig88         wgt      serving  ig88                     10.99.0.4/30    wgpk1 wg
 Put the puck on a **phone hotspot**: like the friend's network, a NAT you don't
 control. Use a travel router on the hotspot with the puck's ethernet in it, a
 USB-to-ethernet adapter tethered to the phone, or the hotspot's Wi-Fi
-(`scripts/tpk-ctl.sh wifi add "<hotspot>"` while still on ethernet, then
+(on a puck with Wi-Fi: `scripts/tpk-ctl.sh wifi add "<hotspot>"`
+([4.1](#41-network-connectivity-computer)) while still on ethernet, then
 unplug; remove it again after the tests with
 `scripts/tpk-ctl.sh wifi remove "<hotspot>"`, once ethernet is back in). No
 reboot is needed: the puck follows the network change on its own.
@@ -653,8 +656,8 @@ ethernet first.
 
 **Or keep a list:** several networks, most preferred first,
 in `~/wg-tunnels/pucks/<puck>/wifi.conf` next to the puck's settings
-(`tpk-ctl.sh` keeps it mode 600). One `name::password` per line, an empty
-password for an open network:
+(`tpk-ctl.sh` keeps it mode 600). One `name::password` per line: an empty
+password for an open network, otherwise 8 to 63 characters:
 
 ```sh
 cp examples/puck.wifi.conf.example ~/wg-tunnels/pucks/<puck>/wifi.conf   # or tpk-ctl.sh new made it
@@ -672,6 +675,8 @@ too. With no `wifi.conf`, the puck's Wi-Fi is left as it is.
 as you expect.
 
 ## 4.2 Drop-off **[Hands]**
+
+If you use raspi-config's overlay file system ([3.1](#31-harden)), turn it on now.
 
 The friend plugs in ethernet (unless you saved their Wi-Fi) and power. That's
 all.
@@ -854,8 +859,8 @@ says which:
 
 **The gateway:** with `tpk`, `GATEWAY_SSH` over plain ssh. With `wgt`, through
 `wgt-ctl`: its server list and host-key checks, and every wgt command as
-`wgt-ctl WGT_SERVER ...`, so configs reach `~/wg-tunnels`. That needs
-`tunnel-puck/` inside the wireguard-tools checkout, next to `bin/wgt-ctl`.
+`wgt-ctl WGT_SERVER ...`, so configs reach `~/wg-tunnels`. `tunnel-puck/` must
+sit inside the wireguard-tools checkout, next to `bin/wgt-ctl` (any routing).
 
 **The scripts:**
 
@@ -925,7 +930,7 @@ links. They're chosen to avoid wgt's numbers (tables `100`, `200`–`250`, rules
 | link interface on the puck | `wgpk<n>` | `wgpk2` | the link, at the puck's end |
 | link addresses | `TPK_LINK`: gateway `+1`, puck `+2` | gateway `10.99.0.9`, puck `10.99.0.10` | the two ends of the link |
 | reverse tunnels on the puck | `wgrtun<n>`, `wgrtunlan<n>`, `wgrtunlo<n>`, UDP `51822 + 3n`, `51823 + 3n`, `51824 + 3n` | `wgrtun2` on `51828`, `wgrtunlan2` on `51829`, `wgrtunlo2` on `51830` | `wgt`: what the gateway reaches in through (its jumps) |
-| jump addresses | `10.98.n.0/28`: puck `.1`, gateway `.2`; the LAN jumps `.5`, `.6` (egress + LAN) and `.9`, `.10` (LAN only) | `10.98.2.1`, `10.98.2.2` | `wgt`: the ends of the reverse tunnels |
+| jump addresses | `10.98.n.0/28`, a /30 per jump: puck `.1`, gateway `.2`; the LAN jumps `.5`, `.6` (egress + LAN) and `.9`, `.10` (LAN only) | `10.98.2.1`, `10.98.2.2` | `wgt`: the ends of the reverse tunnels |
 | routing table | `260 + n` | `262` | `tpk`: the table that goes to the puck |
 | rule priorities | `900 + 2n`, `901 + 2n` | `904`, `905` | `tpk`: the rule sending a listed client to the table, and the kill switch that drops its traffic when the first can't apply |
 | kill switch | `tunnel-puck-killswitch-<puck>` | `tunnel-puck-killswitch-home` | `tpk`: its script and service on the gateway |

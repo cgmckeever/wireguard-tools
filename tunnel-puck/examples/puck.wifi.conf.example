@@ -3,10 +3,11 @@
 #   scripts/tpk-ctl.sh <puck> wifi sync          (tpk-ctl.sh <puck> all syncs it too)
 #
 # One network per line, name::password, most preferred first. Only the first ::
-# splits, so a password may hold anything; spaces count, at the ends too. An
-# empty password is an open network. Among networks in range, the puck joins the
-# highest on the list; ethernet still wins when plugged in. Networks tunnel-puck
-# saved before that aren't here are removed on sync.
+# splits, so a password (8 to 63 characters) may hold anything else; spaces count,
+# at the ends too. An empty password is an open network. Among networks in range,
+# the puck joins the highest on the list; ethernet still wins when plugged in. On
+# sync, networks tunnel-puck saved that aren't on this list are removed (except
+# the one in use); others, like Imager's, are left alone.
 #
 # MomsHouse::hunter2hunter2
 # MomsHouse-5G::hunter2hunter2

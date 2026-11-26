@@ -1281,7 +1281,7 @@ notify() {
 # active_names: from status's lines, the configs (or tpk clients) in use: a last
 # handshake under 3 minutes (ago prints seconds under 2 minutes, then 2m).
 active_names() {
-    awk '/last handshake: ([0-9]+s|2m) ago/ {print $1}'
+    awk '$2 ~ /^([0-9]+s|2m)$/ && $3 == "ago" {print $1}'
 }
 
 

@@ -84,3 +84,20 @@ def test_a_bad_jump_code_is_named_by_wgts_own_rule(tmp_path):
         'TPK_ROUTING="wgt"\nWGT_SERVER="gw"\nJUMP_CODE="all"\n')
     r = tpk(store, "home", "config")
     assert r.returncode != 0 and "jump code 'all' won't do: 2-6 of" in r.stderr
+
+
+def shell_function(name):
+    """One function's text from tpk-ctl.sh (its body ends at the first column-0 '}')."""
+    text = TPK.read_text()
+    start = text.index(f"\n{name}() {{") + 1
+    return text[start:text.index("\n}\n", start) + 3]
+
+
+def test_status_alert_sees_the_configs_in_use():
+    """active_names reads status's rows (CONFIG, then LAST HANDSHAKE as ago prints it)."""
+    rows = "".join(f"  {name:<28} {age:<14} 15M     167M\n" for name, age in (
+        ("puck1.iphone", "41s ago"), ("puck1.mac", "2m ago"), ("puck1.tv", "3m ago"), ("puck1.steve", "never")))
+    script = shell_function("active_names") + "active_names\n"
+    r = subprocess.run(["sh", "-c", script], input="  CONFIG  LAST HANDSHAKE RX TX\n" + rows,
+                       capture_output=True, text=True)
+    assert r.stdout.split() == ["puck1.iphone", "puck1.mac"]

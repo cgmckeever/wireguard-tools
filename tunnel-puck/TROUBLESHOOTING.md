@@ -19,7 +19,7 @@ For the steps in the [tunnel-puck README](README.md).
 | `the puck's rtun exists but <gateway> has no jump` | `TPK_RENEW=1 scripts/tpk-ctl.sh <puck>.<gateway> exit` |
 | `tpk`: handshake, but no internet on the client | **[Gateway]** `ip rule` (this puck's rules, [Fixed values](README.md#fixed-values)), `ip route show table <the puck's table>` ([Fixed values](README.md#fixed-values)); **[Puck]** `sudo iptables -t nat -L -v`, `journalctl -u wg-quick@wgpk<n>` (its `tunnel-puck-exit:` line names the uplink) |
 | `tpk`: sites load, names don't resolve | **[Puck]** `systemctl status unbound`; **[Gateway]** `iptables -t nat -L PREROUTING -v` |
-| large pages hang | MTU: a client config's `MTU` above 1280 needs lowering. The jump runs inside the link, so a packet much bigger than a client's 1280 gets split in two on the way, and behind a busy NAT that can cut the speed to a few Mbit/s |
+| large pages hang | MTU: keep each client config's `MTU` at 1280 or below. The jump runs inside the link, so a larger packet is split in two, and behind a busy NAT that can drop the speed to a few Mbit/s |
 | a client shows the gateway's IP | `tpk`: is it in `CLIENT_IPS`? `systemctl status tunnel-puck-killswitch-<puck>`. `wgt`: is the config named `<code>.<device>`? |
 | FAIL `the LAN-only jump ... sends ... into the puck, but its LAN is ...` | the puck is on another network since `exit`: `scripts/tpk-ctl.sh <puck>.<gateway> exit` sets the jump's routes to its LAN |
 | FAIL `the puck reports no LAN for the LAN-only jump` | the puck's `tunnel-puck-exit` predates it (`scripts/tpk-ctl.sh <puck>.<gateway> exit` installs the current one), or its uplink has no IPv4 address (`test`'s `uplink:` line) |
