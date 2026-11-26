@@ -34,7 +34,6 @@ from ..const import client_conf_name
 from ..ctx import SETTINGS_COMMANDS
 from ..errors import WgtError
 from . import home, remote
-from .home import make_dir, root, shown
 from .remote import Server, out
 
 HEADER = re.compile(r"(?m)^# wireguard-tools client: (\S+) on (\S+)[ \t]*$")
@@ -42,38 +41,29 @@ PRIVATE_KEY = re.compile(r"(?mi)^[ \t]*PrivateKey[ \t]*=[ \t]*(\S+)")
 MARK = "\x1e"   # starts each file's name line in a fetch (never in a config)
 
 
-def carriers_dir(server: str) -> str:
-    """Where <server>'s jump configs wait to be pushed."""
-    return os.path.join(home.server_dir(server), "carriers")
-
-
 def anchor(server: str) -> str:
-    """fleet/servers/<server>/carriers/, even empty: where wireguard-tunnels'
-    nord.sh and you put its jump files (wgt-ctl only reads them)."""
-    return make_dir(carriers_dir(server))
+    """carriers/, even empty: where jump files are staged, by nord.sh or by hand
+    (the README points there); wgt-ctl only reads them."""
+    return home.make_dir(home.carriers_dir(server))
 
 
-def drop_anchor(server: str) -> str:
+def drop_server_dir(server: str) -> str:
     """Delete fleet/servers/<server>/ when nothing but Finder's .DS_Store is in it;
     else where what's left is (jump files, backups)."""
-    top = os.path.dirname(carriers_dir(server))
+    top = home.server_dir(server)
     if not os.path.isdir(top):
         return ""
     left = [os.path.join(d, f) for d, _dirs, files in os.walk(top) for f in files if f != ".DS_Store"]
     if left:
-        return shown(top)
+        return home.shown(top)
     shutil.rmtree(top)
     return ""
 
 
 def staged(server: str) -> List[str]:
     """<server>'s staged jump configs (carriers/*.conf)."""
-    d = carriers_dir(server)
+    d = home.carriers_dir(server)
     return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".conf")) if os.path.isdir(d) else []
-
-
-def config_dir(device: str) -> str:
-    return os.path.join(root(), "devices", device, "config")
 
 
 def header_of(text: str) -> Optional[Tuple[str, str]]:
@@ -123,7 +113,7 @@ def local_files(devices: List[str]) -> Dict[str, str]:
     found = {}
     seen = set()
     for device in devices:
-        d = config_dir(device)
+        d = home.config_dir(device)
         if not os.path.isdir(d):
             continue
         st = os.stat(d)
@@ -138,13 +128,13 @@ def local_files(devices: List[str]) -> Dict[str, str]:
 
 
 def all_devices() -> List[str]:
-    d = os.path.join(root(), "devices")
+    d = home.devices_dir()
     return sorted(f for f in os.listdir(d) if os.path.isdir(os.path.join(d, f))) if os.path.isdir(d) else []
 
 
 def own_path(server: str, config: str) -> str:
     """Where a new copy of <config> goes: devices/<device>/config/<server>.<config>.conf."""
-    return os.path.join(config_dir(store.device_of(config)), client_conf_name(server, config))
+    return os.path.join(home.config_dir(store.device_of(config)), client_conf_name(server, config))
 
 
 def delivered(path: str, text: str) -> bool:
@@ -191,7 +181,7 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         if match and match not in claimed:
             claimed.add(match)
             matched[config] = match
-            actions += [Action("duplicate", p, config, note=f"holds its key too, not updated ({shown(match)} is)")
+            actions += [Action("duplicate", p, config, note=f"holds its key too, not updated ({home.shown(match)} is)")
                         for p in keyed[1:]]
     retiring = []
     if complete:
@@ -207,7 +197,7 @@ def plan(server: str, issued: Dict[str, str], local: Dict[str, str], complete: b
         match = matched.get(config)
         if match:
             kind = "same" if local[match] == text else "update"
-            moved = os.path.dirname(match) != config_dir(device)
+            moved = os.path.dirname(match) != home.config_dir(device)
             note = f"left in its folder; the device is now '{device}' (rename the folder to match)" if moved else ""
             actions.append(Action(kind, match, config, text, note))
             continue
@@ -255,7 +245,7 @@ def apply(actions: List[Action]) -> None:
     """Retires first: a new copy may take a name one of them frees (Phone for phone)."""
     for a in sorted(actions, key=lambda a: a.kind != "retire"):
         if a.kind in ("new", "update"):
-            make_dir(os.path.dirname(a.path))
+            home.make_dir(os.path.dirname(a.path))
             if a.kind == "update":
                 # A copy, not a move: if the write fails, the config is still where it was.
                 # Written 0600 from the start (copy2 makes it umask-readable first).
@@ -270,13 +260,13 @@ def report(server: str, actions: List[Action]) -> None:
              "retire": "retired to .bak (the server no longer has it)"}
     for a in actions:
         if a.kind in words:
-            out.info(f"{server} {a.config}: {words[a.kind]}: {shown(a.path)}")
+            out.info(f"{server} {a.config}: {words[a.kind]}: {home.shown(a.path)}")
         elif a.kind == "refuse":
-            out.warn(f"{server} {a.config}: not delivered: {shown(a.path)} is {a.note}")
+            out.warn(f"{server} {a.config}: not delivered: {home.shown(a.path)} is {a.note}")
         elif a.kind == "duplicate":
-            out.warn(f"{server} {a.config}: {shown(a.path)} {a.note}")
+            out.warn(f"{server} {a.config}: {home.shown(a.path)} {a.note}")
         if a.note and a.kind in ("same", "update"):
-            out.warn(f"{server} {a.config}: {shown(a.path)}: {a.note}")
+            out.warn(f"{server} {a.config}: {home.shown(a.path)}: {a.note}")
 
 
 def fetch(s: Server) -> Tuple[Dict[str, str], str, Set[str]]:
@@ -381,4 +371,5 @@ def after(s: Server, cmd: str, args: List[str]) -> None:
         try:
             deliver(s)
         except (WgtError, OSError) as e:
-            out.warn(f"{s.name}: configs not delivered to {shown(root())}: {e} (wgt-ctl {s.name} sync retries)")
+            where = home.shown(home.root())
+            out.warn(f"{s.name}: configs not delivered to {where}: {e} (wgt-ctl {s.name} sync retries)")

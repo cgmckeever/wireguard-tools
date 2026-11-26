@@ -508,12 +508,12 @@ def test_init_records_a_server_with_its_anchor(store, tmp_path, monkeypatch):
 def test_an_empty_anchor_goes_and_one_with_jump_files_stays(store):
     tunnels.anchor("gone")
     (store / "fleet" / "servers" / "gone" / "carriers" / ".DS_Store").write_text("")
-    assert tunnels.drop_anchor("gone") == "" and not (store / "fleet" / "servers" / "gone").exists()
+    assert tunnels.drop_server_dir("gone") == "" and not (store / "fleet" / "servers" / "gone").exists()
     tunnels.anchor("kept")
     (store / "fleet" / "servers" / "kept" / "carriers" / "paris.conf").write_text("x")
-    assert tunnels.drop_anchor("kept").endswith("kept")
+    assert tunnels.drop_server_dir("kept").endswith("kept")
     assert (store / "fleet" / "servers" / "kept" / "carriers" / "paris.conf").exists()
-    assert tunnels.drop_anchor("never") == ""
+    assert tunnels.drop_server_dir("never") == ""
 
 
 @pytest.mark.parametrize("name,owned", [

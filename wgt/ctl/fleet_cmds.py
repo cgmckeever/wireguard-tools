@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import os
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -47,7 +46,6 @@ def read_entries() -> Dict[str, fleet.Entry]:
 
 
 def write_entries(entries: Dict[str, fleet.Entry]) -> None:
-    home.make_dir(os.path.dirname(home.devices_file()))
     remote.write_local(home.devices_file(), fleet.format_entries(entries))
 
 

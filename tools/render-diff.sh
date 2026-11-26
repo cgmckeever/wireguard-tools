@@ -16,8 +16,11 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
     # wgt-ctl's own list (wgt/ctl/home.py, remote.servers), not a second reading of it
-    listed=$(cd "$here" && python3 -c \
-        'from wgt.ctl import remote; [print(s.target) for s in remote.servers()]') || exit 1
+    listed=$(cd "$here" && python3 -c 'import sys
+from wgt.ctl import remote
+from wgt.errors import WgtError
+try: [print(s.target) for s in remote.servers()]
+except WgtError as e: sys.exit(f"render-diff.sh: {e}")') || exit 1
     while read -r target; do [ -z "$target" ] || targets+=("$target"); done <<<"$listed"
 fi
 # Also keeps "${targets[@]}" below from failing under set -u in macOS's bash 3.2.

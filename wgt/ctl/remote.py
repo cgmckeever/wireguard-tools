@@ -63,7 +63,7 @@ def servers() -> List[Server]:
     local paths, and targets and directories go into ssh and remote commands."""
     found: List[Server] = []
     top = home.servers_dir()
-    for name in sorted(os.listdir(top)) if os.path.isdir(top) else []:
+    for name in sorted(os.listdir(top), key=str.lower) if os.path.isdir(top) else []:
         path = home.login_file(name)
         if not os.path.isfile(path):
             continue                       # wireguard-tunnels' alone (nord.sh), or forgotten
@@ -80,7 +80,6 @@ def servers() -> List[Server]:
 
 def write_login(name: str, target: str, checkout: str = DEF_DIR) -> None:
     """A server's login file: it's listed from then on."""
-    home.make_dir(home.server_dir(name))
     where = f" {checkout}" if checkout != DEF_DIR else ""
     write_local(home.login_file(name), f"{target}{where}\n")
 
@@ -300,9 +299,10 @@ def needs_terminal(cmd: str) -> None:
 
 
 def write_local(path: str, text: str, mode: int = 0o600) -> None:
-    """A file under ~/wg-tunnels, whole or not at all: the server list and numbers
-    aren't recoverable from anywhere else. system.atomic_write: synced, and no temp
-    file left behind if it fails."""
+    """A file under ~/wg-tunnels, whole or not at all (its folders made, 0700): the
+    server list and numbers aren't recoverable from anywhere else. system.atomic_write:
+    synced, and no temp file left behind if it fails."""
+    home.make_dir(os.path.dirname(path))
     atomic_write(path, text, mode)
 
 

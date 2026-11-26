@@ -30,6 +30,14 @@ def root() -> str:
     return path
 
 
+def devices_dir() -> str:
+    return os.path.join(root(), "devices")
+
+
+def config_dir(device: str) -> str:
+    return os.path.join(devices_dir(), device, "config")
+
+
 def servers_dir() -> str:
     return os.path.join(root(), "fleet", "servers")
 
@@ -46,14 +54,13 @@ def backups_dir(server: str) -> str:
     return os.path.join(server_dir(server), "backups")
 
 
+def carriers_dir(server: str) -> str:
+    """Where <server>'s jump files wait to be pushed."""
+    return os.path.join(server_dir(server), "carriers")
+
+
 def devices_file() -> str:
     return os.path.join(root(), "fleet", "devices")
-
-
-def private_dir(path: str) -> str:
-    os.makedirs(path, exist_ok=True)
-    os.chmod(path, 0o700)
-    return path
 
 
 def make_dir(path: str) -> str:
@@ -67,7 +74,8 @@ def make_dir(path: str) -> str:
             break
         d = os.path.dirname(d)
     for d in reversed(todo):
-        private_dir(d)
+        os.makedirs(d, exist_ok=True)
+        os.chmod(d, 0o700)
     return path
 
 

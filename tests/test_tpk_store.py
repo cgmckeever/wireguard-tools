@@ -49,3 +49,25 @@ def test_pucks_and_gateways_come_from_the_folders(tmp_path):
 def test_a_store_that_isnt_absolute_is_refused(store):
     r = tpk(store, "new", "home")
     assert r.returncode != 0 and "absolute" in r.stderr
+
+
+def test_gateway_add_makes_a_private_settings_file(tmp_path):
+    """A name wgt-ctl doesn't list: a tpk file to fill in, and a stop before any ssh."""
+    store = tmp_path / "wg-tunnels"
+    assert tpk(store, "new", "home").returncode == 0
+    r = tpk(store, "home", "gateway", "add", "elsewhere")
+    assert r.returncode == 0, r.stderr
+    gw = store / "pucks" / "home" / "gateways"
+    assert mode(gw) == "0o700" and mode(gw / "elsewhere.conf") == "0o600"
+    assert "fill in GATEWAY_SSH" in r.stderr
+
+
+def test_a_hand_made_copy_is_made_private_when_read(tmp_path):
+    store = tmp_path / "wg-tunnels"
+    puck = store / "pucks" / "home"
+    puck.mkdir(parents=True)
+    (puck / "puck.conf").write_text('SSH_LAN="pi@home.local"\n')
+    os.chmod(puck / "puck.conf", 0o644)
+    os.chmod(puck, 0o755)
+    tpk(store, "home", "gateway")
+    assert mode(puck) == "0o700" and mode(puck / "puck.conf") == "0o600"

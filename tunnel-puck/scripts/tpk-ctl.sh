@@ -3,7 +3,8 @@
 # puck's settings are ~/wg-tunnels/pucks/<puck>/puck.conf ($WG_TUNNELS, as
 # wgt-ctl), plus one pucks/<puck>/gateways/<gateway>.conf for each gateway it
 # serves (a WireGuard gateway: the server your clients connect to, which sends
-# them on to the puck; the file holds the link, routing and jumps there). It runs puck.sh on the puck and gateway.sh on the gateways over ssh.
+# them on to the puck; the file holds the link, routing and jumps there). It
+# runs puck.sh on the puck and gateway.sh on the gateways over ssh.
 # <puck> can be left out while there's only one (else it asks; TPK_PUCK=<puck> is
 # the default). <puck>.<gateway> names one gateway: commands about one gateway take
 # the puck's only one without it, or ask (TPK_GATEWAY=<gateway> is the default); the
@@ -52,12 +53,19 @@ set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 EXAMPLES=$(cd "$HERE/../configs" && pwd)    # the templates; settings live in PUCKS
 REPO=$(cd "$HERE/../.." && pwd)
-# ~/wg-tunnels ($WG_TUNNELS), by wgt-ctl's own rule (wgt/ctl/home.py).
-STORE=$(PYTHONPATH="$REPO" python3 -c 'import sys
-from wgt.ctl import home
+# wgt_py <python> [args]: run it with this checkout's wgt (from $REPO, so no other
+# checkout's wgt/ is picked up), a WgtError as one line rather than a traceback.
+wgt_py() {
+    code="$1"; shift
+    (cd "$REPO" && python3 -c "import sys
 from wgt.errors import WgtError
-try: print(home.root())
-except WgtError as e: sys.exit(f"tpk-ctl.sh: {e}")') || exit 1
+try:
+$(printf '%s\n' "$code" | sed 's/^/    /')
+except WgtError as e:
+    sys.exit(f'tpk-ctl.sh: {e}')" "$@")
+}
+# ~/wg-tunnels ($WG_TUNNELS), by wgt-ctl's own rule (wgt/ctl/home.py).
+STORE=$(wgt_py 'from wgt.ctl import home; print(home.root())') || exit 1
 PUCKS="$STORE/pucks"
 WGT_CTL="$REPO/bin/wgt-ctl"
 COMMANDS="new config ssh-config init gateway link exit client mode disable enable status wifi test ssh reboot shutdown all undo"
@@ -158,7 +166,7 @@ wifi_file() { echo "$PUCKS/$1/wifi.conf"; }
 gateway_file() { echo "$PUCKS/$1/gateways/$2.conf"; }
 # shown <path>: under ~ when it is, for messages.
 shown() { case "$1" in "$HOME"/*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; }
-# private_dir <dir>: made, mode 700 (with its parents up to the store).
+# private_dir <dir>: made, mode 700 (any parents it needs too, as they're made).
 private_dir() { (umask 077; mkdir -p "$1"); chmod 700 "$1"; }
 
 # pucks: the configured pucks, one name per line: those with a pucks/<puck>/puck.conf.
@@ -214,7 +222,7 @@ cmd_new() {
     ! is_command "$name" || die "'$name' is a command word: pick another name"
     f=$(puck_file "$name") w=$(wifi_file "$name")
     [ ! -e "$f" ] || die "$(shown "$f") already exists"
-    private_dir "$PUCKS"; private_dir "$PUCKS/$name"
+    private_dir "$PUCKS/$name"
     (umask 077; cp "$EXAMPLES/puck.conf.example" "$f")
     log "made $(shown "$f"): fill it in, then scripts/tpk-ctl.sh $name config"
     if [ -z "$wifi" ] && have_tty && [ ! -e "$w" ]; then
@@ -237,6 +245,7 @@ load_puck() {
     PUCK_CONF=$(puck_file "$PUCK_NAME")
     [ -r "$PUCK_CONF" ] || die "no puck '$PUCK_NAME': $(shown "$PUCK_CONF") doesn't exist (configured: $(words "$(pucks)"))"
     log "puck: $PUCK_NAME ($(shown "$PUCK_CONF"))"
+    chmod 700 "${PUCK_CONF%/*}"; chmod 600 "$PUCK_CONF"     # a hand-made copy too
     SSH_LAN="" SSH_CLOUDFLARE="" CF_TOKEN_FILE=""
     # shellcheck disable=SC1090
     . "$PUCK_CONF"
@@ -261,6 +270,7 @@ load_gateway() {
     GATEWAY_NAME="$1" CONF=$(gateway_file "$PUCK_NAME" "$1")
     [ -r "$CONF" ] || die "$PUCK_NAME serves no gateway '$1': $(shown "$CONF") doesn't exist (its gateways: $(words "$(gateways)"); add one: tpk-ctl.sh $PUCK_NAME gateway add $1)"
     [ -n "${QUIET:-}" ] || log "gateway: $1 ($(shown "$CONF"))"
+    chmod 700 "${CONF%/*}"; chmod 600 "$CONF"
     # shellcheck disable=SC1090
     . "$CONF"
     : "${TPK_ROUTING:=tpk}" "${WG_IF:=wg0}"
@@ -320,14 +330,12 @@ wgt_gateway_settings() {
         elif [ -n "${QUIET:-}" ]; then die "WGT_SERVER is empty in $CONF"
         else choose_wgt_server; fi
     fi
-    GATEWAY_SSH=$(PYTHONPATH="$REPO" python3 -c 'import sys; from wgt.ctl import remote; print(remote.find(sys.argv[1]).target)' \
-        "$WGT_SERVER" 2>/dev/null) || die "WGT_SERVER '$WGT_SERVER' isn't in wgt-ctl's list (see: bin/wgt-ctl list)"
+    GATEWAY_SSH=$(wgt_py 'from wgt.ctl import remote; print(remote.find(sys.argv[1]).target)' "$WGT_SERVER" 2>/dev/null) || die "WGT_SERVER '$WGT_SERVER' isn't in wgt-ctl's list (see: bin/wgt-ctl list)"
     ! placeholder "$GATEWAY_HOST" || GATEWAY_HOST="${GATEWAY_SSH#*@}"
 }
 
 wgt_servers() {    # wgt-ctl's servers, one name per line
-    PYTHONPATH="$REPO" python3 -c 'from wgt.ctl import remote
-for s in remote.servers(): print(s.name)'
+    wgt_py 'from wgt.ctl import remote; [print(s.name) for s in remote.servers()]'
 }
 
 # choose_wgt_server: WGT_SERVER, when it's empty: a server from wgt-ctl's list, or a
@@ -554,8 +562,8 @@ gateway_config() {
     case "$PUCK_PORT" in *[!0-9]*) die "PUCK_PORT must be a number, or empty (link picks one)" ;; esac
     if [ "$TPK_ROUTING" = wgt ]; then
         for code in $(jump_codes); do    # wgt's own rule for a new jump's code
-            PYTHONPATH="$REPO" python3 -c 'import sys; from wgt import store; sys.exit(not store.new_exit_code(sys.argv[1]))' "$code" \
-                || die "jump code '$code' won't do: $(PYTHONPATH="$REPO" python3 -c 'from wgt import store; print(store.EXIT_CODE_RULE)'). Set JUMP_CODE (or JUMP_LAN_CODE, JUMP_LANONLY_CODE) yourself"
+            wgt_py 'from wgt import store; sys.exit(not store.new_exit_code(sys.argv[1]))' "$code" \
+                || die "jump code '$code' won't do: $(wgt_py 'from wgt import store; print(store.EXIT_CODE_RULE)'). Set JUMP_CODE (or JUMP_LAN_CODE, JUMP_LANONLY_CODE) yourself"
         done
     elif [ -z "$CLIENT_IPS" ]; then
         log "note: CLIENT_IPS is empty, so no client goes through the puck on $GATEWAY_NAME yet (README 2.2)"

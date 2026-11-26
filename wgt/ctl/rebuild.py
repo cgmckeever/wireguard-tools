@@ -61,7 +61,7 @@ def do_remove(s: Server, args: List[str]) -> int:
     if teardown(s.target, s.dir) != 0:
         raise WgtError(f"teardown failed on {s.name}; it stays listed - fix the cause and re-run")
     rc = do_forget(s, ["--yes"])
-    left = tunnels.drop_anchor(s.name)
+    left = tunnels.drop_server_dir(s.name)
     if left:
         out.info(f"{left} still has jump files or backups: kept (delete it by hand when they're done with)")
     return rc

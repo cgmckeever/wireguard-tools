@@ -185,7 +185,7 @@ def do_exit_add(s: Server, args: List[str]) -> int:
     """Push one of this server's local configs (by its number in the list) or all."""
     if len(args) > 1:   # `jump-add 1 2` must not push only 1
         raise WgtError(f"usage: wgt-ctl {s.name} jump-add [n|all] (got: {' '.join(args)})")
-    src = tunnels.carriers_dir(s.name)
+    src = home.carriers_dir(s.name)
     files = tunnels.staged(s.name)
     if not files:
         raise WgtError(f"no configs in {home.shown(src)} (save WireGuard configs there, any name ending .conf)")

@@ -11,7 +11,7 @@ import subprocess
 import pytest
 
 from wgt import ctl, ui
-from wgt.ctl import fleet_cmds, jumpfiles, newserver, rebuild, remote, tunnels
+from wgt.ctl import fleet_cmds, home, jumpfiles, newserver, rebuild, remote, tunnels
 from wgt.errors import WgtError
 
 
@@ -63,7 +63,7 @@ def test_servers_and_find(local):
 
 def test_link_of_reads_the_jump_line(local):
     carriers = local / "wg-tunnels" / "fleet" / "servers" / "boba" / "carriers"
-    assert tunnels.carriers_dir("boba") == str(carriers)
+    assert home.carriers_dir("boba") == str(carriers)
     assert jumpfiles.link_of(str(carriers / "paris.france.conf")) == ("par-fr", "Paris, France")
     assert jumpfiles.link_of(str(carriers / "unnamed.conf")) is None
 
@@ -127,7 +127,7 @@ def test_all_refuses_single_server_commands(local):
 
 
 @pytest.mark.parametrize("line", ["onlyname", "2bad root@h", "ok -oProxyCommand=x", "ok root@h relative/dir",
-                                  "all root@h"])
+                                  "all root@h", "ok # only a comment"])
 def test_bad_server_lines_refused(local, line):
     listing(local, line)
     with pytest.raises(WgtError, match="want"):
@@ -203,6 +203,8 @@ def test_a_folder_without_a_login_is_not_listed(local):
 def test_init_refuses_a_name_whose_folder_differs_in_case(local):
     with pytest.raises(WgtError, match="name the server 'nordonly'"):
         newserver._refuse_listed("NordOnly")
+    with pytest.raises(WgtError, match="already listed .as 'boba'"):
+        newserver._refuse_listed("Boba")
 
 
 def test_remove_failure_keeps_the_server_listed(local, monkeypatch):
