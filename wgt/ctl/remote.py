@@ -66,7 +66,7 @@ def servers() -> List[Server]:
     for name in sorted(os.listdir(top), key=str.lower) if os.path.isdir(top) else []:
         path = home.login_file(name)
         if not os.path.isfile(path):
-            continue                       # wireguard-tunnels' alone (nord.sh), or forgotten
+            continue                       # forgotten (its backups or jump files kept it), or hand-made
         fields = next((line.split() for line in (store.read_text(path) or "").splitlines()
                        if line.split() and not line.lstrip().startswith("#")), [])
         target = fields[0] if fields else ""

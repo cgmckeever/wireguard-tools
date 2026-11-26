@@ -43,7 +43,7 @@ MARK = "\x1e"   # starts each file's name line in a fetch (never in a config)
 
 def anchor(server: str) -> str:
     """carriers/, even empty: where jump files are staged, by nord.sh or by hand
-    (the README points there); wgt-ctl only reads them."""
+    (the README points there); wgt-ctl reads them and names each on its first push."""
     return home.make_dir(home.carriers_dir(server))
 
 

@@ -4,7 +4,8 @@ a name, a list number, or all; a few take no server (below).
 
 One server:
   wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
-  wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to fleet/servers/SERVER/backups/
+  wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to
+                                        ~/wg-tunnels/fleet/servers/SERVER/backups/
   wgt-ctl SERVER jump-add [n|all]       push a jump file from ~/wg-tunnels/fleet/servers/SERVER/carriers/
   wgt-ctl SERVER sync                   copy its client configs to ~/wg-tunnels/devices/<device>/config/
   wgt-ctl SERVER ssh [command] | branch <b>

@@ -51,16 +51,15 @@
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-EXAMPLES=$(cd "$HERE/../configs" && pwd)    # the templates; settings live in PUCKS
+EXAMPLES=$(cd "$HERE/../examples" && pwd)   # the templates; settings live in PUCKS
 REPO=$(cd "$HERE/../.." && pwd)
 # wgt_py <python> [args]: run it with this checkout's wgt (from $REPO, so no other
 # checkout's wgt/ is picked up), a WgtError as one line rather than a traceback.
 wgt_py() {
-    code="$1"; shift
-    (cd "$REPO" && python3 -c "import sys
+    (py="$1"; shift; cd "$REPO" && python3 -c "import sys
 from wgt.errors import WgtError
 try:
-$(printf '%s\n' "$code" | sed 's/^/    /')
+$(printf '%s\n' "$py" | sed 's/^/    /')
 except WgtError as e:
     sys.exit(f'tpk-ctl.sh: {e}')" "$@")
 }

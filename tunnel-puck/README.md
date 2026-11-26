@@ -300,7 +300,7 @@ scripts/tpk-ctl.sh gateway add dengar      # asks before it changes the gateway
 ```
 
 `gateway add` makes the gateway's settings file, `~/wg-tunnels/pucks/<puck>/gateways/<gateway>.conf`, from
-`configs/puck.gateway.conf.example`:
+`examples/puck.gateway.conf.example`:
 
 - **A server in `../bin/wgt-ctl list`** (here `dengar`) gets `TPK_ROUTING="wgt"`
   and `WGT_SERVER` filled in, and `gateway add` carries on at once.
@@ -657,7 +657,7 @@ in `~/wg-tunnels/pucks/<puck>/wifi.conf` next to the puck's settings
 password for an open network:
 
 ```sh
-cp configs/puck.wifi.conf.example ~/wg-tunnels/pucks/<puck>/wifi.conf   # or tpk-ctl.sh new made it
+cp examples/puck.wifi.conf.example ~/wg-tunnels/pucks/<puck>/wifi.conf   # or tpk-ctl.sh new made it
 scripts/tpk-ctl.sh wifi sync                                 # the puck's Wi-Fi becomes this list
 ```
 
@@ -818,7 +818,7 @@ asks):
 | `gateway remove <gateway>` | with `wgt`, the device configs on the puck's jumps there and the jumps; its link on both ends; then its settings file (asks first) |
 | `link` | one gateway. The gateway picks a free subnet (apart from the puck's other links) and port the first time. The puck: WireGuard, IP forwarding, a retry at boot, its key, and a hook that moves the exit rules when the network changes. The gateway: its key, its end of the link (`wgpk-<puck>`), `PUCK_PORT/udp` in ufw if active, and with `tpk` the routing and kill switch for `CLIENT_IPS`. Then the puck's end (`wgpk<n>`) |
 | `exit` | one gateway. `tpk`: the DNS resolver (unbound) on the puck. `wgt`: the reverse tunnel(s) on the puck (`wgrtun<n>`, and `wgrtunlan<n>`, `wgrtunlo<n>` when on), piped into `wgt jump add` on the gateway; the LAN-only jump's routes set to the puck's LAN |
-| `all` | `link` and `exit` for each gateway (or the one named), then `wifi sync` (only with a `<puck>.wifi.conf`), `test` |
+| `all` | `link` and `exit` for each gateway (or the one named), then `wifi sync` (only with a `wifi.conf`), `test` |
 | `client <device> [--egress] [--lan]` | `wgt`, one gateway: a config for the device: the internet (no flags, `--egress`), the internet and the LAN (`--egress --lan`: `JUMP_LAN`), or the LAN only (`--lan`: `JUMP_LANONLY`) ([2.2](#22-device-configs)) |
 | `mode [--egress [--lan]] [<interface>]` | one gateway, every client: the internet only, or the friend's LAN too (default `wgpk<n>` or `wgrtun<n>`); no flags: show it. `--lan` alone is per device (`client --lan`) |
 | `disable [<device>]`, `enable [<device>]` | the puck's clients (or one device's) off and back on, on every gateway or the one named; nothing deleted ([Turning clients off and on](#turning-clients-off-and-on)) |

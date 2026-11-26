@@ -71,3 +71,16 @@ def test_a_hand_made_copy_is_made_private_when_read(tmp_path):
     os.chmod(puck, 0o755)
     tpk(store, "home", "gateway")
     assert mode(puck) == "0o700" and mode(puck / "puck.conf") == "0o600"
+
+
+def test_a_bad_jump_code_is_named_by_wgts_own_rule(tmp_path):
+    """config checks a wgt gateway's jump codes with wgt (wgt_py); the message names the code."""
+    store = tmp_path / "wg-tunnels"
+    (store / "fleet" / "servers" / "gw").mkdir(parents=True)
+    (store / "fleet" / "servers" / "gw" / "login").write_text("root@gw.example\n")
+    assert tpk(store, "new", "home").returncode == 0
+    (store / "pucks" / "home" / "gateways").mkdir()
+    (store / "pucks" / "home" / "gateways" / "gw.conf").write_text(
+        'TPK_ROUTING="wgt"\nWGT_SERVER="gw"\nJUMP_CODE="all"\n')
+    r = tpk(store, "home", "config")
+    assert r.returncode != 0 and "jump code 'all' won't do: 2-6 of" in r.stderr
