@@ -14,7 +14,7 @@ from .remote import Server, out, q
 
 
 def do_backup(s: Server, args: List[str]) -> int:
-    """wgt backup there, then fetch the archive into ~/wg-tunnels/servers/<server>/backups/."""
+    """wgt backup there, then fetch the archive into ~/wg-tunnels/fleet/servers/<server>/backups/."""
     remote.no_args("backup", args)
     local = fetch_backup(s)
     out.info(f"{s.name}: {local} (private keys inside; restore with wgt restore)")
@@ -22,16 +22,14 @@ def do_backup(s: Server, args: List[str]) -> int:
 
 
 def fetch_backup(s: Server) -> str:
-    """wgt backup there; the archive fetched into servers/<server>/backups/ (its path here)."""
+    """wgt backup there; the archive fetched into fleet/servers/<server>/backups/ (its path here)."""
     rc, o = remote.ssh(s.target, f"{s.wgt} backup --yes >/dev/null || exit 1; "
                           f"ls -t {remote.REMOTE.backup_dir}/{archive_name('*', '*')} 2>/dev/null | head -n 1",
                 capture=True)
     archive = o.strip()
     if rc != 0 or not archive:
         raise WgtError(f"{s.name}: backup failed")
-    remote.ensure_home()
-    remote.private_dir(home.server_dir(s.name))
-    d = remote.private_dir(home.backups_dir(s.name))
+    d = home.make_dir(home.backups_dir(s.name))
     if not remote.scp(f"{s.target}:{archive}", d + "/"):
         raise WgtError(f"{s.name}: fetching {archive} failed")
     local = os.path.join(d, os.path.basename(archive))
@@ -185,7 +183,7 @@ def do_move(s: Server, args: List[str]) -> int:
     if in_place:
         out.log(f"{s.name} rebuilt")
     else:
-        remote.set_target(s.name, new)
+        remote.set_target(s, new)
         out.log(f"6. {s.name} is now {new} in {home.shown(home.login_file(s.name))}")
         out.info(f"the old machine ({s.target}) is down, its keys kept")
         # No by default: Enter, or a lost terminal, must not destroy the way back.

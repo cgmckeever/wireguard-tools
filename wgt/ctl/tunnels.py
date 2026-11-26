@@ -1,7 +1,7 @@
 """Client configs in ~/wg-tunnels (home.py: the whole layout), and the jump
 files staged there. wgt-ctl's folders are made on demand (0700, like the root):
 
-  servers/<server>/carriers/   jump configs staged for a server (jumpfiles.py)
+  fleet/servers/<server>/carriers/   jump configs staged for a server (jumpfiles.py)
   devices/<device>/config/     client configs as the servers issued them (below)
 
 Besides those and home.py's, everything under it belongs to wireguard-tunnels.
@@ -34,7 +34,7 @@ from ..const import client_conf_name
 from ..ctx import SETTINGS_COMMANDS
 from ..errors import WgtError
 from . import home, remote
-from .home import root, shown
+from .home import make_dir, root, shown
 from .remote import Server, out
 
 HEADER = re.compile(r"(?m)^# wireguard-tools client: (\S+) on (\S+)[ \t]*$")
@@ -48,14 +48,14 @@ def carriers_dir(server: str) -> str:
 
 
 def anchor(server: str) -> str:
-    """servers/<server>/carriers/, even empty: how wireguard-tunnels knows the
-    server exists (it writes jump files there; wgt-ctl only reads them)."""
+    """fleet/servers/<server>/carriers/, even empty: where wireguard-tunnels'
+    nord.sh and you put its jump files (wgt-ctl only reads them)."""
     return make_dir(carriers_dir(server))
 
 
 def drop_anchor(server: str) -> str:
-    """Delete servers/<server>/ when nothing but Finder's .DS_Store is in it;
-    else where what's left is."""
+    """Delete fleet/servers/<server>/ when nothing but Finder's .DS_Store is in it;
+    else where what's left is (jump files, backups)."""
     top = os.path.dirname(carriers_dir(server))
     if not os.path.isdir(top):
         return ""
@@ -67,28 +67,13 @@ def drop_anchor(server: str) -> str:
 
 
 def staged(server: str) -> List[str]:
-    """<server>'s staged jump configs (servers/<server>/carriers/*.conf)."""
+    """<server>'s staged jump configs (carriers/*.conf)."""
     d = carriers_dir(server)
     return sorted(os.path.join(d, f) for f in os.listdir(d) if f.endswith(".conf")) if os.path.isdir(d) else []
 
 
 def config_dir(device: str) -> str:
     return os.path.join(root(), "devices", device, "config")
-
-
-def make_dir(path: str) -> str:
-    """<path> and any missing folders up from it to the root, each 0700."""
-    top = root()
-    todo = []
-    d = path
-    while not os.path.isdir(d):
-        todo.append(d)
-        if d == top or os.path.dirname(d) == d:
-            break
-        d = os.path.dirname(d)
-    for d in reversed(todo):
-        remote.private_dir(d)
-    return path
 
 
 def header_of(text: str) -> Optional[Tuple[str, str]]:

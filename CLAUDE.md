@@ -21,15 +21,15 @@ everything private this machine keeps, and the checkout holds none of it (no
   `<file>.<YYYYmmdd-HHMMSS>.bak` (`<file>.<YYYYmmdd-HHMMSS>.<n>.bak` for the
   nth more within that second). A file of that name that isn't a copy is
   refused, never overwritten.
-- **Its own, beside them:** `servers/<server>/login` (the server list: one
-  `user@host [/checkout]` line; listed when present, in name order),
-  `servers/<server>/backups/` (fetched archives), `fleet/devices` (static
-  numbers) and `pucks/<puck>/` (tpk-ctl.sh: `puck.conf`, `wifi.conf`,
-  `gateways/<gateway>.conf`). wireguard-tunnels reads none of them.
-- **Reads** `servers/<server>/carriers/*.conf` (jump-add). It also makes that
-  folder (init, sync: how wireguard-tunnels knows the server exists), deletes
-  `servers/<server>/` when nothing is left in it (remove: forget drops the
-  login, and backups or jump files keep it), and writes a `# jump: <code> <label>` line into a
+- **Its own, beside them:** `fleet/servers/<server>/login` (the server list:
+  one `user@host [/checkout]` line; listed when present, in name order; nord.sh
+  offers the same servers), `fleet/servers/<server>/backups/` (fetched
+  archives), `fleet/devices` (static numbers) and `pucks/<puck>/` (tpk-ctl.sh:
+  `puck.conf`, `wifi.conf`, `gateways/<gateway>.conf`). wireguard-tunnels reads
+  only the logins' presence.
+- **Reads** `fleet/servers/<server>/carriers/*.conf` (jump-add). It also makes
+  that folder (init, sync), deletes the server's folder when nothing is left in
+  it (remove: forget drops the login, and backups or jump files keep it), and writes a `# jump: <code> <label>` line into a
   file on its first push. nord.sh writes the same line, with the same code rule
   (`store.valid_exit_code`; a new code also isn't `all`, `store.new_exit_code`,
   which nord.sh's `xxx-cc`/`nd-cc` never are). Each push also makes the folder 0700 and the file
@@ -56,7 +56,7 @@ everything private this machine keeps, and the checkout holds none of it (no
   `# wireguard-tools client:` (tunnel.sh extract leaves those files alone) and
   `# device-network:` (the sweep routes it through a carrier).
 
-**The servers** (`~/wg-tunnels/servers/<server>/login`). dengar, ig88 and boba are live:
+**The servers** (`~/wg-tunnels/fleet/servers/<server>/login`). dengar, ig88 and boba are live:
 people's traffic runs through them. bossk is the throwaway for anything
 destructive (`tools/trial.sh`, setup/rollback, restore, `--new-server-keys`).
 Live servers are never used for those. `wgt-ctl all` means every listed

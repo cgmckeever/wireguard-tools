@@ -4,7 +4,7 @@
 # Read-only: copies this checkout to a temp dir there, runs `wgt debug` with
 # both (keys redacted), diffs, and removes the temp dir.
 #
-#   tools/render-diff.sh                   every listed server (~/wg-tunnels/servers/*/login)
+#   tools/render-diff.sh                   every server wgt-ctl lists
 #   tools/render-diff.sh root@1.2.3.4 ...  just these
 #
 # Covers wg0.conf, the WARP and jump tunnels, rules, watchdog units, the drop-in,
@@ -15,13 +15,10 @@ set -uo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 targets=("$@")
 if [ ${#targets[@]} -eq 0 ]; then
-    for login in "${WG_TUNNELS:-$HOME/wg-tunnels}"/servers/*/login; do
-        [ -f "$login" ] || continue
-        while read -r target _ || [ -n "$target" ]; do   # a last line without a newline too
-            case "$target" in ""|\#*) continue ;; esac
-            targets+=("$target"); break
-        done <"$login"
-    done
+    # wgt-ctl's own list (wgt/ctl/home.py, remote.servers), not a second reading of it
+    listed=$(cd "$here" && python3 -c \
+        'from wgt.ctl import remote; [print(s.target) for s in remote.servers()]') || exit 1
+    while read -r target; do [ -z "$target" ] || targets+=("$target"); done <<<"$listed"
 fi
 # Also keeps "${targets[@]}" below from failing under set -u in macOS's bash 3.2.
 [ ${#targets[@]} -gt 0 ] || { echo "no servers listed"; exit 0; }

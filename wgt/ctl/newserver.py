@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from typing import Dict, List, Tuple
@@ -30,7 +31,6 @@ def fleet_subnets() -> List[str]:
 def cmd_init(argv: List[str]) -> None:
     """Set up a new server (or adopt one already running these tools) and add it to the list."""
     opts, setup_args = _parse_init(argv)
-    remote.ensure_home()
     address, name, target = _ask_identity(opts)
     out.log(f"Connecting to {target}")
     login(target)
@@ -94,6 +94,10 @@ def _refuse_listed(name: str) -> None:
     taken = next((s.name for s in remote.servers() if tunnels.same_name(s.name, name)), "")
     if taken:
         raise WgtError(f"'{name}' is already listed" + (f" (as '{taken}')" if taken != name else ""))
+    top = home.servers_dir()
+    folder = next((f for f in (os.listdir(top) if os.path.isdir(top) else []) if tunnels.same_name(f, name)), name)
+    if folder != name:   # one folder on a Mac: its login would list the server as '<folder>'
+        raise WgtError(f"{home.shown(home.server_dir(folder))} already exists: name the server '{folder}'")
 
 
 def login(target: str) -> None:

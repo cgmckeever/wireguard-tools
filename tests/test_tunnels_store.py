@@ -9,7 +9,7 @@ import os
 import pytest
 
 from wgt import ctl
-from wgt.ctl import remote, tunnels
+from wgt.ctl import home, remote, tunnels
 from wgt.errors import WgtError
 
 
@@ -303,13 +303,13 @@ def test_the_store_is_wg_tunnels_as_written_and_absolute(monkeypatch):
     # wireguard-tunnels (store.root, tunnel.sh) doesn't expand a "~" in it: neither do we,
     # and a path that isn't absolute is refused, not taken as one under the current folder
     monkeypatch.setenv("WG_TUNNELS", "/srv/elsewhere")
-    assert tunnels.root() == "/srv/elsewhere"
+    assert home.root() == "/srv/elsewhere"
     for relative in ("~/elsewhere", "wg-tunnels", "./x"):
         monkeypatch.setenv("WG_TUNNELS", relative)
         with pytest.raises(WgtError, match="absolute"):
-            tunnels.root()
+            home.root()
     monkeypatch.delenv("WG_TUNNELS")
-    assert tunnels.root() == os.path.expanduser("~/wg-tunnels")
+    assert home.root() == os.path.expanduser("~/wg-tunnels")
 
 
 def test_a_renamed_devices_copy_stays_put_with_a_note(store):
@@ -493,7 +493,7 @@ def test_sync_takes_no_arguments(store):
 def test_a_servers_anchor_is_made_by_sync_even_with_nothing_to_stage(store, monkeypatch):
     monkeypatch.setattr(remote, "ssh", lambda target, command, **k: (0, ""))
     assert tunnels.deliver(remote.Server("ig88", "root@h")) == 0
-    d = store / "servers" / "ig88" / "carriers"
+    d = store / "fleet" / "servers" / "ig88" / "carriers"
     assert d.is_dir() and list(d.iterdir()) == []
     assert oct(d.stat().st_mode & 0o777) == "0o700"
 
@@ -501,18 +501,18 @@ def test_a_servers_anchor_is_made_by_sync_even_with_nothing_to_stage(store, monk
 def test_init_records_a_server_with_its_anchor(store, tmp_path, monkeypatch):
     from wgt.ctl import newserver
     newserver.record("lando", "root@1.2.3.4")
-    assert (store / "servers" / "lando" / "carriers").is_dir()
-    assert (store / "servers" / "lando" / "login").read_text() == "root@1.2.3.4\n"
+    assert (store / "fleet" / "servers" / "lando" / "carriers").is_dir()
+    assert (store / "fleet" / "servers" / "lando" / "login").read_text() == "root@1.2.3.4\n"
 
 
 def test_an_empty_anchor_goes_and_one_with_jump_files_stays(store):
     tunnels.anchor("gone")
-    (store / "servers" / "gone" / "carriers" / ".DS_Store").write_text("")
-    assert tunnels.drop_anchor("gone") == "" and not (store / "servers" / "gone").exists()
+    (store / "fleet" / "servers" / "gone" / "carriers" / ".DS_Store").write_text("")
+    assert tunnels.drop_anchor("gone") == "" and not (store / "fleet" / "servers" / "gone").exists()
     tunnels.anchor("kept")
-    (store / "servers" / "kept" / "carriers" / "paris.conf").write_text("x")
+    (store / "fleet" / "servers" / "kept" / "carriers" / "paris.conf").write_text("x")
     assert tunnels.drop_anchor("kept").endswith("kept")
-    assert (store / "servers" / "kept" / "carriers" / "paris.conf").exists()
+    assert (store / "fleet" / "servers" / "kept" / "carriers" / "paris.conf").exists()
     assert tunnels.drop_anchor("never") == ""
 
 

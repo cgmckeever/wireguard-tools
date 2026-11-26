@@ -4,6 +4,7 @@ jumps and the first-word grammar."""
 from __future__ import annotations
 
 import io
+import os
 import shutil
 import subprocess
 
@@ -23,7 +24,7 @@ def test_local_file_comment_replaces_old_one():
 
 def listing(local, text):
     """The server list as login files: one 'name user@host [/dir]' line each."""
-    top = local / "wg-tunnels" / "servers"
+    top = local / "wg-tunnels" / "fleet" / "servers"
     for login in top.glob("*/login"):
         login.unlink()
     for line in text.splitlines():
@@ -42,9 +43,10 @@ def devices_file(local):
 def local(tmp_path, monkeypatch):
     monkeypatch.setenv("WG_TUNNELS", str(tmp_path / "wg-tunnels"))
     listing(tmp_path, "dengar  root@1.2.3.4\nboba root@5.6.7.8 /srv/wgt")
-    (tmp_path / "wg-tunnels" / "servers" / "boba" / "login").write_text("# a comment\nroot@5.6.7.8 /srv/wgt\n")
-    (tmp_path / "wg-tunnels" / "servers" / "nordonly").mkdir()   # wireguard-tunnels' folder, no login: not listed
-    carriers = tmp_path / "wg-tunnels" / "servers" / "boba" / "carriers"
+    top = tmp_path / "wg-tunnels" / "fleet" / "servers"
+    (top / "boba" / "login").write_text("# a comment\nroot@5.6.7.8 /srv/wgt\n")
+    (top / "nordonly").mkdir()   # a folder with no login (a removed server's backups): not listed
+    carriers = top / "boba" / "carriers"
     carriers.mkdir(parents=True)
     (carriers / "paris.france.conf").write_text("# jump: par-fr Paris, France\n[Interface]\nPrivateKey = K\n")
     (carriers / "unnamed.conf").write_text("[Interface]\nPrivateKey = K2\n")
@@ -60,7 +62,7 @@ def test_servers_and_find(local):
 
 
 def test_link_of_reads_the_jump_line(local):
-    carriers = local / "wg-tunnels" / "servers" / "boba" / "carriers"
+    carriers = local / "wg-tunnels" / "fleet" / "servers" / "boba" / "carriers"
     assert tunnels.carriers_dir("boba") == str(carriers)
     assert jumpfiles.link_of(str(carriers / "paris.france.conf")) == ("par-fr", "Paris, France")
     assert jumpfiles.link_of(str(carriers / "unnamed.conf")) is None
@@ -74,7 +76,7 @@ def test_jump_line_replaces_old_one():
 
 
 def test_naming_a_jump_writes_it_into_the_file_and_refuses_a_taken_code(local, monkeypatch):
-    path = local / "wg-tunnels" / "servers" / "boba" / "carriers" / "unnamed.conf"
+    path = local / "wg-tunnels" / "fleet" / "servers" / "boba" / "carriers" / "unnamed.conf"
     replies = iter(["Paris, France", "par-fr", "par"])
     monkeypatch.setattr(ui, "have_tty", lambda: True)
     monkeypatch.setattr(ui, "ask", lambda prompt, gone="": next(replies))
@@ -85,7 +87,7 @@ def test_naming_a_jump_writes_it_into_the_file_and_refuses_a_taken_code(local, m
 
 def test_naming_a_jump_refuses_a_code_the_server_already_has(local, monkeypatch):
     # the push runs `wgt jump add <code> --yes`, which would replace that jump
-    path = local / "wg-tunnels" / "servers" / "boba" / "carriers" / "unnamed.conf"
+    path = local / "wg-tunnels" / "fleet" / "servers" / "boba" / "carriers" / "unnamed.conf"
     replies = iter(["Paris, France", "", "pa2"])   # the default "par" is on the server
     monkeypatch.setattr(ui, "have_tty", lambda: True)
     monkeypatch.setattr(ui, "ask", lambda prompt, gone="": next(replies))
@@ -93,7 +95,7 @@ def test_naming_a_jump_refuses_a_code_the_server_already_has(local, monkeypatch)
 
 
 def test_naming_a_jump_stops_at_end_of_input_instead_of_asking_forever(local, monkeypatch):
-    path = local / "wg-tunnels" / "servers" / "boba" / "carriers" / "unnamed.conf"
+    path = local / "wg-tunnels" / "fleet" / "servers" / "boba" / "carriers" / "unnamed.conf"
     replies = iter(["Paris, France", "par-fr"])   # taken by paris.france.conf
     monkeypatch.setattr(ui, "have_tty", lambda: True)
     monkeypatch.setattr(ui, "ask", lambda prompt, gone="": next(replies, gone))
@@ -104,15 +106,15 @@ def test_naming_a_jump_stops_at_end_of_input_instead_of_asking_forever(local, mo
 
 def test_record_writes_a_login_and_forget_removes_it(local, monkeypatch):
     newserver.record("lando", "root@9.9.9.9", "/srv/x")
-    login = local / "wg-tunnels" / "servers" / "lando" / "login"
+    login = local / "wg-tunnels" / "fleet" / "servers" / "lando" / "login"
     assert login.read_text() == "root@9.9.9.9 /srv/x\n" and oct(login.stat().st_mode & 0o777) == "0o600"
     assert [s.name for s in remote.servers()] == ["boba", "dengar", "lando"]
-    remote.set_target("lando", "root@8.8.8.8")
+    remote.set_target(remote.find("lando"), "root@8.8.8.8")
     assert login.read_text() == "root@8.8.8.8 /srv/x\n"
     from wgt.ctl import rebuild
     rebuild.do_forget(remote.find("lando"), ["--yes"])
     assert [s.name for s in remote.servers()] == ["boba", "dengar"]
-    assert (local / "wg-tunnels" / "servers" / "lando" / "carriers").is_dir()   # its jump files stay
+    assert (local / "wg-tunnels" / "fleet" / "servers" / "lando" / "carriers").is_dir()   # its jump files stay
 
 
 def test_reserved_names():
@@ -171,6 +173,38 @@ def test_remove_tears_down_then_forgets(local, monkeypatch):
     assert [s.name for s in remote.servers()] == ["dengar"]
 
 
+def test_remove_keeps_local_backups_and_unlists_the_server(local, monkeypatch):
+    top = local / "wg-tunnels" / "fleet" / "servers" / "dengar"
+    (top / "backups").mkdir(parents=True)
+    (top / "backups" / "wireguard-tools.dengar.x.tar.gz").write_text("keys")
+    monkeypatch.setattr(remote, "ssh", lambda target, cmd, **kw: (0, ""))
+    assert rebuild.do_remove(remote.find("dengar"), ["--yes"]) == 0
+    assert (top / "backups" / "wireguard-tools.dengar.x.tar.gz").exists() and not (top / "login").exists()
+    assert [s.name for s in remote.servers()] == ["boba"]
+
+
+def test_fetch_backup_lands_in_the_servers_backups(local, monkeypatch):
+    monkeypatch.setattr(remote, "ssh", lambda target, cmd, **kw: (0, "/var/backups/wireguard-tools/a.tar.gz\n"))
+    def scp(src, dest):
+        with open(os.path.join(dest, "a.tar.gz"), "w") as f:
+            f.write("x")
+        return True
+    monkeypatch.setattr(remote, "scp", scp)
+    path = rebuild.fetch_backup(remote.find("dengar"))
+    backups = local / "wg-tunnels" / "fleet" / "servers" / "dengar" / "backups"
+    assert path == str(backups / "a.tar.gz") and oct(os.stat(path).st_mode & 0o777) == "0o600"
+    assert oct(backups.stat().st_mode & 0o777) == "0o700"
+
+
+def test_a_folder_without_a_login_is_not_listed(local):
+    assert "nordonly" not in [s.name for s in remote.servers()]
+
+
+def test_init_refuses_a_name_whose_folder_differs_in_case(local):
+    with pytest.raises(WgtError, match="name the server 'nordonly'"):
+        newserver._refuse_listed("NordOnly")
+
+
 def test_remove_failure_keeps_the_server_listed(local, monkeypatch):
     monkeypatch.setattr(remote, "ssh", lambda target, cmd, **kw: (1, ""))
     with pytest.raises(WgtError, match="stays listed"):
@@ -198,7 +232,7 @@ def test_parse_move():
 
 
 def test_set_target_keeps_checkout(local):
-    remote.set_target("boba", "root@9.9.9.9")
+    remote.set_target(remote.find("boba"), "root@9.9.9.9")
     assert [(s.name, s.target, s.dir) for s in remote.servers()] == [
         ("boba", "root@9.9.9.9", "/srv/wgt"), ("dengar", "root@1.2.3.4", remote.DEF_DIR)]
 
@@ -639,7 +673,7 @@ def test_fleet_subnets_read_each_servers_state(local, monkeypatch):
 
 
 def test_list_shows_staged_jumps_by_name(local, monkeypatch, capsys):
-    carriers = local / "wg-tunnels" / "servers" / "dengar" / "carriers"
+    carriers = local / "wg-tunnels" / "fleet" / "servers" / "dengar" / "carriers"
     carriers.mkdir(parents=True)
     for name in ("a.conf", "a-b.conf", "notes.txt", "a.conf.20261112-120000.bak"):
         (carriers / name).write_text("")

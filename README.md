@@ -758,17 +758,19 @@ and nothing in your clone:
 
 ```
 ~/wg-tunnels/
-  servers/dengar/
-    login          root@203.0.113.10   (the SSH login, then the checkout if not /opt/wireguard-tools)
-    backups/       archives fetched by backup and move
-    carriers/      jump files waiting to be pushed
-  fleet/devices    each device's static number, across servers
   devices/<device>/config/   every config, as the servers issued it
+  fleet/
+    servers/dengar/
+      login        root@203.0.113.10   (the SSH login, then the checkout if not /opt/wireguard-tools)
+      backups/     archives fetched by backup and move
+      carriers/    jump files waiting to be pushed
+    devices        each device's static number, across servers
   pucks/<puck>/    tunnel-puck's settings
 ```
 
-A server is listed when its folder has a `login` file, in name order; `wgt-ctl
-init` writes it, also for a server that's already set up.
+A server is listed when its folder has a `login` file, in name order (the
+numbers `wgt-ctl list` shows follow it); `wgt-ctl init` writes it, also for a
+server that's already set up.
 
 `wgt-ctl` only talks to hosts already in `known_hosts`; only `init` and `move --to`
 ask about a new key. For a line you add by hand, or a rebuilt machine at the same
@@ -813,8 +815,8 @@ and these run from your machine, against that server:
 
 ```bash
 wgt-ctl boba pull                      # git pull its checkout (fast-forward only)
-wgt-ctl boba backup                    # wgt backup there, fetched to ~/wg-tunnels/servers/boba/backups/
-wgt-ctl boba jump-add                  # push a jump file from ~/wg-tunnels/servers/boba/carriers/ as a jump
+wgt-ctl boba backup                    # wgt backup there, fetched to ~/wg-tunnels/fleet/servers/boba/backups/
+wgt-ctl boba jump-add                  # push a jump file from ~/wg-tunnels/fleet/servers/boba/carriers/ as a jump
 wgt-ctl boba sync                      # copy its client configs to ~/wg-tunnels/devices/<device>/config/
 wgt-ctl boba ssh                       # log in (or: ssh <command>)
 wgt-ctl boba branch some-branch        # switch its checkout
@@ -890,19 +892,20 @@ directly on a server uses its own range and can reuse a freed number there.
 `wgt-ctl` keeps WireGuard configs in `~/wg-tunnels` (or `$WG_TUNNELS`, an absolute path), the
 folder [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels) uses
 for devices. It creates what it needs there, owner-only, the first time it writes;
-wireguard-tunnels isn't needed. It uses two kinds of folder and leaves the rest alone:
+wireguard-tunnels isn't needed. Besides its own `fleet/` ([Your servers](#your-servers)),
+it uses two kinds of folder and leaves the rest alone:
 
 | Folder | What |
 |---|---|
-| `servers/<server>/carriers/` | jump files for that server ([below](#adding-jumps-from-your-machine)) |
+| `fleet/servers/<server>/carriers/` | jump files for that server ([below](#adding-jumps-from-your-machine)) |
 | `devices/<device>/config/` | that device's client configs, copied from each server |
 
 `wgt-ctl` doesn't make jump files (it only adds the `# jump:` line that names
 each); whatever makes them, you or wireguard-tunnels, puts them in
-`servers/<server>/carriers/`. So every server you manage has that folder, even
-empty: `init` and `sync` make it, and `remove` deletes it if nothing is left in
-it. That's how wireguard-tunnels knows which servers exist. `remove` leaves the
-server's client configs in `devices/`: delete those by hand.
+`fleet/servers/<server>/carriers/`. `init` and `sync` make that folder, even
+empty, and wireguard-tunnels offers the servers that have a `login`. `remove`
+deletes the server's folder if nothing is left in it (backups and jump files
+stay), and leaves its client configs in `devices/`: delete those by hand.
 
 **Client configs follow the server.** `wgt-ctl` copies a server's client configs
 into `devices/<device>/config/` after any command through it that can change them:
@@ -936,7 +939,7 @@ rotated config's old key included): delete `.bak` files you don't need.
 ### Adding jumps from your machine
 
 Keep your jump files on your machine and let `wgt-ctl` put them on servers:
-save one as `~/wg-tunnels/servers/<server>/carriers/<any name>.conf` (it stays
+save one as `~/wg-tunnels/fleet/servers/<server>/carriers/<any name>.conf` (it stays
 there after it's pushed; `jump-add`'s list shows which are on the server), then
 
 ```bash
@@ -972,7 +975,7 @@ wgt-ctl dengar move --to 203.0.113.50 -- --endpoint vpn.example.com
 wgt-ctl dengar move                                                # a fresh copy, on the same machine
 ```
 
-1. Back up the server and fetch the archive to `~/wg-tunnels/servers/<server>/backups/`.
+1. Back up the server and fetch the archive to `~/wg-tunnels/fleet/servers/<server>/backups/`.
 2. Prepare the new machine: log in, install, clone; no setup yet.
 3. Bring the old server down: `wgt rollback`, keys kept. Its devices are cut off
    from here until step 4 finishes; both can't run at once, as they'd share the

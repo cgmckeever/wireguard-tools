@@ -1,4 +1,4 @@
-"""Jumps from staged files: ~/wg-tunnels/servers/<server>/carriers/*.conf (tunnels.py),
+"""Jumps from staged files: ~/wg-tunnels/fleet/servers/<server>/carriers/*.conf (tunnels.py),
 pushed to a server. Each file names its jump in a "# jump: <code> <label>" line,
 written the first time it's pushed."""
 
@@ -11,7 +11,7 @@ from typing import List, Optional, Sequence, Tuple
 
 from .. import render, store, ui
 from ..errors import WgtError
-from . import fleet_cmds, remote, tunnels
+from . import fleet_cmds, home, remote, tunnels
 from .remote import Server, out, q
 
 JUMP = re.compile(r"(?m)^# jump: (\S+) (.+?)[ \t]*$")
@@ -188,7 +188,7 @@ def do_exit_add(s: Server, args: List[str]) -> int:
     src = tunnels.carriers_dir(s.name)
     files = tunnels.staged(s.name)
     if not files:
-        raise WgtError(f"no configs in {tunnels.shown(src)} (save WireGuard configs there, any name ending .conf)")
+        raise WgtError(f"no configs in {home.shown(src)} (save WireGuard configs there, any name ending .conf)")
     sel = args[0] if args else ""
     if not sel:
         if not ui.have_tty():

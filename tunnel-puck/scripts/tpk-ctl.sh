@@ -1,9 +1,9 @@
 #!/bin/sh
 # tpk-ctl.sh: set up and run tunnel-puck from your computer (macOS or Linux). A
-# puck's settings are ~/wg-tunnels/pucks/<puck>/puck.conf ($WG_TUNNELS, as wgt-ctl),
-# plus one pucks/<puck>/gateways/<gateway>.conf for each gateway it serves (a WireGuard gateway: the server your clients connect
-# to, which sends them on to the puck; the file holds the link, routing and jumps
-# there). It runs puck.sh on the puck and gateway.sh on the gateways over ssh.
+# puck's settings are ~/wg-tunnels/pucks/<puck>/puck.conf ($WG_TUNNELS, as
+# wgt-ctl), plus one pucks/<puck>/gateways/<gateway>.conf for each gateway it
+# serves (a WireGuard gateway: the server your clients connect to, which sends
+# them on to the puck; the file holds the link, routing and jumps there). It runs puck.sh on the puck and gateway.sh on the gateways over ssh.
 # <puck> can be left out while there's only one (else it asks; TPK_PUCK=<puck> is
 # the default). <puck>.<gateway> names one gateway: commands about one gateway take
 # the puck's only one without it, or ask (TPK_GATEWAY=<gateway> is the default); the
@@ -15,7 +15,7 @@
 #   tpk-ctl.sh [<puck>] ssh-config                print the ~/.ssh/config entry for SSH_CLOUDFLARE
 #   tpk-ctl.sh ssh-config install                 add every puck's entry to your ssh config (its own file, one Include)
 #   tpk-ctl.sh [<puck>] init                      1.2c, on the puck: packages, updates, watchdog (and cloudflared, with SSH_CLOUDFLARE)
-#   tpk-ctl.sh [<puck>] gateway add <gateway>     2.1: serve a gateway: pucks/<puck>/gateways/<gateway>.conf, then link, exit and test
+#   tpk-ctl.sh [<puck>] gateway add <gateway>     2.1: its settings file (gateways/<gateway>.conf), then link, exit, test
 #   tpk-ctl.sh [<puck>] gateway [list]            the gateways the puck serves: routing, link, interfaces, jumps
 #   tpk-ctl.sh [<puck>] gateway remove <gateway>  stop serving one: its configs and jumps (wgt), its link, its settings file
 #   tpk-ctl.sh [<puck>[.<gateway>]] link          the link to the gateway (puck and gateway), keys exchanged for you
@@ -51,10 +51,14 @@ set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
 EXAMPLES=$(cd "$HERE/../configs" && pwd)    # the templates; settings live in PUCKS
-STORE="${WG_TUNNELS:-$HOME/wg-tunnels}"
-case "$STORE" in /*) ;; *) echo "tpk-ctl.sh: WG_TUNNELS must be an absolute path, not '$STORE'" >&2; exit 1 ;; esac
-PUCKS="$STORE/pucks"
 REPO=$(cd "$HERE/../.." && pwd)
+# ~/wg-tunnels ($WG_TUNNELS), by wgt-ctl's own rule (wgt/ctl/home.py).
+STORE=$(PYTHONPATH="$REPO" python3 -c 'import sys
+from wgt.ctl import home
+from wgt.errors import WgtError
+try: print(home.root())
+except WgtError as e: sys.exit(f"tpk-ctl.sh: {e}")') || exit 1
+PUCKS="$STORE/pucks"
 WGT_CTL="$REPO/bin/wgt-ctl"
 COMMANDS="new config ssh-config init gateway link exit client mode disable enable status wifi test ssh reboot shutdown all undo"
 # Cloudflare's trace (ip=... lines), as wgt's jump test uses (wgt/const.py TRACE_URL).
@@ -704,7 +708,7 @@ valid_psk() { case "${#1}" in 0|[89]|[1-5][0-9]|6[0-3]) return 0 ;; esac; return
 # Kept mode 600: it holds passwords.
 wifi_list() {
     file=$(wifi_file "$PUCK_NAME")
-    [ -r "$file" ] || die "no Wi-Fi list for $PUCK_NAME: cp configs/puck.wifi.conf.example $(shown "$file") (or tpk-ctl.sh new makes it), and fill it in"
+    [ -r "$file" ] || die "no Wi-Fi list for $PUCK_NAME: cp $(shown "$EXAMPLES")/puck.wifi.conf.example $(shown "$file") (or tpk-ctl.sh new makes it), and fill it in"
     chmod 600 "$file"
     n=0
     while IFS= read -r line || [ -n "$line" ]; do
@@ -1338,7 +1342,7 @@ cmd_gateway_add() {
     if [ -e "$f" ]; then
         log "$(shown "$f") exists: using it"
     elif [ -n "$DRY" ]; then
-        die "a dry run doesn't make settings files: make $(shown "$f") first (from configs/puck.gateway.conf.example)"
+        die "a dry run doesn't make settings files: make $(shown "$f") first (from $(shown "$EXAMPLES")/puck.gateway.conf.example)"
     elif wgt_servers 2>/dev/null | grep -qxF -- "$name"; then
         private_dir "${f%/*}"
         (umask 077; sed -e 's/^TPK_ROUTING="tpk"/TPK_ROUTING="wgt"/' -e "s/^WGT_SERVER=\"\"/WGT_SERVER=\"$name\"/" "$example" > "$f")

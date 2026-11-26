@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -37,7 +38,6 @@ def cmd_clients() -> None:
         for row in rows:
             print(fmt.format(s.name, *row.cells()))
     print("")
-    remote.ensure_home()
     entries = refresh_entries(seen, len(seen) == len(remote.servers()))
     print_problems(entries, seen)
 
@@ -47,6 +47,7 @@ def read_entries() -> Dict[str, fleet.Entry]:
 
 
 def write_entries(entries: Dict[str, fleet.Entry]) -> None:
+    home.make_dir(os.path.dirname(home.devices_file()))
     remote.write_local(home.devices_file(), fleet.format_entries(entries))
 
 
@@ -94,7 +95,6 @@ def numbered_add(args: List[str]) -> Tuple[List[str], str]:
     device = store.device_of(client_name(args))
     if not device or remote.flag_given(args, "--device-number"):
         return args, ""
-    remote.ensure_home()
     seen, missed, entries = read_fleet()
     if missed:
         out.info(f"not read for the static number (fleet/devices covers them): {', '.join(missed)}")
@@ -160,7 +160,6 @@ def rename_everywhere(args: List[str]) -> int:
         if one == 0:
             tunnels.after(s, "device", words)
         rc = one or rc
-    remote.ensure_home()
     entries = read_entries()
     if old in entries and rc == 0 and not remote.dry_run(passed):
         # <old>'s number goes with it, whatever <new>'s line said (no server that answered
@@ -182,7 +181,6 @@ def rename_everywhere(args: List[str]) -> int:
 
 def cmd_devices(args: List[str]) -> int:
     """wgt-ctl devices [sync | fix <device> <n> | forget <device>]."""
-    remote.ensure_home()
     verb = args[0] if args else "list"
     if verb == "forget" and len(args) == 2:
         return _devices_forget(args[1])

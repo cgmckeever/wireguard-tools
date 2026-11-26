@@ -1,5 +1,5 @@
 """wgt-ctl's foundations: where things are on a server, the server list
-(~/wg-tunnels/servers/<server>/login, home.py), and reaching a server over ssh."""
+(~/wg-tunnels/fleet/servers/<server>/login, home.py), and reaching a server over ssh."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ out = Out()
 
 @dataclass
 class Server:
-    """One server in the list: its folder's name, and its login file."""
+    """A listed server: its folder's name, and the login file's ssh target and checkout."""
 
     name: str
     target: str
@@ -58,14 +58,8 @@ class Server:
         return shlex.quote(f"{self.dir}/bin/wgt")
 
 
-def ensure_home() -> None:
-    """~/wg-tunnels and the folders wgt-ctl keeps there, private (700)."""
-    for d in (home.root(), home.servers_dir(), os.path.dirname(home.devices_file())):
-        private_dir(d)
-
-
 def servers() -> List[Server]:
-    """Every folder in servers/ with a login file, by name. Checked: names become
+    """Every folder in fleet/servers/ with a login file, by name. Checked: names become
     local paths, and targets and directories go into ssh and remote commands."""
     found: List[Server] = []
     top = home.servers_dir()
@@ -86,8 +80,7 @@ def servers() -> List[Server]:
 
 def write_login(name: str, target: str, checkout: str = DEF_DIR) -> None:
     """A server's login file: it's listed from then on."""
-    ensure_home()
-    private_dir(home.server_dir(name))
+    home.make_dir(home.server_dir(name))
     where = f" {checkout}" if checkout != DEF_DIR else ""
     write_local(home.login_file(name), f"{target}{where}\n")
 
@@ -127,12 +120,6 @@ def valid_server(name: str) -> bool:
     """A letter first (so it can't be mistaken for a list number), not a reserved word."""
     return (bool(re.match(r"^[A-Za-z][A-Za-z0-9_-]{0,31}$", name))
             and name not in RESERVED and name not in CTL_COMMANDS and name not in WGT_COMMANDS)
-
-
-def private_dir(path: str) -> str:
-    os.makedirs(path, exist_ok=True)
-    os.chmod(path, 0o700)
-    return path
 
 
 def ssh(target: str, command: str, tty: bool = False, batch: bool = False, capture: bool = False,
@@ -319,6 +306,6 @@ def write_local(path: str, text: str, mode: int = 0o600) -> None:
     atomic_write(path, text, mode)
 
 
-def set_target(name: str, target: str) -> None:
+def set_target(s: Server, target: str) -> None:
     """Point a server's login at a new machine (its checkout dir stays)."""
-    write_login(name, target, find(name).dir)
+    write_login(s.name, target, s.dir)

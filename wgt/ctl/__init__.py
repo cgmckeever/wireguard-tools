@@ -1,11 +1,11 @@
-"""`wgt-ctl`: drives the servers listed in ~/wg-tunnels/servers/ from your own machine
+"""`wgt-ctl`: drives the servers listed in ~/wg-tunnels/fleet/servers/ from your own machine
 (macOS or Linux). Most commands are  wgt-ctl SERVER COMMAND  where SERVER is
 a name, a list number, or all; a few take no server (below).
 
 One server:
   wgt-ctl SERVER <wgt command>          run it there, e.g. wgt-ctl boba client add phone --exit par-fr
-  wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to servers/SERVER/backups/
-  wgt-ctl SERVER jump-add [n|all]       push a jump file from ~/wg-tunnels/servers/SERVER/carriers/
+  wgt-ctl SERVER pull | backup          git pull (fast-forward) / back up, fetched to fleet/servers/SERVER/backups/
+  wgt-ctl SERVER jump-add [n|all]       push a jump file from ~/wg-tunnels/fleet/servers/SERVER/carriers/
   wgt-ctl SERVER sync                   copy its client configs to ~/wg-tunnels/devices/<device>/config/
   wgt-ctl SERVER ssh [command] | branch <b>
   wgt-ctl SERVER forget [--yes]         drop it from the list: its login file (the server is untouched)
@@ -32,9 +32,9 @@ No server:
 
 Leave SERVER out of a server command to pick one from the list. Everything
 private lives in ~/wg-tunnels ($WG_TUNNELS, shared with wireguard-tunnels), none
-of it in this checkout: servers/<server>/login is the list ("user@host
-[/checkout/dir]"), servers/<server>/backups/ the fetched archives,
-servers/<server>/carriers/*.conf the jump files (any name; a "# jump: <code>
+of it in this checkout: fleet/servers/<server>/login is the list ("user@host
+[/checkout/dir]"), fleet/servers/<server>/backups/ the fetched archives,
+fleet/servers/<server>/carriers/*.conf the jump files (any name; a "# jump: <code>
 <label>" line names each), and fleet/devices each device's static number.
 devices/<device>/config/ gets each server's client configs after client add,
 rotate, rename and remove, setup, restore, move and init (the server's copy

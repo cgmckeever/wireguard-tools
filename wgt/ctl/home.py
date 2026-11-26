@@ -1,13 +1,16 @@
-"""~/wg-tunnels ($WG_TUNNELS): everything this machine keeps about the servers,
+"""~/wg-tunnels ($WG_TUNNELS): everything this machine keeps about its servers,
 their devices and the pucks, shared with wireguard-tunnels. Nothing private is
-kept in the checkout.
+kept in the checkout. Folders are 0700, files 0600.
 
-  servers/<server>/login       how wgt-ctl reaches it: "user@host [/checkout/dir]"
-  servers/<server>/backups/    archives fetched by wgt-ctl backup and move (private keys)
-  servers/<server>/carriers/   jump files staged for it (tunnels.py, jumpfiles.py)
-  fleet/devices                each device's static number, fleet-wide (fleet.py)
-  devices/<device>/config/     client configs as the servers issued them (tunnels.py)
-  pucks/<puck>/                tunnel-puck's settings for one puck (tpk-ctl.sh)
+  devices/<device>/config/           client configs as the servers issued them (tunnels.py)
+  fleet/servers/<server>/login       how wgt-ctl reaches it: "user@host [/checkout/dir]"
+  fleet/servers/<server>/backups/    archives fetched by backup and move (private keys)
+  fleet/servers/<server>/carriers/   jump files staged for it (tunnels.py, jumpfiles.py)
+  fleet/devices                      each device's static number, fleet-wide (fleet.py)
+  pucks/<puck>/                      tunnel-puck's settings for one puck (tpk-ctl.sh)
+
+A server is listed when its folder has a login file; wireguard-tunnels' nord.sh
+offers the same servers.
 """
 
 from __future__ import annotations
@@ -28,7 +31,7 @@ def root() -> str:
 
 
 def servers_dir() -> str:
-    return os.path.join(root(), "servers")
+    return os.path.join(root(), "fleet", "servers")
 
 
 def server_dir(server: str) -> str:
@@ -36,7 +39,6 @@ def server_dir(server: str) -> str:
 
 
 def login_file(server: str) -> str:
-    """Its line in the server list: a server is listed when it has one."""
     return os.path.join(server_dir(server), "login")
 
 
@@ -48,12 +50,28 @@ def devices_file() -> str:
     return os.path.join(root(), "fleet", "devices")
 
 
+def private_dir(path: str) -> str:
+    os.makedirs(path, exist_ok=True)
+    os.chmod(path, 0o700)
+    return path
+
+
+def make_dir(path: str) -> str:
+    """<path> and any missing folders up from it to the root, each 0700."""
+    top = root()
+    todo = []
+    d = path
+    while not os.path.isdir(d):
+        todo.append(d)
+        if d == top or os.path.dirname(d) == d:
+            break
+        d = os.path.dirname(d)
+    for d in reversed(todo):
+        private_dir(d)
+    return path
+
+
 def shown(path: str) -> str:
     """A path as people read it: under ~ when it is."""
     home = os.path.expanduser("~")
     return "~" + path[len(home):] if path == home or path.startswith(home + os.sep) else path
-
-
-def list_shown() -> str:
-    """Where the server list is, for messages."""
-    return shown(os.path.join(servers_dir(), "<server>", "login"))
