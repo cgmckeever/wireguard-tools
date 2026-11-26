@@ -24,7 +24,7 @@ everything private this machine keeps, and the checkout holds none of it (no
 - **Its own, beside them:** `fleet/servers/<server>/login` (the server list:
   one `user@host [/checkout]` line; listed when present, in name order; nord.sh
   offers the same servers), `fleet/servers/<server>/backups/` (fetched
-  archives), `fleet/devices` (static numbers) and `pucks/<puck>/` (tpk-ctl.sh:
+  archives), `fleet/device-list.json` (static numbers) and `pucks/<puck>/` (tpk-ctl.sh:
   `puck.conf`, `wifi.conf`, `gateways/<gateway>.conf`). wireguard-tunnels reads
   only the logins' presence.
 - **Reads** `fleet/servers/<server>/carriers/*.conf` (jump-add). It also makes

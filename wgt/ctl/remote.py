@@ -258,7 +258,7 @@ def flag_given(args: Sequence[str], flag: str) -> bool:
 
 def dry_run(args: Sequence[str]) -> bool:
     """A wgt command run with --dry-run: wgt-ctl takes no number, offers no push and
-    delivers nothing for it either (what a sweep reads still refreshes fleet/devices)."""
+    delivers nothing for it either (what a sweep reads still refreshes fleet/device-list.json)."""
     return "--dry-run" in wgt_words(args)
 
 

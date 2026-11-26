@@ -11,7 +11,7 @@ import subprocess
 import pytest
 
 from wgt import ctl, ui
-from wgt.ctl import fleet_cmds, home, jumpfiles, newserver, rebuild, remote, tunnels
+from wgt.ctl import fleet, fleet_cmds, home, jumpfiles, newserver, rebuild, remote, tunnels
 from wgt.errors import WgtError
 
 
@@ -34,9 +34,24 @@ def listing(local, text):
 
 
 def devices_file(local):
-    path = local / "wg-tunnels" / "fleet" / "devices"
+    path = local / "wg-tunnels" / "fleet" / "device-list.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def set_devices(local, *lines):
+    """fleet/device-list.json from "device number [removed date]" lines."""
+    entries = {}
+    for line in lines:
+        name, number, *rest = line.split()
+        entries[name] = fleet.Entry(int(number), rest[1] if rest else "")
+    devices_file(local).write_text(fleet.format_entries(entries))
+
+
+def devices_lines(local):
+    """fleet/device-list.json read back as "device number [removed date]" lines."""
+    return [f"{d} {e.number}" + (f" removed {e.removed}" if e.removed else "")
+            for d, e in fleet.parse(devices_file(local).read_text()).items()]
 
 
 @pytest.fixture
@@ -337,7 +352,7 @@ def test_add_takes_the_next_low_number_and_remembers_it(local, monkeypatch):
     calls = answers_from(monkeypatch, {"dengar": {"mac": 2}, "boba": {"mac": 2}})
     assert ctl.on("boba", "client", ["add", "phone", "--yes"]) == 0
     assert calls == [("boba", ["client", "add", "phone", "--yes", "--device-number", "3"])]
-    assert devices_file(local).read_text().splitlines()[1:] == ["mac 2", "phone 3"]
+    assert devices_lines(local) == ["mac 2", "phone 3"]
 
 
 def test_a_dry_run_add_doesnt_use_up_a_number(local, monkeypatch):
@@ -354,7 +369,7 @@ def test_add_reuses_the_number_the_fleet_has_for_the_device(local, monkeypatch):
 
 
 def test_add_uses_local_devices_for_a_server_that_is_down(local, monkeypatch):
-    devices_file(local).write_text("phone 9\n")
+    set_devices(local, "phone 9")
     calls = answers_from(monkeypatch, {"boba": {}})
     ctl.on("boba", "client", ["add", "phone", "--yes"])
     assert calls[0][1][-2:] == ["--device-number", "9"]
@@ -384,7 +399,7 @@ def test_a_failed_add_gives_its_new_number_back(local, monkeypatch):
 
 
 def test_a_failed_add_keeps_a_number_already_in_use(local, monkeypatch):
-    devices_file(local).write_text("phone 7\n")
+    set_devices(local, "phone 7")
     answers_from(monkeypatch, {"dengar": {}, "boba": {}})
     monkeypatch.setattr(remote, "do_wgt", lambda s, words: 1)
     ctl.on("boba", "client", ["add", "phone", "--yes"])
@@ -394,7 +409,7 @@ def test_a_failed_add_keeps_a_number_already_in_use(local, monkeypatch):
 @pytest.mark.parametrize("cmd", ["client", "device"])
 def test_all_rename_is_the_whole_device_either_way(local, monkeypatch, cmd):
     calls = answers_from(monkeypatch, {"dengar": {"phone": 5}, "boba": {"phone": 5}})
-    devices_file(local).write_text("phone 5\n")
+    set_devices(local, "phone 5")
     assert ctl.on("all", cmd, ["rename", "phone", "pixel", "--yes"]) == 0
     assert [c[1] for c in calls] == [["device", "rename", "phone", "pixel", "--yes"]] * 2
     assert fleet_cmds.read_entries()["pixel"].number == 5
@@ -409,7 +424,7 @@ def test_all_rename_refuses_to_merge_two_devices(local, monkeypatch):
 
 def test_all_rename_dry_run_keeps_the_local_record(local, monkeypatch):
     answers_from(monkeypatch, {"dengar": {"phone": 5}, "boba": {"phone": 5}})
-    devices_file(local).write_text("phone 5\n")
+    set_devices(local, "phone 5")
     ctl.on("all", "device", ["rename", "phone", "pixel", "--dry-run"])
     assert "phone" in fleet_cmds.read_entries()
 
@@ -421,11 +436,11 @@ def test_add_keeps_a_number_given_by_hand(local, monkeypatch):
 
 
 def test_a_removed_device_is_flagged_and_its_number_not_reused(local, monkeypatch):
-    devices_file(local).write_text("old 7\n")
+    set_devices(local, "old 7")
     calls = answers_from(monkeypatch, {"dengar": {}, "boba": {}})
     ctl.on("boba", "client", ["add", "phone", "--yes"])
     assert calls[0][1][-1] == "8"
-    assert "old 7 removed " in devices_file(local).read_text()
+    assert devices_lines(local)[0].startswith("old 7 removed ")
 
 
 def test_devices_sync_gives_one_number_on_every_server(local, monkeypatch):
@@ -440,34 +455,34 @@ def test_devices_fix_sets_every_holder_and_refuses_a_taken_number(local, monkeyp
     assert calls == []
     assert ctl.main(["devices", "fix", "mac", "9"]) == 0
     assert calls == [("boba", ["device", "set", "mac", "9"]), ("dengar", ["device", "set", "mac", "9"])]
-    assert "mac 9" in devices_file(local).read_text().splitlines()
+    assert "mac 9" in devices_lines(local)
 
 
 def test_devices_forget_refuses_while_a_server_might_have_it(local, monkeypatch):
-    devices_file(local).write_text("old 7 removed 2026-01-01\n")
+    set_devices(local, "old 7 removed 2026-01-01")
     answers_from(monkeypatch, {"boba": {}})
     assert ctl.main(["devices", "forget", "old"]) == 1      # dengar didn't answer
     answers_from(monkeypatch, {"dengar": {"old": 7}, "boba": {}})
     assert ctl.main(["devices", "forget", "old"]) == 1      # still on dengar
     answers_from(monkeypatch, {"dengar": {}, "boba": {}})
     assert ctl.main(["devices", "forget", "old"]) == 0
-    assert "old" not in devices_file(local).read_text().replace("# wgt-ctl", "")
+    assert "old" not in devices_file(local).read_text()
 
 
 def test_rename_everywhere(local, monkeypatch):
-    devices_file(local).write_text("phone 5\n")
+    set_devices(local, "phone 5")
     calls = answers_from(monkeypatch, {"dengar": {"phone": 5}, "boba": {"mac": 2}})
     assert ctl.on("all", "client", ["rename", "phone", "pixel"]) == 0
     assert calls == [("dengar", ["device", "rename", "phone", "pixel"])]   # only where it is
-    assert devices_file(local).read_text().splitlines()[1:] == ["pixel 5"]
+    assert devices_lines(local) == ["pixel 5"]
 
 
 def test_rename_everywhere_keeps_a_removed_devices_number_taken(local, monkeypatch):
     """Renaming onto a removed device's name: its number must not be handed out again."""
-    devices_file(local).write_text("phone 5\npixel 9 removed 2026-01-01\n")
+    set_devices(local, "phone 5", "pixel 9 removed 2026-01-01")
     answers_from(monkeypatch, {"dengar": {"phone": 5}, "boba": {}})
     assert ctl.on("all", "client", ["rename", "phone", "pixel"]) == 0
-    lines = devices_file(local).read_text().splitlines()[1:]
+    lines = devices_lines(local)
     assert "pixel 5" in lines and "pixel.removed 9 removed 2026-01-01" in lines
 
 
@@ -484,14 +499,14 @@ def test_rename_everywhere_refuses_config_names_clashes_and_a_missing_server(loc
 
 
 def test_rename_everywhere_force_can_be_finished_later(local, monkeypatch):
-    devices_file(local).write_text("phone 5\n")
+    set_devices(local, "phone 5")
     calls = answers_from(monkeypatch, {"boba": {"phone": 5}})
     assert ctl.on("all", "client", ["rename", "phone", "pixel", "--force"]) == 0
     calls.clear()
     answers_from(monkeypatch, {"dengar": {"phone": 5}, "boba": {"pixel": 5}}, calls)
     assert ctl.on("all", "client", ["rename", "phone", "pixel"]) == 0
     assert calls == [("dengar", ["device", "rename", "phone", "pixel"])]
-    assert devices_file(local).read_text().splitlines()[1:] == ["pixel 5"]
+    assert devices_lines(local) == ["pixel 5"]
 
 
 # --- first contact, in-place moves, init again ---

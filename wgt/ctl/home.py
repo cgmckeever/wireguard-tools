@@ -6,7 +6,7 @@ kept in the checkout. Folders are 0700, files 0600.
   fleet/servers/<server>/login       how wgt-ctl reaches it: "user@host [/checkout/dir]"
   fleet/servers/<server>/backups/    archives fetched by backup and move (private keys)
   fleet/servers/<server>/carriers/   jump files staged for it (tunnels.py, jumpfiles.py)
-  fleet/devices                      each device's static number, fleet-wide (fleet.py)
+  fleet/device-list.json             each device's static number, fleet-wide (fleet.py)
   pucks/<puck>/                      tunnel-puck's settings for one puck (tpk-ctl.sh)
 
 A server is listed when its folder has a login file; wireguard-tunnels' nord.sh
@@ -60,7 +60,7 @@ def carriers_dir(server: str) -> str:
 
 
 def devices_file() -> str:
-    return os.path.join(root(), "fleet", "devices")
+    return os.path.join(root(), "fleet", "device-list.json")
 
 
 def make_dir(path: str) -> str:

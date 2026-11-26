@@ -12,7 +12,7 @@ wgt/                      the package (Python 3.8+, standard library only)
   ctx.py                  the command line (Args) and what every command gets (Ctx)
   ctl/                    wgt-ctl, from your own machine: main and per-server dispatch (__init__.py),
                           ~/wg-tunnels' layout (home.py), the server list and ssh (remote.py), desktop notifications for --alert
-                          (notify.py), init (newserver.py), backup, remove and move (rebuild.py), numbers across servers (fleet_cmds.py; fleet.py is its pure part: fleet/devices,
+                          (notify.py), init (newserver.py), backup, remove and move (rebuild.py), numbers across servers (fleet_cmds.py; fleet.py is its pure part: fleet/device-list.json,
                           no ssh, no files), jump files (jumpfiles.py), ~/wg-tunnels and client config
                           delivery (tunnels.py; plan() is its pure part)
   const.py, errors.py     paths (Paths, one helper per file) and constants; WgtError

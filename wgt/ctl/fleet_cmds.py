@@ -1,5 +1,5 @@
 """wgt-ctl's view across servers: every config, and each device's static number
-(fleet/devices; the decisions are in fleet.py)."""
+(fleet/device-list.json; the decisions are in fleet.py)."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from .remote import out
 
 def cmd_clients() -> None:
     """Every client on every server in one table, then what doesn't line up
-    about their static addresses (what it read also updates fleet/devices)."""
+    about their static addresses (what it read also updates fleet/device-list.json)."""
     seen: Dict[str, Dict[str, Optional[int]]] = {}
     fmt = "  {:<10} " + ui.CLIENT_FMT
     print("")
@@ -50,7 +50,7 @@ def write_entries(entries: Dict[str, fleet.Entry]) -> None:
 
 
 def refresh_entries(seen: fleet.Seen, complete: bool) -> Dict[str, fleet.Entry]:
-    """fleet/devices updated with what the servers answered."""
+    """fleet/device-list.json updated with what the servers answered."""
     before = read_entries()
     entries = fleet.merge(before, seen, complete, time.strftime("%Y-%m-%d"))
     if entries != before:
@@ -76,7 +76,7 @@ def sweep() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str]]:
 
 
 def read_fleet() -> Tuple[Dict[str, Dict[str, Optional[int]]], List[str], Dict[str, fleet.Entry]]:
-    """sweep(), and fleet/devices refreshed from it (complete only if every server answered)."""
+    """sweep(), and fleet/device-list.json refreshed from it (complete only if every server answered)."""
     seen, missed = sweep()
     return seen, missed, refresh_entries(seen, not missed)
 
@@ -89,13 +89,13 @@ def print_problems(entries: Dict[str, fleet.Entry], seen: fleet.Seen) -> None:
 def numbered_add(args: List[str]) -> Tuple[List[str], str]:
     """`client add` words with the device's fleet-wide number, and the device if
     this just gave it a new number (forget_number: a failed add gives it back). A
-    server that can't be reached is covered by fleet/devices."""
+    server that can't be reached is covered by fleet/device-list.json."""
     device = store.device_of(client_name(args))
     if not device or remote.flag_given(args, "--device-number"):
         return args, ""
     seen, missed, entries = read_fleet()
     if missed:
-        out.info(f"not read for the static number (fleet/devices covers them): {', '.join(missed)}")
+        out.info(f"not read for the static number (fleet/device-list.json covers them): {', '.join(missed)}")
     known = entries.get(device)
     number = known.number if known else fleet.next_low(entries)
     taken = not known and not remote.dry_run(args)   # a dry run adds nothing: it mustn't use up a number

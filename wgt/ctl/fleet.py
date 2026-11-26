@@ -1,24 +1,29 @@
-"""fleet/devices: wgt-ctl's memory of each device's static number across the
+"""fleet/device-list.json: wgt-ctl's memory of each device's static number across the
 servers, so a device gets the same one everywhere, even with a server
 unreachable. The servers hold the numbers that count (devices.db); this is
 refreshed from them whenever wgt-ctl reads them. Pure: no ssh, no files.
 
-  <device> <number> [removed <date>]
+  {
+    "phone": {"number": 3},                          its static address ends .3 everywhere
+    "tab": {"number": 252, "removed": "2026-11-24"}   gone from every server that day
+  }
 
-A removed device keeps its line, and its number isn't handed out again: an old
+A removed device keeps its entry, and its number isn't handed out again: an old
 SSH config can't reach a new machine by accident. Adding it back brings the
-number back; `wgt-ctl devices forget` deletes the line."""
+number back; `wgt-ctl devices forget` deletes the entry."""
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from typing import Dict, List, Mapping, Optional
 
-from ..const import DEVICE_ADDRESS_FORM, DEVICE_CTL_FIRST, DEVICE_CTL_LAST, device_ip
+from ..const import DEVICE_CTL_FIRST, DEVICE_CTL_LAST, device_ip
 from ..errors import WgtError
-from ..store import is_uint
 
-HEADER = f"# wgt-ctl devices: device number [removed date] (static address {DEVICE_ADDRESS_FORM})"
+NAME = "fleet/device-list.json"
+DATE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 # server -> device -> its number there (None: it has none yet)
 Seen = Mapping[str, Mapping[str, Optional[int]]]
@@ -30,22 +35,36 @@ class Entry:
     removed: str = ""
 
 
+def _good_entry(device: str, v: object) -> bool:
+    if not device or not isinstance(v, dict) or set(v) - {"number", "removed"}:
+        return False
+    number, removed = v.get("number"), v.get("removed", "")
+    return (type(number) is int and number >= 0 and isinstance(removed, str)
+            and (removed == "" or bool(DATE.fullmatch(removed))))
+
+
 def parse(text: Optional[str]) -> Dict[str, Entry]:
+    if not text or not text.strip():
+        return {}
+    try:
+        data = json.loads(text)
+    except ValueError as e:
+        raise WgtError(f"{NAME}: not JSON ({e})") from None
+    if not isinstance(data, dict):
+        raise WgtError(f"{NAME}: want an object of devices")
     out: Dict[str, Entry] = {}
-    for line in (text or "").splitlines():
-        f = line.split()
-        if not f or f[0].startswith("#"):
-            continue
-        if len(f) not in (2, 4) or not is_uint(f[1]) or (len(f) == 4 and f[2] != "removed"):
-            raise WgtError(f"fleet/devices: bad line (want 'device number [removed date]'): {line}")
-        out[f[0]] = Entry(int(f[1]), f[3] if len(f) == 4 else "")
+    for device, v in data.items():
+        if not _good_entry(device, v):
+            raise WgtError(f'{NAME}: bad entry for {device!r} (want {{"number": N}}, '
+                           f'and "removed": "YYYY-MM-DD" once gone): {json.dumps(v)}')
+        out[device] = Entry(v["number"], v.get("removed", ""))
     return out
 
 
 def format_entries(entries: Mapping[str, Entry]) -> str:
-    lines = [f"{d} {e.number}" + (f" removed {e.removed}" if e.removed else "")
-             for d, e in sorted(entries.items(), key=lambda kv: kv[1].number)]
-    return "\n".join([HEADER, *lines]) + "\n"
+    data = {d: {"number": e.number, **({"removed": e.removed} if e.removed else {})}
+            for d, e in sorted(entries.items(), key=lambda kv: kv[1].number)}
+    return json.dumps(data, indent=2) + "\n"
 
 
 def merge(entries: Mapping[str, Entry], seen: Seen, complete: bool, today: str) -> Dict[str, Entry]:

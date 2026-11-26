@@ -769,7 +769,7 @@ and nothing in your clone:
       login        root@203.0.113.10   (the SSH login, then the checkout if not /opt/wireguard-tools)
       backups/     archives fetched by backup and move
       carriers/    jump files waiting to be pushed
-    devices        each device's static number, across servers
+    device-list.json each device's static number, across servers
   pucks/<puck>/    tunnel-puck's settings
 ```
 
@@ -874,8 +874,9 @@ with a letter.
 
 `wgt-ctl SERVER client add <device>` (or `all`) checks the other servers first,
 so a device gets the same [static address](#static-device-addresses) everywhere.
-`wgt-ctl` keeps the numbers in `~/wg-tunnels/fleet/devices`, refreshed whenever it reads the
-servers, so a device still gets the right one when a server is unreachable.
+`wgt-ctl` keeps the numbers in `~/wg-tunnels/fleet/device-list.json`, refreshed
+whenever it reads the servers, so a device still gets the right one when a server
+is unreachable.
 
 `wgt-ctl devices` warns about:
 
@@ -883,9 +884,9 @@ servers, so a device still gets the right one when a server is unreachable.
 |---|---|
 | two devices claim the same number | `wgt-ctl devices fix <device> <another number>` |
 | a device has no number on a server | `wgt-ctl devices sync` |
-| a server's number differs from `fleet/devices`, such as after `wgt device set` there | `wgt-ctl devices fix <device> <number>` |
+| a server's number differs from `fleet/device-list.json`, such as after `wgt device set` there | `wgt-ctl devices fix <device> <number>` |
 
-A device that's gone from every server keeps its line, marked `removed <date>`,
+A device that's gone from every server keeps its entry, with the date in `removed`,
 and `wgt-ctl` doesn't hand its number out again, so an old SSH config can't reach
 a new machine by accident. Adding the device through `wgt-ctl` brings the number
 back. New numbers always go above the highest on the list, so `devices forget` on

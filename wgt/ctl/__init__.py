@@ -36,7 +36,7 @@ private lives in ~/wg-tunnels ($WG_TUNNELS, shared with wireguard-tunnels), none
 of it in this checkout: fleet/servers/<server>/login is the list ("user@host
 [/checkout/dir]"), fleet/servers/<server>/backups/ the fetched archives,
 fleet/servers/<server>/carriers/*.conf the jump files (any name; a "# jump: <code>
-<label>" line names each), and fleet/devices each device's static number.
+<label>" line names each), and fleet/device-list.json each device's static number.
 devices/<device>/config/ gets each server's client configs after client add,
 rotate, rename and remove, setup, restore, move and init (the server's copy
 wins; a file that isn't a copy is never overwritten).

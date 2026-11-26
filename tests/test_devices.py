@@ -3,6 +3,7 @@ fleet's record (wgt/ctl/fleet.py; wgt-ctl's use of it is in test_ctl.py)."""
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -388,15 +389,26 @@ def test_watchdog_logs_to_its_own_tag_and_skips_while_locked(make_ctx, monkeypat
 def test_fleet_file_round_trip_sorted_by_number():
     entries = {"b": Entry(9), "a": Entry(2, "2026-01-01")}
     text = fleet.format_entries(entries)
-    assert text.splitlines()[1:] == ["a 2 removed 2026-01-01", "b 9"]
+    assert json.loads(text) == {"a": {"number": 2, "removed": "2026-01-01"}, "b": {"number": 9}}
+    assert list(json.loads(text)) == ["a", "b"]
     assert fleet.parse(text) == entries
-    assert fleet.parse(None) == {}
+    assert fleet.parse(None) == {} and fleet.parse("") == {}
 
 
-@pytest.mark.parametrize("line", ["a", "a x", "a 2 removed", "a 2 gone 2026-01-01"])
-def test_fleet_bad_lines_refused(line):
-    with pytest.raises(WgtError, match="fleet/devices"):
-        fleet.parse(line)
+@pytest.mark.parametrize("text", [
+    "a 2",                                   # not JSON (the old format)
+    "[]",
+    '{"a": 2}',
+    '{"a": {}}',
+    '{"a": {"number": "2"}}',
+    '{"a": {"number": true}}',
+    '{"a": {"number": -1}}',
+    '{"a": {"number": 2, "removed": "yesterday"}}',
+    '{"a": {"number": 2, "gone": "2026-01-01"}}',
+])
+def test_fleet_bad_files_refused(text):
+    with pytest.raises(WgtError, match="fleet/device-list.json"):
+        fleet.parse(text)
 
 
 def test_merge_adds_clears_and_flags():
@@ -700,12 +712,6 @@ def test_moving_a_config_to_another_device_changes_its_access_at_once(make_ctx):
     Path(ctx.paths.psk(c.name)).write_text("PSK\n")
     clients.cmd_rename(ctx, [c.name, "warp.par-fr.other"])
     assert f"iptables -t filter -D WGT-SERVER -s {c.ip}/32 -j ACCEPT" in ctx.runner.calls
-
-
-def test_fleet_file_with_a_digit_int_refuses_is_a_bad_line():
-    """"²" passes str.isdigit and int() raises: an error to print, not a traceback."""
-    with pytest.raises(WgtError, match="bad line"):
-        fleet.parse("tv ²\n")
 
 
 def test_device_rename_force_leaves_another_devices_number(make_ctx, again):
