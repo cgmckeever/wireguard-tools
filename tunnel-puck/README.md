@@ -259,12 +259,17 @@ scripts/tpk-ctl.sh reboot        # once, so the hardware watchdog starts
 scripts/tpk-ctl.sh ssh-config install   # emergency door only: so your own ssh reaches it
 ```
 
-`tpk-ctl.sh` itself needs no ssh setup for the door: through Cloudflare it
-passes `cloudflared` to ssh itself. `ssh-config install` is for your own
-`ssh SSH_CLOUDFLARE`: it writes every puck's door to
-`~/.config/tunnel-puck/ssh_config` (rewritten each time) and adds one
-`Include` line for it at the top of `~/.ssh/config`, after a backup; the rest
-of that file is left alone. (`ssh-config` alone prints the entry instead.)
+`ssh-config install` is optional, and only for the emergency door.
+`tpk-ctl.sh` already reaches the puck through Cloudflare on its own, with no
+setup. Install it if you also want to type `ssh SSH_CLOUDFLARE` yourself, like
+any other host. It:
+
+- writes an ssh entry for each puck's door to
+  `~/.config/tunnel-puck/ssh_config` (rewritten each time it runs);
+- adds one `Include` line for that file at the top of `~/.ssh/config`, after
+  backing it up, and changes nothing else there.
+
+To see the entry without changing anything: `scripts/tpk-ctl.sh ssh-config`.
 
 **Check:** `config` ends with `settings look complete` and, with the emergency door, prints no note about `CF_TOKEN_FILE`. `init` ends with `init done`, and `reboot` ends with `<puck> is back`. With the emergency door: the dashboard shows the tunnel
 **Healthy**, and `ssh SSH_CLOUDFLARE` opens a browser login once **[Browser]**,
