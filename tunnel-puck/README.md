@@ -676,7 +676,7 @@ all.
 
 **Check [Computer], within a few minutes:** `scripts/tpk-ctl.sh test` passes
 and shows the friend's IP, and so does a puck-exit client's
-`curl https://ifconfig.me`. Tests 2–4 and 9–10 of [3.2](#32-the-away-from-home-test-hands-then-computer-and-client) are worth repeating. Run 5–8 there only with the emergency door working, or another gateway's link up: they cut a link, and without another way in only a power cycle brings it back.
+`curl https://ifconfig.me`. Tests 2–4 and 9–10 of [3.2 The Away-from-Home Test](#32-the-away-from-home-test-hands-then-computer-and-client) are worth repeating. Run 5–8 there only with the emergency door working, or another gateway's link up: they cut a link, and without another way in only a power cycle brings it back.
 
 If it doesn't come up: ask the friend to check the ethernet lights, then to
 unplug the power and plug it back in. Still nothing usually means their
