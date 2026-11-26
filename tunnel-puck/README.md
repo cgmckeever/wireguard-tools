@@ -99,7 +99,7 @@ tests 1 and 6.
 
 - **Routing, for each gateway:** how the gateway sends clients into the puck,
   tunnel-puck's own rules (`tpk`) or a wgt jump (`wgt`). Chosen when you add
-  the gateway ([2.1](#21-serve-a-gateway-computer)).
+  the gateway ([2.1](#21-add-a-gateway-computer)).
 - **An emergency door (optional, recommended):** SSH to the puck through
   Cloudflare when its links are down ([1.2b](#12b-optional-the-emergency-door-cloudflare-browser)).
 
@@ -207,7 +207,7 @@ The name is up to 10 characters of `a-z`, `0-9` and `-`, starting with a
 letter. `new` asks for it and makes the file from the template, and offers a
 Wi-Fi list too ([4.1](#41-network-connectivity-computer)). This
 file holds the puck's own settings; each gateway it serves gets its own file in
-[2.1](#21-serve-a-gateway-computer).
+[2.1](#21-add-a-gateway-computer).
 
 ```sh
 scripts/tpk-ctl.sh new           # or: scripts/tpk-ctl.sh new mom [--wifi]
@@ -281,7 +281,7 @@ then a shell.
 
 The puck stays at home for this phase.
 
-## 2.1 Serve a Gateway **[Computer]**
+## 2.1 Add a Gateway **[Computer]**
 
 **Choose the routing:** how this gateway sends clients into the puck. Pick the
 row that matches it:
