@@ -4,13 +4,12 @@
 
 ## Contents
 
-- [Overview](#overview): [terms](#terms), [why route through Cloudflare?](#why-route-through-cloudflare)
+- [Overview](#overview): [terms](#terms)
 - [Quick start](#quick-start): a single server, or [from your own machine](#or-from-your-own-machine); [conventions](#conventions)
-- [Server management](#server-management): setup and its settings, [devices and configs](#devices-and-configs), [groups](#groups-who-can-reach-what), [jumps](#jumps)
-- [Backups and restore](#check-back-up-restore-clean-up), [history](#history-what-changed-when-and-who-did-it), [rotating WARP accounts](#rotate-warp-accounts)
+- [Server management](#server-management): setup and its settings, [devices and configs](#devices-and-configs), [static addresses](#static-device-addresses), [groups](#groups-who-can-reach-what), [why route through Cloudflare?](#why-route-through-cloudflare), [jumps](#jumps), [backups and restore](#check-back-up-restore-clean-up), [history](#history-what-changed-when-and-who-did-it), [rotating WARP accounts](#rotate-warp-accounts)
 - [Fleet management](#fleet-management): `wgt-ctl`, your servers from your own machine, [moving or rebuilding one](#moving-or-rebuilding-a-server)
 - [Updating servers](#updating-servers)
-- [Troubleshooting](TROUBLESHOOTING.md)
+- [Troubleshooting](TROUBLESHOOTING.md) (its own file)
 - [How it works](#how-it-works): interfaces, routing, [files](#files)
 - [Development](#development)
 
@@ -19,8 +18,8 @@
 wireguard-tools sets up and runs WireGuard VPN servers: one, or a fleet of them
 driven from your own machine. `wgt` turns a bare Debian 11+ / Ubuntu 20.04+
 server (amd64 or arm64) into a WireGuard server and manages it; `wgt-ctl` runs
-the same commands on every server over SSH, and adds new servers, updates,
-backups, and moving a server to a new machine.
+the same commands on every server over SSH, and also adds new servers, updates
+them, fetches backups and moves a server to a new machine.
 
 - **Servers:** setup that's safe to re-run (and `wgt rollback`), backups and
   restore, a [history](#history-what-changed-when-and-who-did-it) of every
@@ -102,8 +101,9 @@ questions; Enter takes the default. The tools themselves need Python 3.8+.
 
 ### Or from your own machine
 
-For one server or a fleet: clone this repository there too
-([Your servers](#your-servers)), then
+For one server or a fleet: clone this repository on your own machine and put
+its `bin/` on your PATH ([Your servers](#your-servers)); you need SSH as root
+to the server. Then:
 
 ```bash
 wgt-ctl init --address 203.0.113.10 --name dengar   # installs and runs setup over SSH
@@ -125,7 +125,9 @@ wgt-ctl dengar client add phone                     # any wgt command, on that s
   `wgt-ctl`'s own commands, such as `move` and `remove`, have no dry run.
 - **Scripts and AI agents (no terminal):** nothing waits on a prompt. With no
   terminal, `wgt setup` needs `--yes` and doesn't ask; run it with `--dry-run`
-  first to see what it would change.
+  first to see what it would change. From `wgt-ctl`, always name the server;
+  `move`, `remove` and `forget` also need `--yes`, and `init` needs `--address`
+  and `--name`.
 - Private keys are never printed except inside a config's QR code.
 - In this README, `dengar` and `boba` are example server names, and `<server>`
   stands for yours.
@@ -219,7 +221,7 @@ back (the name only if nobody renamed the host since). It only asks in a termina
 without `--yes`; names with `_` aren't valid hostnames and are skipped.
 
 **If the terminal goes away.** Once you've answered `Continue?`, losing the terminal
-doesn't stop setup, so it's safe to run over a session that goes through `wg0`. It
+doesn't stop setup, so it's safe to run over an SSH session that itself goes through this VPN. It
 ignores hangups, and between stopping `wg0` and starting it again it also ignores
 Ctrl-C and SIGTERM, since stopping there would leave `wg0` down. A question that
 finds the terminal gone counts as no: without `--yes`, setup stops at the next
@@ -246,7 +248,7 @@ If WARP can't be set up (wgcf can't be fetched, registration is refused, its uni
 won't start, its tests fail), setup warns and still finishes: plain configs work,
 `warp.` ones are blocked until it does; fix it and re-run setup. A wgcf checksum
 mismatch (or published checksums that don't list the binary: pin one with
-`WGCF_SHA256`) or a [changed default route](TROUBLESHOOTING.md) does stop setup.
+`WGCF_SHA256`) or a changed default route (`default route changed` in [Troubleshooting](TROUBLESHOOTING.md)) does stop setup.
 
 ### Devices and configs
 
@@ -391,8 +393,8 @@ servers](#static-addresses-across-servers).
 
 `wgt client add` gives a new device its number, and removing its last config
 frees it on that server. A device added with `wgt` directly gets a number
-counting down from 254, without knowing about your other servers. One added
-through `wgt-ctl` gets a number counting up from 2, the same on every server.
+counting down from 254 (128-254), without knowing about your other servers; one
+added through `wgt-ctl` counts up from 2 (2-127), the same on every server.
 Devices added before static addresses existed have no number yet: `wgt setup`
 lists them, and `wgt device set <device>` or `wgt-ctl devices sync` gives them
 one. No config needs re-sending.
@@ -426,7 +428,7 @@ at the config with the newest handshake in the last 180s. Good to know:
 Every device starts with no groups, which means isolated: it has the internet but
 can't reach other devices or the server's tunnel addresses. Groups open up the
 rest. **Two devices can talk if they share a group**, and the special group **`server`** lets a device
-reach the server, and not the others in it.
+reach the server only: being in `server` doesn't let devices reach each other.
 
 ```bash
 wgt device group laptop home,server    # add it to groups
@@ -517,6 +519,9 @@ WARP traffic. Through `par-fr.<device>`, sites see the jump's IP.
 warp.par-fr.phone: phone -> wg0 (the WireGuard Server) -> wx-par-fr (WARP) -> inside px-par-fr (jump, Paris) -> Cloudflare, Paris
 par-fr.phone:      phone -> wg0 (the WireGuard Server) -> px-par-fr (jump, Paris) -> sites
 ```
+
+(`px-`/`wx-<code>` are the server's interfaces for the jump and its WARP; see
+[How it works](#how-it-works).)
 
 **The jump file.** Any WireGuard file with one peer and an IPv4 address works:
 it's the client side of the jump, since the WireGuard Server connects to the jump as a
@@ -773,7 +778,7 @@ numbers `wgt-ctl list` shows follow it); `wgt-ctl init` writes it, also for a
 server that's already set up.
 
 `wgt-ctl` only talks to hosts already in `known_hosts`; only `init` and `move --to`
-ask about a new key. For a line you add by hand, or a rebuilt machine at the same
+ask about a new key. For a `login` file you write by hand, or a rebuilt machine at the same
 address, run `ssh root@<address>` once first (`ssh-keygen -R <address>` if the key
 changed). Root login must be allowed, which many cloud images don't do by default,
 and `--user` must name a root login. The archives in `backups/` hold private
@@ -822,7 +827,7 @@ wgt-ctl boba ssh                       # log in (or: ssh <command>)
 wgt-ctl boba branch some-branch        # switch its checkout
 wgt-ctl boba forget                    # drop it from the list (its login file); the server is untouched
 wgt-ctl boba remove                    # tear it down: rollback --purge, delete its checkout,
-                                       #   wgcf and backup archives, then forget it (asks for its name)
+                                       #   wgcf, backup archives and history, then forget it (asks for its name)
 wgt-ctl boba move [--to <address>]     # rebuild it from its backup, elsewhere or in place (also --user, --branch; below)
 ```
 
@@ -889,11 +894,10 @@ directly on a server uses its own range and can reuse a freed number there.
 
 ### Configs on your machine
 
-`wgt-ctl` keeps WireGuard configs in `~/wg-tunnels` (or `$WG_TUNNELS`, an absolute path), the
-folder [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels) uses
-for devices. It creates what it needs there, owner-only, the first time it writes;
-wireguard-tunnels isn't needed. Besides its own `fleet/` ([Your servers](#your-servers)),
-it uses two kinds of folder and leaves the rest alone:
+`wgt-ctl` copies every client config into `~/wg-tunnels/devices/<device>/config/`
+([Your servers](#your-servers)), creating folders owner-only; wireguard-tunnels
+isn't needed. Besides its own `fleet/`, it uses two kinds of folder there and
+leaves the rest alone:
 
 | Folder | What |
 |---|---|
@@ -904,8 +908,9 @@ it uses two kinds of folder and leaves the rest alone:
 each); whatever makes them, you or wireguard-tunnels, puts them in
 `fleet/servers/<server>/carriers/`. `init` and `sync` make that folder, even
 empty, and wireguard-tunnels offers the servers that have a `login`. `remove`
-deletes the server's folder if nothing is left in it (backups and jump files
-stay), and leaves its client configs in `devices/`: delete those by hand.
+deletes `fleet/servers/<server>/` once its `login` is gone, unless backups or
+jump files are still in it (those stay), and leaves its client configs in
+`devices/`: delete those by hand.
 
 **Client configs follow the server.** `wgt-ctl` copies a server's client configs
 into `devices/<device>/config/` after any command through it that can change them:

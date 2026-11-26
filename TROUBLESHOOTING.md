@@ -28,8 +28,12 @@ For the [wireguard-tools README](README.md).
   doesn't clear it.
 - **`another wireguard-tools command is running`:** a command waits 15s for another
   to finish, then gives up. Try again when it's done.
-- **Anything else:** `wgt status` (marks saved settings still
-  pending, i.e. not running yet) and `wgt test`.
+- **`wgt-ctl` can't reach a server:** its host key must be in `known_hosts`
+  (`ssh root@<address>` once; `ssh-keygen -R <address>` after a rebuild), root
+  login must be allowed, and `~/wg-tunnels/fleet/servers/<server>/login` must
+  name it ([Your servers](README.md#your-servers)).
+- **Anything else:** `wgt status` (it marks saved settings that aren't running
+  yet) and `wgt test`.
 
 ## Register WARP on another machine
 
