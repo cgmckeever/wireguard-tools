@@ -101,3 +101,9 @@ def test_status_alert_sees_the_configs_in_use():
     r = subprocess.run(["sh", "-c", script], input="  CONFIG  LAST HANDSHAKE RX TX\n" + rows,
                        capture_output=True, text=True)
     assert r.stdout.split() == ["puck1.iphone", "puck1.mac"]
+
+
+def test_new_leaves_fleet_a_readme(tmp_path):
+    store = tmp_path / "wg-tunnels"
+    assert tpk(store, "new", "home").returncode == 0
+    assert "pucks/<puck>/" in (store / "fleet" / "README-tools.md").read_text()

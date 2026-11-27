@@ -10,7 +10,9 @@ kept in the checkout. Folders are 0700, files 0600.
   fleet/pucks/<puck>/                tunnel-puck's settings for one puck (tpk-ctl.sh)
 
 A server is listed when its folder has a login file; wireguard-tunnels' nord.sh
-offers the same servers.
+offers the same servers. devices/ and fleet/ each get a README-tools.md saying
+what wireguard-tools keeps there (wireguard-tunnels writes its own
+README-tunnels.md in devices/).
 """
 
 from __future__ import annotations
@@ -68,8 +70,30 @@ def pucks_dir() -> str:
     return os.path.join(root(), "fleet", "pucks")
 
 
+README = "README-tools.md"
+_READMES = {"devices": "devices.md", "fleet": "fleet.md"}     # in readmes/, beside this file
+
+
+def write_readmes() -> None:
+    """devices/ and fleet/, where they exist, get README-tools.md if they have none
+    (one already there is kept, edited or not)."""
+    for folder, template in _READMES.items():
+        d = os.path.join(root(), folder)
+        path = os.path.join(d, README)
+        if os.path.isdir(d) and not os.path.lexists(path):
+            with open(os.path.join(os.path.dirname(__file__), "readmes", template), encoding="utf-8") as f:
+                text = f.read()
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            except FileExistsError:
+                continue
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                out.write(text)
+
+
 def make_dir(path: str) -> str:
-    """<path> and any missing folders up from it to the root, each 0700."""
+    """<path> and any missing folders up from it to the root, each 0700; then the
+    READMEs (write_readmes)."""
     top = root()
     todo = []
     d = path
@@ -81,6 +105,7 @@ def make_dir(path: str) -> str:
     for d in reversed(todo):
         os.makedirs(d, exist_ok=True)
         os.chmod(d, 0o700)
+    write_readmes()
     return path
 
 

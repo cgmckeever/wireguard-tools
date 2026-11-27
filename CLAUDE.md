@@ -41,6 +41,10 @@ everything private this machine keeps, and the checkout holds none of it (no
   ignores it; pinned by the same examples in both repos' tests): those names
   are never matched, and a config that would land on one (a server named
   `warp`) is refused. Nor anything else in the store.
+- **READMEs:** `devices/README-tools.md` and `fleet/README-tools.md`
+  (`home.write_readmes`, from `wgt/ctl/readmes/`), written when missing and
+  never changed; wireguard-tunnels writes its own `devices/README-tunnels.md`.
+  Nothing that lists `devices/` takes a file for a device.
 - **UTF-8.** wireguard-tunnels refuses a config that isn't. A copy is the
   server's file byte for byte, so the server's files are kept UTF-8: a jump
   label is made so where it comes in and where it's read (`store.one_line`),

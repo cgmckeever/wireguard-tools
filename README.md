@@ -764,6 +764,7 @@ and nothing in your clone:
 ```
 ~/wg-tunnels/
   devices/<device>/config/   every config, as the servers issued it
+  devices/README-tools.md    what wireguard-tools keeps there (fleet/ has one too)
   fleet/
     servers/dengar/
       login        root@203.0.113.10   (the SSH login, then the checkout if not /opt/wireguard-tools)

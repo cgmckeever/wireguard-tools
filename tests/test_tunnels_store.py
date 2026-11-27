@@ -523,3 +523,16 @@ def test_the_sweeps_names_as_wireguard_tunnels_owns_them(name, owned):
     """The same cases as wireguard-tunnels' test_sweep_owned_by_name (its store.sweep_owned,
     on names without .conf): one rule on both sides, without case."""
     assert tunnels.sweep_owned(f"{name}.conf", "iphone") is owned
+
+
+def test_devices_and_fleet_get_a_readme_once(store):
+    """README-tools.md in each, when missing; one already there is kept."""
+    home.make_dir(home.config_dir("phone"))
+    devices = store / "devices" / "README-tools.md"
+    assert "wireguard-tools" in devices.read_text() and oct(devices.stat().st_mode & 0o777) == "0o600"
+    assert not (store / "fleet").exists()                       # only folders that exist get one
+    devices.write_text("mine\n")
+    home.make_dir(home.carriers_dir("dengar"))
+    assert devices.read_text() == "mine\n"
+    assert "servers/<server>/" in (store / "fleet" / "README-tools.md").read_text()
+    assert tunnels.all_devices() == ["phone"]                 # a README isn't a device

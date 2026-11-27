@@ -220,7 +220,7 @@ cmd_new() {
     ! is_command "$name" || die "'$name' is a command word: pick another name"
     f=$(puck_file "$name") w=$(wifi_file "$name")
     [ ! -e "$f" ] || die "$(shown "$f") already exists"
-    private_dir "$PUCKS/$name"
+    wgt_py 'import os; from wgt.ctl import home; home.make_dir(os.path.join(home.pucks_dir(), sys.argv[1]))' "$name" || exit 1
     (umask 077; cp "$EXAMPLES/puck.conf.example" "$f")
     log "made $(shown "$f"): fill it in, then scripts/tpk-ctl.sh $name config"
     if [ -z "$wifi" ] && have_tty && [ ! -e "$w" ]; then
