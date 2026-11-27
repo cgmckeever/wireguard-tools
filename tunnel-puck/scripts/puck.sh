@@ -3,7 +3,7 @@
 #
 # scripts/tpk-ctl.sh on your computer streams this file to the puck over ssh, after the
 # settings it needs and ids.sh. To run it on the puck yourself instead:
-#   cat ids.sh puck.sh | sudo TPK_CONF=/path/to/pucks/<puck>/gateways/<gateway>.conf sh -s -- <step>
+#   cat ids.sh puck.sh | sudo TPK_CONF=/path/to/fleet/pucks/<puck>/gateways/<gateway>.conf sh -s -- <step>
 #
 # Steps (each is safe to run again):
 #   init                 packages, automatic updates, watchdog; cloudflared too when

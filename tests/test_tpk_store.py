@@ -1,4 +1,4 @@
-"""tpk-ctl.sh's settings in ~/wg-tunnels/pucks/<puck>/ (only the local commands:
+"""tpk-ctl.sh's settings in ~/wg-tunnels/fleet/pucks/<puck>/ (only the local commands:
 nothing here reaches a puck or a gateway)."""
 
 import os
@@ -24,9 +24,9 @@ def test_new_makes_a_private_puck_folder(tmp_path):
     store = tmp_path / "wg-tunnels"
     r = tpk(store, "new", "home", "--wifi")
     assert r.returncode == 0, r.stderr
-    puck = store / "pucks" / "home"
+    puck = store / "fleet" / "pucks" / "home"
     assert (puck / "puck.conf").is_file() and (puck / "wifi.conf").is_file()
-    assert mode(store / "pucks") == mode(puck) == "0o700"
+    assert mode(store / "fleet" / "pucks") == mode(puck) == "0o700"
     assert mode(puck / "puck.conf") == mode(puck / "wifi.conf") == "0o600"
     assert tpk(store, "new", "home").returncode != 0          # never over an existing one
 
@@ -35,7 +35,7 @@ def test_pucks_and_gateways_come_from_the_folders(tmp_path):
     store = tmp_path / "wg-tunnels"
     for name in ("home", "mom"):
         assert tpk(store, "new", name).returncode == 0
-    gw = store / "pucks" / "mom" / "gateways"
+    gw = store / "fleet" / "pucks" / "mom" / "gateways"
     gw.mkdir()
     (gw / "dengar.conf").write_text('TPK_ROUTING="wgt"\nWGT_SERVER="dengar"\n')
     r = tpk(store, "mom", "gateway")
@@ -57,14 +57,14 @@ def test_gateway_add_makes_a_private_settings_file(tmp_path):
     assert tpk(store, "new", "home").returncode == 0
     r = tpk(store, "home", "gateway", "add", "elsewhere")
     assert r.returncode == 0, r.stderr
-    gw = store / "pucks" / "home" / "gateways"
+    gw = store / "fleet" / "pucks" / "home" / "gateways"
     assert mode(gw) == "0o700" and mode(gw / "elsewhere.conf") == "0o600"
     assert "fill in GATEWAY_SSH" in r.stderr
 
 
 def test_a_hand_made_copy_is_made_private_when_read(tmp_path):
     store = tmp_path / "wg-tunnels"
-    puck = store / "pucks" / "home"
+    puck = store / "fleet" / "pucks" / "home"
     puck.mkdir(parents=True)
     (puck / "puck.conf").write_text('SSH_LAN="pi@home.local"\n')
     os.chmod(puck / "puck.conf", 0o644)
@@ -79,8 +79,8 @@ def test_a_bad_jump_code_is_named_by_wgts_own_rule(tmp_path):
     (store / "fleet" / "servers" / "gw").mkdir(parents=True)
     (store / "fleet" / "servers" / "gw" / "login").write_text("root@gw.example\n")
     assert tpk(store, "new", "home").returncode == 0
-    (store / "pucks" / "home" / "gateways").mkdir()
-    (store / "pucks" / "home" / "gateways" / "gw.conf").write_text(
+    (store / "fleet" / "pucks" / "home" / "gateways").mkdir()
+    (store / "fleet" / "pucks" / "home" / "gateways" / "gw.conf").write_text(
         'TPK_ROUTING="wgt"\nWGT_SERVER="gw"\nJUMP_CODE="all"\n')
     r = tpk(store, "home", "config")
     assert r.returncode != 0 and "jump code 'all' won't do: 2-6 of" in r.stderr

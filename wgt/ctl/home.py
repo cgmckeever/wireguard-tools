@@ -7,7 +7,7 @@ kept in the checkout. Folders are 0700, files 0600.
   fleet/servers/<server>/backups/    archives fetched by backup and move (private keys)
   fleet/servers/<server>/carriers/   jump files staged for it (tunnels.py, jumpfiles.py)
   fleet/device-list.json             each device's static number, fleet-wide (fleet.py)
-  pucks/<puck>/                      tunnel-puck's settings for one puck (tpk-ctl.sh)
+  fleet/pucks/<puck>/                tunnel-puck's settings for one puck (tpk-ctl.sh)
 
 A server is listed when its folder has a login file; wireguard-tunnels' nord.sh
 offers the same servers.
@@ -61,6 +61,11 @@ def carriers_dir(server: str) -> str:
 
 def devices_file() -> str:
     return os.path.join(root(), "fleet", "device-list.json")
+
+
+def pucks_dir() -> str:
+    """tunnel-puck's: tpk-ctl.sh keeps each puck's settings in <this>/<puck>/."""
+    return os.path.join(root(), "fleet", "pucks")
 
 
 def make_dir(path: str) -> str:

@@ -1,9 +1,9 @@
 # ids.sh: the names and numbers of one puck's link to one gateway. Sent ahead of
 # puck.sh and gateway.sh, and read by tpk-ctl.sh, so all three agree.
 #
-# The gateway's names come from the puck's name (PUCK_NAME: its pucks/<name>/ folder).
+# The gateway's names come from the puck's name (PUCK_NAME: its fleet/pucks/<name>/ folder).
 # Everything else comes from the link's subnet (TPK_LINK, in the puck's
-# pucks/<name>/gateways/<gateway>.conf), a /30 in 10.99.0.0/24 that gateway.sh pick chooses
+# fleet/pucks/<name>/gateways/<gateway>.conf), a /30 in 10.99.0.0/24 that gateway.sh pick chooses
 # while it's empty, free on that gateway and among the puck's other links. The n-th
 # /30 gives the puck's interfaces wgpk<n>, wgrtun<n>, wgrtunlan<n> and wgrtunlo<n>
 # (the rtuns, on ports 51822+3n, 51823+3n and 51824+3n), wgt jump addresses
@@ -48,7 +48,7 @@ link_ids() {
 
 need_link() { [ -n "$LINK_NET" ] || ids_die "TPK_LINK isn't set yet: tpk-ctl.sh link picks it"; }
 
-# gateway_name_ok <name>: a gateway's name, as in pucks/<puck>/gateways/<gateway>.conf.
+# gateway_name_ok <name>: a gateway's name, as in fleet/pucks/<puck>/gateways/<gateway>.conf.
 gateway_name_ok() { name_ok gateway "$1"; }
 
 # name_ok puck|gateway <name>: a-z, 0-9 and -, starting with a letter.

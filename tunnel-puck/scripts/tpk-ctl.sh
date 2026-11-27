@@ -1,7 +1,7 @@
 #!/bin/sh
 # tpk-ctl.sh: set up and run tunnel-puck from your computer (macOS or Linux). A
-# puck's settings are ~/wg-tunnels/pucks/<puck>/puck.conf ($WG_TUNNELS, as
-# wgt-ctl), plus one pucks/<puck>/gateways/<gateway>.conf for each gateway it
+# puck's settings are ~/wg-tunnels/fleet/pucks/<puck>/puck.conf ($WG_TUNNELS, as
+# wgt-ctl), plus one fleet/pucks/<puck>/gateways/<gateway>.conf for each gateway it
 # serves (a WireGuard gateway: the server your clients connect to, which sends
 # them on to the puck; the file holds the link, routing and jumps there). It
 # runs puck.sh on the puck and gateway.sh on the gateways over ssh.
@@ -35,7 +35,7 @@
 #   tpk-ctl.sh [<puck>] wifi [list]               the puck's saved Wi-Fi networks, and its uplink now
 #   tpk-ctl.sh [<puck>] wifi add <name>           save a Wi-Fi network on the puck (asks for the password)
 #   tpk-ctl.sh [<puck>] wifi remove <name>|all    remove saved Wi-Fi (all: ethernet only)
-#   tpk-ctl.sh [<puck>] wifi sync                 the puck's Wi-Fi becomes pucks/<puck>/wifi.conf, in its order
+#   tpk-ctl.sh [<puck>] wifi sync                 the puck's Wi-Fi becomes fleet/pucks/<puck>/wifi.conf, in its order
 #   tpk-ctl.sh [<puck>[.<gateway>]] test          PASS/FAIL: the puck, then each gateway (wgt: and a client's way out)
 #   tpk-ctl.sh [<puck>] ssh [<command>]           a shell (or a command) on the puck, the first way that answers
 #   tpk-ctl.sh [<puck>] reboot                    restart the puck, and wait until it answers again
@@ -64,15 +64,14 @@ except WgtError as e:
     sys.exit(f'tpk-ctl.sh: {e}')" "$@")
 }
 # ~/wg-tunnels ($WG_TUNNELS), by wgt-ctl's own rule (wgt/ctl/home.py).
-STORE=$(wgt_py 'from wgt.ctl import home; print(home.root())') || exit 1
-PUCKS="$STORE/pucks"
+PUCKS=$(wgt_py 'from wgt.ctl import home; print(home.pucks_dir())') || exit 1
 WGT_CTL="$REPO/bin/wgt-ctl"
 COMMANDS="new config ssh-config init gateway link exit client mode disable enable status wifi test ssh reboot shutdown all undo"
 # Cloudflare's trace (ip=... lines), as wgt's jump test uses (wgt/const.py TRACE_URL).
 TRACE_URL="https://www.cloudflare.com/cdn-cgi/trace"
 # The remote prefix that runs a command as root (sudo unless already root).
 AS_ROOT='if [ "$(id -u)" = 0 ]; then S=; else S=sudo; fi; $S'
-# The settings in a pucks/<puck>/gateways/<gateway>.conf.
+# The settings in a fleet/pucks/<puck>/gateways/<gateway>.conf.
 GATEWAY_VARS="TPK_ROUTING PUCK_PORT TPK_LINK GATEWAY_SSH GATEWAY_HOST CLIENT_IPS CLIENT_IP6S WG_IF WG_SUBNET
           WGT_SERVER JUMP_CODE JUMP_LABEL JUMP_LAN JUMP_LAN_CODE JUMP_LAN_LABEL JUMP_LANONLY JUMP_LANONLY_CODE
           JUMP_LANONLY_LABEL TPK_DISABLED TPK_DISABLED_CONFIGS"
@@ -158,7 +157,7 @@ choose() {
 
 # --- Which puck, which gateway -----------------------------------------------------
 
-# Each puck's settings: pucks/<puck>/puck.conf, its Wi-Fi list wifi.conf, and one
+# Each puck's settings: fleet/pucks/<puck>/puck.conf, its Wi-Fi list wifi.conf, and one
 # gateways/<gateway>.conf per gateway it serves. Folders 700, files 600.
 puck_file() { echo "$PUCKS/$1/puck.conf"; }
 wifi_file() { echo "$PUCKS/$1/wifi.conf"; }
@@ -168,7 +167,7 @@ shown() { case "$1" in "$HOME"/*) echo "~${1#"$HOME"}" ;; *) echo "$1" ;; esac; 
 # private_dir <dir>: made, mode 700 (any parents it needs too, as they're made).
 private_dir() { (umask 077; mkdir -p "$1"); chmod 700 "$1"; }
 
-# pucks: the configured pucks, one name per line: those with a pucks/<puck>/puck.conf.
+# pucks: the configured pucks, one name per line: those with a fleet/pucks/<puck>/puck.conf.
 pucks() {
     for f in "$PUCKS"/*/puck.conf; do
         [ -e "$f" ] || continue
@@ -177,7 +176,7 @@ pucks() {
     return 0
 }
 
-# gateways_of <puck>: the gateways it serves, one per line: pucks/<puck>/gateways/<gateway>.conf.
+# gateways_of <puck>: the gateways it serves, one per line: fleet/pucks/<puck>/gateways/<gateway>.conf.
 gateways_of() {
     for f in "$PUCKS/$1"/gateways/*.conf; do
         [ -e "$f" ] || continue
@@ -238,7 +237,7 @@ cmd_new() {
 
 # --- Settings ------------------------------------------------------------------
 
-# load_puck: read pucks/<PUCK_NAME>/puck.conf, the puck's own settings.
+# load_puck: read fleet/pucks/<PUCK_NAME>/puck.conf, the puck's own settings.
 load_puck() {
     puck_name_ok "$PUCK_NAME"
     PUCK_CONF=$(puck_file "$PUCK_NAME")
@@ -261,7 +260,7 @@ reset_gateway() {
     link_ids
 }
 
-# load_gateway <gateway>: read pucks/<puck>/gateways/<gateway>.conf and fill in what follows from it.
+# load_gateway <gateway>: read fleet/pucks/<puck>/gateways/<gateway>.conf and fill in what follows from it.
 # QUIET=1: no log line, and no questions (stops instead).
 load_gateway() {
     gateway_name_ok "$1"
@@ -579,7 +578,7 @@ server_of() { if [ "$1" = wgt ]; then echo "wgt:$2"; else echo "ssh:$3"; fi; }
 # from it). Another puck on the same gateway: not its TPK_LINK, PUCK_PORT, and by
 # routing a jump code (wgt) or a client address (tpk). The gateway checks the link's
 # subnet and port again when link runs.
-# theirs <SETTING>: its value in the other gateway file check_others is at, pucks/<p>/gateways/<o>.conf
+# theirs <SETTING>: its value in the other gateway file check_others is at, fleet/pucks/<p>/gateways/<o>.conf
 # ($f), read in a subshell so that file's settings don't leak into these.
 theirs() {
     # shellcheck disable=SC1090
@@ -710,7 +709,7 @@ read_password() {
 
 valid_psk() { case "${#1}" in 0|[89]|[1-5][0-9]|6[0-3]) return 0 ;; esac; return 1; }    # empty: open
 
-# wifi_list: this puck's Wi-Fi list, pucks/<puck>/wifi.conf, checked: "name::password"
+# wifi_list: this puck's Wi-Fi list, fleet/pucks/<puck>/wifi.conf, checked: "name::password"
 # lines (password empty: an open network), most preferred first; # starts a comment.
 # Kept mode 600: it holds passwords.
 wifi_list() {

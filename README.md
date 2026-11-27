@@ -769,8 +769,8 @@ and nothing in your clone:
       login        root@203.0.113.10   (the SSH login, then the checkout if not /opt/wireguard-tools)
       backups/     archives fetched by backup and move
       carriers/    jump files waiting to be pushed
+    pucks/home/    tunnel-puck's settings for one puck
     device-list.json each device's static number, across servers
-  pucks/<puck>/    tunnel-puck's settings
 ```
 
 A server is listed when its folder has a `login` file, in name order (the
