@@ -56,7 +56,7 @@ def devices_lines(local):
 
 @pytest.fixture
 def local(tmp_path, monkeypatch):
-    monkeypatch.setenv("WG_TUNNELS", str(tmp_path / "wg-tunnels"))
+    monkeypatch.setenv("WG_CONFIG_HOME", str(tmp_path / "wg-tunnels"))
     listing(tmp_path, "dengar  root@1.2.3.4\nboba root@5.6.7.8 /srv/wgt")
     top = tmp_path / "wg-tunnels" / "fleet" / "servers"
     (top / "boba" / "login").write_text("# a comment\nroot@5.6.7.8 /srv/wgt\n")

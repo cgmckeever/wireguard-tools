@@ -11,7 +11,7 @@ TPK = Path(__file__).resolve().parent.parent / "tunnel-puck" / "scripts" / "tpk-
 
 
 def tpk(store, *args):
-    env = dict(os.environ, WG_TUNNELS=str(store))
+    env = dict(os.environ, WG_CONFIG_HOME=str(store))
     return subprocess.run(["sh", str(TPK), *args], env=env, stdin=subprocess.DEVNULL,
                           capture_output=True, text=True)
 

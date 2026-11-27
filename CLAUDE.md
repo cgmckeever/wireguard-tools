@@ -7,7 +7,7 @@ promises to things outside it, and how to change it without breaking them.
 
 ## Contracts
 
-**The shared store with wireguard-tunnels**: `$WG_TUNNELS` as written (no `~`
+**The shared store with wireguard-tunnels**: `$WG_CONFIG_HOME` as written (no `~`
 expansion, as there; absolute, or refused), else `~/wg-tunnels` (`wgt/ctl/home.py` has the
 layout; `tunnels.py`, `jumpfiles.py`; pinned by `tests/test_tunnels_store.py`). It holds
 everything private this machine keeps, and the checkout holds none of it (no

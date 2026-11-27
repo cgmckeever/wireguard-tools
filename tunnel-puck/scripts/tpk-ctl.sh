@@ -1,6 +1,6 @@
 #!/bin/sh
 # tpk-ctl.sh: set up and run tunnel-puck from your computer (macOS or Linux). A
-# puck's settings are ~/wg-tunnels/fleet/pucks/<puck>/puck.conf ($WG_TUNNELS, as
+# puck's settings are ~/wg-tunnels/fleet/pucks/<puck>/puck.conf ($WG_CONFIG_HOME, as
 # wgt-ctl), plus one fleet/pucks/<puck>/gateways/<gateway>.conf for each gateway it
 # serves (a WireGuard gateway: the server your clients connect to, which sends
 # them on to the puck; the file holds the link, routing and jumps there). It
@@ -63,7 +63,7 @@ $(printf '%s\n' "$py" | sed 's/^/    /')
 except WgtError as e:
     sys.exit(f'tpk-ctl.sh: {e}')" "$@")
 }
-# ~/wg-tunnels ($WG_TUNNELS), by wgt-ctl's own rule (wgt/ctl/home.py).
+# ~/wg-tunnels ($WG_CONFIG_HOME), by wgt-ctl's own rule (wgt/ctl/home.py).
 PUCKS=$(wgt_py 'from wgt.ctl import home; print(home.pucks_dir())') || exit 1
 WGT_CTL="$REPO/bin/wgt-ctl"
 COMMANDS="new config ssh-config init gateway link exit client mode disable enable status wifi test ssh reboot shutdown all undo"

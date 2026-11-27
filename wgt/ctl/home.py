@@ -1,4 +1,4 @@
-"""~/wg-tunnels ($WG_TUNNELS): everything this machine keeps about its servers,
+"""~/wg-tunnels ($WG_CONFIG_HOME): everything this machine keeps about its servers,
 their devices and the pucks, shared with wireguard-tunnels. Nothing private is
 kept in the checkout. Folders are 0700, files 0600.
 
@@ -23,12 +23,12 @@ from ..errors import WgtError
 
 
 def root() -> str:
-    """$WG_TUNNELS as written (as wireguard-tunnels reads it), else ~/wg-tunnels. An
+    """$WG_CONFIG_HOME as written (as wireguard-tunnels reads it), else ~/wg-tunnels. An
     absolute path only: a relative one (or a "~" the shell didn't expand) would put
     configs, private keys and all, under wherever wgt-ctl runs, a checkout say."""
-    path = os.environ.get("WG_TUNNELS") or os.path.expanduser("~/wg-tunnels")
+    path = os.environ.get("WG_CONFIG_HOME") or os.path.expanduser("~/wg-tunnels")
     if not os.path.isabs(path):
-        raise WgtError(f"WG_TUNNELS must be an absolute path, not '{path}'")
+        raise WgtError(f"WG_CONFIG_HOME must be an absolute path, not '{path}'")
     return path
 
 

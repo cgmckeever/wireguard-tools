@@ -151,7 +151,7 @@ test 2 (test 4 also keeps IPv6 from leaking past it), 2 is test 3, 3 is tests
   this folder. It ssh-es to the puck and the gateway and runs `puck.sh` and `gateway.sh`
   there. `scripts/tpk-ctl.sh` with no arguments lists its commands.
 - **Each puck has a name, `<puck>`:** its settings live outside this repo, in
-  `~/wg-tunnels/fleet/pucks/<puck>/` (`$WG_TUNNELS`, the folder wireguard-tools and
+  `~/wg-tunnels/fleet/pucks/<puck>/` (`$WG_CONFIG_HOME`, the folder wireguard-tools and
   wireguard-tunnels share): `puck.conf`, and one `gateways/<gateway>.conf` for
   each gateway it serves (`<gateway>`). Commands take the name first,
   `scripts/tpk-ctl.sh mom test`, or `mom.dengar` for one gateway. Leave it out, as

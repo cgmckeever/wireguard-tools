@@ -757,7 +757,7 @@ servers over SSH. Clone this repository there too
 then put its `bin/` on your PATH, or `alias wgt-ctl=~/wireguard-tools/bin/wgt-ctl`.
 It needs SSH as root to each server, with your key (`init` can set that up).
 
-Everything it keeps lives in `~/wg-tunnels` (or `$WG_TUNNELS`, an absolute path),
+Everything it keeps lives in `~/wg-tunnels` (or `$WG_CONFIG_HOME`, an absolute path),
 the folder it shares with [wireguard-tunnels](https://github.com/cgmckeever/wireguard-tunnels),
 and nothing in your clone:
 

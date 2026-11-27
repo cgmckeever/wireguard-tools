@@ -20,7 +20,7 @@ def conf(config: str, key: str, server: str = "dengar", body: str = "") -> str:
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
-    monkeypatch.setenv("WG_TUNNELS", str(tmp_path / "wg-tunnels"))
+    monkeypatch.setenv("WG_CONFIG_HOME", str(tmp_path / "wg-tunnels"))
     return tmp_path / "wg-tunnels"
 
 
@@ -302,13 +302,13 @@ def test_two_updates_in_one_second_keep_both_old_copies(store, monkeypatch):
 def test_the_store_is_wg_tunnels_as_written_and_absolute(monkeypatch):
     # wireguard-tunnels (store.root, tunnel.sh) doesn't expand a "~" in it: neither do we,
     # and a path that isn't absolute is refused, not taken as one under the current folder
-    monkeypatch.setenv("WG_TUNNELS", "/srv/elsewhere")
+    monkeypatch.setenv("WG_CONFIG_HOME", "/srv/elsewhere")
     assert home.root() == "/srv/elsewhere"
     for relative in ("~/elsewhere", "wg-tunnels", "./x"):
-        monkeypatch.setenv("WG_TUNNELS", relative)
+        monkeypatch.setenv("WG_CONFIG_HOME", relative)
         with pytest.raises(WgtError, match="absolute"):
             home.root()
-    monkeypatch.delenv("WG_TUNNELS")
+    monkeypatch.delenv("WG_CONFIG_HOME")
     assert home.root() == os.path.expanduser("~/wg-tunnels")
 
 

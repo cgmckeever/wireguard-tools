@@ -32,7 +32,7 @@ No server:
                                         set up a new server (or adopt one already running these tools)
 
 Leave SERVER out of a server command to pick one from the list. Everything
-private lives in ~/wg-tunnels ($WG_TUNNELS, shared with wireguard-tunnels), none
+private lives in ~/wg-tunnels ($WG_CONFIG_HOME, shared with wireguard-tunnels), none
 of it in this checkout: fleet/servers/<server>/login is the list ("user@host
 [/checkout/dir]"), fleet/servers/<server>/backups/ the fetched archives,
 fleet/servers/<server>/carriers/*.conf the jump files (any name; a "# jump: <code>
